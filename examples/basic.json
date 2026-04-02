@@ -1,0 +1,20 @@
+{
+  "allowed_origins": ["http://localhost:3000", "http://localhost:8000"],
+  "allow_anonymous": true,
+  "products": {
+    "default": {
+      "name": "Default",
+      "description": "Anonymous local development product",
+      "require_subscription": false
+    }
+  },
+  "routes": [
+    {
+      "name": "default",
+      "path_prefix": "/api",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "product": "default"
+    }
+  ]
+}

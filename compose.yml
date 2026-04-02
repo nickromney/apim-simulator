@@ -1,0 +1,21 @@
+services:
+  mock-backend:
+    build:
+      context: ./examples/mock-backend
+      dockerfile: Dockerfile
+    image: apim-simulator-mock-backend:latest
+    ports:
+      - "8081:8080"
+
+  apim-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: apim-simulator:latest
+    ports:
+      - "8000:8000"
+    environment:
+      APIM_CONFIG_PATH: /app/examples/basic.json
+    depends_on:
+      mock-backend:
+        condition: service_started

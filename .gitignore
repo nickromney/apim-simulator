@@ -1,0 +1,11 @@
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+*.log
+build/
+dist/
