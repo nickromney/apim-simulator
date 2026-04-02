@@ -75,6 +75,40 @@ def test_health() -> None:
     assert resp.json() == {"status": "healthy"}
 
 
+def test_root_hint_lists_builtin_entrypoints() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="local-dev-tenant-key"),
+            routes=[
+                RouteConfig(
+                    name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api"
+                )
+            ],
+        )
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "service": "Local APIM Simulator",
+        "message": "This is an API gateway. Try /apim/health, /apim/startup, or one of the configured route prefixes.",
+        "gateway_endpoints": ["/apim/health", "/apim/startup"],
+        "route_prefixes": ["/api"],
+        "management": {
+            "enabled": True,
+            "status_path": "/apim/management/status",
+            "required_header": "X-Apim-Tenant-Key",
+        },
+        "operator_console": {
+            "url": "http://localhost:3007",
+            "note": "Run make up-ui to start the operator console.",
+        },
+    }
+
+
 def test_route_host_match_selects_expected_upstream() -> None:
     seen_urls: list[str] = []
 

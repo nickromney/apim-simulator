@@ -247,6 +247,26 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         allow_headers=["*"],
     )
 
+    @app.get("/")
+    async def root_hint(request: Request) -> dict[str, Any]:
+        cfg: GatewayConfig = request.app.state.gateway_config
+        route_prefixes = sorted({route.path_prefix or "/" for route in cfg.routes})
+        return {
+            "service": "Local APIM Simulator",
+            "message": "This is an API gateway. Try /apim/health, /apim/startup, or one of the configured route prefixes.",
+            "gateway_endpoints": ["/apim/health", "/apim/startup"],
+            "route_prefixes": route_prefixes,
+            "management": {
+                "enabled": cfg.tenant_access.enabled,
+                "status_path": "/apim/management/status" if cfg.tenant_access.enabled else None,
+                "required_header": "X-Apim-Tenant-Key" if cfg.tenant_access.enabled else None,
+            },
+            "operator_console": {
+                "url": "http://localhost:3007",
+                "note": "Run make up-ui to start the operator console.",
+            },
+        }
+
     @app.get("/apim/health")
     async def health() -> dict[str, str]:
         return {"status": "healthy"}
