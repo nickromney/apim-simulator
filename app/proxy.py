@@ -98,7 +98,9 @@ def _route_matches_host(route: RouteConfig, request_hosts: list[str]) -> bool:
                 return True
             if expected_no_port == request_host or expected_no_port == request_no_port:
                 return True
-            if "*" in expected_norm and (fnmatch(request_host, expected_norm) or fnmatch(request_no_port, expected_norm)):
+            if "*" in expected_norm and (
+                fnmatch(request_host, expected_norm) or fnmatch(request_no_port, expected_norm)
+            ):
                 return True
             if "*" in expected_no_port and (
                 fnmatch(request_host, expected_no_port) or fnmatch(request_no_port, expected_no_port)

@@ -6,10 +6,8 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from typing import TypeVar
 
 import httpx
-
 
 KEYCLOAK_BASE_URL = "http://localhost:8180"
 REALM = "subnet-calculator"
@@ -17,10 +15,9 @@ CLIENT_ID = "frontend-app"
 GATEWAY_BASE_URL = "http://localhost:8000"
 DEFAULT_ATTEMPTS = int(os.getenv("SMOKE_OIDC_ATTEMPTS", "20"))
 DEFAULT_DELAY_SECONDS = float(os.getenv("SMOKE_OIDC_RETRY_DELAY_SECONDS", "1"))
-T = TypeVar("T")
 
 
-def retry_call(
+def retry_call[T](
     operation: Callable[[], T],
     *,
     attempts: int = DEFAULT_ATTEMPTS,
@@ -95,7 +92,9 @@ def main() -> int:
             f"/admin/api/echo for demo user expected 403, got {denied_resp.status_code}: {denied_resp.text}",
         )
 
-        admin_resp = retry_call(lambda: gateway_get("/admin/api/echo", token=admin_token, subscription_key="oidc-admin-key"))
+        admin_resp = retry_call(
+            lambda: gateway_get("/admin/api/echo", token=admin_token, subscription_key="oidc-admin-key")
+        )
         require(
             admin_resp.status_code == 200,
             f"/admin/api/echo for admin user expected 200, got {admin_resp.status_code}: {admin_resp.text}",

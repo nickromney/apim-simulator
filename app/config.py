@@ -168,9 +168,15 @@ class RouteAuthzConfig(BaseModel):
     required_claims: dict[str, str] = Field(default_factory=dict)
 
 
+class KeyVaultNamedValueConfig(BaseModel):
+    secret_id: str
+    identity_client_id: str | None = None
+
+
 class NamedValueConfig(BaseModel):
-    value: str
+    value: str | None = None
     secret: bool = False
+    value_from_key_vault: KeyVaultNamedValueConfig | None = None
 
 
 class UserConfig(BaseModel):
@@ -198,6 +204,11 @@ class BackendConfig(BaseModel):
     basic_username: str | None = None
     basic_password: str | None = None
     managed_identity_resource: str | None = None
+    authorization_scheme: str | None = None
+    authorization_parameter: str | None = None
+    header_credentials: dict[str, str] = Field(default_factory=dict)
+    query_credentials: dict[str, str] = Field(default_factory=dict)
+    client_certificate_thumbprints: list[str] = Field(default_factory=list)
 
 
 class RouteConfig(BaseModel):
@@ -212,6 +223,8 @@ class RouteConfig(BaseModel):
     products: list[str] = Field(default_factory=list)
     api_version_set: str | None = None
     api_version: str | None = None
+    subscription_header_names: list[str] | None = None
+    subscription_query_param_names: list[str] | None = None
     authz: RouteAuthzConfig | None = None
     policies_xml: str | None = None
     policies_xml_documents: list[str] = Field(default_factory=list)
@@ -306,6 +319,8 @@ class GatewayConfig(BaseModel):
                         products=list(api.products),
                         api_version_set=api.api_version_set,
                         api_version=api.api_version,
+                        subscription_header_names=api.subscription_header_names,
+                        subscription_query_param_names=api.subscription_query_param_names,
                         policies_xml_documents=api_policy_docs,
                     )
                 )
@@ -346,6 +361,9 @@ class GatewayConfig(BaseModel):
                         products=list(op_products or []),
                         api_version_set=op.api_version_set or api.api_version_set,
                         api_version=op.api_version or api.api_version,
+                        subscription_header_names=op.subscription_header_names or api.subscription_header_names,
+                        subscription_query_param_names=op.subscription_query_param_names
+                        or api.subscription_query_param_names,
                         authz=op.authz,
                         policies_xml_documents=policies,
                     )
@@ -364,6 +382,8 @@ class OperationConfig(BaseModel):
     products: list[str] | None = None
     api_version_set: str | None = None
     api_version: str | None = None
+    subscription_header_names: list[str] | None = None
+    subscription_query_param_names: list[str] | None = None
     authz: RouteAuthzConfig | None = None
     policies_xml: str | None = None
 
@@ -377,6 +397,8 @@ class ApiConfig(BaseModel):
     products: list[str] = Field(default_factory=list)
     api_version_set: str | None = None
     api_version: str | None = None
+    subscription_header_names: list[str] | None = None
+    subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None
     operations: dict[str, OperationConfig] = Field(default_factory=dict)
 

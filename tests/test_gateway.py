@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from app.config import (
     ClientCertificateConfig,
     ClientCertificateMode,
     GatewayConfig,
+    NamedValueConfig,
     OIDCConfig,
     OperationConfig,
     ProductConfig,
@@ -1716,9 +1718,7 @@ def test_mtls_mode_disabled_allows_requests_without_cert() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get("/api/test")
@@ -1739,9 +1739,7 @@ def test_mtls_mode_required_rejects_request_without_cert() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get("/api/test")
@@ -1763,9 +1761,7 @@ def test_mtls_mode_required_accepts_request_with_cert() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get(
@@ -1792,9 +1788,7 @@ def test_mtls_mode_optional_allows_requests_without_cert() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get("/api/test")
@@ -1823,9 +1817,7 @@ def test_mtls_trusted_cert_by_thumbprint() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Matching thumbprint (case-insensitive)
@@ -1866,9 +1858,7 @@ def test_mtls_trusted_cert_by_subject() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Matching subject (contains)
@@ -1908,9 +1898,7 @@ def test_mtls_trusted_cert_by_issuer() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Matching issuer
@@ -1947,9 +1935,7 @@ def test_mtls_custom_header_names() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Standard headers - should fail (no cert detected)
@@ -1980,9 +1966,7 @@ def test_startup_probe_returns_200_when_ready() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get("/apim/startup")
@@ -2003,9 +1987,7 @@ def test_reload_endpoint_reloads_config() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.post("/apim/reload")
@@ -2028,9 +2010,7 @@ def test_reload_requires_admin_token_when_configured() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Without token - should fail
@@ -2041,3 +2021,522 @@ def test_reload_requires_admin_token_when_configured() -> None:
         resp = client.post("/apim/reload", headers={"X-Apim-Admin-Token": "secret-admin-token"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "reloaded"
+
+
+def test_named_values_resolve_in_backend_credentials_and_are_masked_in_trace() -> None:
+    config = GatewayConfig(
+        allow_anonymous=True,
+        trace_enabled=True,
+        proxy_streaming=False,
+        named_values={
+            "backend-host": NamedValueConfig(value="backend.example.test"),
+            "backend-secret": NamedValueConfig(value="super-secret-token", secret=True),
+        },
+        backends={
+            "b1": BackendConfig(
+                url="https://{{backend-host}}",
+                authorization_scheme="Bearer",
+                authorization_parameter="{{backend-secret}}",
+                header_credentials={"x-backend-name": "{{backend-host}}"},
+                query_credentials={"sig": "{{backend-secret}}"},
+            )
+        },
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                upstream_base_url="http://ignored",
+                upstream_path_prefix="/api",
+                backend="b1",
+            )
+        ],
+    )
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert str(req.url) == "https://backend.example.test/api/health?sig=super-secret-token"
+        assert req.headers["authorization"] == "Bearer super-secret-token"
+        assert req.headers["x-backend-name"] == "backend.example.test"
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        resp = client.get("/api/health", headers={"x-apim-trace": "true"})
+        trace = client.get(f"/apim/trace/{resp.headers['x-apim-trace-id']}")
+
+    assert resp.status_code == 200
+    assert trace.status_code == 200
+    payload = trace.json()
+    assert payload["selected_backend"]["backend_id"] == "b1"
+    assert "super-secret-token" not in json.dumps(payload)
+
+
+def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> None:
+    issuer = "https://issuer.example"
+    audience = "sample-api"
+    jwks, private_key = _make_rsa_jwks()
+    token = _make_token(private_key=private_key, issuer=issuer, audience=audience, extra_claims={"scope": "read"})
+
+    policy = """\
+<policies>
+  <inbound>
+    <validate-jwt header-name="Authorization" require-scheme="Bearer" require-expiration-time="false" output-token-variable-name="jwt">
+      <openid-config url="https://issuer.example/.well-known/openid-configuration" />
+      <audiences>
+        <audience>sample-api</audience>
+      </audiences>
+      <required-claims>
+        <claim name="scope" match="any" separator=" ">
+          <value>read</value>
+        </claim>
+      </required-claims>
+    </validate-jwt>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url == httpx.URL("https://issuer.example/.well-known/openid-configuration"):
+            return httpx.Response(200, json={"issuer": issuer, "jwks_uri": "https://issuer.example/jwks"})
+        if req.url == httpx.URL("https://issuer.example/jwks"):
+            return httpx.Response(200, json=jwks)
+        assert req.url == httpx.URL("http://upstream/api/health")
+        assert req.headers["x-apim-user-object-id"] == "user-123"
+        assert req.headers["x-ms-client-principal-name"] == "demo@dev.test"
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            trace_enabled=True,
+            proxy_streaming=False,
+            routes=[
+                RouteConfig(
+                    name="r1",
+                    path_prefix="/api",
+                    upstream_base_url="http://upstream",
+                    upstream_path_prefix="/api",
+                    policies_xml=policy,
+                )
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/health", headers={"Authorization": f"Bearer {token}", "x-apim-trace": "true"})
+        trace = client.get(f"/apim/trace/{resp.headers['x-apim-trace-id']}")
+
+    assert resp.status_code == 200
+    assert trace.status_code == 200
+    payload = trace.json()
+    assert payload["jwt_validations"][0]["status"] == "valid"
+
+
+def test_send_request_policy_can_branch_on_response_body() -> None:
+    policy = """\
+<policies>
+  <inbound>
+    <set-variable name="token" value="@(context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;,&quot;scheme param&quot;).Split(&#x27; &#x27;).Last())" />
+    <send-request mode="new" response-variable-name="tokenstate" timeout="20" ignore-error="true">
+      <set-url>https://introspection.example/token</set-url>
+      <set-method>POST</set-method>
+      <set-header name="Authorization" exists-action="override">
+        <value>basic demo</value>
+      </set-header>
+      <set-header name="Content-Type" exists-action="override">
+        <value>application/x-www-form-urlencoded</value>
+      </set-header>
+      <set-body>@($&quot;token={(string)context.Variables[&quot;token&quot;]}&quot;)</set-body>
+    </send-request>
+    <choose>
+      <when condition="@((bool)((IResponse)context.Variables[&quot;tokenstate&quot;]).Body.As&lt;JObject&gt;()[&quot;active&quot;] == false)">
+        <return-response>
+          <set-status code="401" reason="Unauthorized" />
+          <set-header name="WWW-Authenticate" exists-action="override">
+            <value>Bearer error=&quot;invalid_token&quot;</value>
+          </set-header>
+        </return-response>
+      </when>
+    </choose>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url == httpx.URL("https://introspection.example/token"):
+            assert req.method == "POST"
+            assert req.content == b"token=opaque"
+            return httpx.Response(200, json={"active": False})
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(
+                    name="r1",
+                    path_prefix="/api",
+                    upstream_base_url="http://upstream",
+                    upstream_path_prefix="/api",
+                    policies_xml=policy,
+                )
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/health", headers={"Authorization": "Bearer opaque"})
+
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"] == 'Bearer error="invalid_token"'
+
+
+def test_set_backend_service_policy_switches_backend_by_query() -> None:
+    policy = """\
+<policies>
+  <inbound>
+    <choose>
+      <when condition="@(context.Request.Url.Query.GetValueOrDefault(&quot;version&quot;) == &quot;2013-05&quot;)">
+        <set-backend-service base-url="http://upstream-v1/api/8.2" />
+      </when>
+    </choose>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+
+    seen_urls: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(req.url))
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(
+                    name="r1",
+                    path_prefix="/api",
+                    upstream_base_url="http://upstream-default/api/10.4",
+                    policies_xml=policy,
+                )
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/partners/15", params={"version": "2013-05"})
+
+    assert resp.status_code == 200
+    assert seen_urls == ["http://upstream-v1/api/8.2/partners/15?version=2013-05"]
+
+
+def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> None:
+    policy = """\
+<policies>
+  <inbound>
+    <rate-limit-by-key
+      calls="1"
+      renewal-period="60"
+      counter-key="@(context.Request.Headers.GetValueOrDefault(&quot;x-key&quot;,&quot;anon&quot;))"
+      increment-condition="@(context.Response.StatusCode == 200)"
+      retry-after-header-name="X-Retry"
+      retry-after-variable-name="retry_after"
+      remaining-calls-header-name="X-Remaining"
+      remaining-calls-variable-name="remaining_calls"
+      total-calls-header-name="X-Total" />
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+
+    seen_urls: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(req.url))
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            trace_enabled=True,
+            proxy_streaming=False,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/items", headers={"x-key": "demo", "x-apim-trace": "true"})
+        first_trace = client.get(f"/apim/trace/{first.headers['x-apim-trace-id']}")
+        second = client.get("/api/items", headers={"x-key": "demo", "x-apim-trace": "true"})
+        second_trace = client.get(f"/apim/trace/{second.headers['x-apim-trace-id']}")
+
+    assert first.status_code == 200
+    assert first.headers["x-remaining"] == "0"
+    assert first.headers["x-total"] == "1"
+    assert second.status_code == 429
+    assert second.headers["x-retry"]
+    assert seen_urls == ["http://upstream/items"]
+    assert first_trace.json()["policy_variable_writes"][-1]["name"] == "remaining_calls"
+    assert second_trace.json()["policy_variable_writes"][-1]["name"] == "retry_after"
+
+
+def test_quota_by_key_respects_first_period_start(monkeypatch: Any) -> None:
+    import app.policy as policy_module
+
+    fixed_now = datetime(2026, 4, 2, 10, 1, 0, tzinfo=UTC).timestamp()
+    monkeypatch.setattr(policy_module.time, "time", lambda: fixed_now)
+
+    policy = """\
+<policies>
+  <inbound>
+    <quota-by-key
+      calls="1"
+      renewal-period="300"
+      counter-key="@(context.Request.IpAddress)"
+      first-period-start="2026-04-02T10:00:00Z" />
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+
+    seen_urls: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(req.url))
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/health", headers={"X-Forwarded-For": "10.1.2.3"})
+        second = client.get("/api/health", headers={"X-Forwarded-For": "10.1.2.3"})
+
+    assert first.status_code == 200
+    assert second.status_code == 403
+    assert second.headers["retry-after"] == "240"
+    assert seen_urls == ["http://upstream/health"]
+
+
+def test_cache_lookup_and_store_hit_and_vary_by_query_parameter() -> None:
+    policy = """\
+<policies>
+  <inbound>
+    <cache-lookup
+      vary-by-developer="false"
+      vary-by-developer-groups="false"
+      caching-type="prefer-external"
+      downstream-caching-type="public"
+      must-revalidate="true">
+      <vary-by-query-parameter>version</vary-by-query-parameter>
+    </cache-lookup>
+  </inbound>
+  <backend />
+  <outbound>
+    <cache-store duration="60" />
+  </outbound>
+  <on-error />
+</policies>
+"""
+
+    call_count = {"value": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            proxy_streaming=True,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/catalog", params={"version": "v1"})
+        second = client.get("/api/catalog", params={"version": "v1"})
+        third = client.get("/api/catalog", params={"version": "v2"})
+
+    assert first.json() == {"call": 1}
+    assert second.json() == {"call": 1}
+    assert third.json() == {"call": 2}
+    assert call_count["value"] == 2
+    assert second.headers["cache-control"] == "public, must-revalidate"
+
+
+def test_cache_lookup_varies_by_developer_subscription() -> None:
+    policy = """\
+<policies>
+  <inbound>
+    <cache-lookup
+      vary-by-developer="true"
+      vary-by-developer-groups="false"
+      caching-type="internal"
+      downstream-caching-type="private"
+      must-revalidate="true" />
+  </inbound>
+  <backend />
+  <outbound>
+    <cache-store duration="60" />
+  </outbound>
+  <on-error />
+</policies>
+"""
+
+    call_count = {"value": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            subscription=SubscriptionConfig(
+                required=True,
+                subscriptions={
+                    "a": Subscription(
+                        id="sub-a", name="A", keys=SubscriptionKeyPair(primary="key-a", secondary="key-a-2")
+                    ),
+                    "b": Subscription(
+                        id="sub-b", name="B", keys=SubscriptionKeyPair(primary="key-b", secondary="key-b-2")
+                    ),
+                },
+            ),
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/catalog", headers={"Ocp-Apim-Subscription-Key": "key-a"})
+        second = client.get("/api/catalog", headers={"Ocp-Apim-Subscription-Key": "key-a"})
+        third = client.get("/api/catalog", headers={"Ocp-Apim-Subscription-Key": "key-b"})
+
+    assert first.json() == {"call": 1}
+    assert second.json() == {"call": 1}
+    assert third.json() == {"call": 2}
+    assert call_count["value"] == 2
+    assert second.headers["cache-control"] == "private, must-revalidate"
+
+
+def test_cache_lookup_value_store_and_remove_value() -> None:
+    policy = """\
+<policies>
+  <inbound>
+    <choose>
+      <when condition="header('x-mode') == 'drop'">
+        <cache-remove-value key="@(context.Request.Headers.GetValueOrDefault(&quot;x-user&quot;,&quot;&quot;))" />
+        <return-response>
+          <set-status code="200" reason="ok" />
+          <set-body>removed</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <cache-lookup-value key="@(context.Request.Headers.GetValueOrDefault(&quot;x-user&quot;,&quot;&quot;))" variable-name="session" />
+    <choose>
+      <when condition="@(context.Variables.GetValueOrDefault(&quot;session&quot;,&quot;&quot;) == &quot;warm&quot;)">
+        <return-response>
+          <set-status code="200" reason="ok" />
+          <set-header name="content-type" exists-action="override"><value>application/json</value></set-header>
+          <set-body>{"cached":true}</set-body>
+        </return-response>
+      </when>
+    </choose>
+  </inbound>
+  <backend />
+  <outbound>
+    <cache-store-value key="@(context.Request.Headers.GetValueOrDefault(&quot;x-user&quot;,&quot;&quot;))" value="warm" duration="60" />
+  </outbound>
+  <on-error />
+</policies>
+"""
+
+    call_count = {"value": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/value", headers={"x-user": "alice"})
+        second = client.get("/api/value", headers={"x-user": "alice"})
+        removed = client.get("/api/value", headers={"x-user": "alice", "x-mode": "drop"})
+        third = client.get("/api/value", headers={"x-user": "alice"})
+
+    assert first.json() == {"call": 1}
+    assert second.json() == {"cached": True}
+    assert removed.text == "removed"
+    assert third.json() == {"call": 2}
+    assert call_count["value"] == 2
+
+
+def test_external_cache_policy_is_unsupported_at_runtime() -> None:
+    policy = """\
+<policies>
+  <inbound>
+    <cache-lookup-value key="demo" variable-name="value" caching-type="external" />
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"ok": True}))),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/value")
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Unsupported caching-type external"

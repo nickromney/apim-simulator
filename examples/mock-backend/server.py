@@ -40,7 +40,7 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True,
             "method": self.command,
             "path": self.path,
-            "headers": {key: value for key, value in self.headers.items()},
+            "headers": dict(self.headers.items()),
             "body": _decode_body(body),
         }
 

@@ -44,7 +44,7 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Path routing | Yes | - | `path_prefix` matching |
 | Method routing | Yes | - | Per-operation `method` |
 | API Version Sets | Yes | `azurerm_api_management_api_version_set` | Header/Query/Segment schemes |
-| OpenAPI import | No | `azurerm_api_management_api` (import block) | Config is manual JSON |
+| OpenAPI import | Yes | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu |
 | GraphQL | No | `azurerm_api_management_api` | Not implemented |
 | WebSocket | No | `azurerm_api_management_api` | Not implemented |
 
@@ -108,24 +108,28 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | `ip-filter` | Yes | - | Allow/deny IP ranges |
 | `cors` | Partial | - | Basic CORS headers |
 | `rate-limit` | Yes | - | Calls per period |
-| `rate-limit-by-key` | Partial | - | Uses subscription ID |
+| `rate-limit-by-key` | Yes | - | Supports literal and response-aware increment evaluation plus custom remaining/retry headers |
 | `quota` | Yes | - | Calls per renewal period |
-| `quota-by-key` | Partial | - | Uses subscription ID |
-| `validate-jwt` | No | - | Use OIDC config instead |
+| `quota-by-key` | Partial | - | Supports call quotas and `first-period-start`; `bandwidth` remains unsupported |
+| `validate-jwt` | Yes | - | OpenID config, audiences, issuers, required claims, output token variables |
 | `authentication-basic` | Partial | - | Backend auth only |
 | `authentication-certificate` | Partial | - | Backend auth config |
 | `authentication-managed-identity` | Partial | - | Backend auth config |
-| `set-backend-service` | Partial | - | Via `backend` reference |
-| `cache-*` | No | - | Not implemented |
+| `set-backend-service` | Yes | - | Supports `backend-id` and `base-url` overrides in inbound/backend |
+| `cache-lookup` | Partial | - | Supports local internal cache; `prefer-external` is adapted to local cache and `external` is unsupported |
+| `cache-store` | Partial | - | Supports local internal response cache for GET responses |
+| `cache-lookup-value` | Partial | - | Supports local internal value cache plus default-value; `prefer-external` is adapted and `external` is unsupported |
+| `cache-store-value` | Partial | - | Stores to local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
+| `cache-remove-value` | Partial | - | Removes from local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
 | `mock-response` | No | - | Use `return-response` |
-| `send-request` | No | - | Not implemented |
+| `send-request` | Yes | - | Supports `new|copy`, headers/body, timeout, ignore-error, managed identity, certificate placeholder |
 | `log-to-eventhub` | No | - | Use observability stack |
 
 ## Backends
 
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
-| Backend definitions | Yes | `azurerm_api_management_backend` | `backends` map |
+| Backend definitions | Yes | `azurerm_api_management_backend` | `backends` map incl. credentials import |
 | Backend URL | Yes | - | `url` field |
 | Basic auth | Yes | - | `auth_type: basic` |
 | Client cert auth | Partial | - | `auth_type: client_certificate` |
@@ -142,7 +146,7 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Policy inspection/update | Yes | - | `/apim/management/policies/{scope_type}/{scope_name}` |
 | Replay | Yes | - | `/apim/management/replay` |
 | Subscription CRUD | Partial | - | List/create/update/rotate via API; delete not implemented |
-| Config import | Yes | - | Terraform JSON import |
+| Config import | Yes | - | Terraform/OpenTofu JSON import via management API and `make import-tofu` |
 | Git integration | No | `azurerm_api_management.management.git_configuration_enabled` | Use GitOps |
 
 ## Observability
@@ -154,6 +158,7 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Trace lookup | Yes | - | `/apim/trace/{id}` |
 | Trace summaries | Yes | - | `/apim/management/traces` |
 | Forwarded-header trace fields | Yes | - | `incoming_host`, `forwarded_host`, `forwarded_proto`, `forwarded_for`, `client_ip`, `upstream_url` |
+| Policy execution trace | Yes | - | Includes policy steps, variable writes, JWT validation, send-request activity, selected backend, cache/throttle actions |
 | Application Insights | No | `azurerm_api_management.application_insights` | Use external APM |
 | Diagnostic logs | No | `azurerm_api_management_diagnostic` | Use container logs |
 
@@ -161,9 +166,9 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
-| Named values | Partial | `azurerm_api_management_named_value` | Config only, no policy refs |
-| Secret values | Partial | - | `secret: true` flag |
-| Key Vault refs | No | - | Use k8s secrets |
+| Named values | Yes | `azurerm_api_management_named_value` | Resolved in policies and backend credentials |
+| Secret values | Yes | - | Masked in traces |
+| Key Vault refs | Partial | - | Imported and resolved via local env overrides (`APIM_NAMED_VALUE_*`) |
 
 ## Developer Console
 
@@ -195,3 +200,5 @@ These features are explicitly out of scope for the simulator:
 - Tags and tag descriptions
 - Global/workspace policies distinction
 - API revision/release management
+- External cache backends for `cache-*` policies
+- `quota-by-key` bandwidth enforcement
