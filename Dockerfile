@@ -1,4 +1,4 @@
-FROM python:3.13-bookworm AS builder
+FROM python:3.13-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -11,7 +11,7 @@ COPY pyproject.toml uv.lock ./
 
 RUN uv sync --frozen --no-cache --no-dev --no-install-project
 
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
