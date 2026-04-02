@@ -1,0 +1,70 @@
+name: apim-simulator-todo
+
+services:
+  todo-api:
+    build:
+      context: ./examples/todo-app/api-fastapi-container-app
+      dockerfile: Dockerfile
+    image: apim-simulator-todo-api:latest
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - todo
+
+  apim-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: apim-simulator:latest
+    ports:
+      - "8000:8000"
+    environment:
+      APIM_CONFIG_PATH: /app/examples/todo-app/apim.json
+    depends_on:
+      todo-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/apim/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - todo
+
+  todo-frontend:
+    build:
+      context: ./examples/todo-app/frontend-astro
+      dockerfile: Dockerfile
+    image: apim-simulator-todo-frontend:latest
+    ports:
+      - "3000:8080"
+    environment:
+      API_BASE_URL: http://localhost:8000
+      APIM_SUBSCRIPTION_KEY: todo-demo-key
+    depends_on:
+      apim-simulator:
+        condition: service_healthy
+    networks:
+      - todo
+
+networks:
+  todo:

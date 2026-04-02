@@ -303,6 +303,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["x-apim-simulator", "x-apim-trace-id", "x-correlation-id", "x-todo-demo-policy"],
     )
 
     @app.get("/")

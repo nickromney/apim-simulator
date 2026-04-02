@@ -8,10 +8,11 @@ COMPOSE_EDGE := $(COMPOSE) -f compose.yml -f compose.edge.yml -f compose.mcp.yml
 COMPOSE_TLS := $(COMPOSE) -f compose.yml -f compose.edge.yml -f compose.tls.yml -f compose.mcp.yml
 COMPOSE_PRIVATE := $(COMPOSE) -f compose.yml -f compose.private.yml -f compose.mcp.yml
 COMPOSE_UI := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.ui.yml
+COMPOSE_TODO := $(COMPOSE) -f compose.todo.yml
 COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 
-.PHONY: help ensure-certs install-hooks fmt lint up up-oidc up-mcp up-edge up-tls up-ui down logs logs-oidc logs-mcp test compat compat-report import-tofu verify-azure smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private compose-config compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui
+.PHONY: help ensure-certs install-hooks fmt lint up up-oidc up-mcp up-edge up-tls up-ui up-todo down logs logs-oidc logs-mcp logs-todo test compat compat-report import-tofu verify-azure smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-todo test-todo-e2e test-todo-bruno export-todo-har compose-config compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-todo
 
 help:
 	@printf "Run:\n"
@@ -21,10 +22,12 @@ help:
 	@printf "  %-22s %s\n" "up-edge" "Start the edge HTTP MCP stack on apim.localtest.me:8088"
 	@printf "  %-22s %s\n" "up-tls" "Start the edge TLS MCP stack on apim.localtest.me:8443"
 	@printf "  %-22s %s\n" "up-ui" "Start the operator console on localhost:3007"
+	@printf "  %-22s %s\n" "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
 	@printf "  %-22s %s\n" "down" "Stop all compose services defined by this repo"
 	@printf "  %-22s %s\n" "logs" "Tail core stack logs"
 	@printf "  %-22s %s\n" "logs-oidc" "Tail OIDC stack logs"
 	@printf "  %-22s %s\n" "logs-mcp" "Tail MCP stack logs"
+	@printf "  %-22s %s\n" "logs-todo" "Tail todo demo stack logs"
 	@printf "  %-22s %s\n" "install-hooks" "Enable the repo-managed git pre-commit hook"
 	@printf "  %-22s %s\n" "fmt" "Format Python code with Ruff"
 	@printf "  %-22s %s\n" "lint" "Format Python code with Ruff and run lint checks"
@@ -38,6 +41,10 @@ help:
 	@printf "  %-22s %s\n" "smoke-edge" "Run the edge MCP and forwarded-header smoke test"
 	@printf "  %-22s %s\n" "smoke-tls" "Run the TLS edge smoke test using the generated local CA"
 	@printf "  %-22s %s\n" "smoke-private" "Run the private-mode smoke test and internal probe"
+	@printf "  %-22s %s\n" "smoke-todo" "Run the APIM-backed todo demo smoke test"
+	@printf "  %-22s %s\n" "test-todo-e2e" "Run Playwright against the running todo demo stack"
+	@printf "  %-22s %s\n" "test-todo-bruno" "Run the Bruno collection against the running todo demo stack"
+	@printf "  %-22s %s\n" "export-todo-har" "Capture the todo APIM flow as a HAR file for Proxyman"
 	@printf "  %-22s %s\n" "compose-config" "Render docker compose config for the direct public stack"
 	@printf "  %-22s %s\n" "compose-config-oidc" "Render docker compose config for the OIDC stack"
 	@printf "  %-22s %s\n" "compose-config-mcp" "Render docker compose config for the MCP stack"
@@ -45,6 +52,7 @@ help:
 	@printf "  %-22s %s\n" "compose-config-tls" "Render docker compose config for the edge TLS stack"
 	@printf "  %-22s %s\n" "compose-config-private" "Render docker compose config for the private MCP stack"
 	@printf "  %-22s %s\n" "compose-config-ui" "Render docker compose config for the console stack"
+	@printf "  %-22s %s\n" "compose-config-todo" "Render docker compose config for the todo demo stack"
 
 ensure-certs: $(DEV_CERTS)
 
@@ -69,8 +77,12 @@ up-tls: ensure-certs
 up-ui:
 	$(COMPOSE_UI) up -d
 
+up-todo:
+	$(COMPOSE_TODO) up --build -d
+
 down:
 	$(COMPOSE_ALL) down --remove-orphans
+	$(COMPOSE_TODO) down --remove-orphans
 
 logs:
 	$(COMPOSE_CORE) logs -f apim-simulator mock-backend
@@ -80,6 +92,9 @@ logs-oidc:
 
 logs-mcp:
 	$(COMPOSE_MCP) logs -f apim-simulator mcp-server
+
+logs-todo:
+	$(COMPOSE_TODO) logs -f todo-frontend apim-simulator todo-api
 
 install-hooks:
 	git config core.hooksPath .githooks
@@ -123,6 +138,20 @@ smoke-private:
 	uv run python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', 8000)); sock.close(); print('Host port 8000 is unavailable, as expected.') if code else (_ for _ in ()).throw(SystemExit('localhost:8000 is reachable; private mode should not publish the gateway port'))"
 	$(COMPOSE_PRIVATE) run --rm smoke-runner sh -lc "python -m pip install -q httpx mcp && python scripts/smoke_private.py"
 
+smoke-todo:
+	uv run python scripts/smoke_todo.py
+
+test-todo-e2e:
+	npm --prefix examples/todo-app/frontend-astro ci
+	npm --prefix examples/todo-app/frontend-astro exec playwright install chromium
+	npm --prefix examples/todo-app/frontend-astro run test:e2e
+
+test-todo-bruno:
+	cd examples/todo-app/api-clients/bruno && npm exec --yes --package=@usebruno/cli -- bru run --env-file ./environments/local.bru .
+
+export-todo-har:
+	uv run python scripts/export_todo_har.py
+
 compose-config:
 	$(COMPOSE_CORE) config
 
@@ -143,3 +172,6 @@ compose-config-private:
 
 compose-config-ui:
 	$(COMPOSE_UI) config
+
+compose-config-todo:
+	$(COMPOSE_TODO) config

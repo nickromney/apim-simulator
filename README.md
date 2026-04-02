@@ -88,6 +88,22 @@ curl \
   http://localhost:8000/api/echo
 ```
 
+### Todo demo stack
+
+```bash
+make up-todo
+make smoke-todo
+make test-todo-e2e
+make test-todo-bruno
+make export-todo-har
+```
+
+This starts a small Astro frontend on `http://localhost:3000`, brokers every
+browser API call through the simulator on `http://localhost:8000`, and keeps the
+FastAPI todo backend internal-only. The example also ships with a Bruno
+collection and a Proxyman-ready HAR capture under
+`examples/todo-app/api-clients/`.
+
 ### Operator console
 
 ```bash
@@ -147,11 +163,16 @@ make up-mcp
 make up-edge
 make up-tls
 make up-ui
+make up-todo
 make smoke-mcp
 make smoke-edge
 make smoke-tls
 make smoke-private
 make smoke-oidc
+make smoke-todo
+make test-todo-e2e
+make test-todo-bruno
+make export-todo-har
 make install-hooks
 make fmt
 make lint
@@ -184,6 +205,7 @@ apim-simulator/
 │   ├── oidc/               # Standalone OIDC config
 │   ├── mock-backend/       # Self-contained upstream echo service
 │   ├── mcp-server/         # Streamable HTTP MCP example server
+│   ├── todo-app/           # Astro + APIM + FastAPI example app
 │   └── subnet-calculator/  # Extracted example assets from platform
 ├── scripts/                # Token and smoke-test helpers
 ├── tests/                  # Unit and integration tests
@@ -196,6 +218,7 @@ apim-simulator/
 ├── compose.oidc.yml        # Keycloak overlay
 ├── compose.mcp.yml         # MCP server overlay
 ├── compose.ui.yml          # Operator console overlay
+├── compose.todo.yml        # Todo demo stack
 └── Makefile
 ```
 
