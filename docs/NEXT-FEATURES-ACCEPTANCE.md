@@ -4,8 +4,8 @@ Audited on `2026-04-02` against [NEXT-FEATURES.md](./NEXT-FEATURES.md).
 
 ## Summary
 
-- Overall closure status: `blocked`
-- Remaining `blocked` item: compatibility enforcement in CI is not wired because this repo has no checked-in CI workflow.
+- Overall closure status: `met`
+- Remaining `blocked` items: none
 - Remaining `needs-fix` items: none after this closure pass
 
 ## Status Legend
@@ -44,7 +44,7 @@ Audited on `2026-04-02` against [NEXT-FEATURES.md](./NEXT-FEATURES.md).
 | `make compat` executes all curated fixtures | Runner walks the manifest and executes all non-unsupported entries | `make compat` on `2026-04-02` reported supported and adapted fixture passes for every listed executable fixture | `met` |
 | `make compat` fails if a `supported` fixture regresses | Runner accumulates failures and exits nonzero when any supported/adapted fixture fails | `scripts/check_sample_compat.py` inspection plus passing run on `2026-04-02` | `met` |
 | `make compat` fails if an `adapted` fixture no longer matches documented adapted behavior | Adapted fixtures are executed and routed through the same failure path as supported fixtures | `scripts/check_sample_compat.py` inspection plus passing run on `2026-04-02` | `met` |
-| `make compat` prints unsupported fixture summaries in CI output without failing | Local command prints unsupported summaries, but no CI workflow exists to claim CI output wiring | `make compat` printed `Unsupported fixtures:` on `2026-04-02`; `find .github -maxdepth 3 -type f` returned `.github: No such file or directory` | `blocked` |
+| `make compat` prints unsupported fixture summaries in CI output without failing | GitHub Actions workflow runs `make compat`, preserving the command stdout in CI logs | `.github/workflows/ci.yml` added on `2026-04-02`; local `make compat` prints `Unsupported fixtures:` | `met` |
 | Additional primitives: `set-variable`, `set-query-parameter`, `set-body`, `include-fragment` | All four primitives are implemented in the narrow XML engine | `app/policy.py` inspection; `tests/test_policy_golden.py` and `make compat` on `2026-04-02` | `met` |
 | No Azure APIM C# expression engine is added | Rendering remains a narrow simulator helper; no APIM expression runtime exists | `app/policy.py` inspection on `2026-04-02` | `met` |
 | One shared value-rendering helper supports literals, method/path, headers, query params, variables, and subscription ID | Shared token renderer is used by header, URI, body, query, and response shaping | `app/policy.py` inspection; `tests/test_policy_golden.py` passed on `2026-04-02` | `met` |
@@ -109,8 +109,8 @@ Audited on `2026-04-02` against [NEXT-FEATURES.md](./NEXT-FEATURES.md).
 | --- | --- | --- |
 | Unit tests exist for each newly supported policy primitive | `tests/test_policy_golden.py` covers `set-variable`, `set-query-parameter`, `set-body`, `include-fragment`; full suite passed on `2026-04-02` | `met` |
 | Curated APIM sample fixtures execute through the compatibility harness | `2026-04-02`: `make compat` exited `0` and reported supported/adapted fixture passes | `met` |
-| Supported and adapted fixtures are enforced in CI | No checked-in CI workflow exists to run `make compat` automatically | `2026-04-02`: `find .github -maxdepth 3 -type f` returned `.github: No such file or directory` | `blocked` |
-| Unsupported fixtures are reported clearly in CI output | Local command output is ready, but CI wiring does not exist in-repo | `2026-04-02`: `make compat` printed `Unsupported fixtures:` locally; no CI workflow exists | `blocked` |
+| Supported and adapted fixtures are enforced in CI | GitHub Actions workflow includes a dedicated `Compatibility Harness` job that runs `make compat` | `.github/workflows/ci.yml` added on `2026-04-02` | `met` |
+| Unsupported fixtures are reported clearly in CI output | The CI workflow runs `make compat` directly, so unsupported summaries remain visible in job logs without failing the job | `.github/workflows/ci.yml` plus local `make compat` output on `2026-04-02` | `met` |
 | Existing policy behavior remains unchanged unless explicitly covered by new fixture expectations | Full policy and gateway suites remained green after the phase work | `2026-04-02`: `uv run --extra dev pytest -q` => `70 passed, 1 skipped` | `met` |
 
 ### Regression
