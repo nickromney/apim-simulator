@@ -1,0 +1,10 @@
+<policies>
+  <inbound>
+    <send-request mode="new" response-variable-name="response">
+      <set-url>https://example.com</set-url>
+    </send-request>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>

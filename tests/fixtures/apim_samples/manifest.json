@@ -1,0 +1,32 @@
+[
+  {
+    "id": "set-variable-header",
+    "source": "https://github.com/Azure-Samples/Apim-Samples",
+    "status": "supported",
+    "notes": "Validates APIM-shaped set-variable plus templated downstream header mutation."
+  },
+  {
+    "id": "set-query-parameter-from-path",
+    "source": "https://github.com/Azure-Samples/Apim-Samples",
+    "status": "supported",
+    "notes": "Validates outbound query mutation using APIM-compatible set-query-parameter syntax."
+  },
+  {
+    "id": "set-body-template",
+    "source": "https://github.com/Azure-Samples/Apim-Samples",
+    "status": "supported",
+    "notes": "Validates templated set-body request mutation without requiring APIM expressions."
+  },
+  {
+    "id": "include-fragment-config",
+    "source": "https://github.com/Azure-Samples/Apim-Samples",
+    "status": "adapted",
+    "notes": "Adapted: include-fragment resolves against gateway policy_fragments config instead of APIM fragment resources."
+  },
+  {
+    "id": "send-request-deferred",
+    "source": "https://github.com/Azure-Samples/Apim-Samples",
+    "status": "unsupported",
+    "notes": "Deferred in this milestone: send-request remains intentionally unsupported."
+  }
+]

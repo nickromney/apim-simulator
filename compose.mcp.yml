@@ -4,8 +4,10 @@ services:
       context: ./examples/mcp-server
       dockerfile: Dockerfile
     image: apim-simulator-mcp-server:latest
-    ports:
-      - "8091:8080"
+    expose:
+      - "8080"
+    networks:
+      - apim
 
   apim-simulator:
     environment:

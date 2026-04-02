@@ -8,7 +8,7 @@ This repository is not trying to clone all of Azure API Management. It is a loca
 - Products, subscriptions, subscription key rotation, and tenant access keys
 - OIDC and JWT validation through static JWKS or JWKS endpoints
 - Route-level scope, role, and claim checks
-- Host matching and API version set routing
+- Host matching, API version set routing, and forwarded-header-aware tracing
 - A limited but useful XML policy subset:
   - `set-header`
   - `rewrite-uri`
@@ -19,15 +19,21 @@ This repository is not trying to clone all of Azure API Management. It is a loca
   - `cors`
   - `rate-limit`
   - `quota`
-- Config reload, trace capture, and `tofu show -json` import
-- Compose-backed example stacks for OIDC and MCP streamable HTTP scenarios
+  - `set-variable`
+  - `set-query-parameter`
+  - `set-body`
+  - `include-fragment`
+- Config reload, trace capture, trace summaries, replay, and `tofu show -json` import
+- Curated Azure-Samples/APIM sample compatibility fixtures with documented supported, adapted, and unsupported cases
+- Compose-backed direct public, edge HTTP, edge TLS, private/internal, OIDC, and MCP scenarios
+- A focused operator console UI for policies, traces, products, routes, and subscriptions
 
-## Planned Next
+## Currently Deferred
 
-- Better sample compatibility coverage for Azure-Samples/Apim-Samples
-- More policy primitives such as `set-variable`, `set-query-parameter`, `set-body`, and fragment inclusion
-- Docker overlays for TLS and App-Gateway-like reverse proxy behavior
-- A focused developer console UI for policies, traces, products, and subscriptions
+- `send-request` and `cache-*`
+- Full APIM policy expression compatibility
+- Broader management-plane emulation
+- Broader Azure-Samples/APIM fixture coverage beyond the curated set
 
 ## Not The Goal
 

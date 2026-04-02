@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ApiVersioningScheme(str, Enum):
+class ApiVersioningScheme(StrEnum):
     Header = "Header"
     Query = "Query"
     Segment = "Segment"
@@ -57,7 +57,7 @@ class SubscriptionKeyPair(BaseModel):
     secondary: str
 
 
-class SubscriptionState(str, Enum):
+class SubscriptionState(StrEnum):
     Active = "active"
     Suspended = "suspended"
     Cancelled = "cancelled"
@@ -114,7 +114,7 @@ class TenantAccessConfig(BaseModel):
     secondary_key: str | None = None
 
 
-class ClientCertificateMode(str, Enum):
+class ClientCertificateMode(StrEnum):
     """Maps to Azure APIM client certificate settings.
 
     - disabled: No client cert required (default)
@@ -266,6 +266,7 @@ class GatewayConfig(BaseModel):
     cache_max_entries: int = 1024
     trace_enabled: bool = False
     api_version_sets: dict[str, ApiVersionSetConfig] = Field(default_factory=dict)
+    policy_fragments: dict[str, str] = Field(default_factory=dict)
     policies_xml: str | None = None
     policies_xml_documents: list[str] = Field(default_factory=list)
     backends: dict[str, BackendConfig] = Field(default_factory=dict)

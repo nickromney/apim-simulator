@@ -27,6 +27,8 @@ services:
       timeout: 5s
       retries: 30
       start_period: 240s
+    networks:
+      - apim
 
   apim-simulator:
     environment:
@@ -36,3 +38,6 @@ services:
         condition: service_started
       keycloak:
         condition: service_healthy
+
+networks:
+  apim:

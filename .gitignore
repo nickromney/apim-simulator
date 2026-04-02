@@ -9,3 +9,6 @@ __pycache__/
 *.log
 build/
 dist/
+examples/edge/certs/
+ui/node_modules/
+ui/dist/
