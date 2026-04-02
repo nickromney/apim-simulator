@@ -1,6 +1,6 @@
 services:
   smoke-runner:
-    image: dhi.io/python:3.13-debian13-dev
+    image: python:3.13-slim
     profiles:
       - smoke
     working_dir: /work
