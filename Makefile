@@ -11,7 +11,7 @@ COMPOSE_UI := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.ui.yml
 COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 
-.PHONY: help ensure-certs up up-oidc up-mcp up-edge up-tls up-ui down logs logs-oidc logs-mcp test compat smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private compose-config compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui
+.PHONY: help ensure-certs up up-oidc up-mcp up-edge up-tls up-ui down logs logs-oidc logs-mcp test compat compat-report import-tofu verify-azure smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private compose-config compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui
 
 help:
 	@printf "Run:\n"
@@ -27,6 +27,9 @@ help:
 	@printf "  %-22s %s\n" "logs-mcp" "Tail MCP stack logs"
 	@printf "  %-22s %s\n" "test" "Run the Python test suite"
 	@printf "  %-22s %s\n" "compat" "Run the curated APIM sample compatibility harness"
+	@printf "  %-22s %s\n" "compat-report" "Run static Terraform/APIM compatibility analysis (requires TOFU_SHOW=...)"
+	@printf "  %-22s %s\n" "import-tofu" "Import a tofu show JSON file into a running simulator (requires TOFU_SHOW=...)"
+	@printf "  %-22s %s\n" "verify-azure" "Diff curated requests against simulator and live Azure APIM"
 	@printf "  %-22s %s\n" "smoke-oidc" "Run the end-to-end OIDC smoke test against a running stack"
 	@printf "  %-22s %s\n" "smoke-mcp" "Run the end-to-end MCP smoke test against a running stack"
 	@printf "  %-22s %s\n" "smoke-edge" "Run the edge MCP and forwarded-header smoke test"
@@ -80,6 +83,15 @@ test:
 
 compat:
 	uv run python scripts/check_sample_compat.py
+
+compat-report:
+	uv run python scripts/compat_report.py
+
+import-tofu:
+	uv run python scripts/import_tofu.py
+
+verify-azure:
+	uv run python scripts/verify_azure.py
 
 smoke-oidc:
 	uv run python scripts/smoke_oidc.py

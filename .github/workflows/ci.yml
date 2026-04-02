@@ -60,6 +60,9 @@ jobs:
       - name: Run curated APIM compatibility harness
         run: make compat
 
+      - name: Run Terraform/APIM compatibility report
+        run: TOFU_SHOW=tests/fixtures/tofu_show/sample.json make compat-report
+
   ui-build:
     name: UI Build
     runs-on: ubuntu-latest

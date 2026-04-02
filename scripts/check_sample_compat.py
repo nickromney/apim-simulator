@@ -68,61 +68,119 @@ def _assert_subset(expected: Any, actual: Any, *, path: str = "root") -> None:
         raise AssertionError(f"{path}: expected {expected!r}, got {actual!r}")
 
 
+def _matches_mock(req: httpx.Request, match: dict[str, Any]) -> bool:
+    if "method" in match and req.method.upper() != str(match["method"]).upper():
+        return False
+    if "url" in match and str(req.url) != str(match["url"]):
+        return False
+    if "path" in match and req.url.path != str(match["path"]):
+        return False
+    return True
+
+
+def _build_mock_response(spec: dict[str, Any]) -> httpx.Response:
+    status_code = int(spec.get("status_code") or 200)
+    headers = spec.get("headers") or {}
+    if "json" in spec:
+        return httpx.Response(status_code, headers=headers, json=spec["json"])
+    if "text" in spec:
+        return httpx.Response(status_code, headers=headers, text=str(spec["text"]))
+    return httpx.Response(status_code, headers=headers, content=(spec.get("body") or "").encode("utf-8"))
+
+
 def _run_fixture(entry: FixtureEntry) -> None:
     policy_xml = _load_fixture_file(entry.id, "policy.xml")
     request_spec = _load_fixture_file(entry.id, "request.json")
     expected = _load_fixture_file(entry.id, "expected.json")
 
-    captured: dict[str, Any] = {}
+    captured_requests: list[dict[str, Any]] = []
+    mock_responses = list(request_spec.get("mock_responses") or [])
 
     def handler(req: httpx.Request) -> httpx.Response:
-        captured["upstream"] = {
-            "method": req.method,
-            "path": req.url.path,
-            "query": dict(req.url.params),
-            "headers": {key.lower(): value for key, value in req.headers.items()},
-            "body": _decode_request_body(req.content),
-        }
+        captured_requests.append(
+            {
+                "method": req.method,
+                "url": str(req.url),
+                "path": req.url.path,
+                "query": dict(req.url.params),
+                "headers": {key.lower(): value for key, value in req.headers.items()},
+                "body": _decode_request_body(req.content),
+            }
+        )
+        for index, item in enumerate(mock_responses):
+            match = item.get("match") or {}
+            if _matches_mock(req, match):
+                response_spec = item.get("response") or {}
+                mock_responses.pop(index)
+                return _build_mock_response(response_spec)
         return httpx.Response(200, json={"ok": True})
 
-    config_overrides = request_spec.get("config", {})
-    path_prefix = config_overrides.get("path_prefix", "/sample")
-    upstream_path_prefix = config_overrides.get("upstream_path_prefix", "")
+    config_overrides = dict(request_spec.get("config", {}))
+    path_prefix = config_overrides.pop("path_prefix", "/sample")
+    upstream_path_prefix = config_overrides.pop("upstream_path_prefix", "")
+    upstream_base_url = config_overrides.pop("upstream_base_url", "http://upstream")
+    allow_anonymous = config_overrides.pop("allow_anonymous", True)
+    policy_fragments = config_overrides.pop("policy_fragments", {})
 
     app = create_app(
         config=GatewayConfig(
-            allow_anonymous=config_overrides.get("allow_anonymous", True),
-            policy_fragments=config_overrides.get("policy_fragments", {}),
+            allow_anonymous=allow_anonymous,
+            policy_fragments=policy_fragments,
             routes=[
                 RouteConfig(
                     name="fixture",
                     path_prefix=path_prefix,
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=upstream_base_url,
                     upstream_path_prefix=upstream_path_prefix,
                     policies_xml=policy_xml,
                 )
             ],
+            **config_overrides,
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
 
-    with TestClient(app) as client:
-        response = client.request(
-            request_spec.get("method", "GET"),
-            request_spec["path"],
-            params=request_spec.get("query", {}),
-            headers=request_spec.get("headers", {}),
-            content=(request_spec.get("body") or "").encode("utf-8"),
-        )
+    steps = request_spec.get("steps")
+    actual_steps: list[dict[str, Any]] = []
 
-    actual: dict[str, Any] = {
-        "status_code": response.status_code,
-        "headers": {key.lower(): value for key, value in response.headers.items()},
-        "body_text": response.text,
-        "upstream": captured.get("upstream"),
-    }
-    if response.headers.get("content-type", "").startswith("application/json"):
-        actual["json"] = response.json()
+    if steps is None:
+        steps = [
+            {
+                "method": request_spec.get("method", "GET"),
+                "path": request_spec["path"],
+                "query": request_spec.get("query", {}),
+                "headers": request_spec.get("headers", {}),
+                "body": request_spec.get("body", ""),
+            }
+        ]
+
+    with TestClient(app) as client:
+        for step in steps:
+            response = client.request(
+                step.get("method", "GET"),
+                step["path"],
+                params=step.get("query", {}),
+                headers=step.get("headers", {}),
+                content=(step.get("body") or "").encode("utf-8"),
+            )
+            actual_step: dict[str, Any] = {
+                "status_code": response.status_code,
+                "headers": {key.lower(): value for key, value in response.headers.items()},
+                "body_text": response.text,
+            }
+            if response.headers.get("content-type", "").startswith("application/json"):
+                actual_step["json"] = response.json()
+            actual_steps.append(actual_step)
+
+    actual: dict[str, Any]
+    if len(actual_steps) == 1 and "steps" not in expected:
+        actual = {**actual_steps[0], "upstream": captured_requests[-1] if captured_requests else None}
+    else:
+        actual = {
+            "steps": actual_steps,
+            "upstream_call_count": len(captured_requests),
+            "upstream_requests": captured_requests,
+        }
 
     _assert_subset(expected, actual, path=entry.id)
 

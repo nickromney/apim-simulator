@@ -24,9 +24,33 @@
     "notes": "Adapted: include-fragment resolves against gateway policy_fragments config instead of APIM fragment resources."
   },
   {
-    "id": "send-request-deferred",
+    "id": "send-request-callout",
     "source": "https://github.com/Azure-Samples/Apim-Samples",
+    "status": "supported",
+    "notes": "Validates send-request callout plus response-based branching without broad expression support."
+  },
+  {
+    "id": "rate-limit-by-key-response",
+    "source": "https://learn.microsoft.com/en-us/azure/api-management/rate-limit-by-key-policy",
+    "status": "supported",
+    "notes": "Validates response-aware deferred by-key throttling and custom response headers."
+  },
+  {
+    "id": "cache-lookup-store",
+    "source": "https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy",
+    "status": "adapted",
+    "notes": "Adapted: prefer-external caching-type resolves to the simulator's local internal cache."
+  },
+  {
+    "id": "cache-value-lifecycle",
+    "source": "https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-value-policy",
+    "status": "adapted",
+    "notes": "Adapted: value cache uses the simulator's local in-memory cache."
+  },
+  {
+    "id": "cache-external-unsupported",
+    "source": "https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-value-policy",
     "status": "unsupported",
-    "notes": "Deferred in this milestone: send-request remains intentionally unsupported."
+    "notes": "External cache backends remain intentionally unsupported."
   }
 ]

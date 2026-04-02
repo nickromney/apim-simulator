@@ -23,14 +23,18 @@ This repository is not trying to clone all of Azure API Management. It is a loca
   - `set-query-parameter`
   - `set-body`
   - `include-fragment`
-- Config reload, trace capture, trace summaries, replay, and `tofu show -json` import
+  - `validate-jwt`
+  - `set-backend-service`
+  - `send-request`
+- Config reload, trace capture, trace summaries, replay, Terraform/OpenTofu import, and static compatibility reporting
 - Curated Azure-Samples/APIM sample compatibility fixtures with documented supported, adapted, and unsupported cases
 - Compose-backed direct public, edge HTTP, edge TLS, private/internal, OIDC, and MCP scenarios
 - A focused operator console UI for policies, traces, products, routes, and subscriptions
 
 ## Currently Deferred
 
-- `send-request` and `cache-*`
+- External cache backends for `cache-*`
+- `quota-by-key` bandwidth enforcement
 - Full APIM policy expression compatibility
 - Broader management-plane emulation
 - Broader Azure-Samples/APIM fixture coverage beyond the curated set

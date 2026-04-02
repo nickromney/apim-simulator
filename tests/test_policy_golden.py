@@ -1,6 +1,21 @@
 from __future__ import annotations
 
-from app.policy import PolicyRequest, apply_inbound, apply_on_error, apply_outbound, parse_policies_xml
+from app.config import GatewayConfig, NamedValueConfig
+from app.policy import (
+    CacheLookup,
+    CacheLookupValue,
+    CacheRemoveValue,
+    CacheStore,
+    CacheStoreValue,
+    PolicyRequest,
+    PolicyRuntime,
+    QuotaByKey,
+    RateLimitByKey,
+    apply_inbound,
+    apply_on_error,
+    apply_outbound,
+    parse_policies_xml,
+)
 
 
 def test_golden_policy_set_header_override() -> None:
@@ -339,3 +354,59 @@ def test_golden_policy_include_fragment_inserts_fragment_nodes() -> None:
     early = apply_inbound([doc], req)
     assert early is None
     assert req.headers["x-fragment"] == "1"
+
+
+def test_golden_policy_named_values_resolve_before_template_tokens() -> None:
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <set-header name="x-backend" exists-action="override"><value>https://{{backend-host}}{path}</value></set-header>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    req = PolicyRequest(method="GET", path="/api/health", query={}, headers={}, variables={})
+    runtime = PolicyRuntime(
+        gateway_config=GatewayConfig(named_values={"backend-host": NamedValueConfig(value="backend.example.test")})
+    )
+
+    early = apply_inbound([doc], req, runtime=runtime)
+
+    assert early is None
+    assert req.headers["x-backend"] == "https://backend.example.test/api/health"
+
+
+def test_golden_policy_parses_policy_parity_v2_nodes() -> None:
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <rate-limit-by-key calls="10" renewal-period="60" counter-key="user-a" />
+    <quota-by-key calls="100" renewal-period="300" counter-key="user-a" first-period-start="2026-04-02T10:00:00Z" />
+    <cache-lookup vary-by-developer="true" vary-by-developer-groups="false" caching-type="internal">
+      <vary-by-query-parameter>version;locale</vary-by-query-parameter>
+    </cache-lookup>
+    <cache-lookup-value key="token-user-a" variable-name="tokenstate" default-value="missing" />
+    <cache-remove-value key="token-user-a" />
+  </inbound>
+  <backend />
+  <outbound>
+    <cache-store duration="60" />
+    <cache-store-value key="token-user-a" value="warm" duration="60" />
+  </outbound>
+  <on-error />
+</policies>
+"""
+    )
+
+    assert isinstance(doc.inbound[0], RateLimitByKey)
+    assert isinstance(doc.inbound[1], QuotaByKey)
+    assert isinstance(doc.inbound[2], CacheLookup)
+    assert isinstance(doc.inbound[3], CacheLookupValue)
+    assert isinstance(doc.inbound[4], CacheRemoveValue)
+    assert isinstance(doc.outbound[0], CacheStore)
+    assert isinstance(doc.outbound[1], CacheStoreValue)

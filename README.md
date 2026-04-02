@@ -5,7 +5,10 @@ This repository is the standalone extraction of the APIM simulator work that sta
 ## Current Shape
 
 - Python/FastAPI gateway engine for fast iteration and readable policy/auth logic
-- Config-driven routing, products, subscriptions, tenant access keys, OIDC, traces, and a narrow APIM XML policy subset
+- Config-driven routing, products, subscriptions, tenant access keys, OIDC, traces, and a practical APIM XML policy subset
+- Policy-driven response caching, value caching, and by-key throttling for local APIM-shaped gateway flows
+- Terraform/OpenTofu import of APIM APIs, version sets, backends, named values, policies, and OpenAPI-derived operations
+- Static compatibility reporting before runtime plus optional live Azure diff tooling for high-confidence verification
 - Compose-first runtime overlays for direct public, edge HTTP, edge TLS, private/internal, OIDC, and MCP scenarios
 - A curated APIM sample compatibility harness plus an operator console over the local management APIs
 - An MCP-focused example that places the simulator in front of a streamable HTTP MCP server
@@ -93,6 +96,27 @@ make up-ui
 
 Open `http://localhost:3007` and connect to `http://localhost:8000` with tenant key `local-dev-tenant-key`.
 
+### Terraform/OpenTofu import
+
+Start the direct stack, then import a `tofu show -json` payload into the running simulator:
+
+```bash
+make up
+TOFU_SHOW=/path/to/tofu-show.json make import-tofu
+```
+
+Preflight a Terraform/APIM payload without starting the gateway:
+
+```bash
+TOFU_SHOW=/path/to/tofu-show.json make compat-report
+```
+
+Key Vault-backed named values are intentionally local-first. Provide local overrides with env vars in the form `APIM_NAMED_VALUE_<NAME>`:
+
+```bash
+export APIM_NAMED_VALUE_BACKEND_SECRET=super-secret-token
+```
+
 ### Tear down
 
 ```bash
@@ -104,6 +128,7 @@ make down
 ```bash
 make test
 make compat
+TOFU_SHOW=tests/fixtures/tofu_show/sample.json make compat-report
 make compose-config
 make compose-config-edge
 make compose-config-tls
@@ -126,6 +151,9 @@ make smoke-private
 make smoke-oidc
 make test
 make compat
+make compat-report
+make import-tofu
+make verify-azure
 make down
 ```
 

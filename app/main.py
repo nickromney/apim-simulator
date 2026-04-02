@@ -21,10 +21,27 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from app.config import GatewayConfig, Subscription, SubscriptionState, load_config
-from app.policy import PolicyRequest, apply_inbound, apply_on_error, apply_outbound, parse_policies_xml
+from app.named_values import mask_secret_data
+from app.policy import (
+    PolicyRequest,
+    PolicyRuntime,
+    PolicyTraceCollector,
+    apply_backend_async,
+    apply_inbound_async,
+    apply_on_error_async,
+    apply_outbound_async,
+    finalize_deferred_actions,
+    parse_policies_xml,
+)
 from app.proxy import build_upstream_headers, build_user_payload, filter_response_headers, resolve_route
-from app.security import OIDCVerifier, authenticate_request, subscription_bypassed, validate_client_certificate
-from app.terraform_import import config_from_tofu_show_json
+from app.security import (
+    OIDCVerifier,
+    authenticate_request,
+    build_client_principal,
+    subscription_bypassed,
+    validate_client_certificate,
+)
+from app.terraform_import import import_from_tofu_show_json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("apim-simulator")
@@ -82,6 +99,43 @@ def _decode_body(content: bytes) -> dict[str, str | None]:
         return {"text": content.decode("utf-8"), "base64": None}
     except UnicodeDecodeError:
         return {"text": None, "base64": base64.b64encode(content).decode("ascii")}
+
+
+def _apply_claim_headers(headers: dict[str, str], claims: dict[str, Any]) -> None:
+    headers["x-apim-user-object-id"] = str(claims.get("sub", ""))
+    headers["x-apim-user-email"] = str(claims.get("email", ""))
+    headers["x-apim-user-name"] = str(claims.get("name") or claims.get("preferred_username") or "")
+    headers["x-apim-auth-method"] = "oidc"
+    headers["x-ms-client-principal"] = build_client_principal(claims)
+    headers["x-ms-client-principal-name"] = str(claims.get("preferred_username", ""))
+
+
+def _trace_payload(
+    *,
+    trace_base: dict[str, Any],
+    trace_collector: PolicyTraceCollector | None,
+    cfg: GatewayConfig,
+    extra: dict[str, Any],
+) -> dict[str, Any]:
+    payload = {
+        **trace_base,
+        "policy_steps": trace_collector.steps if trace_collector else [],
+        "policy_variable_writes": trace_collector.variable_writes if trace_collector else [],
+        "jwt_validations": trace_collector.jwt_validations if trace_collector else [],
+        "send_requests": trace_collector.send_requests if trace_collector else [],
+        "selected_backend": trace_collector.selected_backend if trace_collector else None,
+        **extra,
+    }
+    return mask_secret_data(payload, cfg)
+
+
+def _render_backend_value(value: str | None, policy_req: PolicyRequest, cfg: GatewayConfig) -> str | None:
+    if value is None:
+        return None
+    runtime = PolicyRuntime(gateway_config=cfg)
+    from app.policy import render_policy_value
+
+    return render_policy_value(value, policy_req, runtime)
 
 
 class SubscriptionUpsert(BaseModel):
@@ -145,6 +199,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         app.state.gateway_config = new_config
         app.state.oidc_verifiers = new_verifiers
         app.state.policy_cache = {}  # Clear policy cache on reload
+        app.state.policy_response_cache = {}
+        app.state.policy_value_cache = {}
         logger.info(
             "config reloaded | routes=%d | origins=%s | anonymous=%s",
             len(new_config.routes),
@@ -207,6 +263,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         app.state.oidc_verifiers = oidc_verifiers
         app.state.cache = {}
         app.state.policy_cache = {}
+        app.state.policy_response_cache = {}
+        app.state.policy_value_cache = {}
         app.state.rate_limit_store = {}
         app.state.quota_store = {}
         app.state.trace_store = {}
@@ -407,6 +465,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         app.state.gateway_config = cfg
         app.state.oidc_verifiers = _build_oidc_verifiers(cfg)
         app.state.policy_cache = {}
+        app.state.policy_response_cache = {}
+        app.state.policy_value_cache = {}
         return cfg
 
     def _persist_or_apply_config(request: Request, cfg: GatewayConfig) -> GatewayConfig:
@@ -688,7 +748,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         _require_tenant_access(request)
 
         current: GatewayConfig = request.app.state.gateway_config
-        imported = config_from_tofu_show_json(tf)
+        result = import_from_tofu_show_json(tf)
+        imported = result.config
 
         # Preserve local runtime settings.
         imported.allowed_origins = current.allowed_origins
@@ -699,14 +760,14 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         imported.tenant_access = current.tenant_access
         imported.trace_enabled = current.trace_enabled
         imported.policy_fragments = current.policy_fragments
-        imported.subscription.header_names = current.subscription.header_names
-        imported.subscription.query_param_names = current.subscription.query_param_names
 
         imported.routes = imported.materialize_routes()
         request.app.state.gateway_config = imported
         request.app.state.oidc_verifiers = _build_oidc_verifiers(imported)
         request.app.state.cache = {}
         request.app.state.policy_cache = {}
+        request.app.state.policy_response_cache = {}
+        request.app.state.policy_value_cache = {}
         request.app.state.rate_limit_store = {}
         request.app.state.quota_store = {}
         request.app.state.trace_store = {}
@@ -716,6 +777,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             "products": len(imported.products),
             "subscriptions": len(imported.subscription.subscriptions),
             "apis": len(imported.apis),
+            "diagnostics": [item.__dict__ for item in result.diagnostics],
         }
 
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
@@ -734,22 +796,9 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         route = resolved.route
 
         verifiers: dict[str, OIDCVerifier] = request.app.state.oidc_verifiers
-        auth = authenticate_request(request, cfg, verifiers)
-
-        if route.authz is not None:
-            scopes = _extract_scopes(auth.claims)
-            roles = _extract_roles(auth.claims)
-            if route.authz.required_scopes and not set(route.authz.required_scopes).issubset(scopes):
-                raise HTTPException(status_code=403, detail="Missing required scope")
-            if route.authz.required_roles and not set(route.authz.required_roles).issubset(roles):
-                raise HTTPException(status_code=403, detail="Missing required role")
-            for key, expected in route.authz.required_claims.items():
-                actual = auth.claims.get(key)
-                if actual is None or str(actual) != expected:
-                    raise HTTPException(status_code=403, detail="Missing required claim")
+        auth = authenticate_request(request, cfg, verifiers, route)
 
         if route.product:
-            # Back-compat: route.product.
             allowed_products = [route.product]
         else:
             allowed_products = []
@@ -803,6 +852,13 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         forwarded_proto = request.headers.get("x-forwarded-proto", "")
         forwarded_for = request.headers.get("x-forwarded-for", "")
         client_ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else (request.client.host if request.client else "")
+        subscription_record = _find_subscription_by_id(cfg, auth.subscription.id) if auth.subscription else None
+        subscription_owner = subscription_record.created_by if subscription_record is not None else None
+        subscription_groups = (
+            sorted(group.id for group in cfg.groups.values() if subscription_owner and subscription_owner in group.users)
+            if subscription_owner
+            else []
+        )
 
         upstream_path = resolved.upstream_path
         upstream_query = dict(request.query_params)
@@ -821,14 +877,29 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 "forwarded_host": forwarded_host,
                 "forwarded_proto": forwarded_proto,
                 "forwarded_for": forwarded_for,
+                "subscription_owner": subscription_owner or "",
+                "subscription_groups": subscription_groups,
                 "rate_limit_store": request.app.state.rate_limit_store,
                 "quota_store": request.app.state.quota_store,
+                "original_request_url": str(request.url),
+                "_request_headers": dict(headers),
+                "_request_query": dict(upstream_query),
             },
             body=body,
         )
 
         trace_requested = cfg.trace_enabled and request.headers.get("x-apim-trace", "").lower() == "true"
         trace_id = f"trace-{int(time.time() * 1000)}" if trace_requested else None
+        trace_collector = PolicyTraceCollector() if trace_requested else None
+        client: httpx.AsyncClient = request.app.state.http_client
+        policy_runtime = PolicyRuntime(
+            gateway_config=cfg,
+            http_client=client,
+            timeout_seconds=cfg.proxy_timeout_seconds,
+            trace=trace_collector,
+            response_cache=request.app.state.policy_response_cache,
+            value_cache=request.app.state.policy_value_cache,
+        )
 
         def _store_trace(payload: dict[str, Any]) -> None:
             if not trace_id:
@@ -839,6 +910,27 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 **payload,
             }
+
+        def _finalize_policy_response(
+            *,
+            status_code: int,
+            headers: dict[str, str],
+            body_bytes: bytes = b"",
+            media_type: str | None = None,
+        ) -> None:
+            final_req = PolicyRequest(
+                method=policy_req.method,
+                path=policy_req.path,
+                query=dict(policy_req.query),
+                headers=dict(policy_req.headers),
+                variables=policy_req.variables,
+                body=policy_req.body,
+                response_status_code=status_code,
+                response_headers=headers,
+                response_body=body_bytes,
+                response_media_type=media_type,
+            )
+            finalize_deferred_actions(final_req, policy_runtime)
 
         trace_base = {
             "route": route.name,
@@ -852,22 +944,32 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         }
 
         if policy_docs:
-            early = apply_inbound(policy_docs, policy_req)
+            early = await apply_inbound_async(policy_docs, policy_req, policy_runtime)
             if early is not None:
                 out_headers = dict(early.headers)
+                _finalize_policy_response(
+                    status_code=early.status_code,
+                    headers=out_headers,
+                    body_bytes=early.body,
+                    media_type=early.media_type,
+                )
                 out_headers["x-apim-simulator"] = "apim-sim-full"
                 out_headers["x-correlation-id"] = correlation_id
                 if trace_id:
                     out_headers["x-apim-trace-id"] = trace_id
-                    trace = {
-                        **trace_base,
-                        "upstream_url": None,
-                        "attempts": 0,
-                        "status": early.status_code,
-                        "elapsed_ms": 0,
-                        "cache": None,
-                        "reason": "policy_inbound_short_circuit",
-                    }
+                    trace = _trace_payload(
+                        trace_base=trace_base,
+                        trace_collector=trace_collector,
+                        cfg=cfg,
+                        extra={
+                            "upstream_url": None,
+                            "attempts": 0,
+                            "status": early.status_code,
+                            "elapsed_ms": 0,
+                            "cache": None,
+                            "reason": "policy_inbound_short_circuit",
+                        },
+                    )
                     out_headers["x-apim-trace"] = base64.b64encode(json.dumps(trace).encode("utf-8")).decode("utf-8")
                     _store_trace(trace)
                 return Response(
@@ -877,35 +979,123 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                     media_type=early.media_type,
                 )
 
+            backend_early = await apply_backend_async(policy_docs, policy_req, policy_runtime)
+            if backend_early is not None:
+                out_headers = dict(backend_early.headers)
+                _finalize_policy_response(
+                    status_code=backend_early.status_code,
+                    headers=out_headers,
+                    body_bytes=backend_early.body,
+                    media_type=backend_early.media_type,
+                )
+                out_headers["x-apim-simulator"] = "apim-sim-full"
+                out_headers["x-correlation-id"] = correlation_id
+                if trace_id:
+                    out_headers["x-apim-trace-id"] = trace_id
+                    trace = _trace_payload(
+                        trace_base=trace_base,
+                        trace_collector=trace_collector,
+                        cfg=cfg,
+                        extra={
+                            "upstream_url": None,
+                            "attempts": 0,
+                            "status": backend_early.status_code,
+                            "elapsed_ms": 0,
+                            "cache": None,
+                            "reason": "policy_backend_short_circuit",
+                        },
+                    )
+                    out_headers["x-apim-trace"] = base64.b64encode(json.dumps(trace).encode("utf-8")).decode("utf-8")
+                    _store_trace(trace)
+                return Response(
+                    content=backend_early.body,
+                    status_code=backend_early.status_code,
+                    headers=out_headers,
+                    media_type=backend_early.media_type,
+                )
+
+        effective_claims = auth.claims
+        jwt_claims = policy_req.variables.get("_last_jwt_claims")
+        if isinstance(jwt_claims, dict):
+            effective_claims = jwt_claims
+            _apply_claim_headers(policy_req.headers, effective_claims)
+
+        if route.authz is not None:
+            scopes = _extract_scopes(effective_claims)
+            roles = _extract_roles(effective_claims)
+            if route.authz.required_scopes and not set(route.authz.required_scopes).issubset(scopes):
+                raise HTTPException(status_code=403, detail="Missing required scope")
+            if route.authz.required_roles and not set(route.authz.required_roles).issubset(roles):
+                raise HTTPException(status_code=403, detail="Missing required role")
+            for key, expected in route.authz.required_claims.items():
+                actual = effective_claims.get(key)
+                if actual is None or str(actual) != expected:
+                    raise HTTPException(status_code=403, detail="Missing required claim")
+
         upstream_base_url = route.upstream_base_url
         upstream_auth: tuple[str, str] | None = None
-        if route.backend:
-            backend = cfg.backends.get(route.backend)
+        selected_backend_url = str(policy_req.variables.get("selected_backend_url") or "")
+        selected_backend_id = str(policy_req.variables.get("selected_backend_id") or "")
+        backend_id = selected_backend_id or (route.backend or "" if not selected_backend_url else "")
+        if selected_backend_url:
+            upstream_base_url = selected_backend_url
+        if backend_id:
+            backend = cfg.backends.get(backend_id)
             if backend is not None:
-                upstream_base_url = backend.url
-                policy_req.headers.setdefault("x-apim-backend-id", route.backend)
+                upstream_base_url = selected_backend_url or (_render_backend_value(backend.url, policy_req, cfg) or backend.url)
+                policy_req.headers.setdefault("x-apim-backend-id", backend_id)
 
                 auth_type = (backend.auth_type or "none").lower()
                 if auth_type == "basic":
-                    if "authorization" not in policy_req.headers and backend.basic_username and backend.basic_password:
-                        upstream_auth = (backend.basic_username, backend.basic_password)
+                    username = _render_backend_value(backend.basic_username, policy_req, cfg)
+                    password = _render_backend_value(backend.basic_password, policy_req, cfg)
+                    if "authorization" not in policy_req.headers and username and password:
+                        upstream_auth = (username, password)
                 elif auth_type == "managed_identity":
                     policy_req.headers.setdefault("x-apim-managed-identity", "true")
                     if backend.managed_identity_resource:
                         policy_req.headers.setdefault(
-                            "x-apim-managed-identity-resource", backend.managed_identity_resource
+                            "x-apim-managed-identity-resource",
+                            _render_backend_value(backend.managed_identity_resource, policy_req, cfg),
                         )
                 elif auth_type == "client_certificate":
                     policy_req.headers.setdefault("x-apim-client-certificate", "present")
 
+                if backend.authorization_scheme and backend.authorization_parameter and "authorization" not in policy_req.headers:
+                    scheme = _render_backend_value(backend.authorization_scheme, policy_req, cfg) or ""
+                    parameter = _render_backend_value(backend.authorization_parameter, policy_req, cfg) or ""
+                    policy_req.headers["authorization"] = f"{scheme} {parameter}".strip()
+
+                for header_name, header_value in backend.header_credentials.items():
+                    rendered = _render_backend_value(header_value, policy_req, cfg)
+                    if rendered is not None:
+                        policy_req.headers[header_name.lower()] = rendered
+
+                for query_name, query_value in backend.query_credentials.items():
+                    rendered = _render_backend_value(query_value, policy_req, cfg)
+                    if rendered is not None:
+                        policy_req.query[query_name] = rendered
+
+                if backend.client_certificate_thumbprints:
+                    policy_req.headers.setdefault(
+                        "x-apim-client-certificate-thumbprints",
+                        ",".join(backend.client_certificate_thumbprints),
+                    )
+
+        if trace_collector is not None and trace_collector.selected_backend is None:
+            trace_collector.selected_backend = {
+                "backend_id": backend_id or None,
+                "base_url": upstream_base_url,
+            }
+
         upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=upstream_base_url)
         policy_req.variables["upstream_url"] = upstream_url
-        client: httpx.AsyncClient = request.app.state.http_client
 
         trace_base["upstream_url"] = upstream_url
 
+        policy_response_cache_active = bool(policy_req.variables.get("_policy_response_cache_active"))
         cache_key = None
-        if cfg.cache_enabled and (request.method == "GET") and (not cfg.proxy_streaming):
+        if cfg.cache_enabled and (request.method == "GET") and (not cfg.proxy_streaming) and not policy_response_cache_active:
             authz = request.headers.get("authorization", "")
             sub_key = request.headers.get("ocp-apim-subscription-key", "")
             material = f"{request.method}|{upstream_url}|{json.dumps(policy_req.query, sort_keys=True)}|{authz}|{sub_key}"
@@ -915,17 +1105,27 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 expires_at, cached_status, cached_headers, cached_media_type, cached_body = cached
                 if time.time() < expires_at:
                     out_headers = dict(cached_headers)
+                    _finalize_policy_response(
+                        status_code=cached_status,
+                        headers=out_headers,
+                        body_bytes=cached_body,
+                        media_type=cached_media_type,
+                    )
                     out_headers["x-apim-cache"] = "hit"
                     out_headers["x-correlation-id"] = correlation_id
                     if trace_id:
                         out_headers["x-apim-trace-id"] = trace_id
-                        trace = {
-                            **trace_base,
-                            "attempts": 0,
-                            "status": cached_status,
-                            "elapsed_ms": 0,
-                            "cache": "hit",
-                        }
+                        trace = _trace_payload(
+                            trace_base=trace_base,
+                            trace_collector=trace_collector,
+                            cfg=cfg,
+                            extra={
+                                "attempts": 0,
+                                "status": cached_status,
+                                "elapsed_ms": 0,
+                                "cache": "hit",
+                            },
+                        )
                         out_headers["x-apim-trace"] = base64.b64encode(json.dumps(trace).encode("utf-8")).decode(
                             "utf-8"
                         )
@@ -974,25 +1174,35 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 failure_req = PolicyRequest(
                     method=request.method,
                     path=policy_req.path,
-                    query=policy_req.query,
+                    query=dict(policy_req.query),
                     headers=dict(policy_req.headers),
-                    variables={"error": "upstream_unavailable"},
+                    variables={**policy_req.variables, "error": "upstream_unavailable"},
                 )
-                override = apply_on_error(policy_docs, failure_req)
+                override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
                 if override is not None:
                     out_headers = dict(override.headers)
+                    _finalize_policy_response(
+                        status_code=override.status_code,
+                        headers=out_headers,
+                        body_bytes=override.body,
+                        media_type=override.media_type,
+                    )
                     out_headers["x-apim-simulator"] = "apim-sim-full"
                     out_headers["x-correlation-id"] = correlation_id
                     if trace_id:
                         out_headers["x-apim-trace-id"] = trace_id
-                        trace = {
-                            **trace_base,
-                            "attempts": attempts_used,
-                            "status": override.status_code,
-                            "elapsed_ms": int((time.perf_counter() - start) * 1000),
-                            "cache": None,
-                            "reason": "policy_on_error_override",
-                        }
+                        trace = _trace_payload(
+                            trace_base=trace_base,
+                            trace_collector=trace_collector,
+                            cfg=cfg,
+                            extra={
+                                "attempts": attempts_used,
+                                "status": override.status_code,
+                                "elapsed_ms": int((time.perf_counter() - start) * 1000),
+                                "cache": None,
+                                "reason": "policy_on_error_override",
+                            },
+                        )
                         out_headers["x-apim-trace"] = base64.b64encode(json.dumps(trace).encode("utf-8")).decode(
                             "utf-8"
                         )
@@ -1008,15 +1218,39 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 
         response_headers = filter_response_headers(dict(upstream_response.headers))
         media_type = upstream_response.headers.get("content-type")
-
         response_headers["x-correlation-id"] = correlation_id
-
-        if policy_docs:
-            apply_outbound(policy_docs, headers=response_headers)
-
-        if cache_key is not None:
+        requires_buffering = cache_key is not None or policy_response_cache_active or not cfg.proxy_streaming
+        content = b""
+        if requires_buffering:
             content = await upstream_response.aread()
             await upstream_response.aclose()
+
+        if policy_docs:
+            outbound_req = PolicyRequest(
+                method=request.method,
+                path=policy_req.path,
+                query=dict(policy_req.query),
+                headers=response_headers,
+                variables=policy_req.variables,
+                body=policy_req.body,
+                response_status_code=upstream_response.status_code,
+                response_headers=response_headers,
+                response_body=content,
+                response_media_type=media_type,
+            )
+            await apply_outbound_async(policy_docs, outbound_req, policy_runtime)
+            response_headers = outbound_req.headers
+            content = outbound_req.response_body
+            media_type = outbound_req.response_media_type or media_type
+
+        _finalize_policy_response(
+            status_code=upstream_response.status_code,
+            headers=response_headers,
+            body_bytes=content,
+            media_type=media_type,
+        )
+
+        if cache_key is not None:
             response_headers["x-apim-cache"] = "miss"
             if len(request.app.state.cache) >= cfg.cache_max_entries:
                 request.app.state.cache.clear()
@@ -1029,13 +1263,17 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             )
             if trace_requested:
                 elapsed_ms = int((time.perf_counter() - start) * 1000)
-                trace = {
-                    **trace_base,
-                    "attempts": attempts_used,
-                    "status": upstream_response.status_code,
-                    "elapsed_ms": elapsed_ms,
-                    "cache": "miss",
-                }
+                trace = _trace_payload(
+                    trace_base=trace_base,
+                    trace_collector=trace_collector,
+                    cfg=cfg,
+                    extra={
+                        "attempts": attempts_used,
+                        "status": upstream_response.status_code,
+                        "elapsed_ms": elapsed_ms,
+                        "cache": "miss",
+                    },
+                )
                 response_headers["x-apim-trace-id"] = trace_id
                 response_headers["x-apim-trace"] = base64.b64encode(json.dumps(trace).encode("utf-8")).decode("utf-8")
                 _store_trace(trace)
@@ -1046,16 +1284,20 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 media_type=media_type,
             )
 
-        if cfg.proxy_streaming:
+        if cfg.proxy_streaming and not requires_buffering:
             if trace_requested:
                 elapsed_ms = int((time.perf_counter() - start) * 1000)
-                trace = {
-                    **trace_base,
-                    "attempts": attempts_used,
-                    "status": upstream_response.status_code,
-                    "elapsed_ms": elapsed_ms,
-                    "cache": None,
-                }
+                trace = _trace_payload(
+                    trace_base=trace_base,
+                    trace_collector=trace_collector,
+                    cfg=cfg,
+                    extra={
+                        "attempts": attempts_used,
+                        "status": upstream_response.status_code,
+                        "elapsed_ms": elapsed_ms,
+                        "cache": None,
+                    },
+                )
                 response_headers["x-apim-trace-id"] = trace_id
                 response_headers["x-apim-trace"] = base64.b64encode(json.dumps(trace).encode("utf-8")).decode("utf-8")
                 _store_trace(trace)
@@ -1067,17 +1309,19 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 background=BackgroundTask(upstream_response.aclose),
             )
 
-        content = await upstream_response.aread()
-        await upstream_response.aclose()
         if trace_requested:
             elapsed_ms = int((time.perf_counter() - start) * 1000)
-            trace = {
-                **trace_base,
-                "attempts": attempts_used,
-                "status": upstream_response.status_code,
-                "elapsed_ms": elapsed_ms,
-                "cache": None,
-            }
+            trace = _trace_payload(
+                trace_base=trace_base,
+                trace_collector=trace_collector,
+                cfg=cfg,
+                extra={
+                    "attempts": attempts_used,
+                    "status": upstream_response.status_code,
+                    "elapsed_ms": elapsed_ms,
+                    "cache": None,
+                },
+            )
             response_headers["x-apim-trace-id"] = trace_id
             response_headers["x-apim-trace"] = base64.b64encode(json.dumps(trace).encode("utf-8")).decode("utf-8")
             _store_trace(trace)
