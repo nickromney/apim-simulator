@@ -150,7 +150,9 @@ def _subscription_query_param_names(config: GatewayConfig, route: RouteConfig | 
     return config.subscription.query_param_names
 
 
-def _get_subscription_key_optional(request: Request, config: GatewayConfig, route: RouteConfig | None = None) -> str | None:
+def _get_subscription_key_optional(
+    request: Request, config: GatewayConfig, route: RouteConfig | None = None
+) -> str | None:
     for header_name in _subscription_header_names(config, route):
         provided = request.headers.get(header_name)
         if provided:
@@ -170,7 +172,9 @@ def _require_active_subscription(config: GatewayConfig, provided_key: str) -> No
         raise HTTPException(status_code=403, detail="Subscription is not active")
 
 
-def validate_subscription_key(request: Request, config: GatewayConfig, route: RouteConfig | None = None) -> SubscriptionIdentity | None:
+def validate_subscription_key(
+    request: Request, config: GatewayConfig, route: RouteConfig | None = None
+) -> SubscriptionIdentity | None:
     if not config.subscription.required:
         return None
     if _subscription_bypassed(request, config):
@@ -219,7 +223,9 @@ def get_subscription_products_optional(
     return sub.products if sub is not None else []
 
 
-def require_subscription_products(request: Request, config: GatewayConfig, route: RouteConfig | None = None) -> list[str]:
+def require_subscription_products(
+    request: Request, config: GatewayConfig, route: RouteConfig | None = None
+) -> list[str]:
     if _subscription_bypassed(request, config):
         return []
     provided = _get_subscription_key_optional(request, config, route)

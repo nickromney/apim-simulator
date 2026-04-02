@@ -1718,9 +1718,7 @@ def test_mtls_mode_disabled_allows_requests_without_cert() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get("/api/test")
@@ -1741,9 +1739,7 @@ def test_mtls_mode_required_rejects_request_without_cert() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get("/api/test")
@@ -1765,9 +1761,7 @@ def test_mtls_mode_required_accepts_request_with_cert() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get(
@@ -1794,9 +1788,7 @@ def test_mtls_mode_optional_allows_requests_without_cert() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get("/api/test")
@@ -1825,9 +1817,7 @@ def test_mtls_trusted_cert_by_thumbprint() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Matching thumbprint (case-insensitive)
@@ -1868,9 +1858,7 @@ def test_mtls_trusted_cert_by_subject() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Matching subject (contains)
@@ -1910,9 +1898,7 @@ def test_mtls_trusted_cert_by_issuer() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Matching issuer
@@ -1949,9 +1935,7 @@ def test_mtls_custom_header_names() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Standard headers - should fail (no cert detected)
@@ -1982,9 +1966,7 @@ def test_startup_probe_returns_200_when_ready() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.get("/apim/startup")
@@ -2005,9 +1987,7 @@ def test_reload_endpoint_reloads_config() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         resp = client.post("/apim/reload")
@@ -2030,9 +2010,7 @@ def test_reload_requires_admin_token_when_configured() -> None:
                 )
             ],
         ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))
-        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
         # Without token - should fail
@@ -2296,7 +2274,9 @@ def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> N
             allow_anonymous=True,
             trace_enabled=True,
             proxy_streaming=False,
-            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)],
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
@@ -2347,7 +2327,9 @@ def test_quota_by_key_respects_first_period_start(monkeypatch: Any) -> None:
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
-            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)],
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
@@ -2393,7 +2375,9 @@ def test_cache_lookup_and_store_hit_and_vary_by_query_parameter() -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             proxy_streaming=True,
-            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)],
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
@@ -2441,11 +2425,17 @@ def test_cache_lookup_varies_by_developer_subscription() -> None:
             subscription=SubscriptionConfig(
                 required=True,
                 subscriptions={
-                    "a": Subscription(id="sub-a", name="A", keys=SubscriptionKeyPair(primary="key-a", secondary="key-a-2")),
-                    "b": Subscription(id="sub-b", name="B", keys=SubscriptionKeyPair(primary="key-b", secondary="key-b-2")),
+                    "a": Subscription(
+                        id="sub-a", name="A", keys=SubscriptionKeyPair(primary="key-a", secondary="key-a-2")
+                    ),
+                    "b": Subscription(
+                        id="sub-b", name="B", keys=SubscriptionKeyPair(primary="key-b", secondary="key-b-2")
+                    ),
                 },
             ),
-            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)],
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
@@ -2503,7 +2493,9 @@ def test_cache_lookup_value_store_and_remove_value() -> None:
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
-            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)],
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
@@ -2536,7 +2528,9 @@ def test_external_cache_policy_is_unsupported_at_runtime() -> None:
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
-            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)],
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+            ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"ok": True}))),
     )

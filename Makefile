@@ -11,7 +11,7 @@ COMPOSE_UI := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.ui.yml
 COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 
-.PHONY: help ensure-certs up up-oidc up-mcp up-edge up-tls up-ui down logs logs-oidc logs-mcp test compat compat-report import-tofu verify-azure smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private compose-config compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui
+.PHONY: help ensure-certs install-hooks fmt lint up up-oidc up-mcp up-edge up-tls up-ui down logs logs-oidc logs-mcp test compat compat-report import-tofu verify-azure smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private compose-config compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui
 
 help:
 	@printf "Run:\n"
@@ -25,6 +25,9 @@ help:
 	@printf "  %-22s %s\n" "logs" "Tail core stack logs"
 	@printf "  %-22s %s\n" "logs-oidc" "Tail OIDC stack logs"
 	@printf "  %-22s %s\n" "logs-mcp" "Tail MCP stack logs"
+	@printf "  %-22s %s\n" "install-hooks" "Enable the repo-managed git pre-commit hook"
+	@printf "  %-22s %s\n" "fmt" "Format Python code with Ruff"
+	@printf "  %-22s %s\n" "lint" "Format Python code with Ruff and run lint checks"
 	@printf "  %-22s %s\n" "test" "Run the Python test suite"
 	@printf "  %-22s %s\n" "compat" "Run the curated APIM sample compatibility harness"
 	@printf "  %-22s %s\n" "compat-report" "Run static Terraform/APIM compatibility analysis (requires TOFU_SHOW=...)"
@@ -77,6 +80,17 @@ logs-oidc:
 
 logs-mcp:
 	$(COMPOSE_MCP) logs -f apim-simulator mcp-server
+
+install-hooks:
+	git config core.hooksPath .githooks
+	chmod +x .githooks/pre-commit
+
+fmt:
+	uv run --extra dev ruff format .
+
+lint:
+	uv run --extra dev ruff format .
+	uv run --extra dev ruff check .
 
 test:
 	uv run --extra dev pytest -q

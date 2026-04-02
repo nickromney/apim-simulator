@@ -126,6 +126,9 @@ make down
 ## Development
 
 ```bash
+make install-hooks
+make fmt
+make lint
 make test
 make compat
 TOFU_SHOW=tests/fixtures/tofu_show/sample.json make compat-report
@@ -149,12 +152,23 @@ make smoke-edge
 make smoke-tls
 make smoke-private
 make smoke-oidc
+make install-hooks
+make fmt
+make lint
 make test
 make compat
 make compat-report
 make import-tofu
 make verify-azure
 make down
+```
+
+`make fmt` runs `ruff format .`. `make lint` is the local alias that formats first and then runs `ruff check .`.
+
+The repo-managed pre-commit hook runs `ruff check --fix` and `ruff format` on staged Python files. Enable it once per clone with:
+
+```bash
+make install-hooks
 ```
 
 ## Repo Layout

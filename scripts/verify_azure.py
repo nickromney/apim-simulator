@@ -54,7 +54,9 @@ def main() -> int:
             body = case.get("body_text")
             compare_headers = list(case.get("compare_headers") or [])
 
-            simulator = client.request(method, f"{simulator_base_url}{path}", params=query, headers=headers, content=body)
+            simulator = client.request(
+                method, f"{simulator_base_url}{path}", params=query, headers=headers, content=body
+            )
             azure = client.request(method, f"{azure_base_url}{path}", params=query, headers=headers, content=body)
 
             if simulator.status_code != azure.status_code:

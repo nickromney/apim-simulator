@@ -167,7 +167,9 @@ def import_from_tofu_show_json(
                 value_from_key_vault = KeyVaultNamedValueConfig(
                     secret_id=str(key_vault_block["secret_id"]),
                     identity_client_id=(
-                        str(key_vault_block.get("identity_client_id")) if key_vault_block.get("identity_client_id") else None
+                        str(key_vault_block.get("identity_client_id"))
+                        if key_vault_block.get("identity_client_id")
+                        else None
                     ),
                 )
                 diagnostics.append(
@@ -217,9 +219,7 @@ def import_from_tofu_show_json(
             backends[res.name] = BackendConfig(
                 url=str(res.values.get("url") or "http://upstream"),
                 description=str(res.values.get("description")) if res.values.get("description") else None,
-                authorization_scheme=(
-                    str(authorization.get("scheme")) if authorization.get("scheme") else None
-                ),
+                authorization_scheme=(str(authorization.get("scheme")) if authorization.get("scheme") else None),
                 authorization_parameter=(
                     str(authorization.get("parameter")) if authorization.get("parameter") else None
                 ),

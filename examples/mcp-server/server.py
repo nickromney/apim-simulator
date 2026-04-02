@@ -4,7 +4,6 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-
 mcp = FastMCP(
     "APIM Simulator Demo MCP Server",
     instructions="Minimal streamable HTTP MCP server used to exercise the APIM simulator.",

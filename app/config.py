@@ -362,7 +362,8 @@ class GatewayConfig(BaseModel):
                         api_version_set=op.api_version_set or api.api_version_set,
                         api_version=op.api_version or api.api_version,
                         subscription_header_names=op.subscription_header_names or api.subscription_header_names,
-                        subscription_query_param_names=op.subscription_query_param_names or api.subscription_query_param_names,
+                        subscription_query_param_names=op.subscription_query_param_names
+                        or api.subscription_query_param_names,
                         authz=op.authz,
                         policies_xml_documents=policies,
                     )

@@ -202,7 +202,9 @@ def parse_condition(expr: str | None) -> Condition:
 
 
 class PolicyNode:
-    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:  # pragma: no cover
+    def apply(
+        self, req: PolicyRequest, runtime: PolicyRuntime | None = None
+    ) -> ResponseSpec | None:  # pragma: no cover
         raise NotImplementedError
 
     async def apply_async(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
@@ -840,7 +842,12 @@ class RateLimitByKey(PolicyNode):
             _record_step(
                 runtime,
                 "rate-limit-by-key",
-                {"counter_key": counter_key, "deferred": True, "count": len(bucket), "remaining": max(0, calls - len(bucket))},
+                {
+                    "counter_key": counter_key,
+                    "deferred": True,
+                    "count": len(bucket),
+                    "remaining": max(0, calls - len(bucket)),
+                },
             )
             return None
 
@@ -1105,7 +1112,9 @@ class CacheStoreValue(PolicyNode):
         value = evaluate_policy_value(self.value, req, runtime)
         ttl = max(0, _policy_int(self.duration, req, runtime, default=0))
         runtime.value_cache[key] = ValueCacheEntry(expires_at=time.time() + ttl, value=value)
-        _record_step(runtime, "cache-store-value", {"status": "stored", "cache_key": key, "ttl_seconds": ttl, "adapted": adapted})
+        _record_step(
+            runtime, "cache-store-value", {"status": "stored", "cache_key": key, "ttl_seconds": ttl, "adapted": adapted}
+        )
         return None
 
 
@@ -1120,7 +1129,11 @@ class CacheRemoveValue(PolicyNode):
         _, adapted = _normalize_cache_caching_type(self.caching_type)
         key = render_policy_value(self.key, req, runtime)
         removed = runtime.value_cache.pop(key, None) is not None
-        _record_step(runtime, "cache-remove-value", {"status": "removed" if removed else "miss", "cache_key": key, "adapted": adapted})
+        _record_step(
+            runtime,
+            "cache-remove-value",
+            {"status": "removed" if removed else "miss", "cache_key": key, "adapted": adapted},
+        )
         return None
 
 
@@ -1240,7 +1253,11 @@ class ValidateJwt(PolicyNode):
                         token,
                         key,
                         algorithms=["RS256", "RS384", "RS512", "PS256", "ES256"],
-                        options={"verify_aud": False, "verify_iss": False, "require": ["exp"] if self.require_expiration_time else []},
+                        options={
+                            "verify_aud": False,
+                            "verify_iss": False,
+                            "require": ["exp"] if self.require_expiration_time else [],
+                        },
                     )
                     if not self.issuers and metadata.get("issuer"):
                         claims.setdefault("_metadata_issuer", metadata.get("issuer"))
@@ -1262,7 +1279,11 @@ class ValidateJwt(PolicyNode):
             raise HTTPException(status_code=401, detail="Issuer validation failed")
 
         actual_aud = claims.get("aud")
-        audiences = [str(item) for item in actual_aud] if isinstance(actual_aud, list) else ([str(actual_aud)] if actual_aud else [])
+        audiences = (
+            [str(item) for item in actual_aud]
+            if isinstance(actual_aud, list)
+            else ([str(actual_aud)] if actual_aud else [])
+        )
         if expected_audiences and not set(expected_audiences).intersection(audiences):
             raise HTTPException(status_code=401, detail="Audience validation failed")
 
@@ -1589,7 +1610,11 @@ def _parse_return_response(el: ElementTree.Element) -> ReturnResponse:
     headers = [_parse_set_header(h) for h in el.findall("set-header")]
     body_el = el.find("body")
     set_body_el = el.find("set-body")
-    body = _parse_set_body(set_body_el).value if set_body_el is not None else (_text_or_empty(body_el) if body_el is not None else None)
+    body = (
+        _parse_set_body(set_body_el).value
+        if set_body_el is not None
+        else (_text_or_empty(body_el) if body_el is not None else None)
+    )
     return ReturnResponse(status_code=code, reason=reason, headers=headers, body=body)
 
 
@@ -1688,7 +1713,9 @@ def _parse_quota_by_key(el: ElementTree.Element) -> QuotaByKey:
 
 def _parse_cache_lookup(el: ElementTree.Element) -> CacheLookup:
     return CacheLookup(
-        vary_by_headers=_vary_values([_text_or_empty(item) for item in el.findall("vary-by-header") if _text_or_empty(item)]),
+        vary_by_headers=_vary_values(
+            [_text_or_empty(item) for item in el.findall("vary-by-header") if _text_or_empty(item)]
+        ),
         vary_by_query_parameters=_vary_values(
             [_text_or_empty(item) for item in el.findall("vary-by-query-parameter") if _text_or_empty(item)]
         ),
@@ -1771,11 +1798,15 @@ def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
         query_parameter_name=el.attrib.get("query-parameter-name"),
         token_value=el.attrib.get("token-value"),
         failed_validation_httpcode=int(el.attrib.get("failed-validation-httpcode") or "401"),
-        failed_validation_error_message=str(el.attrib.get("failed-validation-error-message") or "JWT validation failed"),
+        failed_validation_error_message=str(
+            el.attrib.get("failed-validation-error-message") or "JWT validation failed"
+        ),
         require_scheme=el.attrib.get("require-scheme"),
         require_expiration_time=str(el.attrib.get("require-expiration-time") or "true").lower() != "false",
         output_token_variable_name=el.attrib.get("output-token-variable-name"),
-        openid_config_urls=[str(item.attrib.get("url")) for item in el.findall("openid-config") if item.attrib.get("url")],
+        openid_config_urls=[
+            str(item.attrib.get("url")) for item in el.findall("openid-config") if item.attrib.get("url")
+        ],
         issuers=[_text_or_empty(item) for item in el.findall("./issuers/issuer") if _text_or_empty(item)],
         audiences=[_text_or_empty(item) for item in el.findall("./audiences/audience") if _text_or_empty(item)],
         required_claims=required_claims,
@@ -1806,10 +1837,14 @@ def _parse_send_request(el: ElementTree.Element) -> SendRequest:
         headers=[_parse_set_header(item) for item in el.findall("set-header")],
         body=(_parse_set_body(el.find("set-body")).value if el.find("set-body") is not None else None),
         authentication_certificate_thumbprint=(
-            str(auth_cert_el.attrib.get("thumbprint")) if auth_cert_el is not None and auth_cert_el.attrib.get("thumbprint") else None
+            str(auth_cert_el.attrib.get("thumbprint"))
+            if auth_cert_el is not None and auth_cert_el.attrib.get("thumbprint")
+            else None
         ),
         authentication_managed_identity_resource=(
-            str(auth_mi_el.attrib.get("resource")) if auth_mi_el is not None and auth_mi_el.attrib.get("resource") else None
+            str(auth_mi_el.attrib.get("resource"))
+            if auth_mi_el is not None and auth_mi_el.attrib.get("resource")
+            else None
         ),
     )
 
@@ -2069,7 +2104,9 @@ async def apply_outbound_async(
     for doc in docs:
         out = await _apply_steps_async(doc.outbound, req, runtime)
         if out is not None:
-            raise HTTPException(status_code=500, detail="Outbound policies cannot short-circuit responses in the simulator")
+            raise HTTPException(
+                status_code=500, detail="Outbound policies cannot short-circuit responses in the simulator"
+            )
 
 
 async def apply_on_error_async(
@@ -2095,11 +2132,15 @@ def finalize_deferred_actions(req: PolicyRequest, runtime: PolicyRuntime | None 
     apply_pending_response_headers(req, _response_header_target(req))
 
 
-def apply_inbound(docs: list[PolicyDocument], req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+def apply_inbound(
+    docs: list[PolicyDocument], req: PolicyRequest, runtime: PolicyRuntime | None = None
+) -> ResponseSpec | None:
     return asyncio.run(apply_inbound_async(docs, req, runtime))
 
 
-def apply_backend(docs: list[PolicyDocument], req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+def apply_backend(
+    docs: list[PolicyDocument], req: PolicyRequest, runtime: PolicyRuntime | None = None
+) -> ResponseSpec | None:
     return asyncio.run(apply_backend_async(docs, req, runtime))
 
 
@@ -2128,5 +2169,7 @@ def apply_outbound(
     finalize_deferred_actions(req, runtime)
 
 
-def apply_on_error(docs: list[PolicyDocument], req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+def apply_on_error(
+    docs: list[PolicyDocument], req: PolicyRequest, runtime: PolicyRuntime | None = None
+) -> ResponseSpec | None:
     return asyncio.run(apply_on_error_async(docs, req, runtime))

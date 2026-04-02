@@ -506,7 +506,9 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             return operation
         if scope == "route":
             if cfg.apis:
-                raise HTTPException(status_code=400, detail="Route policy updates are unavailable for API-backed configs")
+                raise HTTPException(
+                    status_code=400, detail="Route policy updates are unavailable for API-backed configs"
+                )
             for route in cfg.routes:
                 if route.name == scope_name:
                     return route
@@ -851,11 +853,15 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         forwarded_host = request.headers.get("x-forwarded-host", "")
         forwarded_proto = request.headers.get("x-forwarded-proto", "")
         forwarded_for = request.headers.get("x-forwarded-for", "")
-        client_ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else (request.client.host if request.client else "")
+        client_ip = (
+            forwarded_for.split(",", 1)[0].strip() if forwarded_for else (request.client.host if request.client else "")
+        )
         subscription_record = _find_subscription_by_id(cfg, auth.subscription.id) if auth.subscription else None
         subscription_owner = subscription_record.created_by if subscription_record is not None else None
         subscription_groups = (
-            sorted(group.id for group in cfg.groups.values() if subscription_owner and subscription_owner in group.users)
+            sorted(
+                group.id for group in cfg.groups.values() if subscription_owner and subscription_owner in group.users
+            )
             if subscription_owner
             else []
         )
@@ -1042,7 +1048,9 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         if backend_id:
             backend = cfg.backends.get(backend_id)
             if backend is not None:
-                upstream_base_url = selected_backend_url or (_render_backend_value(backend.url, policy_req, cfg) or backend.url)
+                upstream_base_url = selected_backend_url or (
+                    _render_backend_value(backend.url, policy_req, cfg) or backend.url
+                )
                 policy_req.headers.setdefault("x-apim-backend-id", backend_id)
 
                 auth_type = (backend.auth_type or "none").lower()
@@ -1061,7 +1069,11 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 elif auth_type == "client_certificate":
                     policy_req.headers.setdefault("x-apim-client-certificate", "present")
 
-                if backend.authorization_scheme and backend.authorization_parameter and "authorization" not in policy_req.headers:
+                if (
+                    backend.authorization_scheme
+                    and backend.authorization_parameter
+                    and "authorization" not in policy_req.headers
+                ):
                     scheme = _render_backend_value(backend.authorization_scheme, policy_req, cfg) or ""
                     parameter = _render_backend_value(backend.authorization_parameter, policy_req, cfg) or ""
                     policy_req.headers["authorization"] = f"{scheme} {parameter}".strip()
@@ -1095,10 +1107,17 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 
         policy_response_cache_active = bool(policy_req.variables.get("_policy_response_cache_active"))
         cache_key = None
-        if cfg.cache_enabled and (request.method == "GET") and (not cfg.proxy_streaming) and not policy_response_cache_active:
+        if (
+            cfg.cache_enabled
+            and (request.method == "GET")
+            and (not cfg.proxy_streaming)
+            and not policy_response_cache_active
+        ):
             authz = request.headers.get("authorization", "")
             sub_key = request.headers.get("ocp-apim-subscription-key", "")
-            material = f"{request.method}|{upstream_url}|{json.dumps(policy_req.query, sort_keys=True)}|{authz}|{sub_key}"
+            material = (
+                f"{request.method}|{upstream_url}|{json.dumps(policy_req.query, sort_keys=True)}|{authz}|{sub_key}"
+            )
             cache_key = str(hash(material))
             cached = request.app.state.cache.get(cache_key)
             if cached is not None:

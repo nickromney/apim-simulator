@@ -15,7 +15,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--client-id", default="frontend-app")
     parser.add_argument("--username", default="demo@dev.test")
     parser.add_argument("--password", default="demo-password")
-    parser.add_argument("--json", action="store_true", help="Print the full token payload instead of only the access token.")
+    parser.add_argument(
+        "--json", action="store_true", help="Print the full token payload instead of only the access token."
+    )
     return parser.parse_args()
 
 

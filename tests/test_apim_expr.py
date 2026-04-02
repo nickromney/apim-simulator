@@ -18,6 +18,6 @@ def test_apim_expression_can_read_response_status_and_headers() -> None:
         response_headers={"cache-control": "public"},
     )
 
-    assert evaluate_policy_value('@(context.Response.StatusCode == 202)', req) is True
+    assert evaluate_policy_value("@(context.Response.StatusCode == 202)", req) is True
     assert evaluate_policy_value('@(context.Response.Headers.GetValueOrDefault("Cache-Control",""))', req) == "public"
     assert evaluate_policy_value("@(context.Request.IpAddress)", req) == "10.1.2.3"
