@@ -205,6 +205,9 @@ def build_upstream_headers(request: Request, auth: AuthContext) -> dict[str, str
     headers: dict[str, str] = {
         key: value for key, value in request.headers.items() if key.lower() not in HOP_BY_HOP_HEADERS
     }
+    incoming_host = request.headers.get("host")
+    if incoming_host:
+        headers["host"] = incoming_host
 
     claims = auth.claims
     headers["x-apim-user-object-id"] = str(claims.get("sub", ""))

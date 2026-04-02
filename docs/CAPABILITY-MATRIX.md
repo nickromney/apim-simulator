@@ -26,6 +26,15 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Virtual network | N/A | `azurerm_api_management.virtual_network_configuration` | Use k8s networking |
 | Custom domains | N/A | `azurerm_api_management.hostname_configuration` | Use ingress/gateway |
 
+## Runtime Scenarios
+
+| Feature | Simulator | Terraform Resource | Notes |
+|---------|-----------|-------------------|-------|
+| Direct public compose path | Yes | N/A | `compose.yml` + `compose.public.yml` on `localhost:8000` |
+| Edge HTTP compose path | Yes | N/A | `compose.yml` + `compose.edge.yml` on `apim.localtest.me:8088` |
+| Edge TLS compose path | Yes | N/A | `compose.yml` + `compose.edge.yml` + `compose.tls.yml` on `apim.localtest.me:8443` |
+| Private internal compose path | Yes | N/A | `compose.yml` + `compose.private.yml`; smoke uses internal probe container |
+
 ## APIs and Operations
 
 | Feature | Simulator | Terraform Resource | Notes |
@@ -89,6 +98,10 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Policy inheritance | Yes | - | Gateway -> API -> Operation |
 | `set-header` | Yes | - | Add/override/delete modes |
 | `rewrite-uri` | Yes | - | Path rewriting |
+| `set-variable` | Yes | - | Writes to request-scoped `variables` |
+| `set-query-parameter` | Yes | - | Mutates outbound upstream query only |
+| `set-body` | Yes | - | Literal or templated request/short-circuit body replacement |
+| `include-fragment` | Yes | - | Config-backed via `policy_fragments` |
 | `return-response` | Yes | - | Short-circuit with custom response |
 | `choose`/`when`/`otherwise` | Yes | - | Conditional logic |
 | `check-header` | Yes | - | Required header validation |
@@ -125,7 +138,10 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
 | Tenant access keys | Yes | `azurerm_api_management.tenant_access` | Primary/secondary |
-| Subscription CRUD | Partial | - | Rotate only via API |
+| Management summary | Yes | - | `/apim/management/summary` |
+| Policy inspection/update | Yes | - | `/apim/management/policies/{scope_type}/{scope_name}` |
+| Replay | Yes | - | `/apim/management/replay` |
+| Subscription CRUD | Partial | - | List/create/update/rotate via API; delete not implemented |
 | Config import | Yes | - | Terraform JSON import |
 | Git integration | No | `azurerm_api_management.management.git_configuration_enabled` | Use GitOps |
 
@@ -136,6 +152,8 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Correlation ID | Yes | - | `X-Correlation-Id` header |
 | Trace header | Yes | - | `X-Apim-Trace: true` |
 | Trace lookup | Yes | - | `/apim/trace/{id}` |
+| Trace summaries | Yes | - | `/apim/management/traces` |
+| Forwarded-header trace fields | Yes | - | `incoming_host`, `forwarded_host`, `forwarded_proto`, `forwarded_for`, `client_ip`, `upstream_url` |
 | Application Insights | No | `azurerm_api_management.application_insights` | Use external APM |
 | Diagnostic logs | No | `azurerm_api_management_diagnostic` | Use container logs |
 
@@ -146,6 +164,17 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Named values | Partial | `azurerm_api_management_named_value` | Config only, no policy refs |
 | Secret values | Partial | - | `secret: true` flag |
 | Key Vault refs | No | - | Use k8s secrets |
+
+## Developer Console
+
+| Feature | Simulator | Terraform Resource | Notes |
+|---------|-----------|-------------------|-------|
+| Operator console | Yes | N/A | `ui/` Vite + React app |
+| Policy editor | Yes | N/A | Uses management policy endpoints |
+| Trace viewer | Yes | N/A | Uses trace lookup and trace summary endpoints |
+| Replay console | Yes | N/A | Uses management replay endpoint |
+| Subscription key inspection/rotation | Yes | N/A | Uses management subscription endpoints |
+| Developer portal | No | `azurerm_api_management_portal_*` | Explicitly out of scope |
 
 ## Certificates
 

@@ -1,4 +1,4 @@
-FROM dhi.io/python:3.13-debian13-dev AS builder
+FROM python:3.13-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -11,21 +11,23 @@ COPY pyproject.toml uv.lock ./
 
 RUN uv sync --frozen --no-cache --no-dev --no-install-project
 
-FROM dhi.io/python:3.13-debian13
+FROM python:3.13-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:/opt/python/bin:$PATH" \
+    PATH="/app/.venv/bin:$PATH" \
     PORT=8000
+
+RUN addgroup --system app && adduser --system --ingroup app --home /app app
 
 WORKDIR /app
 
-COPY --chown=nonroot:nonroot --from=builder /app/.venv /app/.venv
-COPY --chown=nonroot:nonroot app ./app
-COPY --chown=nonroot:nonroot examples ./examples
+COPY --chown=app:app --from=builder /app/.venv /app/.venv
+COPY --chown=app:app app ./app
+COPY --chown=app:app examples ./examples
 
 EXPOSE 8000
 
-USER nonroot
+USER app
 
 CMD ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

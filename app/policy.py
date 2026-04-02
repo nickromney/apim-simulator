@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from xml.etree import ElementTree
 
@@ -24,6 +25,7 @@ class PolicyRequest:
     query: dict[str, str]
     headers: dict[str, str]
     variables: dict[str, Any]
+    body: bytes = b""
 
 
 class Condition:
@@ -146,6 +148,7 @@ class SetHeader(PolicyNode):
     def apply(self, req: PolicyRequest) -> ResponseSpec | None:
         key = self.name
         action = (self.exists_action or "override").lower()
+        rendered = render_policy_value(self.value, req)
         if action == "delete":
             req.headers.pop(key, None)
             return None
@@ -154,10 +157,10 @@ class SetHeader(PolicyNode):
             return None
 
         if action == "append" and key in req.headers:
-            req.headers[key] = f"{req.headers[key]},{self.value}"
+            req.headers[key] = f"{req.headers[key]},{rendered}"
             return None
 
-        req.headers[key] = self.value
+        req.headers[key] = rendered
         return None
 
 
@@ -166,12 +169,51 @@ class RewriteUri(PolicyNode):
     template: str
 
     def apply(self, req: PolicyRequest) -> ResponseSpec | None:
-        # Minimal template expansion.
-        # Supported placeholder: {path}
-        try:
-            req.path = self.template.format_map({"path": req.path})
-        except Exception:
-            req.path = self.template
+        req.path = render_policy_value(self.template, req)
+        return None
+
+
+@dataclass(frozen=True)
+class SetVariable(PolicyNode):
+    name: str
+    value: str
+
+    def apply(self, req: PolicyRequest) -> ResponseSpec | None:
+        req.variables[self.name] = render_policy_value(self.value, req)
+        return None
+
+
+@dataclass(frozen=True)
+class SetQueryParameter(PolicyNode):
+    name: str
+    value: str
+    exists_action: str = "override"
+
+    def apply(self, req: PolicyRequest) -> ResponseSpec | None:
+        key = self.name
+        action = (self.exists_action or "override").lower()
+        rendered = render_policy_value(self.value, req)
+        if action == "delete":
+            req.query.pop(key, None)
+            return None
+
+        if action == "skip" and key in req.query:
+            return None
+
+        if action == "append" and key in req.query:
+            req.query[key] = f"{req.query[key]},{rendered}"
+            return None
+
+        req.query[key] = rendered
+        return None
+
+
+@dataclass(frozen=True)
+class SetBody(PolicyNode):
+    value: str
+
+    def apply(self, req: PolicyRequest) -> ResponseSpec | None:
+        req.body = render_policy_value(self.value, req).encode("utf-8")
         return None
 
 
@@ -179,17 +221,32 @@ class RewriteUri(PolicyNode):
 class ReturnResponse(PolicyNode):
     status_code: int
     reason: str | None = None
-    headers: dict[str, str] | None = None
+    headers: list[SetHeader] = field(default_factory=list)
     body: str | None = None
     media_type: str | None = None
 
     def apply(self, req: PolicyRequest) -> ResponseSpec | None:
-        out_headers = dict(self.headers or {})
+        out_headers: dict[str, str] = {}
+        for header in self.headers:
+            key = header.name
+            action = (header.exists_action or "override").lower()
+            if action == "delete":
+                out_headers.pop(key, None)
+                continue
+            if action == "skip" and key in out_headers:
+                continue
+            rendered = render_policy_value(header.value, req)
+            if action == "append" and key in out_headers:
+                out_headers[key] = f"{out_headers[key]},{rendered}"
+                continue
+            out_headers[key] = rendered
+
+        body = render_policy_value(self.body or "", req)
         return ResponseSpec(
             status_code=self.status_code,
             headers=out_headers,
-            body=(self.body or "").encode("utf-8"),
-            media_type=self.media_type,
+            body=body.encode("utf-8"),
+            media_type=self.media_type or out_headers.get("content-type"),
         )
 
 
@@ -213,10 +270,63 @@ class PolicyDocument:
     on_error: list[PolicyNode]
 
 
+POLICY_VALUE_PATTERN = re.compile(r"\{([^{}]+)\}")
+
+
+def _stringify_policy_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _resolve_policy_token(req: PolicyRequest, token: str) -> str | None:
+    normalized = token.strip()
+    lowered = normalized.lower()
+
+    if lowered == "method":
+        return req.method
+    if lowered == "path":
+        return req.path
+    if lowered == "subscription_id":
+        return _stringify_policy_value(req.variables.get("subscription_id"))
+    if lowered.startswith("header:"):
+        name = lowered.split(":", 1)[1].strip()
+        return _stringify_policy_value(req.headers.get(name))
+    if lowered.startswith("query:"):
+        name = normalized.split(":", 1)[1].strip()
+        return _stringify_policy_value(req.query.get(name))
+    if lowered.startswith("var:") or lowered.startswith("variable:"):
+        name = normalized.split(":", 1)[1].strip()
+        return _stringify_policy_value(req.variables.get(name))
+    return None
+
+
+def render_policy_value(template: str, req: PolicyRequest) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        resolved = _resolve_policy_token(req, match.group(1))
+        if resolved is None:
+            return match.group(0)
+        return resolved
+
+    return POLICY_VALUE_PATTERN.sub(_replace, template)
+
+
 def _text_or_empty(el: ElementTree.Element | None) -> str:
     if el is None or el.text is None:
         return ""
     return el.text.strip()
+
+
+def _policy_value_or_empty(el: ElementTree.Element) -> str:
+    attr_value = el.attrib.get("value")
+    if attr_value is not None:
+        return attr_value.strip()
+    value_el = el.find("value")
+    if value_el is not None:
+        return _text_or_empty(value_el)
+    return _text_or_empty(el)
 
 
 def _parse_set_header(el: ElementTree.Element) -> SetHeader:
@@ -225,9 +335,27 @@ def _parse_set_header(el: ElementTree.Element) -> SetHeader:
         raise HTTPException(status_code=500, detail="set-header missing name")
     name = name.lower()
     exists_action = el.attrib.get("exists-action", "override")
-    value_el = el.find("value")
-    value = _text_or_empty(value_el)
+    value = _policy_value_or_empty(el)
     return SetHeader(name=name, value=value, exists_action=exists_action)
+
+
+def _parse_set_variable(el: ElementTree.Element) -> SetVariable:
+    name = (el.attrib.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=500, detail="set-variable missing name")
+    return SetVariable(name=name, value=_policy_value_or_empty(el))
+
+
+def _parse_set_query_parameter(el: ElementTree.Element) -> SetQueryParameter:
+    name = (el.attrib.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=500, detail="set-query-parameter missing name")
+    exists_action = el.attrib.get("exists-action", "override")
+    return SetQueryParameter(name=name, value=_policy_value_or_empty(el), exists_action=exists_action)
+
+
+def _parse_set_body(el: ElementTree.Element) -> SetBody:
+    return SetBody(value=_policy_value_or_empty(el))
 
 
 def _parse_rewrite_uri(el: ElementTree.Element) -> RewriteUri:
@@ -384,14 +512,14 @@ def _parse_return_response(el: ElementTree.Element) -> ReturnResponse:
     code = int(status_el.attrib.get("code") or "200")
     reason = status_el.attrib.get("reason")
 
-    headers: dict[str, str] = {}
-    for h in el.findall("set-header"):
-        sh = _parse_set_header(h)
-        # For a return-response we treat headers as simple set operations.
-        headers[sh.name] = sh.value
+    headers = [_parse_set_header(h) for h in el.findall("set-header")]
 
     body_el = el.find("body")
-    body = _text_or_empty(body_el) if body_el is not None else None
+    set_body_el = el.find("set-body")
+    if set_body_el is not None:
+        body = _parse_set_body(set_body_el).value
+    else:
+        body = _text_or_empty(body_el) if body_el is not None else None
     return ReturnResponse(status_code=code, reason=reason, headers=headers, body=body)
 
 
@@ -465,18 +593,102 @@ def _rate_limit_key(req: PolicyRequest, *, scope: str) -> str:
     return f"route:{route}|sub:{subscription_id}|products:{product_part}"
 
 
-def _parse_choose(el: ElementTree.Element) -> Choose:
+def _parse_choose(
+    el: ElementTree.Element,
+    *,
+    policy_fragments: dict[str, str],
+    section_name: str,
+    seen_fragments: set[str],
+) -> Choose:
     branches: list[tuple[Condition, list[PolicyNode]]] = []
     for when in el.findall("when"):
         cond = parse_condition(when.attrib.get("condition"))
-        steps = [_parse_node(child) for child in list(when)]
+        steps = _parse_children(
+            list(when),
+            policy_fragments=policy_fragments,
+            section_name=section_name,
+            seen_fragments=set(seen_fragments),
+        )
         branches.append((cond, steps))
     otherwise_el = el.find("otherwise")
-    otherwise_steps = [_parse_node(child) for child in list(otherwise_el)] if otherwise_el is not None else []
+    otherwise_steps = (
+        _parse_children(
+            list(otherwise_el),
+            policy_fragments=policy_fragments,
+            section_name=section_name,
+            seen_fragments=set(seen_fragments),
+        )
+        if otherwise_el is not None
+        else []
+    )
     return Choose(branches=branches, otherwise=otherwise_steps)
 
 
-def _parse_node(el: ElementTree.Element) -> PolicyNode:
+def _fragment_elements(xml: str, *, section_name: str) -> list[ElementTree.Element]:
+    try:
+        root = ElementTree.fromstring(xml)
+    except ElementTree.ParseError:
+        try:
+            root = ElementTree.fromstring(f"<fragment>{xml}</fragment>")
+        except ElementTree.ParseError as exc:
+            raise HTTPException(status_code=500, detail="Invalid policy fragment XML") from exc
+
+    if root.tag == "policies":
+        section = root.find(section_name)
+        return list(section) if section is not None else []
+    if root.tag == "fragment":
+        return list(root)
+    return [root]
+
+
+def _parse_children(
+    children: list[ElementTree.Element],
+    *,
+    policy_fragments: dict[str, str],
+    section_name: str,
+    seen_fragments: set[str],
+) -> list[PolicyNode]:
+    out: list[PolicyNode] = []
+    for child in children:
+        if child.tag == "include-fragment":
+            fragment_id = (
+                child.attrib.get("fragment-id") or child.attrib.get("name") or child.attrib.get("id") or ""
+            ).strip()
+            if not fragment_id:
+                raise HTTPException(status_code=500, detail="include-fragment missing fragment-id")
+            if fragment_id in seen_fragments:
+                raise HTTPException(status_code=500, detail=f"Circular policy fragment include: {fragment_id}")
+            fragment_xml = policy_fragments.get(fragment_id)
+            if fragment_xml is None:
+                raise HTTPException(status_code=500, detail=f"Unknown policy fragment: {fragment_id}")
+            fragment_children = _fragment_elements(fragment_xml, section_name=section_name)
+            out.extend(
+                _parse_children(
+                    fragment_children,
+                    policy_fragments=policy_fragments,
+                    section_name=section_name,
+                    seen_fragments=seen_fragments | {fragment_id},
+                )
+            )
+            continue
+        out.append(
+            _parse_node(
+                child,
+                policy_fragments=policy_fragments,
+                section_name=section_name,
+                seen_fragments=seen_fragments,
+            )
+        )
+    return out
+
+
+def _parse_node(
+    el: ElementTree.Element,
+    *,
+    policy_fragments: dict[str, str],
+    section_name: str,
+    seen_fragments: set[str],
+) -> PolicyNode:
     tag = el.tag
 
     if tag == "base":
@@ -484,6 +696,15 @@ def _parse_node(el: ElementTree.Element) -> PolicyNode:
 
     if tag == "set-header":
         return _parse_set_header(el)
+
+    if tag == "set-variable":
+        return _parse_set_variable(el)
+
+    if tag == "set-query-parameter":
+        return _parse_set_query_parameter(el)
+
+    if tag == "set-body":
+        return _parse_set_body(el)
 
     if tag == "rewrite-uri":
         return _parse_rewrite_uri(el)
@@ -507,12 +728,17 @@ def _parse_node(el: ElementTree.Element) -> PolicyNode:
         return _parse_return_response(el)
 
     if tag == "choose":
-        return _parse_choose(el)
+        return _parse_choose(
+            el,
+            policy_fragments=policy_fragments,
+            section_name=section_name,
+            seen_fragments=seen_fragments,
+        )
 
     raise HTTPException(status_code=500, detail=f"Unsupported policy element: {tag}")
 
 
-def parse_policies_xml(xml: str) -> PolicyDocument:
+def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = None) -> PolicyDocument:
     try:
         root = ElementTree.fromstring(xml)
     except ElementTree.ParseError as exc:
@@ -521,11 +747,13 @@ def parse_policies_xml(xml: str) -> PolicyDocument:
     if root.tag != "policies":
         raise HTTPException(status_code=500, detail="Policies XML must have <policies> root")
 
+    fragments = policy_fragments or {}
+
     def section(name: str) -> list[PolicyNode]:
         sec = root.find(name)
         if sec is None:
             return []
-        return [_parse_node(child) for child in list(sec)]
+        return _parse_children(list(sec), policy_fragments=fragments, section_name=name, seen_fragments=set())
 
     return PolicyDocument(
         inbound=section("inbound"),

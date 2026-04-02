@@ -220,3 +220,122 @@ def test_golden_policy_quota_enforces_429() -> None:
     early = apply_inbound([doc], req)
     assert early is not None
     assert early.status_code == 429
+
+
+def test_golden_policy_set_variable_renders_into_later_policy_values() -> None:
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <set-variable name="mode" value="{query:mode}" />
+    <set-header name="x-mode" exists-action="override"><value>{var:mode}</value></set-header>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    req = PolicyRequest(method="GET", path="/api/health", query={"mode": "debug"}, headers={}, variables={})
+    early = apply_inbound([doc], req)
+    assert early is None
+    assert req.variables["mode"] == "debug"
+    assert req.headers["x-mode"] == "debug"
+
+
+def test_golden_policy_set_query_parameter_mutates_upstream_query_only() -> None:
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <set-query-parameter name="source" exists-action="override">
+      <value>{path}</value>
+    </set-query-parameter>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    req = PolicyRequest(method="GET", path="/api/health", query={}, headers={}, variables={})
+    early = apply_inbound([doc], req)
+    assert early is None
+    assert req.query["source"] == "/api/health"
+
+
+def test_golden_policy_set_body_replaces_request_body() -> None:
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <set-body>{"path":"{path}","subscription":"{subscription_id}"}</set-body>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    req = PolicyRequest(
+        method="POST",
+        path="/api/items",
+        query={},
+        headers={},
+        variables={"subscription_id": "sub-1"},
+        body=b"original",
+    )
+    early = apply_inbound([doc], req)
+    assert early is None
+    assert req.body == b'{"path":"/api/items","subscription":"sub-1"}'
+
+
+def test_golden_policy_return_response_supports_set_body_template() -> None:
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <set-variable name="mode" value="{query:mode}" />
+    <return-response>
+      <set-status code="200" reason="ok" />
+      <set-header name="content-type" exists-action="override"><value>application/json</value></set-header>
+      <set-body>{"mode":"{var:mode}"}</set-body>
+    </return-response>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    req = PolicyRequest(method="GET", path="/api/health", query={"mode": "trace"}, headers={}, variables={})
+    early = apply_inbound([doc], req)
+    assert early is not None
+    assert early.status_code == 200
+    assert early.body == b'{"mode":"trace"}'
+
+
+def test_golden_policy_include_fragment_inserts_fragment_nodes() -> None:
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <include-fragment fragment-id="common-header" />
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+""",
+        policy_fragments={
+            "common-header": """
+<fragment>
+  <set-header name="x-fragment" exists-action="override"><value>1</value></set-header>
+</fragment>
+"""
+        },
+    )
+    req = PolicyRequest(method="GET", path="/api/health", query={}, headers={}, variables={})
+    early = apply_inbound([doc], req)
+    assert early is None
+    assert req.headers["x-fragment"] == "1"

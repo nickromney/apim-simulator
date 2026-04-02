@@ -8,8 +8,10 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -26,6 +28,88 @@ from app.terraform_import import config_from_tofu_show_json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("apim-simulator")
+
+EMPTY_POLICY_XML = "<policies><inbound /><backend /><outbound /><on-error /></policies>"
+POLICY_SECTION_NAMES = ("inbound", "backend", "outbound", "on-error")
+
+
+def _merge_policy_xml_documents(xml_documents: list[str]) -> str:
+    if not xml_documents:
+        return EMPTY_POLICY_XML
+    if len(xml_documents) == 1:
+        return xml_documents[0]
+
+    root = ElementTree.Element("policies")
+    sections = {name: ElementTree.SubElement(root, name) for name in POLICY_SECTION_NAMES}
+
+    for xml in xml_documents:
+        try:
+            parsed = ElementTree.fromstring(xml)
+        except ElementTree.ParseError:
+            continue
+        if parsed.tag != "policies":
+            continue
+        for section_name in POLICY_SECTION_NAMES:
+            source = parsed.find(section_name)
+            if source is None:
+                continue
+            for child in list(source):
+                sections[section_name].append(deepcopy(child))
+
+    return ElementTree.tostring(root, encoding="unicode")
+
+
+def _effective_policy_xml(*groups: list[str] | None) -> str:
+    xml_documents: list[str] = []
+    for group in groups:
+        if not group:
+            continue
+        xml_documents.extend(item for item in group if item)
+    return _merge_policy_xml_documents(xml_documents)
+
+
+def _serialize_gateway_config(cfg: GatewayConfig) -> str:
+    payload = cfg.model_dump(mode="json")
+    if payload.get("apis"):
+        payload["routes"] = []
+    return json.dumps(payload, indent=2) + "\n"
+
+
+def _decode_body(content: bytes) -> dict[str, str | None]:
+    if not content:
+        return {"text": "", "base64": None}
+    try:
+        return {"text": content.decode("utf-8"), "base64": None}
+    except UnicodeDecodeError:
+        return {"text": None, "base64": base64.b64encode(content).decode("ascii")}
+
+
+class SubscriptionUpsert(BaseModel):
+    id: str
+    name: str
+    state: SubscriptionState = SubscriptionState.Active
+    products: list[str] = Field(default_factory=list)
+    primary_key: str | None = None
+    secondary_key: str | None = None
+
+
+class SubscriptionUpdate(BaseModel):
+    name: str | None = None
+    state: SubscriptionState | None = None
+    products: list[str] | None = None
+
+
+class PolicyUpdate(BaseModel):
+    xml: str
+
+
+class ReplayRequestBody(BaseModel):
+    method: str = "GET"
+    path: str
+    query: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body_text: str | None = None
+    body_base64: str | None = None
 
 
 def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncClient | None = None) -> FastAPI:
@@ -163,6 +247,26 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         allow_headers=["*"],
     )
 
+    @app.get("/")
+    async def root_hint(request: Request) -> dict[str, Any]:
+        cfg: GatewayConfig = request.app.state.gateway_config
+        route_prefixes = sorted({route.path_prefix or "/" for route in cfg.routes})
+        return {
+            "service": "Local APIM Simulator",
+            "message": "This is an API gateway. Try /apim/health, /apim/startup, or one of the configured route prefixes.",
+            "gateway_endpoints": ["/apim/health", "/apim/startup"],
+            "route_prefixes": route_prefixes,
+            "management": {
+                "enabled": cfg.tenant_access.enabled,
+                "status_path": "/apim/management/status" if cfg.tenant_access.enabled else None,
+                "required_header": "X-Apim-Tenant-Key" if cfg.tenant_access.enabled else None,
+            },
+            "operator_console": {
+                "url": "http://localhost:3007",
+                "note": "Run make up-ui to start the operator console.",
+            },
+        }
+
     @app.get("/apim/health")
     async def health() -> dict[str, str]:
         return {"status": "healthy"}
@@ -298,18 +402,128 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             sub.keys.secondary = new_key
         return {"subscription_id": sub.id, "subscription_name": sub.name, "rotated": key, "new_key": new_key}
 
-    class SubscriptionUpsert(BaseModel):
-        id: str
-        name: str
-        state: SubscriptionState = SubscriptionState.Active
-        products: list[str] = Field(default_factory=list)
-        primary_key: str | None = None
-        secondary_key: str | None = None
+    def _apply_runtime_config(app: FastAPI, cfg: GatewayConfig) -> GatewayConfig:
+        cfg.routes = cfg.materialize_routes()
+        app.state.gateway_config = cfg
+        app.state.oidc_verifiers = _build_oidc_verifiers(cfg)
+        app.state.policy_cache = {}
+        return cfg
 
-    class SubscriptionUpdate(BaseModel):
-        name: str | None = None
-        state: SubscriptionState | None = None
-        products: list[str] | None = None
+    def _persist_or_apply_config(request: Request, cfg: GatewayConfig) -> GatewayConfig:
+        config_path = os.getenv("APIM_CONFIG_PATH", "").strip()
+        if not config_path:
+            return _apply_runtime_config(request.app, cfg)
+
+        try:
+            Path(config_path).write_text(_serialize_gateway_config(cfg), encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="Unable to persist config update") from exc
+
+        reload_fn = getattr(request.app.state, "config_reload_fn", None)
+        if reload_fn is None:
+            raise HTTPException(status_code=500, detail="Reload not available")
+        return reload_fn()
+
+    def _policy_scope_target(cfg: GatewayConfig, scope_type: str, scope_name: str) -> Any:
+        scope = scope_type.lower()
+        if scope == "gateway":
+            return cfg
+        if scope == "api":
+            api = cfg.apis.get(scope_name)
+            if api is None:
+                raise HTTPException(status_code=404, detail="API policy scope not found")
+            return api
+        if scope == "operation":
+            api_name, sep, operation_name = scope_name.partition(":")
+            if not sep:
+                raise HTTPException(status_code=400, detail="Operation scope must use api:operation")
+            api = cfg.apis.get(api_name)
+            if api is None:
+                raise HTTPException(status_code=404, detail="API policy scope not found")
+            operation = api.operations.get(operation_name)
+            if operation is None:
+                raise HTTPException(status_code=404, detail="Operation policy scope not found")
+            return operation
+        if scope == "route":
+            if cfg.apis:
+                raise HTTPException(status_code=400, detail="Route policy updates are unavailable for API-backed configs")
+            for route in cfg.routes:
+                if route.name == scope_name:
+                    return route
+            raise HTTPException(status_code=404, detail="Route policy scope not found")
+        raise HTTPException(status_code=404, detail="Unsupported policy scope")
+
+    def _policy_xml_for_target(target: Any) -> str:
+        docs = list(getattr(target, "policies_xml_documents", []) or [])
+        xml = getattr(target, "policies_xml", None)
+        if xml:
+            docs.append(xml)
+        return _effective_policy_xml(docs)
+
+    def _set_policy_xml(target: Any, xml: str) -> None:
+        target.policies_xml = xml
+        if hasattr(target, "policies_xml_documents"):
+            target.policies_xml_documents = []
+
+    def _summary_payload(cfg: GatewayConfig) -> dict[str, Any]:
+        apis: list[dict[str, Any]] = []
+        for api_id, api in cfg.apis.items():
+            operations: list[dict[str, Any]] = []
+            for operation_id, operation in api.operations.items():
+                operations.append(
+                    {
+                        "id": operation_id,
+                        "name": operation.name,
+                        "method": operation.method,
+                        "url_template": operation.url_template,
+                        "upstream_base_url": operation.upstream_base_url,
+                        "upstream_path_prefix": operation.upstream_path_prefix,
+                        "backend": operation.backend,
+                        "products": operation.products,
+                        "policy_scope": {"scope_type": "operation", "scope_name": f"{api_id}:{operation_id}"},
+                    }
+                )
+            apis.append(
+                {
+                    "id": api_id,
+                    "name": api.name,
+                    "path": api.path,
+                    "upstream_base_url": api.upstream_base_url,
+                    "upstream_path_prefix": api.upstream_path_prefix,
+                    "backend": api.backend,
+                    "products": api.products,
+                    "policy_scope": {"scope_type": "api", "scope_name": api_id},
+                    "operations": operations,
+                }
+            )
+
+        routes: list[dict[str, Any]] = []
+        for route in cfg.routes:
+            route_payload: dict[str, Any] = {
+                "name": route.name,
+                "path_prefix": route.path_prefix,
+                "host_match": route.host_match,
+                "methods": route.methods,
+                "upstream_base_url": route.upstream_base_url,
+                "upstream_path_prefix": route.upstream_path_prefix,
+                "backend": route.backend,
+                "product": route.product,
+                "products": route.products,
+                "api_version_set": route.api_version_set,
+                "api_version": route.api_version,
+            }
+            if not cfg.apis:
+                route_payload["policy_scope"] = {"scope_type": "route", "scope_name": route.name}
+            routes.append(route_payload)
+
+        return {
+            "gateway_policy_scope": {"scope_type": "gateway", "scope_name": "gateway"},
+            "apis": apis,
+            "routes": routes,
+            "products": [{"id": product_id, **product.model_dump()} for product_id, product in cfg.products.items()],
+            "subscriptions": [sub.model_dump() for sub in cfg.subscription.subscriptions.values()],
+            "backends": [{"id": backend_id, **backend.model_dump()} for backend_id, backend in cfg.backends.items()],
+        }
 
     @app.get("/apim/management/status")
     async def management_status(request: Request) -> dict:
@@ -320,6 +534,92 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             "products": len(cfg.products),
             "subscriptions": len(cfg.subscription.subscriptions),
             "api_version_sets": len(cfg.api_version_sets),
+        }
+
+    @app.get("/apim/management/summary")
+    async def management_summary(request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return _summary_payload(cfg)
+
+    @app.get("/apim/management/policies/{scope_type}/{scope_name:path}")
+    async def management_get_policy(scope_type: str, scope_name: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        target = _policy_scope_target(cfg, scope_type, scope_name)
+        return {
+            "scope_type": scope_type,
+            "scope_name": scope_name,
+            "xml": _policy_xml_for_target(target),
+        }
+
+    @app.put("/apim/management/policies/{scope_type}/{scope_name:path}")
+    async def management_put_policy(
+        scope_type: str,
+        scope_name: str,
+        request: Request,
+        body: PolicyUpdate,
+    ) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        xml = body.xml.strip() or EMPTY_POLICY_XML
+        parse_policies_xml(xml, policy_fragments=cfg.policy_fragments)
+        target = _policy_scope_target(cfg, scope_type, scope_name)
+        _set_policy_xml(target, xml)
+        updated = _persist_or_apply_config(request, cfg)
+        return {
+            "scope_type": scope_type,
+            "scope_name": scope_name,
+            "xml": _policy_xml_for_target(_policy_scope_target(updated, scope_type, scope_name)),
+        }
+
+    @app.get("/apim/management/traces")
+    async def management_traces(request: Request, limit: int = 50) -> dict[str, Any]:
+        _require_tenant_access(request)
+        trace_store: dict[str, Any] = request.app.state.trace_store
+        items = sorted(trace_store.values(), key=lambda item: item.get("created_at", ""), reverse=True)
+        return {"items": items[: max(1, min(limit, 200))]}
+
+    @app.post("/apim/management/replay")
+    async def management_replay(request: Request, body: ReplayRequestBody) -> dict[str, Any]:
+        _require_tenant_access(request)
+        path = body.path if body.path.startswith("/") else f"/{body.path}"
+        if path.startswith("/apim/management") or path.startswith("/apim/admin"):
+            raise HTTPException(status_code=400, detail="Replay path must target gateway routes")
+
+        headers = dict(body.headers)
+        headers.setdefault("x-apim-trace", "true")
+        content = b""
+        if body.body_base64 is not None:
+            try:
+                content = base64.b64decode(body.body_base64)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid base64 replay body") from exc
+        elif body.body_text is not None:
+            content = body.body_text.encode("utf-8")
+
+        transport = httpx.ASGITransport(app=request.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://apim-replay.local") as replay_client:
+            response = await replay_client.request(
+                body.method.upper(),
+                path,
+                params=body.query,
+                headers=headers,
+                content=content,
+            )
+
+        trace_id = response.headers.get("x-apim-trace-id")
+        decoded = _decode_body(response.content)
+        return {
+            "request": body.model_dump(),
+            "response": {
+                "status_code": response.status_code,
+                "headers": dict(response.headers),
+                "body_text": decoded["text"],
+                "body_base64": decoded["base64"],
+            },
+            "trace_id": trace_id,
+            "trace": request.app.state.trace_store.get(trace_id) if trace_id else None,
         }
 
     @app.get("/apim/management/subscriptions")
@@ -397,6 +697,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         imported.oidc_providers = current.oidc_providers
         imported.admin_token = current.admin_token
         imported.tenant_access = current.tenant_access
+        imported.trace_enabled = current.trace_enabled
+        imported.policy_fragments = current.policy_fragments
         imported.subscription.header_names = current.subscription.header_names
         imported.subscription.query_param_names = current.subscription.query_param_names
 
@@ -471,11 +773,12 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         policy_cache: dict[str, Any] = request.app.state.policy_cache
 
         def _doc_for(xml: str) -> Any:
-            cached = policy_cache.get(xml)
+            cache_key = (xml, tuple(sorted(cfg.policy_fragments.items())))
+            cached = policy_cache.get(cache_key)
             if cached is not None:
                 return cached
-            doc = parse_policies_xml(xml)
-            policy_cache[xml] = doc
+            doc = parse_policies_xml(xml, policy_fragments=cfg.policy_fragments)
+            policy_cache[cache_key] = doc
             return doc
 
         for xml in cfg.policies_xml_documents:
@@ -495,8 +798,11 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         correlation_id = request.headers.get("x-correlation-id") or f"corr-{uuid.uuid4()}"
         headers.setdefault("x-correlation-id", correlation_id)
 
-        xff = request.headers.get("x-forwarded-for", "")
-        client_ip = xff.split(",", 1)[0].strip() if xff else (request.client.host if request.client else "")
+        incoming_host = request.headers.get("host", "")
+        forwarded_host = request.headers.get("x-forwarded-host", "")
+        forwarded_proto = request.headers.get("x-forwarded-proto", "")
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        client_ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else (request.client.host if request.client else "")
 
         upstream_path = resolved.upstream_path
         upstream_query = dict(request.query_params)
@@ -511,9 +817,14 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 "products": auth.subscription_products,
                 "client_ip": client_ip,
                 "correlation_id": correlation_id,
+                "incoming_host": incoming_host,
+                "forwarded_host": forwarded_host,
+                "forwarded_proto": forwarded_proto,
+                "forwarded_for": forwarded_for,
                 "rate_limit_store": request.app.state.rate_limit_store,
                 "quota_store": request.app.state.quota_store,
             },
+            body=body,
         )
 
         trace_requested = cfg.trace_enabled and request.headers.get("x-apim-trace", "").lower() == "true"
@@ -523,7 +834,22 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             if not trace_id:
                 return
             trace_store: dict[str, Any] = request.app.state.trace_store
-            trace_store[trace_id] = payload
+            trace_store[trace_id] = {
+                "trace_id": trace_id,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                **payload,
+            }
+
+        trace_base = {
+            "route": route.name,
+            "correlation_id": correlation_id,
+            "incoming_host": incoming_host,
+            "forwarded_host": forwarded_host,
+            "forwarded_proto": forwarded_proto,
+            "forwarded_for": forwarded_for,
+            "client_ip": client_ip,
+            "upstream_url": None,
+        }
 
         if policy_docs:
             early = apply_inbound(policy_docs, policy_req)
@@ -534,8 +860,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 if trace_id:
                     out_headers["x-apim-trace-id"] = trace_id
                     trace = {
-                        "route": route.name,
-                        "correlation_id": correlation_id,
+                        **trace_base,
                         "upstream_url": None,
                         "attempts": 0,
                         "status": early.status_code,
@@ -574,13 +899,16 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                     policy_req.headers.setdefault("x-apim-client-certificate", "present")
 
         upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=upstream_base_url)
+        policy_req.variables["upstream_url"] = upstream_url
         client: httpx.AsyncClient = request.app.state.http_client
+
+        trace_base["upstream_url"] = upstream_url
 
         cache_key = None
         if cfg.cache_enabled and (request.method == "GET") and (not cfg.proxy_streaming):
             authz = request.headers.get("authorization", "")
             sub_key = request.headers.get("ocp-apim-subscription-key", "")
-            material = f"{request.method}|{upstream_url}|{request.url.query}|{authz}|{sub_key}"
+            material = f"{request.method}|{upstream_url}|{json.dumps(policy_req.query, sort_keys=True)}|{authz}|{sub_key}"
             cache_key = str(hash(material))
             cached = request.app.state.cache.get(cache_key)
             if cached is not None:
@@ -592,9 +920,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                     if trace_id:
                         out_headers["x-apim-trace-id"] = trace_id
                         trace = {
-                            "route": route.name,
-                            "correlation_id": correlation_id,
-                            "upstream_url": upstream_url,
+                            **trace_base,
                             "attempts": 0,
                             "status": cached_status,
                             "elapsed_ms": 0,
@@ -624,7 +950,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             req = client.build_request(
                 request.method,
                 upstream_url,
-                content=body,
+                content=policy_req.body,
                 headers=policy_req.headers,
                 params=policy_req.query,
                 timeout=timeout,
@@ -660,9 +986,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                     if trace_id:
                         out_headers["x-apim-trace-id"] = trace_id
                         trace = {
-                            "route": route.name,
-                            "correlation_id": correlation_id,
-                            "upstream_url": upstream_url,
+                            **trace_base,
                             "attempts": attempts_used,
                             "status": override.status_code,
                             "elapsed_ms": int((time.perf_counter() - start) * 1000),
@@ -706,9 +1030,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             if trace_requested:
                 elapsed_ms = int((time.perf_counter() - start) * 1000)
                 trace = {
-                    "route": route.name,
-                    "correlation_id": correlation_id,
-                    "upstream_url": upstream_url,
+                    **trace_base,
                     "attempts": attempts_used,
                     "status": upstream_response.status_code,
                     "elapsed_ms": elapsed_ms,
@@ -728,9 +1050,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             if trace_requested:
                 elapsed_ms = int((time.perf_counter() - start) * 1000)
                 trace = {
-                    "route": route.name,
-                    "correlation_id": correlation_id,
-                    "upstream_url": upstream_url,
+                    **trace_base,
                     "attempts": attempts_used,
                     "status": upstream_response.status_code,
                     "elapsed_ms": elapsed_ms,
@@ -752,9 +1072,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         if trace_requested:
             elapsed_ms = int((time.perf_counter() - start) * 1000)
             trace = {
-                "route": route.name,
-                "correlation_id": correlation_id,
-                "upstream_url": upstream_url,
+                **trace_base,
                 "attempts": attempts_used,
                 "status": upstream_response.status_code,
                 "elapsed_ms": elapsed_ms,

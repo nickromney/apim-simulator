@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -72,6 +73,40 @@ def test_health() -> None:
         resp = client.get("/apim/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "healthy"}
+
+
+def test_root_hint_lists_builtin_entrypoints() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="local-dev-tenant-key"),
+            routes=[
+                RouteConfig(
+                    name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api"
+                )
+            ],
+        )
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "service": "Local APIM Simulator",
+        "message": "This is an API gateway. Try /apim/health, /apim/startup, or one of the configured route prefixes.",
+        "gateway_endpoints": ["/apim/health", "/apim/startup"],
+        "route_prefixes": ["/api"],
+        "management": {
+            "enabled": True,
+            "status_path": "/apim/management/status",
+            "required_header": "X-Apim-Tenant-Key",
+        },
+        "operator_console": {
+            "url": "http://localhost:3007",
+            "note": "Run make up-ui to start the operator console.",
+        },
+    }
 
 
 def test_route_host_match_selects_expected_upstream() -> None:
@@ -1438,6 +1473,22 @@ def test_management_plane_requires_tenant_key() -> None:
         assert ok.status_code == 200
 
 
+def test_shipped_example_configs_enable_management_plane() -> None:
+    root = Path(__file__).resolve().parents[1]
+    example_paths = [
+        root / "examples" / "basic.json",
+        root / "examples" / "mcp" / "http.json",
+        root / "examples" / "oidc" / "keycloak.json",
+    ]
+
+    for path in example_paths:
+        cfg = GatewayConfig.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        app = create_app(config=cfg)
+        with TestClient(app) as client:
+            resp = client.get("/apim/management/status", headers={"X-Apim-Tenant-Key": "local-dev-tenant-key"})
+        assert resp.status_code == 200, path.name
+
+
 def test_management_plane_rotate_subscription_key_updates_gateway_lookup() -> None:
     issuer = "http://issuer.example"
     audience = "api"
@@ -1491,6 +1542,164 @@ def test_management_plane_rotate_subscription_key_updates_gateway_lookup() -> No
             },
         )
         assert resp.status_code == 200
+
+
+def test_trace_payload_captures_forwarded_headers() -> None:
+    config = GatewayConfig(
+        allow_anonymous=True,
+        trace_enabled=True,
+        proxy_streaming=False,
+        routes=[
+            RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api")
+        ],
+    )
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/health",
+            headers={
+                "Host": "apim.localtest.me:8443",
+                "X-Forwarded-Host": "apim.localtest.me",
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-For": "203.0.113.10, 10.0.0.5",
+                "x-apim-trace": "true",
+            },
+        )
+        trace = client.get(f"/apim/trace/{resp.headers['x-apim-trace-id']}")
+
+    assert resp.status_code == 200
+    assert trace.status_code == 200
+    payload = trace.json()
+    assert payload["incoming_host"] == "apim.localtest.me:8443"
+    assert payload["forwarded_host"] == "apim.localtest.me"
+    assert payload["forwarded_proto"] == "https"
+    assert payload["forwarded_for"] == "203.0.113.10, 10.0.0.5"
+    assert payload["client_ip"] == "203.0.113.10"
+    assert payload["upstream_url"] == "http://upstream/api/health"
+
+
+def test_management_summary_lists_routes_and_gateway_scope() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            routes=[
+                RouteConfig(
+                    name="r1",
+                    path_prefix="/api",
+                    upstream_base_url="http://upstream",
+                    upstream_path_prefix="/api",
+                )
+            ],
+        )
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/apim/management/summary", headers={"X-Apim-Tenant-Key": "t1"})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["gateway_policy_scope"] == {"scope_type": "gateway", "scope_name": "gateway"}
+    assert payload["routes"][0]["name"] == "r1"
+    assert payload["routes"][0]["policy_scope"] == {"scope_type": "route", "scope_name": "r1"}
+
+
+def test_management_policy_get_put_updates_route_policy_in_memory() -> None:
+    policy_xml = """\
+<policies>
+  <inbound />
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+
+    config = GatewayConfig(
+        allow_anonymous=True,
+        tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                upstream_base_url="http://upstream",
+                upstream_path_prefix="/api",
+                policies_xml=policy_xml,
+            )
+        ],
+    )
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.headers.get("x-managed") == "1"
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        current = client.get("/apim/management/policies/route/r1", headers={"X-Apim-Tenant-Key": "t1"})
+        assert current.status_code == 200
+        assert current.json()["xml"] == policy_xml
+
+        updated = client.put(
+            "/apim/management/policies/route/r1",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={
+                "xml": """\
+<policies>
+  <inbound>
+    <set-header name="x-managed" exists-action="override"><value>1</value></set-header>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+            },
+        )
+        assert updated.status_code == 200
+
+        ok = client.get("/api/health")
+
+    assert ok.status_code == 200
+
+
+def test_management_replay_returns_response_and_trace() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url == httpx.URL("http://upstream/api/health?mode=debug")
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            trace_enabled=True,
+            proxy_streaming=False,
+            routes=[
+                RouteConfig(
+                    name="r1",
+                    path_prefix="/api",
+                    upstream_base_url="http://upstream",
+                    upstream_path_prefix="/api",
+                )
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        replay = client.post(
+            "/apim/management/replay",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={"method": "GET", "path": "/api/health", "query": {"mode": "debug"}},
+        )
+
+    assert replay.status_code == 200
+    payload = replay.json()
+    assert payload["response"]["status_code"] == 200
+    assert payload["trace_id"]
+    assert payload["trace"]["route"] == "r1"
 
 
 def test_mtls_mode_disabled_allows_requests_without_cert() -> None:
