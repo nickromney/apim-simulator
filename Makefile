@@ -2,32 +2,49 @@
 
 COMPOSE ?= docker compose
 COMPOSE_CORE := $(COMPOSE) -f compose.yml -f compose.public.yml
+COMPOSE_CORE_OTEL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.otel.yml
 COMPOSE_OIDC := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.oidc.yml
 COMPOSE_MCP := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.mcp.yml
 COMPOSE_EDGE := $(COMPOSE) -f compose.yml -f compose.edge.yml -f compose.mcp.yml
 COMPOSE_TLS := $(COMPOSE) -f compose.yml -f compose.edge.yml -f compose.tls.yml -f compose.mcp.yml
 COMPOSE_PRIVATE := $(COMPOSE) -f compose.yml -f compose.private.yml -f compose.mcp.yml
 COMPOSE_UI := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.ui.yml
+COMPOSE_HELLO := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.hello.yml
+COMPOSE_HELLO_OTEL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.hello.yml -f compose.otel.yml -f compose.hello.otel.yml
+COMPOSE_HELLO_OIDC := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.hello.yml
 COMPOSE_TODO := $(COMPOSE) -f compose.todo.yml
+COMPOSE_TODO_OTEL := $(COMPOSE) -f compose.todo.yml -f compose.todo.otel.yml
 COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 
-.PHONY: help ensure-certs install-hooks fmt lint up up-oidc up-mcp up-edge up-tls up-ui up-todo down logs logs-oidc logs-mcp logs-todo test compat compat-report import-tofu verify-azure smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-todo test-todo-e2e test-todo-bruno export-todo-har compose-config compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-todo
+.PHONY: help ensure-certs install-hooks fmt lint up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo test-todo-e2e test-todo-bruno export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
 	@printf "  %-22s %s\n" "up" "Start the direct public simulator stack"
+	@printf "  %-22s %s\n" "up-otel" "Start the direct public simulator stack with LGTM"
 	@printf "  %-22s %s\n" "up-oidc" "Start the simulator with the Keycloak overlay"
 	@printf "  %-22s %s\n" "up-mcp" "Start the simulator with the MCP example overlay"
 	@printf "  %-22s %s\n" "up-edge" "Start the edge HTTP MCP stack on apim.localtest.me:8088"
 	@printf "  %-22s %s\n" "up-tls" "Start the edge TLS MCP stack on apim.localtest.me:8443"
 	@printf "  %-22s %s\n" "up-ui" "Start the operator console on localhost:3007"
+	@printf "  %-22s %s\n" "up-hello" "Start the anonymous hello API example behind APIM"
+	@printf "  %-22s %s\n" "up-hello-subscription" "Start the subscription-protected hello API example behind APIM"
+	@printf "  %-22s %s\n" "up-hello-otel" "Start the hello API example with LGTM"
+	@printf "  %-22s %s\n" "up-hello-oidc" "Start the JWT-only hello API example with Keycloak"
+	@printf "  %-22s %s\n" "up-hello-oidc-subscription" "Start the subscription-plus-JWT hello API example with Keycloak"
 	@printf "  %-22s %s\n" "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
+	@printf "  %-22s %s\n" "up-todo-otel" "Start the todo demo stack with LGTM on localhost:3001"
 	@printf "  %-22s %s\n" "down" "Stop all compose services defined by this repo"
 	@printf "  %-22s %s\n" "logs" "Tail core stack logs"
+	@printf "  %-22s %s\n" "logs-otel" "Tail core stack logs with LGTM"
 	@printf "  %-22s %s\n" "logs-oidc" "Tail OIDC stack logs"
 	@printf "  %-22s %s\n" "logs-mcp" "Tail MCP stack logs"
+	@printf "  %-22s %s\n" "logs-hello" "Tail hello API example stack logs"
+	@printf "  %-22s %s\n" "logs-hello-otel" "Tail hello API example logs with LGTM"
+	@printf "  %-22s %s\n" "logs-hello-oidc" "Tail hello API example logs with Keycloak"
 	@printf "  %-22s %s\n" "logs-todo" "Tail todo demo stack logs"
+	@printf "  %-22s %s\n" "logs-todo-otel" "Tail todo demo stack logs with LGTM"
 	@printf "  %-22s %s\n" "install-hooks" "Enable the repo-managed git pre-commit hook"
 	@printf "  %-22s %s\n" "fmt" "Format Python code with Ruff"
 	@printf "  %-22s %s\n" "lint" "Format Python code with Ruff and run lint checks"
@@ -36,23 +53,32 @@ help:
 	@printf "  %-22s %s\n" "compat-report" "Run static Terraform/APIM compatibility analysis (requires TOFU_SHOW=...)"
 	@printf "  %-22s %s\n" "import-tofu" "Import a tofu show JSON file into a running simulator (requires TOFU_SHOW=...)"
 	@printf "  %-22s %s\n" "verify-azure" "Diff curated requests against simulator and live Azure APIM"
+	@printf "  %-22s %s\n" "verify-otel" "Verify Grafana, Loki, Tempo, and Prometheus for the OTEL stack"
+	@printf "  %-22s %s\n" "verify-hello-otel" "Verify OTEL signals for the LGTM-backed hello API starter"
+	@printf "  %-22s %s\n" "verify-todo-otel" "Verify OTEL signals for the LGTM-backed todo demo stack"
 	@printf "  %-22s %s\n" "smoke-oidc" "Run the end-to-end OIDC smoke test against a running stack"
 	@printf "  %-22s %s\n" "smoke-mcp" "Run the end-to-end MCP smoke test against a running stack"
 	@printf "  %-22s %s\n" "smoke-edge" "Run the edge MCP and forwarded-header smoke test"
 	@printf "  %-22s %s\n" "smoke-tls" "Run the TLS edge smoke test using the generated local CA"
 	@printf "  %-22s %s\n" "smoke-private" "Run the private-mode smoke test and internal probe"
+	@printf "  %-22s %s\n" "smoke-hello" "Run the hello API smoke test (mode via SMOKE_HELLO_MODE)"
 	@printf "  %-22s %s\n" "smoke-todo" "Run the APIM-backed todo demo smoke test"
 	@printf "  %-22s %s\n" "test-todo-e2e" "Run Playwright against the running todo demo stack"
 	@printf "  %-22s %s\n" "test-todo-bruno" "Run the Bruno collection against the running todo demo stack"
 	@printf "  %-22s %s\n" "export-todo-har" "Capture the todo APIM flow as a HAR file for Proxyman"
 	@printf "  %-22s %s\n" "compose-config" "Render docker compose config for the direct public stack"
+	@printf "  %-22s %s\n" "compose-config-otel" "Render docker compose config for the direct public LGTM stack"
 	@printf "  %-22s %s\n" "compose-config-oidc" "Render docker compose config for the OIDC stack"
 	@printf "  %-22s %s\n" "compose-config-mcp" "Render docker compose config for the MCP stack"
 	@printf "  %-22s %s\n" "compose-config-edge" "Render docker compose config for the edge HTTP stack"
 	@printf "  %-22s %s\n" "compose-config-tls" "Render docker compose config for the edge TLS stack"
 	@printf "  %-22s %s\n" "compose-config-private" "Render docker compose config for the private MCP stack"
 	@printf "  %-22s %s\n" "compose-config-ui" "Render docker compose config for the console stack"
+	@printf "  %-22s %s\n" "compose-config-hello" "Render docker compose config for the hello API example"
+	@printf "  %-22s %s\n" "compose-config-hello-otel" "Render docker compose config for the hello API example with LGTM"
+	@printf "  %-22s %s\n" "compose-config-hello-oidc" "Render docker compose config for the hello API example with Keycloak"
 	@printf "  %-22s %s\n" "compose-config-todo" "Render docker compose config for the todo demo stack"
+	@printf "  %-22s %s\n" "compose-config-todo-otel" "Render docker compose config for the todo demo LGTM stack"
 
 ensure-certs: $(DEV_CERTS)
 
@@ -61,6 +87,9 @@ $(DEV_CERTS):
 
 up:
 	$(COMPOSE_CORE) up --build -d
+
+up-otel:
+	$(COMPOSE_CORE_OTEL) up --build -d
 
 up-oidc:
 	$(COMPOSE_OIDC) up --build -d
@@ -77,15 +106,41 @@ up-tls: ensure-certs
 up-ui:
 	$(COMPOSE_UI) up -d
 
+up-hello:
+	$(COMPOSE_HELLO) up --build -d
+
+up-hello-subscription:
+	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.subscription.json $(COMPOSE_HELLO) up --build -d
+
+up-hello-otel:
+	$(COMPOSE_HELLO_OTEL) up --build -d
+
+up-hello-oidc:
+	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.oidc.jwt-only.json $(COMPOSE_HELLO_OIDC) up --build -d
+
+up-hello-oidc-subscription:
+	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.oidc.subscription.json $(COMPOSE_HELLO_OIDC) up --build -d
+
 up-todo:
 	$(COMPOSE_TODO) up --build -d
 
+up-todo-otel:
+	$(COMPOSE_TODO_OTEL) up --build -d
+
 down:
 	$(COMPOSE_ALL) down --remove-orphans
+	$(COMPOSE_CORE_OTEL) down --remove-orphans
+	$(COMPOSE_HELLO) down --remove-orphans
+	$(COMPOSE_HELLO_OTEL) down --remove-orphans
+	$(COMPOSE_HELLO_OIDC) down --remove-orphans
 	$(COMPOSE_TODO) down --remove-orphans
+	$(COMPOSE_TODO_OTEL) down --remove-orphans
 
 logs:
 	$(COMPOSE_CORE) logs -f apim-simulator mock-backend
+
+logs-otel:
+	$(COMPOSE_CORE_OTEL) logs -f apim-simulator mock-backend lgtm
 
 logs-oidc:
 	$(COMPOSE_OIDC) logs -f apim-simulator mock-backend keycloak
@@ -93,8 +148,20 @@ logs-oidc:
 logs-mcp:
 	$(COMPOSE_MCP) logs -f apim-simulator mcp-server
 
+logs-hello:
+	$(COMPOSE_HELLO) logs -f apim-simulator hello-api
+
+logs-hello-otel:
+	$(COMPOSE_HELLO_OTEL) logs -f apim-simulator hello-api lgtm
+
+logs-hello-oidc:
+	$(COMPOSE_HELLO_OIDC) logs -f apim-simulator hello-api keycloak
+
 logs-todo:
 	$(COMPOSE_TODO) logs -f todo-frontend apim-simulator todo-api
+
+logs-todo-otel:
+	$(COMPOSE_TODO_OTEL) logs -f todo-frontend apim-simulator todo-api lgtm
 
 install-hooks:
 	git config core.hooksPath .githooks
@@ -122,6 +189,15 @@ import-tofu:
 verify-azure:
 	uv run python scripts/verify_azure.py
 
+verify-otel:
+	uv run python scripts/verify_otel.py
+
+verify-hello-otel:
+	uv run python scripts/verify_hello_otel.py
+
+verify-todo-otel:
+	VERIFY_OTEL_TODO=true uv run python scripts/verify_otel.py
+
 smoke-oidc:
 	uv run python scripts/smoke_oidc.py
 
@@ -137,6 +213,9 @@ smoke-tls:
 smoke-private:
 	uv run python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', 8000)); sock.close(); print('Host port 8000 is unavailable, as expected.') if code else (_ for _ in ()).throw(SystemExit('localhost:8000 is reachable; private mode should not publish the gateway port'))"
 	$(COMPOSE_PRIVATE) run --rm smoke-runner sh -lc "python -m pip install -q httpx mcp && python scripts/smoke_private.py"
+
+smoke-hello:
+	uv run python scripts/smoke_hello.py
 
 smoke-todo:
 	uv run python scripts/smoke_todo.py
@@ -154,6 +233,9 @@ export-todo-har:
 
 compose-config:
 	$(COMPOSE_CORE) config
+
+compose-config-otel:
+	$(COMPOSE_CORE_OTEL) config
 
 compose-config-oidc:
 	$(COMPOSE_OIDC) config
@@ -173,5 +255,17 @@ compose-config-private:
 compose-config-ui:
 	$(COMPOSE_UI) config
 
+compose-config-hello:
+	$(COMPOSE_HELLO) config
+
+compose-config-hello-otel:
+	$(COMPOSE_HELLO_OTEL) config
+
+compose-config-hello-oidc:
+	$(COMPOSE_HELLO_OIDC) config
+
 compose-config-todo:
 	$(COMPOSE_TODO) config
+
+compose-config-todo-otel:
+	$(COMPOSE_TODO_OTEL) config

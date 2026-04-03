@@ -18,6 +18,7 @@ services:
       - "8000"
     environment:
       APIM_CONFIG_PATH: /app/examples/basic.json
+      OTEL_SERVICE_NAME: apim-simulator
     depends_on:
       mock-backend:
         condition: service_started

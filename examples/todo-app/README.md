@@ -8,10 +8,15 @@ browser-facing APIM path:
 It is intentionally container-first and environment-configured so it can be
 lifted into `platform/apps/todo` later without changing the application code.
 
+If you are new to APIs or APIM, read
+[`docs/APIM-TRAINING-GUIDE.md`](../../docs/APIM-TRAINING-GUIDE.md) before
+diving into the example details here.
+
 ## Local stack
 
 ```bash
 make up-todo
+make up-todo-otel
 make smoke-todo
 make test-todo-e2e
 make test-todo-bruno
@@ -21,6 +26,14 @@ make down
 
 The browser entrypoint is `http://localhost:3000`. The APIM gateway is
 `http://localhost:8000`.
+
+`make up-todo-otel` adds LGTM on `http://localhost:3001` and exports OTEL
+telemetry from both the gateway and the toy FastAPI backend over OTLP HTTP.
+The todo UI exposes direct Grafana links so a browser user can move from a
+real task interaction into the OTEL dashboard without leaving the app.
+
+Run `make verify-todo-otel` after the stack is up if you want a quick check
+that Prometheus, Loki, and Tempo all see the expected APIM and todo signals.
 
 ## External client artifacts
 

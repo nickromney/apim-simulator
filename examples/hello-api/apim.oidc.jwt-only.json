@@ -1,0 +1,31 @@
+{
+  "allowed_origins": ["http://localhost:3000", "http://localhost:3007", "http://localhost:5173", "http://localhost:8000"],
+  "allow_anonymous": false,
+  "oidc": {
+    "issuer": "http://localhost:8180/realms/subnet-calculator",
+    "audience": "api-app",
+    "jwks_uri": "http://keycloak:8080/realms/subnet-calculator/protocol/openid-connect/certs"
+  },
+  "products": {
+    "hello": {
+      "name": "Hello",
+      "description": "JWT-only hello API",
+      "require_subscription": false
+    }
+  },
+  "subscription": {
+    "required": false
+  },
+  "routes": [
+    {
+      "name": "hello-api",
+      "path_prefix": "/api",
+      "upstream_base_url": "http://hello-api:8000",
+      "upstream_path_prefix": "/api",
+      "product": "hello",
+      "authz": {
+        "required_roles": ["user"]
+      }
+    }
+  ]
+}
