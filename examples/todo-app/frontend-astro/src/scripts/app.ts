@@ -1,6 +1,8 @@
 interface RuntimeConfig {
   API_BASE_URL?: string;
   APIM_SUBSCRIPTION_KEY?: string;
+  GRAFANA_BASE_URL?: string;
+  OBSERVABILITY_DASHBOARD_URL?: string;
 }
 
 interface Todo {
@@ -49,6 +51,8 @@ class TodoFrontendApp {
   private readonly networkPath: HTMLOListElement;
   private readonly apiCallLog: HTMLElement;
   private readonly apiCallEmpty: HTMLElement;
+  private readonly dashboardLink: HTMLAnchorElement;
+  private readonly grafanaHomeLink: HTMLAnchorElement;
   private readonly networkHops: NetworkHop[];
   private todos: Todo[] = [];
   private apiCalls: ApiCallEntry[] = [];
@@ -56,9 +60,14 @@ class TodoFrontendApp {
 
   constructor() {
     const runtimeConfig = window.RUNTIME_CONFIG || {};
+    const grafanaBaseUrl = runtimeConfig.GRAFANA_BASE_URL || "http://localhost:3001";
     this.config = {
       API_BASE_URL: runtimeConfig.API_BASE_URL || "http://localhost:8000",
       APIM_SUBSCRIPTION_KEY: runtimeConfig.APIM_SUBSCRIPTION_KEY || "",
+      GRAFANA_BASE_URL: grafanaBaseUrl,
+      OBSERVABILITY_DASHBOARD_URL:
+        runtimeConfig.OBSERVABILITY_DASHBOARD_URL ||
+        this.joinUrl(grafanaBaseUrl, "/d/apim-simulator-overview/apim-simulator-overview"),
     };
 
     this.form = document.querySelector('[data-testid="create-form"]') as HTMLFormElement;
@@ -71,6 +80,8 @@ class TodoFrontendApp {
     this.networkPath = document.querySelector('[data-testid="network-path"]') as HTMLOListElement;
     this.apiCallLog = document.querySelector('[data-testid="api-call-log"]') as HTMLElement;
     this.apiCallEmpty = document.querySelector('[data-testid="api-call-empty"]') as HTMLElement;
+    this.dashboardLink = document.querySelector('[data-testid="observability-dashboard-link"]') as HTMLAnchorElement;
+    this.grafanaHomeLink = document.querySelector('[data-testid="observability-home-link"]') as HTMLAnchorElement;
     this.networkHops = this.buildNetworkHops();
   }
 
@@ -80,6 +91,7 @@ class TodoFrontendApp {
       void this.handleCreate();
     });
 
+    this.hydrateObservabilityLinks();
     this.renderNetworkPath();
     this.renderApiCalls();
     await this.refresh();
@@ -303,6 +315,11 @@ class TodoFrontendApp {
       item.append(indexPill, copy);
       this.networkPath.appendChild(item);
     }
+  }
+
+  private hydrateObservabilityLinks(): void {
+    this.dashboardLink.href = this.config.OBSERVABILITY_DASHBOARD_URL;
+    this.grafanaHomeLink.href = this.config.GRAFANA_BASE_URL;
   }
 
   private renderApiCalls(): void {

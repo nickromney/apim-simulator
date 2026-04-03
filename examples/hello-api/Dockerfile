@@ -24,10 +24,10 @@ WORKDIR /app
 
 COPY --chown=app:app --from=builder /app/.venv /app/.venv
 COPY --chown=app:app app ./app
-COPY --chown=app:app examples ./examples
+COPY --chown=app:app examples/hello-api/main.py ./main.py
 
 EXPOSE 8000
 
 USER app
 
-CMD ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["/app/.venv/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

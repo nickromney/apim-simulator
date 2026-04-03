@@ -9,6 +9,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -41,13 +42,35 @@ from app.security import (
     subscription_bypassed,
     validate_client_certificate,
 )
+from app.telemetry import (
+    ObservabilityRuntime,
+    configure_observability,
+    get_correlation_id,
+    instrument_fastapi_app,
+    instrument_httpx_client,
+    reset_correlation_id,
+    set_correlation_id,
+    set_current_span_attributes,
+)
 from app.terraform_import import import_from_tofu_show_json
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("apim-simulator")
 
+APIM_SERVICE_NAME = "apim-simulator"
+APIM_SERVICE_VERSION = "0.1.0"
 EMPTY_POLICY_XML = "<policies><inbound /><backend /><outbound /><on-error /></policies>"
 POLICY_SECTION_NAMES = ("inbound", "backend", "outbound", "on-error")
+_GATEWAY_METRICS: GatewayMetrics | None = None
+
+
+@dataclass(frozen=True)
+class GatewayMetrics:
+    requests: Any
+    request_duration: Any
+    upstream_duration: Any
+    cache_events: Any
+    policy_short_circuits: Any
+    config_reloads: Any
 
 
 def _merge_policy_xml_documents(xml_documents: list[str]) -> str:
@@ -138,6 +161,106 @@ def _render_backend_value(value: str | None, policy_req: PolicyRequest, cfg: Gat
     return render_policy_value(value, policy_req, runtime)
 
 
+def _get_gateway_metrics(telemetry: ObservabilityRuntime) -> GatewayMetrics:
+    global _GATEWAY_METRICS
+    if _GATEWAY_METRICS is not None:
+        return _GATEWAY_METRICS
+
+    meter = telemetry.meter
+    _GATEWAY_METRICS = GatewayMetrics(
+        requests=meter.create_counter(
+            "apim.gateway.requests",
+            description="Count of requests handled by the APIM simulator gateway",
+        ),
+        request_duration=meter.create_histogram(
+            "apim.gateway.request.duration",
+            unit="s",
+            description="End-to-end gateway request duration",
+        ),
+        upstream_duration=meter.create_histogram(
+            "apim.gateway.upstream.duration",
+            unit="s",
+            description="Duration spent waiting on upstream backends",
+        ),
+        cache_events=meter.create_counter(
+            "apim.gateway.cache.events",
+            description="Gateway response cache outcomes",
+        ),
+        policy_short_circuits=meter.create_counter(
+            "apim.gateway.policy.short_circuits",
+            description="Requests terminated by inbound or backend APIM policy stages",
+        ),
+        config_reloads=meter.create_counter(
+            "apim.gateway.config.reloads",
+            description="Gateway config reload attempts",
+        ),
+    )
+    return _GATEWAY_METRICS
+
+
+def _request_route_label(request: Request) -> str:
+    apim_route_name = getattr(request.state, "apim_route_name", None)
+    if apim_route_name:
+        return apim_route_name
+
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if route_path:
+        return str(route_path)
+    return request.url.path
+
+
+def _request_client_ip(request: Request) -> str:
+    state_value = getattr(request.state, "apim_client_ip", None)
+    if state_value:
+        return state_value
+    if request.client is not None:
+        return request.client.host
+    return ""
+
+
+def _request_observation_attrs(request: Request, status_code: int) -> dict[str, str | int | bool]:
+    return {
+        "http.request.method": request.method,
+        "http.response.status_code": status_code,
+        "http.route": _request_route_label(request),
+        "apim.route.name": getattr(request.state, "apim_route_name", "none"),
+        "apim.cache.result": getattr(request.state, "apim_cache_result", "none"),
+        "apim.backend.id": getattr(request.state, "apim_backend_id", "none"),
+        "apim.trace.requested": bool(getattr(request.state, "apim_trace_requested", False)),
+    }
+
+
+def _record_request_observation(request: Request, *, status_code: int, duration_seconds: float) -> None:
+    metrics: GatewayMetrics = request.app.state.gateway_metrics
+    attrs = _request_observation_attrs(request, status_code)
+    metrics.requests.add(1, attrs)
+    metrics.request_duration.record(duration_seconds, attrs)
+
+    upstream_duration = getattr(request.state, "apim_upstream_duration_seconds", None)
+    if upstream_duration is not None:
+        metrics.upstream_duration.record(upstream_duration, attrs)
+
+
+def _access_log_fields(request: Request, *, status_code: int, duration_seconds: float) -> dict[str, Any]:
+    return {
+        "event.name": "http.request.completed",
+        "http.request.method": request.method,
+        "url.path": request.url.path,
+        "http.route": _request_route_label(request),
+        "http.response.status_code": status_code,
+        "duration_ms": round(duration_seconds * 1000, 3),
+        "network.client.ip": _request_client_ip(request),
+        "correlation_id": get_correlation_id() or getattr(request.state, "correlation_id", None),
+        "apim.route.name": getattr(request.state, "apim_route_name", None),
+        "apim.backend.id": getattr(request.state, "apim_backend_id", None),
+        "apim.cache.result": getattr(request.state, "apim_cache_result", None),
+        "apim.trace.requested": getattr(request.state, "apim_trace_requested", False),
+        "apim.upstream.attempts": getattr(request.state, "apim_upstream_attempts", None),
+        "apim.result.reason": getattr(request.state, "apim_result_reason", None),
+    }
+
+
 class SubscriptionUpsert(BaseModel):
     id: str
     name: str
@@ -167,6 +290,7 @@ class ReplayRequestBody(BaseModel):
 
 
 def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncClient | None = None) -> FastAPI:
+    telemetry = configure_observability(service_name=APIM_SERVICE_NAME, service_version=APIM_SERVICE_VERSION)
     gateway_config = config or load_config()
     gateway_config.routes = gateway_config.materialize_routes()
 
@@ -201,6 +325,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         app.state.policy_cache = {}  # Clear policy cache on reload
         app.state.policy_response_cache = {}
         app.state.policy_value_cache = {}
+        app.state.gateway_metrics.config_reloads.add(1, {"result": "success"})
         logger.info(
             "config reloaded | routes=%d | origins=%s | anonymous=%s",
             len(new_config.routes),
@@ -259,6 +384,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             created = True
         else:
             app.state.http_client = http_client
+        instrument_httpx_client(app.state.http_client, telemetry)
         app.state.gateway_config = gateway_config
         app.state.oidc_verifiers = oidc_verifiers
         app.state.cache = {}
@@ -297,6 +423,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             await app.state.http_client.aclose()
 
     app = FastAPI(title="Local APIM Simulator", version="0.1.0", lifespan=lifespan)
+    app.state.telemetry = telemetry
+    app.state.gateway_metrics = _get_gateway_metrics(telemetry)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=gateway_config.allowed_origins or ["*"],
@@ -305,6 +433,40 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         allow_headers=["*"],
         expose_headers=["x-apim-simulator", "x-apim-trace-id", "x-correlation-id", "x-todo-demo-policy"],
     )
+
+    @app.middleware("http")
+    async def observe_requests(request: Request, call_next):
+        correlation_id = request.headers.get("x-correlation-id") or f"corr-{uuid.uuid4()}"
+        request.state.correlation_id = correlation_id
+        request.state.apim_cache_result = "none"
+        request.state.apim_backend_id = "none"
+        request.state.apim_upstream_attempts = 0
+        request.state.apim_trace_requested = False
+        request.state.apim_result_reason = None
+        token = set_correlation_id(correlation_id)
+        start = time.perf_counter()
+
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_seconds = time.perf_counter() - start
+            _record_request_observation(request, status_code=500, duration_seconds=duration_seconds)
+            telemetry.logger.exception(
+                "request failed",
+                extra=_access_log_fields(request, status_code=500, duration_seconds=duration_seconds),
+            )
+            raise
+        else:
+            response.headers.setdefault("x-correlation-id", correlation_id)
+            duration_seconds = time.perf_counter() - start
+            _record_request_observation(request, status_code=response.status_code, duration_seconds=duration_seconds)
+            telemetry.logger.info(
+                "request completed",
+                extra=_access_log_fields(request, status_code=response.status_code, duration_seconds=duration_seconds),
+            )
+            return response
+        finally:
+            reset_correlation_id(token)
 
     @app.get("/")
     async def root_hint(request: Request) -> dict[str, Any]:
@@ -789,14 +951,17 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             return Response(status_code=204)
 
         cfg: GatewayConfig = request.app.state.gateway_config
+        gateway_metrics: GatewayMetrics = request.app.state.gateway_metrics
 
         # mTLS validation (before route resolution)
         validate_client_certificate(request, cfg)
 
         resolved = resolve_route(cfg, request)
         if resolved is None:
+            request.state.apim_result_reason = "no_route"
             raise HTTPException(status_code=404, detail="No route")
         route = resolved.route
+        request.state.apim_route_name = route.name
 
         verifiers: dict[str, OIDCVerifier] = request.app.state.oidc_verifiers
         auth = authenticate_request(request, cfg, verifiers, route)
@@ -817,9 +982,20 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 require_sub = False
             if require_sub:
                 if auth.subscription is None:
+                    request.state.apim_result_reason = "missing_subscription"
                     raise HTTPException(status_code=401, detail="Missing subscription key")
                 if not set(allowed_products).intersection(set(auth.subscription_products)):
+                    request.state.apim_result_reason = "subscription_not_authorized"
                     raise HTTPException(status_code=403, detail="Subscription not authorized for product")
+
+        set_current_span_attributes(
+            **{
+                "apim.route.name": route.name,
+                "apim.route.path_prefix": route.path_prefix,
+                "apim.subscription.present": auth.subscription is not None,
+                "apim.allowed_products.count": len(allowed_products),
+            }
+        )
 
         policy_docs: list[Any] = []
         policy_cache: dict[str, Any] = request.app.state.policy_cache
@@ -844,10 +1020,11 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 
         body = await request.body()
         if len(body) > cfg.max_request_body_bytes:
+            request.state.apim_result_reason = "request_body_too_large"
             raise HTTPException(status_code=413, detail="Request body too large")
         headers = {k.lower(): v for k, v in build_upstream_headers(request, auth).items()}
 
-        correlation_id = request.headers.get("x-correlation-id") or f"corr-{uuid.uuid4()}"
+        correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
         headers.setdefault("x-correlation-id", correlation_id)
 
         incoming_host = request.headers.get("host", "")
@@ -857,6 +1034,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         client_ip = (
             forwarded_for.split(",", 1)[0].strip() if forwarded_for else (request.client.host if request.client else "")
         )
+        request.state.apim_client_ip = client_ip
         subscription_record = _find_subscription_by_id(cfg, auth.subscription.id) if auth.subscription else None
         subscription_owner = subscription_record.created_by if subscription_record is not None else None
         subscription_groups = (
@@ -896,6 +1074,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         )
 
         trace_requested = cfg.trace_enabled and request.headers.get("x-apim-trace", "").lower() == "true"
+        request.state.apim_trace_requested = trace_requested
         trace_id = f"trace-{int(time.time() * 1000)}" if trace_requested else None
         trace_collector = PolicyTraceCollector() if trace_requested else None
         client: httpx.AsyncClient = request.app.state.http_client
@@ -906,6 +1085,13 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             trace=trace_collector,
             response_cache=request.app.state.policy_response_cache,
             value_cache=request.app.state.policy_value_cache,
+        )
+
+        set_current_span_attributes(
+            **{
+                "apim.trace.requested": trace_requested,
+                "apim.subscription.authorized": auth.subscription is not None,
+            }
         )
 
         def _store_trace(payload: dict[str, Any]) -> None:
@@ -953,6 +1139,22 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         if policy_docs:
             early = await apply_inbound_async(policy_docs, policy_req, policy_runtime)
             if early is not None:
+                request.state.apim_result_reason = "policy_inbound_short_circuit"
+                request.state.apim_upstream_attempts = 0
+                gateway_metrics.policy_short_circuits.add(
+                    1,
+                    {
+                        "apim.route.name": route.name,
+                        "apim.policy.stage": "inbound",
+                        "http.request.method": request.method,
+                    },
+                )
+                set_current_span_attributes(
+                    **{
+                        "apim.result.reason": "policy_inbound_short_circuit",
+                        "apim.upstream.attempts": 0,
+                    }
+                )
                 out_headers = dict(early.headers)
                 _finalize_policy_response(
                     status_code=early.status_code,
@@ -988,6 +1190,22 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 
             backend_early = await apply_backend_async(policy_docs, policy_req, policy_runtime)
             if backend_early is not None:
+                request.state.apim_result_reason = "policy_backend_short_circuit"
+                request.state.apim_upstream_attempts = 0
+                gateway_metrics.policy_short_circuits.add(
+                    1,
+                    {
+                        "apim.route.name": route.name,
+                        "apim.policy.stage": "backend",
+                        "http.request.method": request.method,
+                    },
+                )
+                set_current_span_attributes(
+                    **{
+                        "apim.result.reason": "policy_backend_short_circuit",
+                        "apim.upstream.attempts": 0,
+                    }
+                )
                 out_headers = dict(backend_early.headers)
                 _finalize_policy_response(
                     status_code=backend_early.status_code,
@@ -1031,12 +1249,15 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             scopes = _extract_scopes(effective_claims)
             roles = _extract_roles(effective_claims)
             if route.authz.required_scopes and not set(route.authz.required_scopes).issubset(scopes):
+                request.state.apim_result_reason = "missing_required_scope"
                 raise HTTPException(status_code=403, detail="Missing required scope")
             if route.authz.required_roles and not set(route.authz.required_roles).issubset(roles):
+                request.state.apim_result_reason = "missing_required_role"
                 raise HTTPException(status_code=403, detail="Missing required role")
             for key, expected in route.authz.required_claims.items():
                 actual = effective_claims.get(key)
                 if actual is None or str(actual) != expected:
+                    request.state.apim_result_reason = "missing_required_claim"
                     raise HTTPException(status_code=403, detail="Missing required claim")
 
         upstream_base_url = route.upstream_base_url
@@ -1095,6 +1316,14 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                         ",".join(backend.client_certificate_thumbprints),
                     )
 
+        request.state.apim_backend_id = backend_id or "direct"
+        set_current_span_attributes(
+            **{
+                "apim.backend.id": request.state.apim_backend_id,
+                "apim.policy.documents": len(policy_docs),
+            }
+        )
+
         if trace_collector is not None and trace_collector.selected_backend is None:
             trace_collector.selected_backend = {
                 "backend_id": backend_id or None,
@@ -1124,6 +1353,24 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             if cached is not None:
                 expires_at, cached_status, cached_headers, cached_media_type, cached_body = cached
                 if time.time() < expires_at:
+                    request.state.apim_cache_result = "hit"
+                    request.state.apim_result_reason = "cache_hit"
+                    request.state.apim_upstream_attempts = 0
+                    gateway_metrics.cache_events.add(
+                        1,
+                        {
+                            "apim.route.name": route.name,
+                            "apim.cache.result": "hit",
+                            "http.request.method": request.method,
+                        },
+                    )
+                    set_current_span_attributes(
+                        **{
+                            "apim.cache.result": "hit",
+                            "apim.result.reason": "cache_hit",
+                            "apim.upstream.attempts": 0,
+                        }
+                    )
                     out_headers = dict(cached_headers)
                     _finalize_policy_response(
                         status_code=cached_status,
@@ -1189,7 +1436,18 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 continue
             break
 
+        elapsed_seconds = time.perf_counter() - start
+        request.state.apim_upstream_attempts = attempts_used
+
         if upstream_response is None:
+            request.state.apim_result_reason = "upstream_unavailable"
+            request.state.apim_upstream_duration_seconds = elapsed_seconds
+            set_current_span_attributes(
+                **{
+                    "apim.result.reason": "upstream_unavailable",
+                    "apim.upstream.attempts": attempts_used,
+                }
+            )
             if policy_docs:
                 failure_req = PolicyRequest(
                     method=request.method,
@@ -1200,6 +1458,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 )
                 override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
                 if override is not None:
+                    request.state.apim_result_reason = "policy_on_error_override"
                     out_headers = dict(override.headers)
                     _finalize_policy_response(
                         status_code=override.status_code,
@@ -1218,7 +1477,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                             extra={
                                 "attempts": attempts_used,
                                 "status": override.status_code,
-                                "elapsed_ms": int((time.perf_counter() - start) * 1000),
+                                "elapsed_ms": int(elapsed_seconds * 1000),
                                 "cache": None,
                                 "reason": "policy_on_error_override",
                             },
@@ -1239,6 +1498,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         response_headers = filter_response_headers(dict(upstream_response.headers))
         media_type = upstream_response.headers.get("content-type")
         response_headers["x-correlation-id"] = correlation_id
+        request.state.apim_upstream_duration_seconds = elapsed_seconds
         requires_buffering = cache_key is not None or policy_response_cache_active or not cfg.proxy_streaming
         content = b""
         if requires_buffering:
@@ -1271,6 +1531,23 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         )
 
         if cache_key is not None:
+            request.state.apim_cache_result = "miss"
+            request.state.apim_result_reason = "upstream_response"
+            gateway_metrics.cache_events.add(
+                1,
+                {
+                    "apim.route.name": route.name,
+                    "apim.cache.result": "miss",
+                    "http.request.method": request.method,
+                },
+            )
+            set_current_span_attributes(
+                **{
+                    "apim.cache.result": "miss",
+                    "apim.result.reason": "upstream_response",
+                    "apim.upstream.attempts": attempts_used,
+                }
+            )
             response_headers["x-apim-cache"] = "miss"
             if len(request.app.state.cache) >= cfg.cache_max_entries:
                 request.app.state.cache.clear()
@@ -1282,7 +1559,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 content,
             )
             if trace_requested:
-                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                elapsed_ms = int(elapsed_seconds * 1000)
                 trace = _trace_payload(
                     trace_base=trace_base,
                     trace_collector=trace_collector,
@@ -1305,8 +1582,15 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             )
 
         if cfg.proxy_streaming and not requires_buffering:
+            request.state.apim_result_reason = "upstream_stream"
+            set_current_span_attributes(
+                **{
+                    "apim.result.reason": "upstream_stream",
+                    "apim.upstream.attempts": attempts_used,
+                }
+            )
             if trace_requested:
-                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                elapsed_ms = int(elapsed_seconds * 1000)
                 trace = _trace_payload(
                     trace_base=trace_base,
                     trace_collector=trace_collector,
@@ -1329,8 +1613,15 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 background=BackgroundTask(upstream_response.aclose),
             )
 
+        request.state.apim_result_reason = "upstream_response"
+        set_current_span_attributes(
+            **{
+                "apim.result.reason": "upstream_response",
+                "apim.upstream.attempts": attempts_used,
+            }
+        )
         if trace_requested:
-            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            elapsed_ms = int(elapsed_seconds * 1000)
             trace = _trace_payload(
                 trace_base=trace_base,
                 trace_collector=trace_collector,
@@ -1352,6 +1643,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             media_type=media_type,
         )
 
+    instrument_fastapi_app(app, telemetry)
     return app
 
 

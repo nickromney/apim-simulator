@@ -2,6 +2,35 @@
 
 This repository is the standalone extraction of the APIM simulator work that started in `platform/apps/subnet-calculator`. The goal here is narrower and cleaner: a Docker-first Azure API Management lab that can evolve independently of the broader platform stack.
 
+## New To APIs Or APIM?
+
+Start with [docs/APIM-TRAINING-GUIDE.md](docs/APIM-TRAINING-GUIDE.md).
+
+That guide is written for people who are new to APIs, Azure API Management, or
+OpenTelemetry and need a directive path through:
+
+- writing a simple backend API
+- putting APIM in front of it
+- securing it with a subscription key and/or JWT
+- proving it works with browser, curl, Bruno, Proxyman, APIM trace, and Grafana
+
+Companion docs:
+
+- [docs/FIRST-DAY-APIM-CHECKLIST.md](docs/FIRST-DAY-APIM-CHECKLIST.md)
+- [docs/AZURE-APIM-TERM-MAP.md](docs/AZURE-APIM-TERM-MAP.md)
+- [docs/APIM-TEAM-PLAYBOOK.md](docs/APIM-TEAM-PLAYBOOK.md)
+- [docs/APIM-STARTER-RECIPE.md](docs/APIM-STARTER-RECIPE.md)
+
+If you want the fastest possible success path, run:
+
+```bash
+make up-todo-otel
+make smoke-todo
+make verify-todo-otel
+```
+
+Then open `http://localhost:3000` and create a todo through APIM.
+
 ## Current Shape
 
 - Python/FastAPI gateway engine for fast iteration and readable policy/auth logic
@@ -24,6 +53,23 @@ until curl -fsS http://localhost:8000/apim/startup >/dev/null; do sleep 1; done
 curl http://localhost:8000/apim/health
 curl --retry 10 --retry-delay 1 --retry-connrefused http://localhost:8000/api/echo
 ```
+
+### Direct public stack with LGTM
+
+```bash
+make up-otel
+curl --retry 10 --retry-delay 1 --retry-connrefused http://localhost:8000/api/echo
+make verify-otel
+```
+
+Grafana is exposed on `http://localhost:3001` with `admin` / `admin`. The
+gateway exports OpenTelemetry logs, traces, and metrics to the bundled LGTM
+collector over OTLP HTTP (`http://lgtm:4318`) and keeps the existing APIM trace
+endpoint for policy-level debugging.
+
+The stack provisions an `APIM Simulator Overview` dashboard automatically. It
+combines custom gateway metrics, todo API metrics, Loki logs, and Tempo-backed
+span throughput so the local OTEL setup is useful immediately after `up`.
 
 ### MCP stack
 
@@ -88,10 +134,54 @@ curl \
   http://localhost:8000/api/echo
 ```
 
+### Hello starter example
+
+```bash
+make up-hello
+make smoke-hello
+```
+
+Switch auth modes with the checked-in starter configs under
+`examples/hello-api/`:
+
+```bash
+make up-hello-subscription
+SMOKE_HELLO_MODE=subscription make smoke-hello
+
+make up-hello-oidc
+SMOKE_HELLO_MODE=oidc-jwt make smoke-hello
+
+make up-hello-oidc-subscription
+SMOKE_HELLO_MODE=oidc-subscription make smoke-hello
+```
+
+Add LGTM with:
+
+```bash
+make up-hello-otel
+make smoke-hello
+make verify-hello-otel
+```
+
+The starter ships with four APIM variants:
+
+- `examples/hello-api/apim.anonymous.json`
+- `examples/hello-api/apim.subscription.json`
+- `examples/hello-api/apim.oidc.jwt-only.json`
+- `examples/hello-api/apim.oidc.subscription.json`
+
+Use it when you want the smallest possible service that still demonstrates:
+
+- a simple backend API
+- APIM in front of it
+- subscription auth and/or JWT auth
+- shared OTEL wiring that can move between this repo and `platform`
+
 ### Todo demo stack
 
 ```bash
 make up-todo
+make up-todo-otel
 make smoke-todo
 make test-todo-e2e
 make test-todo-bruno
@@ -103,6 +193,16 @@ browser API call through the simulator on `http://localhost:8000`, and keeps the
 FastAPI todo backend internal-only. The example also ships with a Bruno
 collection and a Proxyman-ready HAR capture under
 `examples/todo-app/api-clients/`.
+
+`make up-todo-otel` adds LGTM on `http://localhost:3001` and instruments both
+the simulator and the toy FastAPI backend with the same OTEL env contract used
+for the main gateway.
+
+Verify the OTEL path against the running todo stack with:
+
+```bash
+make verify-todo-otel
+```
 
 ### Operator console
 
@@ -159,15 +259,23 @@ Useful targets:
 ```bash
 make help
 make up
+make up-otel
 make up-mcp
 make up-edge
 make up-tls
 make up-ui
+make up-hello
+make up-hello-subscription
+make up-hello-otel
+make up-hello-oidc
+make up-hello-oidc-subscription
 make up-todo
+make up-todo-otel
 make smoke-mcp
 make smoke-edge
 make smoke-tls
 make smoke-private
+make smoke-hello
 make smoke-oidc
 make smoke-todo
 make test-todo-e2e
@@ -181,6 +289,12 @@ make compat
 make compat-report
 make import-tofu
 make verify-azure
+make verify-otel
+make verify-hello-otel
+make verify-todo-otel
+make compose-config-hello
+make compose-config-hello-otel
+make compose-config-hello-oidc
 make down
 ```
 
@@ -201,6 +315,7 @@ apim-simulator/
 ├── examples/
 │   ├── basic.json          # Default anonymous local config
 │   ├── edge/               # Shared nginx config and generated dev certs
+│   ├── hello-api/          # Minimal FastAPI + APIM starter scaffold
 │   ├── mcp/                # MCP-focused APIM example config
 │   ├── oidc/               # Standalone OIDC config
 │   ├── mock-backend/       # Self-contained upstream echo service
@@ -211,6 +326,7 @@ apim-simulator/
 ├── tests/                  # Unit and integration tests
 ├── ui/                     # Operator console (Vite + React + TypeScript)
 ├── compose.yml             # Internal-only base runtime
+├── compose.otel.yml        # LGTM + OTEL overlay for the direct public stack
 ├── compose.public.yml      # Direct public localhost overlay
 ├── compose.edge.yml        # Nginx edge HTTP overlay
 ├── compose.tls.yml         # TLS + redirect overlay
@@ -218,7 +334,11 @@ apim-simulator/
 ├── compose.oidc.yml        # Keycloak overlay
 ├── compose.mcp.yml         # MCP server overlay
 ├── compose.ui.yml          # Operator console overlay
+├── compose.hello.yml       # Hello API starter overlay
+├── compose.hello.otel.yml  # Hello API OTEL overlay
 ├── compose.todo.yml        # Todo demo stack
+├── compose.todo.otel.yml   # LGTM + OTEL overlay for the todo demo stack
+├── observability/          # Grafana provisioning and local dashboards
 └── Makefile
 ```
 

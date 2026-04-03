@@ -1,0 +1,20 @@
+{
+  "allowed_origins": ["http://localhost:3000", "http://localhost:3007", "http://localhost:5173", "http://localhost:8000"],
+  "allow_anonymous": true,
+  "products": {
+    "hello": {
+      "name": "Hello",
+      "description": "Anonymous hello API for local APIM learning",
+      "require_subscription": false
+    }
+  },
+  "routes": [
+    {
+      "name": "hello-api",
+      "path_prefix": "/api",
+      "upstream_base_url": "http://hello-api:8000",
+      "upstream_path_prefix": "/api",
+      "product": "hello"
+    }
+  ]
+}
