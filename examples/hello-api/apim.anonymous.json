@@ -8,13 +8,25 @@
       "require_subscription": false
     }
   },
-  "routes": [
-    {
-      "name": "hello-api",
-      "path_prefix": "/api",
+  "apis": {
+    "hello-api": {
+      "name": "Hello API",
+      "path": "api",
       "upstream_base_url": "http://hello-api:8000",
       "upstream_path_prefix": "/api",
-      "product": "hello"
+      "products": ["hello"],
+      "operations": {
+        "health": {
+          "name": "Health",
+          "method": "GET",
+          "url_template": "/health"
+        },
+        "hello": {
+          "name": "Hello",
+          "method": "GET",
+          "url_template": "/hello"
+        }
+      }
     }
-  ]
+  }
 }

@@ -18,8 +18,10 @@ Companion docs:
 
 - [docs/FIRST-DAY-APIM-CHECKLIST.md](docs/FIRST-DAY-APIM-CHECKLIST.md)
 - [docs/AZURE-APIM-TERM-MAP.md](docs/AZURE-APIM-TERM-MAP.md)
+- [docs/APIM-SDK-SURFACE-GUIDE.md](docs/APIM-SDK-SURFACE-GUIDE.md)
 - [docs/APIM-TEAM-PLAYBOOK.md](docs/APIM-TEAM-PLAYBOOK.md)
 - [docs/APIM-STARTER-RECIPE.md](docs/APIM-STARTER-RECIPE.md)
+- [docs/MIGRATING-FROM-AWS-API-GATEWAY.md](docs/MIGRATING-FROM-AWS-API-GATEWAY.md)
 
 If you want the fastest possible success path, run:
 
@@ -34,9 +36,10 @@ Then open `http://localhost:3000` and create a todo through APIM.
 ## Current Shape
 
 - Python/FastAPI gateway engine for fast iteration and readable policy/auth logic
-- Config-driven routing, products, subscriptions, tenant access keys, OIDC, traces, and a practical APIM XML policy subset
+- Config-driven APIs, operations, products, subscriptions, tenant access keys, OIDC, traces, and a practical APIM XML policy subset
 - Policy-driven response caching, value caching, and by-key throttling for local APIM-shaped gateway flows
 - Terraform/OpenTofu import of APIM APIs, version sets, backends, named values, policies, and OpenAPI-derived operations
+- APIM-style management resources for service, APIs, operations, products, subscriptions, backends, named values, version sets, policy fragments, users, and groups
 - Static compatibility reporting before runtime plus optional live Azure diff tooling for high-confidence verification
 - Compose-first runtime overlays for direct public, edge HTTP, edge TLS, private/internal, OIDC, and MCP scenarios
 - A curated APIM sample compatibility harness plus an operator console over the local management APIs
@@ -177,6 +180,26 @@ Use it when you want the smallest possible service that still demonstrates:
 - subscription auth and/or JWT auth
 - shared OTEL wiring that can move between this repo and `platform`
 
+### Migrating From AWS API Gateway
+
+Use the guide at [docs/MIGRATING-FROM-AWS-API-GATEWAY.md](docs/MIGRATING-FROM-AWS-API-GATEWAY.md)
+with the starter under
+[`examples/migrating-from-aws-api-gateway/`](examples/migrating-from-aws-api-gateway/README.md)
+when you want a familiar local shape for:
+
+- stage-style paths
+- usage plan plus API key equivalents
+- JWT authorizers
+- backend integrations
+- policy-based header and payload shaping
+
+Fastest path:
+
+```bash
+HELLO_APIM_CONFIG_PATH=/app/examples/migrating-from-aws-api-gateway/apim.http-api.json make up-hello
+curl -H "Ocp-Apim-Subscription-Key: aws-migration-demo-key" http://localhost:8000/prod/hello
+```
+
 ### Todo demo stack
 
 ```bash
@@ -243,8 +266,7 @@ make down
 
 ```bash
 make install-hooks
-make fmt
-make lint
+make lint-check
 make test
 make compat
 TOFU_SHOW=tests/fixtures/tofu_show/sample.json make compat-report
@@ -284,7 +306,10 @@ make export-todo-har
 make install-hooks
 make fmt
 make lint
+make lint-check
 make test
+make test-python
+make test-shell
 make compat
 make compat-report
 make import-tofu
@@ -298,7 +323,14 @@ make compose-config-hello-oidc
 make down
 ```
 
-`make fmt` runs `ruff format .`. `make lint` is the local alias that formats first and then runs `ruff check .`.
+Before opening a PR, run:
+
+```bash
+make lint-check
+make test
+```
+
+`make fmt` runs `ruff format .`. `make lint` is the write-fixing alias that formats first and then runs `ruff check .`. `make lint-check` is the non-mutating gate for CI-style local verification. `make test` runs both the Python suite and the shell-script suite under BATS.
 
 The repo-managed pre-commit hook runs `ruff check --fix` and `ruff format` on staged Python files. Enable it once per clone with:
 

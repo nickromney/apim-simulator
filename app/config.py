@@ -31,6 +31,11 @@ class ApiVersionSetConfig(BaseModel):
             raise ValueError("version_query_name is required when versioning_scheme=Query")
 
 
+class ServiceMetadataConfig(BaseModel):
+    name: str = "apim-simulator"
+    display_name: str = "Local APIM Simulator"
+
+
 class HeaderCondition(BaseModel):
     header: str
     starts_with: str | None = None
@@ -247,16 +252,19 @@ class RouteConfig(BaseModel):
         remainder = path
         if prefix and (path == prefix or path.startswith(prefix + "/")):
             remainder = path[len(prefix) :]
-        if not remainder.startswith("/"):
+        if remainder and not remainder.startswith("/"):
             remainder = "/" + remainder
         upstream_prefix = self.upstream_path_prefix.rstrip("/")
         upstream_path = (upstream_prefix + remainder) if upstream_prefix else remainder
+        if not upstream_path:
+            upstream_path = "/"
         base = (upstream_base_url or self.upstream_base_url).rstrip("/")
         return base + upstream_path
 
 
 class GatewayConfig(BaseModel):
     schema_version: int = 1
+    service: ServiceMetadataConfig = Field(default_factory=ServiceMetadataConfig)
     allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3007"])
     allow_anonymous: bool = False
     client_certificate: ClientCertificateConfig = Field(default_factory=ClientCertificateConfig)

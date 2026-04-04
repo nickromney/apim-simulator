@@ -17,7 +17,7 @@ services:
     expose:
       - "8000"
     environment:
-      APIM_CONFIG_PATH: /app/examples/basic.json
+      APIM_CONFIG_PATH: ${APIM_CONFIG_PATH:-/app/examples/basic.json}
       OTEL_SERVICE_NAME: apim-simulator
     depends_on:
       mock-backend:

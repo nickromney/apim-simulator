@@ -13,13 +13,25 @@
       "require_subscription": false
     }
   },
-  "routes": [
-    {
-      "name": "default",
-      "path_prefix": "/api",
+  "apis": {
+    "default": {
+      "name": "Default",
+      "path": "api",
       "upstream_base_url": "http://mock-backend:8080",
       "upstream_path_prefix": "/api",
-      "product": "default"
+      "products": ["default"],
+      "operations": {
+        "health": {
+          "name": "Health",
+          "method": "GET",
+          "url_template": "/health"
+        },
+        "echo": {
+          "name": "Echo",
+          "method": "GET",
+          "url_template": "/echo"
+        }
+      }
     }
-  ]
+  }
 }

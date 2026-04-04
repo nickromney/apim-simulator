@@ -129,7 +129,7 @@ def test_management_import_applies_routes() -> None:
     )
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream/health/")
+        assert req.url == httpx.URL("http://upstream/health")
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(
@@ -192,7 +192,7 @@ def test_imported_subscription_key_parameter_names_are_honored_by_gateway() -> N
     cfg.routes = cfg.materialize_routes()
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("https://backend.example.test/api/health/")
+        assert req.url == httpx.URL("https://backend.example.test/api/health")
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(config=cfg, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))

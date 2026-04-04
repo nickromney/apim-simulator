@@ -21,7 +21,19 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
-from app.config import GatewayConfig, Subscription, SubscriptionState, load_config
+from app.config import (
+    ApiConfig,
+    BackendConfig,
+    GatewayConfig,
+    KeyVaultNamedValueConfig,
+    NamedValueConfig,
+    OperationConfig,
+    ProductConfig,
+    RouteAuthzConfig,
+    Subscription,
+    SubscriptionState,
+    load_config,
+)
 from app.named_values import mask_secret_data
 from app.policy import (
     PolicyRequest,
@@ -35,6 +47,20 @@ from app.policy import (
     parse_policies_xml,
 )
 from app.proxy import build_upstream_headers, build_user_payload, filter_response_headers, resolve_route
+from app.resource_projection import (
+    project_api,
+    project_api_version_set,
+    project_backend,
+    project_group,
+    project_named_value,
+    project_operation,
+    project_policy_fragment,
+    project_product,
+    project_service,
+    project_subscription,
+    project_summary,
+    project_user,
+)
 from app.security import (
     OIDCVerifier,
     authenticate_request,
@@ -276,7 +302,67 @@ class SubscriptionUpdate(BaseModel):
     products: list[str] | None = None
 
 
+class ApiUpsert(BaseModel):
+    name: str | None = None
+    path: str
+    upstream_base_url: str
+    upstream_path_prefix: str = ""
+    backend: str | None = None
+    products: list[str] = Field(default_factory=list)
+    api_version_set: str | None = None
+    api_version: str | None = None
+    subscription_header_names: list[str] | None = None
+    subscription_query_param_names: list[str] | None = None
+    policies_xml: str | None = None
+
+
+class OperationUpsert(BaseModel):
+    name: str | None = None
+    method: str = "GET"
+    url_template: str
+    upstream_base_url: str | None = None
+    upstream_path_prefix: str | None = None
+    backend: str | None = None
+    products: list[str] | None = None
+    api_version_set: str | None = None
+    api_version: str | None = None
+    subscription_header_names: list[str] | None = None
+    subscription_query_param_names: list[str] | None = None
+    authz: RouteAuthzConfig | None = None
+    policies_xml: str | None = None
+
+
+class ProductUpsert(BaseModel):
+    name: str
+    description: str | None = None
+    require_subscription: bool = True
+
+
+class BackendUpsert(BaseModel):
+    url: str
+    description: str | None = None
+    auth_type: str = "none"
+    basic_username: str | None = None
+    basic_password: str | None = None
+    managed_identity_resource: str | None = None
+    authorization_scheme: str | None = None
+    authorization_parameter: str | None = None
+    header_credentials: dict[str, str] = Field(default_factory=dict)
+    query_credentials: dict[str, str] = Field(default_factory=dict)
+    client_certificate_thumbprints: list[str] = Field(default_factory=list)
+
+
+class NamedValueUpsert(BaseModel):
+    value: str | None = None
+    secret: bool = False
+    value_from_key_vault: KeyVaultNamedValueConfig | None = None
+
+
 class PolicyUpdate(BaseModel):
+    xml: str
+
+
+class PolicyFragmentUpsert(BaseModel):
     xml: str
 
 
@@ -473,7 +559,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         cfg: GatewayConfig = request.app.state.gateway_config
         route_prefixes = sorted({route.path_prefix or "/" for route in cfg.routes})
         return {
-            "service": "Local APIM Simulator",
+            "service": cfg.service.display_name,
             "message": "This is an API gateway. Try /apim/health, /apim/startup, or one of the configured route prefixes.",
             "gateway_endpoints": ["/apim/health", "/apim/startup"],
             "route_prefixes": route_prefixes,
@@ -599,11 +685,15 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             return
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    def _find_subscription_by_id(cfg: GatewayConfig, subscription_id: str) -> Subscription | None:
-        for sub in cfg.subscription.subscriptions.values():
+    def _find_subscription_entry(cfg: GatewayConfig, subscription_id: str) -> tuple[str, Subscription] | None:
+        for config_key, sub in cfg.subscription.subscriptions.items():
             if sub.id == subscription_id:
-                return sub
+                return config_key, sub
         return None
+
+    def _find_subscription_by_id(cfg: GatewayConfig, subscription_id: str) -> Subscription | None:
+        entry = _find_subscription_entry(cfg, subscription_id)
+        return entry[1] if entry is not None else None
 
     @app.post("/apim/admin/subscriptions/{subscription_id}/rotate")
     async def rotate_subscription_key(subscription_id: str, request: Request, key: str = "secondary") -> dict:
@@ -690,82 +780,205 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         if hasattr(target, "policies_xml_documents"):
             target.policies_xml_documents = []
 
-    def _summary_payload(cfg: GatewayConfig) -> dict[str, Any]:
-        apis: list[dict[str, Any]] = []
-        for api_id, api in cfg.apis.items():
-            operations: list[dict[str, Any]] = []
-            for operation_id, operation in api.operations.items():
-                operations.append(
-                    {
-                        "id": operation_id,
-                        "name": operation.name,
-                        "method": operation.method,
-                        "url_template": operation.url_template,
-                        "upstream_base_url": operation.upstream_base_url,
-                        "upstream_path_prefix": operation.upstream_path_prefix,
-                        "backend": operation.backend,
-                        "products": operation.products,
-                        "policy_scope": {"scope_type": "operation", "scope_name": f"{api_id}:{operation_id}"},
-                    }
-                )
-            apis.append(
-                {
-                    "id": api_id,
-                    "name": api.name,
-                    "path": api.path,
-                    "upstream_base_url": api.upstream_base_url,
-                    "upstream_path_prefix": api.upstream_path_prefix,
-                    "backend": api.backend,
-                    "products": api.products,
-                    "policy_scope": {"scope_type": "api", "scope_name": api_id},
-                    "operations": operations,
-                }
+    def _masked(cfg: GatewayConfig, payload: Any) -> Any:
+        return mask_secret_data(payload, cfg)
+
+    def _summary_payload(cfg: GatewayConfig, request: Request | None = None) -> dict[str, Any]:
+        trace_store = getattr(request.app.state, "trace_store", None) if request is not None else None
+        return project_summary(cfg, trace_store=trace_store)
+
+    def _ensure_api_authoring_mode(cfg: GatewayConfig) -> None:
+        if not cfg.apis and cfg.routes:
+            raise HTTPException(
+                status_code=400,
+                detail="API CRUD requires api-authored config; convert legacy route configs before mutating APIs.",
             )
 
-        routes: list[dict[str, Any]] = []
-        for route in cfg.routes:
-            route_payload: dict[str, Any] = {
-                "name": route.name,
-                "path_prefix": route.path_prefix,
-                "host_match": route.host_match,
-                "methods": route.methods,
-                "upstream_base_url": route.upstream_base_url,
-                "upstream_path_prefix": route.upstream_path_prefix,
-                "backend": route.backend,
-                "product": route.product,
-                "products": route.products,
-                "api_version_set": route.api_version_set,
-                "api_version": route.api_version,
-            }
-            if not cfg.apis:
-                route_payload["policy_scope"] = {"scope_type": "route", "scope_name": route.name}
-            routes.append(route_payload)
+    def _get_api_or_404(cfg: GatewayConfig, api_id: str) -> ApiConfig:
+        api = cfg.apis.get(api_id)
+        if api is None:
+            raise HTTPException(status_code=404, detail="API not found")
+        return api
 
-        return {
-            "gateway_policy_scope": {"scope_type": "gateway", "scope_name": "gateway"},
-            "apis": apis,
-            "routes": routes,
-            "products": [{"id": product_id, **product.model_dump()} for product_id, product in cfg.products.items()],
-            "subscriptions": [sub.model_dump() for sub in cfg.subscription.subscriptions.values()],
-            "backends": [{"id": backend_id, **backend.model_dump()} for backend_id, backend in cfg.backends.items()],
-        }
+    def _get_operation_or_404(cfg: GatewayConfig, api_id: str, operation_id: str) -> OperationConfig:
+        api = _get_api_or_404(cfg, api_id)
+        operation = api.operations.get(operation_id)
+        if operation is None:
+            raise HTTPException(status_code=404, detail="Operation not found")
+        return operation
+
+    def _get_product_or_404(cfg: GatewayConfig, product_id: str) -> ProductConfig:
+        product = cfg.products.get(product_id)
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        return product
+
+    def _get_backend_or_404(cfg: GatewayConfig, backend_id: str) -> BackendConfig:
+        backend = cfg.backends.get(backend_id)
+        if backend is None:
+            raise HTTPException(status_code=404, detail="Backend not found")
+        return backend
+
+    def _get_named_value_or_404(cfg: GatewayConfig, named_value_id: str) -> NamedValueConfig:
+        named_value = cfg.named_values.get(named_value_id)
+        if named_value is None:
+            raise HTTPException(status_code=404, detail="Named value not found")
+        return named_value
+
+    def _validate_fragment_xml(xml: str) -> None:
+        try:
+            ElementTree.fromstring(f"<fragment>{xml}</fragment>")
+        except ElementTree.ParseError as exc:
+            raise HTTPException(status_code=400, detail="Invalid policy fragment XML") from exc
+
+    def _validate_policy_xml(cfg: GatewayConfig, xml: str | None) -> None:
+        if xml is None:
+            return
+        parse_policies_xml(xml.strip() or EMPTY_POLICY_XML, policy_fragments=cfg.policy_fragments)
 
     @app.get("/apim/management/status")
-    async def management_status(request: Request) -> dict:
+    async def management_status(request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
+        service = project_service(cfg, trace_store=request.app.state.trace_store)
         return {
-            "routes": len(cfg.routes),
-            "products": len(cfg.products),
-            "subscriptions": len(cfg.subscription.subscriptions),
-            "api_version_sets": len(cfg.api_version_sets),
+            "service": {
+                "id": service["id"],
+                "name": service["name"],
+                "display_name": service["display_name"],
+            },
+            "counts": service["counts"],
+            "gateway_policy_scope": service["gateway_policy_scope"],
         }
+
+    @app.get("/apim/management/service")
+    async def management_service(request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return _masked(cfg, project_service(cfg, trace_store=request.app.state.trace_store))
 
     @app.get("/apim/management/summary")
     async def management_summary(request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        return _summary_payload(cfg)
+        return _summary_payload(cfg, request)
+
+    @app.get("/apim/management/apis")
+    async def list_apis(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [_masked(cfg, project_api(cfg, api_id, api)) for api_id, api in cfg.apis.items()]
+
+    @app.get("/apim/management/apis/{api_id}")
+    async def get_api(api_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        return _masked(cfg, project_api(cfg, api_id, api))
+
+    @app.put("/apim/management/apis/{api_id}")
+    async def upsert_api(api_id: str, request: Request, body: ApiUpsert) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _ensure_api_authoring_mode(cfg)
+        _validate_policy_xml(cfg, body.policies_xml)
+        cfg.apis[api_id] = ApiConfig(
+            name=body.name or api_id,
+            path=body.path,
+            upstream_base_url=body.upstream_base_url,
+            upstream_path_prefix=body.upstream_path_prefix,
+            backend=body.backend,
+            products=body.products,
+            api_version_set=body.api_version_set,
+            api_version=body.api_version,
+            subscription_header_names=body.subscription_header_names,
+            subscription_query_param_names=body.subscription_query_param_names,
+            policies_xml=body.policies_xml,
+        )
+        updated = _persist_or_apply_config(request, cfg)
+        api = _get_api_or_404(updated, api_id)
+        return _masked(updated, project_api(updated, api_id, api))
+
+    @app.delete("/apim/management/apis/{api_id}")
+    async def delete_api(api_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _ensure_api_authoring_mode(cfg)
+        _get_api_or_404(cfg, api_id)
+        del cfg.apis[api_id]
+        updated = _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "api_id": api_id, "remaining": len(updated.apis)}
+
+    @app.get("/apim/management/operations")
+    async def list_operations(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        operations: list[dict[str, Any]] = []
+        for api_id, api in cfg.apis.items():
+            for operation_id, operation in api.operations.items():
+                operations.append(_masked(cfg, project_operation(cfg, api_id, operation_id, operation)))
+        return operations
+
+    @app.get("/apim/management/apis/{api_id}/operations")
+    async def list_api_operations(api_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        return [
+            _masked(cfg, project_operation(cfg, api_id, operation_id, operation))
+            for operation_id, operation in api.operations.items()
+        ]
+
+    @app.get("/apim/management/apis/{api_id}/operations/{operation_id}")
+    async def get_api_operation(api_id: str, operation_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        operation = _get_operation_or_404(cfg, api_id, operation_id)
+        return _masked(cfg, project_operation(cfg, api_id, operation_id, operation))
+
+    @app.put("/apim/management/apis/{api_id}/operations/{operation_id}")
+    async def upsert_api_operation(
+        api_id: str, operation_id: str, request: Request, body: OperationUpsert
+    ) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _ensure_api_authoring_mode(cfg)
+        api = _get_api_or_404(cfg, api_id)
+        _validate_policy_xml(cfg, body.policies_xml)
+        api.operations[operation_id] = OperationConfig(
+            name=body.name or operation_id,
+            method=body.method,
+            url_template=body.url_template,
+            upstream_base_url=body.upstream_base_url,
+            upstream_path_prefix=body.upstream_path_prefix,
+            backend=body.backend,
+            products=body.products,
+            api_version_set=body.api_version_set,
+            api_version=body.api_version,
+            subscription_header_names=body.subscription_header_names,
+            subscription_query_param_names=body.subscription_query_param_names,
+            authz=body.authz,
+            policies_xml=body.policies_xml,
+        )
+        updated = _persist_or_apply_config(request, cfg)
+        operation = _get_operation_or_404(updated, api_id, operation_id)
+        return _masked(updated, project_operation(updated, api_id, operation_id, operation))
+
+    @app.delete("/apim/management/apis/{api_id}/operations/{operation_id}")
+    async def delete_api_operation(api_id: str, operation_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _ensure_api_authoring_mode(cfg)
+        api = _get_api_or_404(cfg, api_id)
+        _get_operation_or_404(cfg, api_id, operation_id)
+        del api.operations[operation_id]
+        updated = _persist_or_apply_config(request, cfg)
+        return {
+            "deleted": True,
+            "api_id": api_id,
+            "operation_id": operation_id,
+            "remaining": len(updated.apis[api_id].operations),
+        }
 
     @app.get("/apim/management/policies/{scope_type}/{scope_name:path}")
     async def management_get_policy(scope_type: str, scope_name: str, request: Request) -> dict[str, Any]:
@@ -847,14 +1060,73 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             "trace": request.app.state.trace_store.get(trace_id) if trace_id else None,
         }
 
-    @app.get("/apim/management/subscriptions")
-    async def list_subscriptions(request: Request) -> list[dict]:
+    @app.get("/apim/management/products")
+    async def list_products(request: Request) -> list[dict[str, Any]]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        return [sub.model_dump() for sub in cfg.subscription.subscriptions.values()]
+        return [_masked(cfg, project_product(cfg, product_id, product)) for product_id, product in cfg.products.items()]
+
+    @app.get("/apim/management/products/{product_id}")
+    async def get_product(product_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        return _masked(cfg, project_product(cfg, product_id, product))
+
+    @app.put("/apim/management/products/{product_id}")
+    async def upsert_product(product_id: str, request: Request, body: ProductUpsert) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg.products[product_id] = ProductConfig(
+            name=body.name,
+            description=body.description,
+            require_subscription=body.require_subscription,
+        )
+        updated = _persist_or_apply_config(request, cfg)
+        product = _get_product_or_404(updated, product_id)
+        return _masked(updated, project_product(updated, product_id, product))
+
+    @app.delete("/apim/management/products/{product_id}")
+    async def delete_product(product_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _get_product_or_404(cfg, product_id)
+        del cfg.products[product_id]
+        for subscription in cfg.subscription.subscriptions.values():
+            subscription.products = [item for item in subscription.products if item != product_id]
+        for api in cfg.apis.values():
+            api.products = [item for item in api.products if item != product_id]
+            for operation in api.operations.values():
+                if operation.products is not None:
+                    operation.products = [item for item in operation.products if item != product_id]
+        for route in cfg.routes:
+            if route.product == product_id:
+                route.product = None
+            route.products = [item for item in route.products if item != product_id]
+        updated = _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "product_id": product_id, "remaining": len(updated.products)}
+
+    @app.get("/apim/management/subscriptions")
+    async def list_subscriptions(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [
+            _masked(cfg, project_subscription(cfg, config_key, subscription))
+            for config_key, subscription in cfg.subscription.subscriptions.items()
+        ]
+
+    @app.get("/apim/management/subscriptions/{subscription_id}")
+    async def get_subscription(subscription_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        entry = _find_subscription_entry(cfg, subscription_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        config_key, subscription = entry
+        return _masked(cfg, project_subscription(cfg, config_key, subscription))
 
     @app.post("/apim/management/subscriptions")
-    async def create_subscription(request: Request, body: SubscriptionUpsert) -> dict:
+    async def create_subscription(request: Request, body: SubscriptionUpsert) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
         if _find_subscription_by_id(cfg, body.id) is not None:
@@ -871,10 +1143,15 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             created_by="management",
         )
         cfg.subscription.subscriptions[body.id] = sub
-        return sub.model_dump()
+        updated = _persist_or_apply_config(request, cfg)
+        entry = _find_subscription_entry(updated, body.id)
+        if entry is None:
+            raise HTTPException(status_code=500, detail="Subscription persistence failed")
+        config_key, subscription = entry
+        return _masked(updated, project_subscription(updated, config_key, subscription))
 
     @app.patch("/apim/management/subscriptions/{subscription_id}")
-    async def update_subscription(request: Request, subscription_id: str, body: SubscriptionUpdate) -> dict:
+    async def update_subscription(request: Request, subscription_id: str, body: SubscriptionUpdate) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
         sub = _find_subscription_by_id(cfg, subscription_id)
@@ -887,12 +1164,33 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             sub.state = body.state
         if body.products is not None:
             sub.products = body.products
-        return sub.model_dump()
+        updated = _persist_or_apply_config(request, cfg)
+        entry = _find_subscription_entry(updated, subscription_id)
+        if entry is None:
+            raise HTTPException(status_code=500, detail="Subscription persistence failed")
+        config_key, subscription = entry
+        return _masked(updated, project_subscription(updated, config_key, subscription))
+
+    @app.delete("/apim/management/subscriptions/{subscription_id}")
+    async def delete_subscription(subscription_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        entry = _find_subscription_entry(cfg, subscription_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        config_key, _subscription = entry
+        del cfg.subscription.subscriptions[config_key]
+        updated = _persist_or_apply_config(request, cfg)
+        return {
+            "deleted": True,
+            "subscription_id": subscription_id,
+            "remaining": len(updated.subscription.subscriptions),
+        }
 
     @app.post("/apim/management/subscriptions/{subscription_id}/rotate")
     async def management_rotate_subscription_key(
         subscription_id: str, request: Request, key: str = "secondary"
-    ) -> dict:
+    ) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
         sub = _find_subscription_by_id(cfg, subscription_id)
@@ -906,7 +1204,168 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             sub.keys.primary = new_key
         else:
             sub.keys.secondary = new_key
-        return {"subscription_id": sub.id, "subscription_name": sub.name, "rotated": key, "new_key": new_key}
+        updated = _persist_or_apply_config(request, cfg)
+        entry = _find_subscription_entry(updated, subscription_id)
+        if entry is None:
+            raise HTTPException(status_code=500, detail="Subscription persistence failed")
+        config_key, subscription = entry
+        return {
+            "subscription_id": subscription.id,
+            "subscription_name": subscription.name,
+            "rotated": key,
+            "new_key": new_key,
+            "subscription": _masked(updated, project_subscription(updated, config_key, subscription)),
+        }
+
+    @app.get("/apim/management/backends")
+    async def list_backends(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [_masked(cfg, project_backend(cfg, backend_id, backend)) for backend_id, backend in cfg.backends.items()]
+
+    @app.get("/apim/management/backends/{backend_id}")
+    async def get_backend(backend_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        backend = _get_backend_or_404(cfg, backend_id)
+        return _masked(cfg, project_backend(cfg, backend_id, backend))
+
+    @app.put("/apim/management/backends/{backend_id}")
+    async def upsert_backend(backend_id: str, request: Request, body: BackendUpsert) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg.backends[backend_id] = BackendConfig(**body.model_dump(mode="json"))
+        updated = _persist_or_apply_config(request, cfg)
+        backend = _get_backend_or_404(updated, backend_id)
+        return _masked(updated, project_backend(updated, backend_id, backend))
+
+    @app.delete("/apim/management/backends/{backend_id}")
+    async def delete_backend(backend_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _get_backend_or_404(cfg, backend_id)
+        del cfg.backends[backend_id]
+        updated = _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "backend_id": backend_id, "remaining": len(updated.backends)}
+
+    @app.get("/apim/management/named-values")
+    async def list_named_values(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [
+            _masked(cfg, project_named_value(cfg, named_value_id, named_value))
+            for named_value_id, named_value in cfg.named_values.items()
+        ]
+
+    @app.get("/apim/management/named-values/{named_value_id}")
+    async def get_named_value(named_value_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        named_value = _get_named_value_or_404(cfg, named_value_id)
+        return _masked(cfg, project_named_value(cfg, named_value_id, named_value))
+
+    @app.put("/apim/management/named-values/{named_value_id}")
+    async def upsert_named_value(named_value_id: str, request: Request, body: NamedValueUpsert) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg.named_values[named_value_id] = NamedValueConfig(**body.model_dump(mode="json"))
+        updated = _persist_or_apply_config(request, cfg)
+        named_value = _get_named_value_or_404(updated, named_value_id)
+        return _masked(updated, project_named_value(updated, named_value_id, named_value))
+
+    @app.delete("/apim/management/named-values/{named_value_id}")
+    async def delete_named_value(named_value_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _get_named_value_or_404(cfg, named_value_id)
+        del cfg.named_values[named_value_id]
+        updated = _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "named_value_id": named_value_id, "remaining": len(updated.named_values)}
+
+    @app.get("/apim/management/api-version-sets")
+    async def list_api_version_sets(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [
+            _masked(cfg, project_api_version_set(cfg, version_set_id, version_set))
+            for version_set_id, version_set in cfg.api_version_sets.items()
+        ]
+
+    @app.get("/apim/management/api-version-sets/{version_set_id}")
+    async def get_api_version_set(version_set_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        version_set = cfg.api_version_sets.get(version_set_id)
+        if version_set is None:
+            raise HTTPException(status_code=404, detail="API version set not found")
+        return _masked(cfg, project_api_version_set(cfg, version_set_id, version_set))
+
+    @app.get("/apim/management/policy-fragments")
+    async def list_policy_fragments(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [
+            _masked(cfg, project_policy_fragment(cfg, fragment_id, xml))
+            for fragment_id, xml in cfg.policy_fragments.items()
+        ]
+
+    @app.get("/apim/management/policy-fragments/{fragment_id}")
+    async def get_policy_fragment(fragment_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        xml = cfg.policy_fragments.get(fragment_id)
+        if xml is None:
+            raise HTTPException(status_code=404, detail="Policy fragment not found")
+        return _masked(cfg, project_policy_fragment(cfg, fragment_id, xml))
+
+    @app.put("/apim/management/policy-fragments/{fragment_id}")
+    async def upsert_policy_fragment(fragment_id: str, request: Request, body: PolicyFragmentUpsert) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _validate_fragment_xml(body.xml)
+        cfg.policy_fragments[fragment_id] = body.xml
+        updated = _persist_or_apply_config(request, cfg)
+        return _masked(updated, project_policy_fragment(updated, fragment_id, updated.policy_fragments[fragment_id]))
+
+    @app.delete("/apim/management/policy-fragments/{fragment_id}")
+    async def delete_policy_fragment(fragment_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        if fragment_id not in cfg.policy_fragments:
+            raise HTTPException(status_code=404, detail="Policy fragment not found")
+        del cfg.policy_fragments[fragment_id]
+        updated = _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "fragment_id": fragment_id, "remaining": len(updated.policy_fragments)}
+
+    @app.get("/apim/management/users")
+    async def list_users(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [_masked(cfg, project_user(cfg, user_id, user)) for user_id, user in cfg.users.items()]
+
+    @app.get("/apim/management/users/{user_id}")
+    async def get_user(user_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        user = cfg.users.get(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        return _masked(cfg, project_user(cfg, user_id, user))
+
+    @app.get("/apim/management/groups")
+    async def list_groups(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [_masked(cfg, project_group(cfg, group_id, group)) for group_id, group in cfg.groups.items()]
+
+    @app.get("/apim/management/groups/{group_id}")
+    async def get_group(group_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        group = cfg.groups.get(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="Group not found")
+        return _masked(cfg, project_group(cfg, group_id, group))
 
     @app.post("/apim/management/import/tofu-show")
     async def import_tofu_show_json(request: Request, tf: dict[str, Any]) -> dict:
@@ -925,6 +1384,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         imported.tenant_access = current.tenant_access
         imported.trace_enabled = current.trace_enabled
         imported.policy_fragments = current.policy_fragments
+        imported.service = current.service
 
         imported.routes = imported.materialize_routes()
         request.app.state.gateway_config = imported

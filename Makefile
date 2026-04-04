@@ -17,7 +17,7 @@ COMPOSE_TODO_OTEL := $(COMPOSE) -f compose.todo.yml -f compose.todo.otel.yml
 COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 
-.PHONY: help ensure-certs install-hooks fmt lint up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo test-todo-e2e test-todo-bruno export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help ensure-certs install-hooks fmt lint lint-check up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo test-todo-e2e test-todo-bruno export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
@@ -48,7 +48,10 @@ help:
 	@printf "  %-22s %s\n" "install-hooks" "Enable the repo-managed git pre-commit hook"
 	@printf "  %-22s %s\n" "fmt" "Format Python code with Ruff"
 	@printf "  %-22s %s\n" "lint" "Format Python code with Ruff and run lint checks"
-	@printf "  %-22s %s\n" "test" "Run the Python test suite"
+	@printf "  %-22s %s\n" "lint-check" "Check Python formatting and lint with Ruff without modifying files"
+	@printf "  %-22s %s\n" "test" "Run Python and shell tests"
+	@printf "  %-22s %s\n" "test-python" "Run the Python test suite"
+	@printf "  %-22s %s\n" "test-shell" "Run the shell script test suite with BATS"
 	@printf "  %-22s %s\n" "compat" "Run the curated APIM sample compatibility harness"
 	@printf "  %-22s %s\n" "compat-report" "Run static Terraform/APIM compatibility analysis (requires TOFU_SHOW=...)"
 	@printf "  %-22s %s\n" "import-tofu" "Import a tofu show JSON file into a running simulator (requires TOFU_SHOW=...)"
@@ -174,8 +177,18 @@ lint:
 	uv run --extra dev ruff format .
 	uv run --extra dev ruff check .
 
-test:
+lint-check:
+	uv run --extra dev ruff format --check .
+	uv run --extra dev ruff check .
+
+test: test-python test-shell
+
+test-python:
 	uv run --extra dev pytest -q
+
+test-shell:
+	@command -v bats >/dev/null 2>&1 || { echo "bats is required for shell tests"; exit 1; }
+	bats tests/shell
 
 compat:
 	uv run python scripts/check_sample_compat.py

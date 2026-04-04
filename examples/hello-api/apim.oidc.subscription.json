@@ -29,16 +29,31 @@
       }
     }
   },
-  "routes": [
-    {
-      "name": "hello-api",
-      "path_prefix": "/api",
+  "apis": {
+    "hello-api": {
+      "name": "Hello API",
+      "path": "api",
       "upstream_base_url": "http://hello-api:8000",
       "upstream_path_prefix": "/api",
-      "product": "hello",
-      "authz": {
-        "required_roles": ["user"]
+      "products": ["hello"],
+      "operations": {
+        "health": {
+          "name": "Health",
+          "method": "GET",
+          "url_template": "/health",
+          "authz": {
+            "required_roles": ["user"]
+          }
+        },
+        "hello": {
+          "name": "Hello",
+          "method": "GET",
+          "url_template": "/hello",
+          "authz": {
+            "required_roles": ["user"]
+          }
+        }
       }
     }
-  ]
+  }
 }

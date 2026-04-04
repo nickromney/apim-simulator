@@ -20,6 +20,7 @@ from app.config import (
     ClientCertificateConfig,
     ClientCertificateMode,
     GatewayConfig,
+    GroupConfig,
     NamedValueConfig,
     OIDCConfig,
     OperationConfig,
@@ -32,6 +33,7 @@ from app.config import (
     SubscriptionState,
     TenantAccessConfig,
     TrustedClientCertificateConfig,
+    UserConfig,
 )
 from app.main import create_app
 
@@ -937,10 +939,10 @@ def test_full_model_operation_method_routing() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET":
             assert req.url.host == "upstream-get"
-            assert req.url.path == "/health/"
+            assert req.url.path == "/health"
         elif req.method == "POST":
             assert req.url.host == "upstream-post"
-            assert req.url.path == "/health/"
+            assert req.url.path == "/health"
         else:
             raise AssertionError(f"Unexpected method {req.method}")
         return httpx.Response(200, json={"ok": True})
@@ -1608,6 +1610,295 @@ def test_management_summary_lists_routes_and_gateway_scope() -> None:
     assert payload["gateway_policy_scope"] == {"scope_type": "gateway", "scope_name": "gateway"}
     assert payload["routes"][0]["name"] == "r1"
     assert payload["routes"][0]["policy_scope"] == {"scope_type": "route", "scope_name": "r1"}
+
+
+def test_management_resource_collections_expose_service_scoped_ids() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            service={"name": "team-sim", "display_name": "Team Simulator"},
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            products={"starter": ProductConfig(name="Starter", require_subscription=True)},
+            subscription=SubscriptionConfig(
+                required=True,
+                subscriptions={
+                    "starter-dev": Subscription(
+                        id="sub-starter-dev",
+                        name="starter-dev",
+                        keys=SubscriptionKeyPair(primary="starter-primary", secondary="starter-secondary"),
+                        products=["starter"],
+                    )
+                },
+            ),
+            named_values={"backend-secret": NamedValueConfig(value="super-secret-token", secret=True)},
+            backends={"hello-backend": BackendConfig(url="http://upstream")},
+            api_version_sets={
+                "public": ApiVersionSetConfig(
+                    display_name="Public",
+                    versioning_scheme=ApiVersioningScheme.Header,
+                    version_header_name="x-api-version",
+                )
+            },
+            policy_fragments={
+                "inject-stage": '<set-header name="x-stage" exists-action="override"><value>prod</value></set-header>'
+            },
+            users={"dev-1": UserConfig(id="dev-1", email="dev@example.com", name="Dev One")},
+            groups={"admins": GroupConfig(id="admins", name="Admins", users=["dev-1"])},
+            apis={
+                "hello": ApiConfig(
+                    name="hello",
+                    path="hello",
+                    upstream_base_url="http://upstream",
+                    products=["starter"],
+                    api_version_set="public",
+                    operations={"getHello": OperationConfig(name="getHello", method="GET", url_template="/hello")},
+                )
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+        service = client.get("/apim/management/service", headers=headers)
+        summary = client.get("/apim/management/summary", headers=headers)
+        apis = client.get("/apim/management/apis", headers=headers)
+        operations = client.get("/apim/management/operations", headers=headers)
+        products = client.get("/apim/management/products", headers=headers)
+        subscriptions = client.get("/apim/management/subscriptions", headers=headers)
+        backends = client.get("/apim/management/backends", headers=headers)
+        named_values = client.get("/apim/management/named-values", headers=headers)
+        version_sets = client.get("/apim/management/api-version-sets", headers=headers)
+        fragments = client.get("/apim/management/policy-fragments", headers=headers)
+        users = client.get("/apim/management/users", headers=headers)
+        groups = client.get("/apim/management/groups", headers=headers)
+
+    assert service.status_code == 200
+    assert service.json()["id"] == "service/team-sim"
+    assert service.json()["counts"]["apis"] == 1
+    assert service.json()["counts"]["operations"] == 1
+    assert service.json()["counts"]["recent_traces"] == 0
+
+    assert summary.status_code == 200
+    assert summary.json()["service"]["display_name"] == "Team Simulator"
+
+    assert apis.status_code == 200
+    assert apis.json()[0]["resource_id"] == "service/team-sim/apis/hello"
+    assert apis.json()[0]["policy_scope"] == {"scope_type": "api", "scope_name": "hello"}
+
+    assert operations.status_code == 200
+    assert operations.json()[0]["resource_id"] == "service/team-sim/apis/hello/operations/getHello"
+    assert operations.json()[0]["policy_scope"] == {"scope_type": "operation", "scope_name": "hello:getHello"}
+
+    assert products.status_code == 200
+    assert products.json()[0]["resource_id"] == "service/team-sim/products/starter"
+
+    assert subscriptions.status_code == 200
+    assert subscriptions.json()[0]["resource_id"] == "service/team-sim/subscriptions/sub-starter-dev"
+
+    assert backends.status_code == 200
+    assert backends.json()[0]["resource_id"] == "service/team-sim/backends/hello-backend"
+
+    assert named_values.status_code == 200
+    assert named_values.json()[0]["resource_id"] == "service/team-sim/named-values/backend-secret"
+    assert named_values.json()[0]["value"] == "***"
+    assert named_values.json()[0]["resolved"]["value"] == "***"
+
+    assert version_sets.status_code == 200
+    assert version_sets.json()[0]["resource_id"] == "service/team-sim/api-version-sets/public"
+
+    assert fragments.status_code == 200
+    assert fragments.json()[0]["resource_id"] == "service/team-sim/policy-fragments/inject-stage"
+
+    assert users.status_code == 200
+    assert users.json()[0]["groups"] == ["admins"]
+    assert users.json()[0]["resource_id"] == "service/team-sim/users/dev-1"
+
+    assert groups.status_code == 200
+    assert groups.json()[0]["users"] == ["dev-1"]
+    assert groups.json()[0]["resource_id"] == "service/team-sim/groups/admins"
+
+
+def test_management_crud_persists_api_authored_resources(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "apim.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "service": {"name": "persisted-sim", "display_name": "Persisted Simulator"},
+                "allow_anonymous": True,
+                "tenant_access": {"enabled": True, "primary_key": "t1"},
+                "products": {},
+                "backends": {},
+                "named_values": {},
+                "policy_fragments": {},
+                "apis": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APIM_CONFIG_PATH", str(config_path))
+
+    app = create_app()
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+
+        product = client.put(
+            "/apim/management/products/starter",
+            headers=headers,
+            json={"name": "Starter", "description": "Starter tier", "require_subscription": True},
+        )
+        backend = client.put(
+            "/apim/management/backends/weather-backend",
+            headers=headers,
+            json={"url": "http://weather-backend", "description": "Weather backend"},
+        )
+        named_value = client.put(
+            "/apim/management/named-values/upstream-key",
+            headers=headers,
+            json={"value": "abc123", "secret": True},
+        )
+        fragment = client.put(
+            "/apim/management/policy-fragments/add-stage",
+            headers=headers,
+            json={"xml": '<set-header name="x-stage" exists-action="override"><value>dev</value></set-header>'},
+        )
+        api = client.put(
+            "/apim/management/apis/weather",
+            headers=headers,
+            json={
+                "name": "weather",
+                "path": "weather",
+                "upstream_base_url": "http://weather-backend",
+                "backend": "weather-backend",
+                "products": ["starter"],
+                "policies_xml": "<policies><inbound><base /></inbound><backend /><outbound /><on-error /></policies>",
+            },
+        )
+        operation = client.put(
+            "/apim/management/apis/weather/operations/current",
+            headers=headers,
+            json={
+                "name": "current",
+                "method": "GET",
+                "url_template": "/current",
+                "products": ["starter"],
+            },
+        )
+
+        persisted_after_create = json.loads(config_path.read_text(encoding="utf-8"))
+
+        delete_operation = client.delete("/apim/management/apis/weather/operations/current", headers=headers)
+        delete_api = client.delete("/apim/management/apis/weather", headers=headers)
+        delete_fragment = client.delete("/apim/management/policy-fragments/add-stage", headers=headers)
+
+        persisted_after_delete = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert product.status_code == 200
+    assert product.json()["resource_id"] == "service/persisted-sim/products/starter"
+
+    assert backend.status_code == 200
+    assert backend.json()["resource_id"] == "service/persisted-sim/backends/weather-backend"
+
+    assert named_value.status_code == 200
+    assert named_value.json()["resource_id"] == "service/persisted-sim/named-values/upstream-key"
+
+    assert fragment.status_code == 200
+    assert fragment.json()["resource_id"] == "service/persisted-sim/policy-fragments/add-stage"
+
+    assert api.status_code == 200
+    assert api.json()["resource_id"] == "service/persisted-sim/apis/weather"
+
+    assert operation.status_code == 200
+    assert operation.json()["resource_id"] == "service/persisted-sim/apis/weather/operations/current"
+
+    assert persisted_after_create["routes"] == []
+    assert "starter" in persisted_after_create["products"]
+    assert "weather-backend" in persisted_after_create["backends"]
+    assert "upstream-key" in persisted_after_create["named_values"]
+    assert "add-stage" in persisted_after_create["policy_fragments"]
+    assert "weather" in persisted_after_create["apis"]
+    assert "current" in persisted_after_create["apis"]["weather"]["operations"]
+
+    assert delete_operation.status_code == 200
+    assert delete_api.status_code == 200
+    assert delete_fragment.status_code == 200
+    assert "current" not in persisted_after_delete["apis"].get("weather", {}).get("operations", {})
+    assert "weather" not in persisted_after_delete["apis"]
+    assert "add-stage" not in persisted_after_delete["policy_fragments"]
+
+
+def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monkeypatch) -> None:
+    issuer = "http://issuer.example"
+    audience = "api-app"
+    jwks, private_key = _make_rsa_jwks()
+    token = _make_token(
+        private_key=private_key,
+        issuer=issuer,
+        audience=audience,
+        extra_claims={"realm_access": {"roles": ["user"]}},
+    )
+
+    config_path = tmp_path / "platform-mounted.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "allow_anonymous": False,
+                "oidc": {"issuer": issuer, "audience": audience, "jwks": jwks},
+                "tenant_access": {"enabled": True, "primary_key": "platform-tenant"},
+                "products": {
+                    "subnet-calculator": {
+                        "name": "Subnet Calculator",
+                        "require_subscription": True,
+                    }
+                },
+                "subscription": {
+                    "required": True,
+                    "subscriptions": {
+                        "platform-demo": {
+                            "id": "platform-demo",
+                            "name": "platform-demo",
+                            "keys": {"primary": "platform-demo-key", "secondary": "platform-demo-key-secondary"},
+                            "products": ["subnet-calculator"],
+                        }
+                    },
+                },
+                "routes": [
+                    {
+                        "name": "subnet-calculator-api",
+                        "path_prefix": "/api",
+                        "upstream_base_url": "http://upstream",
+                        "upstream_path_prefix": "/api",
+                        "product": "subnet-calculator",
+                        "authz": {"required_roles": ["user"]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APIM_CONFIG_PATH", str(config_path))
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url == httpx.URL("http://upstream/api/health")
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        health = client.get("/apim/health")
+        startup = client.get("/apim/startup")
+        status = client.get("/apim/management/status", headers={"X-Apim-Tenant-Key": "platform-tenant"})
+        ok = client.get(
+            "/api/health",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": "platform-demo-key",
+            },
+        )
+
+    assert health.status_code == 200
+    assert startup.status_code == 200
+    assert status.status_code == 200
+    assert status.json()["service"]["name"] == "apim-simulator"
+    assert ok.status_code == 200
 
 
 def test_management_policy_get_put_updates_route_policy_in_memory() -> None:
