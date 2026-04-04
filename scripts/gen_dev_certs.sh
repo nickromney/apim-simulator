@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+DEFAULT_ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+ROOT_DIR="${APIM_SIMULATOR_ROOT_DIR:-$DEFAULT_ROOT_DIR}"
 CERT_DIR="$ROOT_DIR/examples/edge/certs"
 CERT_PATH="$CERT_DIR/apim.localtest.me.crt"
 KEY_PATH="$CERT_DIR/apim.localtest.me.key"

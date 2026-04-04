@@ -388,13 +388,21 @@ The important shape is:
   "subscription": {
     "required": true
   },
-  "routes": [
-    {
+  "apis": {
+    "todo-api": {
       "name": "todo-api",
-      "path_prefix": "/api",
-      "product": "todo-demo"
+      "path": "api",
+      "upstream_base_url": "http://mock-backend:8080",
+      "products": ["todo-demo"],
+      "operations": {
+        "health": {
+          "name": "health",
+          "method": "GET",
+          "url_template": "/health"
+        }
+      }
     }
-  ]
+  }
 }
 ```
 
@@ -425,30 +433,36 @@ The important shape is:
   "subscription": {
     "required": false
   },
-  "routes": [
-    {
+  "apis": {
+    "demo-api": {
       "name": "demo-api",
-      "path_prefix": "/api",
+      "path": "api",
       "upstream_base_url": "http://mock-backend:8080",
-      "upstream_path_prefix": "/api",
-      "product": "default",
-      "authz": {
-        "required_roles": ["user"]
+      "products": ["default"],
+      "operations": {
+        "echo": {
+          "name": "echo",
+          "method": "GET",
+          "url_template": "/echo",
+          "authz": {
+            "required_roles": ["user"]
+          }
+        }
       }
     }
-  ]
+  }
 }
 ```
 
 Important nuance:
 
 - `subscription.required: false` disables the global subscription requirement
-- but if the route belongs to a product where `require_subscription: true`, the
-  route will still require a subscription key
+- but if the API or operation belongs to a product where
+  `require_subscription: true`, it will still require a subscription key
 
 So if you want true JWT-only mode, do one of these:
 
-- do not attach the route to a subscription-required product
+- do not attach the API or operation to a subscription-required product
 - or set `product.require_subscription: false`
 
 The checked-in OIDC stack in this repo demonstrates the combined

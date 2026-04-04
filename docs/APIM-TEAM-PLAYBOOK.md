@@ -48,7 +48,7 @@ If you reverse that order, you usually make debugging harder.
 Use this when:
 
 - a new service is being introduced
-- an existing internal service needs a public APIM route
+- an existing internal service needs a public APIM API
 
 Touch:
 
@@ -74,7 +74,7 @@ Validation:
 
 PR proof:
 
-- the route config snippet
+- the APIM config snippet
 - one successful request example
 - one sentence explaining why the backend should be behind APIM
 
@@ -89,7 +89,7 @@ Touch:
 
 - `products`
 - `subscription`
-- route `product` or `products`
+- API or operation `products`
 
 Required checks:
 

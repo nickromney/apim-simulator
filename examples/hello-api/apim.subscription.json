@@ -24,14 +24,26 @@
       }
     }
   },
-  "routes": [
-    {
-      "name": "hello-api",
-      "path_prefix": "/api",
+  "apis": {
+    "hello-api": {
+      "name": "Hello API",
+      "path": "api",
       "upstream_base_url": "http://hello-api:8000",
       "upstream_path_prefix": "/api",
-      "product": "hello",
-      "policies_xml": "<policies><inbound /><backend /><outbound><set-header name=\"x-hello-policy\" exists-action=\"override\"><value>applied</value></set-header></outbound><on-error /></policies>"
+      "products": ["hello"],
+      "policies_xml": "<policies><inbound /><backend /><outbound><set-header name=\"x-hello-policy\" exists-action=\"override\"><value>applied</value></set-header></outbound><on-error /></policies>",
+      "operations": {
+        "health": {
+          "name": "Health",
+          "method": "GET",
+          "url_template": "/health"
+        },
+        "hello": {
+          "name": "Hello",
+          "method": "GET",
+          "url_template": "/hello"
+        }
+      }
     }
-  ]
+  }
 }

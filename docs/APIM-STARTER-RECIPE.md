@@ -111,10 +111,10 @@ shape.
 
 These are the gateway-side variants:
 
-- `apim.anonymous.json`: route works without auth
-- `apim.subscription.json`: route requires a subscription key
-- `apim.oidc.jwt-only.json`: route requires a bearer token but not a subscription
-- `apim.oidc.subscription.json`: route requires both a bearer token and a subscription key
+- `apim.anonymous.json`: API works without auth
+- `apim.subscription.json`: API requires a subscription key
+- `apim.oidc.jwt-only.json`: API requires a bearer token but not a subscription
+- `apim.oidc.subscription.json`: API requires both a bearer token and a subscription key
 
 This is the clearest way to teach the difference between the auth patterns,
 because only the config changes.
@@ -197,7 +197,7 @@ meant to be called directly.
 
 Pick exactly one first:
 
-- anonymous for route bring-up
+- anonymous for API bring-up
 - subscription-only for product access control
 - JWT-only for identity-driven APIs without APIM subscriptions
 - subscription plus JWT when you need both product access and identity

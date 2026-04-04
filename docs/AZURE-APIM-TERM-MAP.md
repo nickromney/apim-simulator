@@ -11,8 +11,8 @@ the API" and you are not yet fluent in APIM vocabulary.
 | If someone says... | They usually mean... | In this repo, start here |
 | --- | --- | --- |
 | APIM service | The gateway runtime | `app/main.py`, `compose*.yml` |
-| API | A public surface exposed by the gateway | `routes` in config JSON |
-| Operation | A specific path and method | backend path, method, and route match |
+| API | A published surface with a base path | `apis` in config JSON |
+| Operation | A specific path and method under an API | `apis.<id>.operations` in config JSON |
 | Product | A named access bundle | `products` in config JSON |
 | Subscription | A client key pair tied to products | `subscription.subscriptions` in config JSON |
 | Subscription key | The header clients send | `Ocp-Apim-Subscription-Key` |
@@ -40,7 +40,7 @@ you are changing the local APIM service equivalent.
 
 In Azure APIM, an API is a published surface with operations under it.
 
-In this repo, the practical equivalent is usually one or more routes in config
+In this repo, the practical equivalent is an entry in the `apis` map in config
 JSON, for example:
 
 - `examples/basic.json`
@@ -49,25 +49,28 @@ JSON, for example:
 
 For beginners, think:
 
-- public path prefix
+- public base path
 - target backend
-- auth requirements
+- product attachment
+- API-level policy and version settings
 
 ### Operation
 
 In Azure APIM, an operation is usually a method plus path.
 
-In this repo, operation-level thinking is split across:
+In this repo, operations live under an API and carry:
 
-- backend path handling
 - HTTP method
-- route matching in the gateway
+- URL template
+- optional operation-level auth and policy
+- any operation-specific backend override
 
 If you are troubleshooting one endpoint, think in terms of:
 
-- request path
+- API path
+- operation URL template
 - request method
-- matched route
+- matched route materialized from the API and operation
 - backend path after any rewrite
 
 ### Product
@@ -89,7 +92,7 @@ Beginners should remember:
 
 - products are about access packaging
 - a product can require a subscription
-- routes can be attached to products
+- APIs and operations can be attached to products
 
 ### Subscription
 
@@ -115,7 +118,7 @@ Beginners should remember:
 
 - a subscription key is not a user login
 - it proves the caller is allowed to use a product
-- routes tied to that product can accept or reject the request based on the key
+- APIs and operations tied to that product can accept or reject the request based on the key
 
 ### Policy
 
@@ -217,7 +220,7 @@ Use this quick translation table.
 
 | Task someone says aloud | What you should inspect first |
 | --- | --- |
-| Add a new API behind APIM | backend app + route config JSON |
+| Add a new API behind APIM | backend app + `apis` config JSON |
 | Require subscriptions for this API | `products`, `subscription`, route `product` |
 | Require JWT for this route | `allow_anonymous`, `oidc`, route `authz` |
 | Add a policy header | `policies_xml` |

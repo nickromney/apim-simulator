@@ -11,10 +11,10 @@ real files you can run immediately.
 
 - `main.py`: minimal FastAPI backend with shared OTEL wiring
 - `Dockerfile`: container build matching the repo's Python service pattern
-- `apim.anonymous.json`: anonymous APIM route
-- `apim.subscription.json`: subscription-protected APIM route
-- `apim.oidc.jwt-only.json`: JWT-only APIM route
-- `apim.oidc.subscription.json`: subscription plus JWT APIM route
+- `apim.anonymous.json`: anonymous APIM config
+- `apim.subscription.json`: subscription-protected APIM config
+- `apim.oidc.jwt-only.json`: JWT-only APIM config
+- `apim.oidc.subscription.json`: subscription plus JWT APIM config
 
 ## Fastest Path
 
