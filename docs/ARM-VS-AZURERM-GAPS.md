@@ -10,7 +10,7 @@ The AzureRM provider abstracts Azure Resource Manager (ARM) APIs into Terraform 
 2. **ARM templates** - Nested ARM deployment
 3. **Wait for provider update** - Track GitHub issues
 
-## Current Gaps (as of January 2026)
+## Current Gaps (as of April 2026)
 
 ### High Priority (affects simulator design)
 
@@ -18,7 +18,7 @@ The AzureRM provider abstracts Azure Resource Manager (ARM) APIs into Terraform 
 |--------------|----------------|------------|------------------|
 | `properties.natGatewayState` | Not exposed | AzAPI | None - k8s networking |
 | `properties.publicNetworkAccess` | Available (v3.x+) | - | None |
-| Workspace APIs | Partial | AzAPI for workspaces | None - single workspace |
+| Workspace APIs | Available for core workspace resources | AzureRM | None - single workspace |
 | GraphQL resolver policies | Not in provider | AzAPI | Not implementing GraphQL |
 
 ### Medium Priority (nice to have)
@@ -26,7 +26,7 @@ The AzureRM provider abstracts Azure Resource Manager (ARM) APIs into Terraform 
 | ARM Property | AzureRM Status | Workaround | Simulator Impact |
 |--------------|----------------|------------|------------------|
 | `properties.developerPortalUrl` customization | Read-only | - | N/A - no portal |
-| API revision descriptions | Not granular | - | Not tracking revisions |
+| API revision descriptions | Partially exposed on APIs | - | Imported as read-only revision metadata; runtime still collapses to one active API |
 | Subscription scope (all APIs) | Supported | - | Implemented |
 | `properties.customProperties` | Available | - | Could add to config |
 
@@ -73,8 +73,6 @@ These ARM resources have complete AzureRM coverage:
 
 | ARM Resource Type | Notes |
 |-------------------|-------|
-| `Microsoft.ApiManagement/service/workspaces` | Preview feature |
-| `Microsoft.ApiManagement/service/workspaces/*` | Workspace-scoped resources |
 | `Microsoft.ApiManagement/service/apis/resolvers` | GraphQL resolvers |
 | `Microsoft.ApiManagement/service/contentTypes` | Developer portal content |
 | `Microsoft.ApiManagement/service/contentItems` | Developer portal content |
@@ -99,8 +97,8 @@ Based on these gaps, the simulator:
 
 1. **Uses JSON config** - Maps to Terraform `tofu show -json` output
 2. **Accepts policy XML** - Same format as `azurerm_api_management_api_policy.xml_content`
-3. **Ignores ARM-only features** - Workspace APIs, GraphQL resolvers
-4. **Focuses on gateway behavior** - Not management plane CRUD
+3. **Ignores ARM-only or out-of-scope features** - GraphQL resolvers, portal content, broader workspace runtime
+4. **Focuses on gateway behavior first** - Adds selective management plane CRUD only for high-learning-value local resources
 
 ## Tracking Provider Updates
 

@@ -34,6 +34,16 @@ class ApiVersionSetConfig(BaseModel):
 class ServiceMetadataConfig(BaseModel):
     name: str = "apim-simulator"
     display_name: str = "Local APIM Simulator"
+    public_network_access_enabled: bool | None = None
+    virtual_network_type: str | None = None
+    hostname_configurations: list[ServiceHostnameConfiguration] = Field(default_factory=list)
+
+
+class ServiceHostnameConfiguration(BaseModel):
+    type: str
+    host_name: str
+    negotiate_client_certificate: bool = False
+    default_ssl_binding: bool = False
 
 
 class HeaderCondition(BaseModel):
@@ -173,6 +183,70 @@ class RouteAuthzConfig(BaseModel):
     required_claims: dict[str, str] = Field(default_factory=dict)
 
 
+class OperationExampleConfig(BaseModel):
+    name: str
+    summary: str | None = None
+    description: str | None = None
+    value: Any | None = None
+    external_value: str | None = None
+
+
+class OperationParameterConfig(BaseModel):
+    name: str
+    required: bool
+    type: str
+    description: str | None = None
+    default_value: str | None = None
+    values: list[str] = Field(default_factory=list)
+    examples: list[OperationExampleConfig] = Field(default_factory=list)
+    schema_id: str | None = None
+    type_name: str | None = None
+
+
+class OperationRepresentationConfig(BaseModel):
+    content_type: str
+    form_parameters: list[OperationParameterConfig] = Field(default_factory=list)
+    examples: list[OperationExampleConfig] = Field(default_factory=list)
+    schema_id: str | None = None
+    type_name: str | None = None
+
+
+class OperationRequestMetadataConfig(BaseModel):
+    description: str | None = None
+    headers: list[OperationParameterConfig] = Field(default_factory=list)
+    query_parameters: list[OperationParameterConfig] = Field(default_factory=list)
+    representations: list[OperationRepresentationConfig] = Field(default_factory=list)
+
+
+class OperationResponseMetadataConfig(BaseModel):
+    status_code: int
+    description: str | None = None
+    headers: list[OperationParameterConfig] = Field(default_factory=list)
+    representations: list[OperationRepresentationConfig] = Field(default_factory=list)
+
+
+class ApiSchemaConfig(BaseModel):
+    content_type: str
+    value: str | None = None
+    definitions: dict[str, Any] = Field(default_factory=dict)
+    components: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApiRevisionConfig(BaseModel):
+    revision: str
+    description: str | None = None
+    is_current: bool | None = None
+    is_online: bool | None = None
+    source_api_id: str | None = None
+
+
+class ApiReleaseConfig(BaseModel):
+    name: str
+    api_id: str | None = None
+    notes: str | None = None
+    revision: str | None = None
+
+
 class KeyVaultNamedValueConfig(BaseModel):
     secret_id: str
     identity_client_id: str | None = None
@@ -184,22 +258,88 @@ class NamedValueConfig(BaseModel):
     value_from_key_vault: KeyVaultNamedValueConfig | None = None
 
 
+class LoggerApplicationInsightsConfig(BaseModel):
+    connection_string: str | None = None
+    instrumentation_key: str | None = None
+
+
+class LoggerEventHubConfig(BaseModel):
+    name: str
+    connection_string: str | None = None
+    endpoint_uri: str | None = None
+    user_assigned_identity_client_id: str | None = None
+
+
+class LoggerConfig(BaseModel):
+    logger_type: str = "custom"
+    description: str | None = None
+    buffered: bool = True
+    resource_id: str | None = None
+    application_insights: LoggerApplicationInsightsConfig | None = None
+    eventhub: LoggerEventHubConfig | None = None
+
+
+class DiagnosticMaskingRuleConfig(BaseModel):
+    mode: str
+    value: str
+
+
+class DiagnosticDataMaskingConfig(BaseModel):
+    query_params: list[DiagnosticMaskingRuleConfig] = Field(default_factory=list)
+    headers: list[DiagnosticMaskingRuleConfig] = Field(default_factory=list)
+
+
+class DiagnosticHttpMessageConfig(BaseModel):
+    body_bytes: int | None = None
+    headers_to_log: list[str] = Field(default_factory=list)
+    data_masking: DiagnosticDataMaskingConfig | None = None
+
+
+class DiagnosticConfig(BaseModel):
+    identifier: str
+    logger_id: str | None = None
+    always_log_errors: bool | None = None
+    backend_request: DiagnosticHttpMessageConfig | None = None
+    backend_response: DiagnosticHttpMessageConfig | None = None
+    frontend_request: DiagnosticHttpMessageConfig | None = None
+    frontend_response: DiagnosticHttpMessageConfig | None = None
+    http_correlation_protocol: str | None = None
+    log_client_ip: bool | None = None
+    sampling_percentage: float | None = None
+    verbosity: str | None = None
+    operation_name_format: str | None = None
+
+
 class UserConfig(BaseModel):
     id: str
     email: str | None = None
     name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    note: str | None = None
+    state: str | None = None
+    confirmation: str | None = None
 
 
 class GroupConfig(BaseModel):
     id: str
     name: str
+    description: str | None = None
+    external_id: str | None = None
+    type: str = "custom"
     users: list[str] = Field(default_factory=list)
+
+
+class TagConfig(BaseModel):
+    display_name: str
 
 
 class ProductConfig(BaseModel):
     name: str
     description: str | None = None
     require_subscription: bool = True
+    groups: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
 
 class BackendConfig(BaseModel):
@@ -272,8 +412,11 @@ class GatewayConfig(BaseModel):
     oidc_providers: dict[str, OIDCConfig] = Field(default_factory=dict)
     products: dict[str, ProductConfig] = Field(default_factory=dict)
     named_values: dict[str, NamedValueConfig] = Field(default_factory=dict)
+    loggers: dict[str, LoggerConfig] = Field(default_factory=dict)
+    diagnostics: dict[str, DiagnosticConfig] = Field(default_factory=dict)
     users: dict[str, UserConfig] = Field(default_factory=dict)
     groups: dict[str, GroupConfig] = Field(default_factory=dict)
+    tags: dict[str, TagConfig] = Field(default_factory=dict)
     subscription: SubscriptionConfig = Field(default_factory=SubscriptionConfig)
     admin_token: str | None = None
     tenant_access: TenantAccessConfig = Field(default_factory=TenantAccessConfig)
@@ -384,6 +527,7 @@ class OperationConfig(BaseModel):
     name: str
     method: str = "GET"
     url_template: str
+    description: str | None = None
     upstream_base_url: str | None = None
     upstream_path_prefix: str | None = None
     backend: str | None = None
@@ -394,6 +538,10 @@ class OperationConfig(BaseModel):
     subscription_query_param_names: list[str] | None = None
     authz: RouteAuthzConfig | None = None
     policies_xml: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    template_parameters: list[OperationParameterConfig] = Field(default_factory=list)
+    request: OperationRequestMetadataConfig | None = None
+    responses: list[OperationResponseMetadataConfig] = Field(default_factory=list)
 
 
 class ApiConfig(BaseModel):
@@ -405,10 +553,20 @@ class ApiConfig(BaseModel):
     products: list[str] = Field(default_factory=list)
     api_version_set: str | None = None
     api_version: str | None = None
+    revision: str | None = None
+    revision_description: str | None = None
+    version_description: str | None = None
+    source_api_id: str | None = None
+    is_current: bool | None = None
+    is_online: bool | None = None
     subscription_header_names: list[str] | None = None
     subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None
+    tags: list[str] = Field(default_factory=list)
     operations: dict[str, OperationConfig] = Field(default_factory=dict)
+    schemas: dict[str, ApiSchemaConfig] = Field(default_factory=dict)
+    revisions: dict[str, ApiRevisionConfig] = Field(default_factory=dict)
+    releases: dict[str, ApiReleaseConfig] = Field(default_factory=dict)
 
 
 def _default_config_from_env() -> GatewayConfig:
