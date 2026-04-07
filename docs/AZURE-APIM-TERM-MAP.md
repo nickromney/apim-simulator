@@ -4,7 +4,7 @@ This document translates common Azure API Management language into the terms,
 files, and runtime surfaces used in this repository.
 
 Use it when somebody says "update the APIM product" or "add JWT validation to
-the API" and you are not yet fluent in APIM vocabulary.
+the API" and you need a translation layer into this repo.
 
 ## The Short Version
 
@@ -47,7 +47,7 @@ JSON, for example:
 - `examples/todo-app/apim.json`
 - `examples/oidc/keycloak.json`
 
-For beginners, think:
+In practice, an API here means:
 
 - public base path
 - target backend
@@ -88,7 +88,7 @@ In this repo, products live in config JSON:
 }
 ```
 
-Beginners should remember:
+Key points:
 
 - products are about access packaging
 - a product can require a subscription
@@ -114,7 +114,7 @@ In this repo, subscriptions also live in config JSON:
 }
 ```
 
-Beginners should remember:
+Key points:
 
 - a subscription key is not a user login
 - it proves the caller is allowed to use a product
@@ -141,7 +141,7 @@ Example:
 </policies>
 ```
 
-For beginners, a policy is just:
+Operationally, a policy is:
 
 - "before the backend call, do this"
 - "after the backend call, do this"
@@ -176,7 +176,7 @@ In this repo, the relevant pieces are:
 - `authz.required_claims`
 - `validate-jwt` support in the policy engine
 
-For beginners:
+Operationally:
 
 - subscription keys answer "is this caller allowed to consume the product?"
 - JWTs answer "who is the caller and what are they allowed to do?"
@@ -208,7 +208,7 @@ In this repo, the practical observability stack is:
 - Grafana LGTM for logs, metrics, and traces
 - the dashboard at `http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview`
 
-For beginners, use these words precisely:
+Use these words precisely:
 
 - logs: individual event records
 - traces: per-request flow across services
@@ -229,7 +229,7 @@ Use this quick translation table.
 | Prove the browser is going through APIM | todo UI transcript, Proxyman, HAR |
 | Show me telemetry for this route | Grafana dashboard and Explore |
 
-## Good Beginner Habits
+## Working Habits
 
 - Do not start by changing three auth layers at once.
 - Get one route working anonymously first if you can.

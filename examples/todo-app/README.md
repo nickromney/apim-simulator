@@ -5,10 +5,11 @@ browser-facing APIM path:
 
 `Browser -> Astro frontend -> apim-simulator -> FastAPI todo API`
 
-It is intentionally container-first and environment-configured so it can be
-lifted into `platform/apps/todo` later without changing the application code.
+It is intentionally container-first and environment-configured so the frontend,
+gateway, backend, and OTEL stack can be exercised together with one set of
+local commands.
 
-If you are new to APIs or APIM, read
+If you want the APIM model first, read
 [`docs/APIM-TRAINING-GUIDE.md`](../../docs/APIM-TRAINING-GUIDE.md) before
 diving into the example details here.
 
@@ -20,6 +21,7 @@ make up-todo-otel
 make smoke-todo
 make test-todo-e2e
 make test-todo-bruno
+make test-todo-postman
 make export-todo-har
 make down
 ```
@@ -38,11 +40,13 @@ that Prometheus, Loki, and Tempo all see the expected APIM and todo signals.
 ## External client artifacts
 
 - Bruno collection: `examples/todo-app/api-clients/bruno/`
+- Postman collection: `examples/todo-app/api-clients/postman/`
 - Proxyman HAR capture: `examples/todo-app/api-clients/proxyman/todo-through-apim.har`
 
-The Bruno environment file defaults to localhost, but the base URL and
-subscription key are just variables, so the same collection can be pointed at a
-Kubernetes ingress later without changing the request files.
+The Bruno and Postman local environment files default to localhost, but the
+base URL and subscription key are just variables, so the same collections can
+be pointed at a Kubernetes ingress later without changing the request
+definitions.
 
 `make export-todo-har` regenerates the HAR from the currently running stack so
 the Proxyman import reflects real requests and responses, including APIM proof
