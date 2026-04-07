@@ -14,16 +14,29 @@ from jwt.algorithms import RSAAlgorithm
 
 from app.config import (
     ApiConfig,
+    ApiReleaseConfig,
+    ApiRevisionConfig,
+    ApiSchemaConfig,
     ApiVersioningScheme,
     ApiVersionSetConfig,
     BackendConfig,
     ClientCertificateConfig,
     ClientCertificateMode,
+    DiagnosticConfig,
+    DiagnosticDataMaskingConfig,
+    DiagnosticHttpMessageConfig,
+    DiagnosticMaskingRuleConfig,
     GatewayConfig,
     GroupConfig,
+    LoggerApplicationInsightsConfig,
+    LoggerConfig,
     NamedValueConfig,
     OIDCConfig,
     OperationConfig,
+    OperationParameterConfig,
+    OperationRepresentationConfig,
+    OperationRequestMetadataConfig,
+    OperationResponseMetadataConfig,
     ProductConfig,
     RouteAuthzConfig,
     RouteConfig,
@@ -31,6 +44,7 @@ from app.config import (
     SubscriptionConfig,
     SubscriptionKeyPair,
     SubscriptionState,
+    TagConfig,
     TenantAccessConfig,
     TrustedClientCertificateConfig,
     UserConfig,
@@ -1618,7 +1632,11 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
             service={"name": "team-sim", "display_name": "Team Simulator"},
             allow_anonymous=True,
             tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
-            products={"starter": ProductConfig(name="Starter", require_subscription=True)},
+            products={
+                "starter": ProductConfig(
+                    name="Starter", require_subscription=True, groups=["admins"], tags=["featured"]
+                )
+            },
             subscription=SubscriptionConfig(
                 required=True,
                 subscriptions={
@@ -1631,6 +1649,30 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
                 },
             ),
             named_values={"backend-secret": NamedValueConfig(value="super-secret-token", secret=True)},
+            loggers={
+                "appinsights": LoggerConfig(
+                    logger_type="application_insights",
+                    application_insights=LoggerApplicationInsightsConfig(
+                        instrumentation_key="ikey-secret",
+                        connection_string="InstrumentationKey=ikey-secret;IngestionEndpoint=https://example.test/",
+                    ),
+                )
+            },
+            diagnostics={
+                "applicationinsights": DiagnosticConfig(
+                    identifier="applicationinsights",
+                    logger_id="appinsights",
+                    sampling_percentage=5.0,
+                    verbosity="verbose",
+                    frontend_request=DiagnosticHttpMessageConfig(
+                        body_bytes=32,
+                        headers_to_log=["content-type"],
+                        data_masking=DiagnosticDataMaskingConfig(
+                            headers=[DiagnosticMaskingRuleConfig(mode="Mask", value="authorization")]
+                        ),
+                    ),
+                )
+            },
             backends={"hello-backend": BackendConfig(url="http://upstream")},
             api_version_sets={
                 "public": ApiVersionSetConfig(
@@ -1644,6 +1686,7 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
             },
             users={"dev-1": UserConfig(id="dev-1", email="dev@example.com", name="Dev One")},
             groups={"admins": GroupConfig(id="admins", name="Admins", users=["dev-1"])},
+            tags={"featured": TagConfig(display_name="Featured")},
             apis={
                 "hello": ApiConfig(
                     name="hello",
@@ -1651,7 +1694,40 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
                     upstream_base_url="http://upstream",
                     products=["starter"],
                     api_version_set="public",
-                    operations={"getHello": OperationConfig(name="getHello", method="GET", url_template="/hello")},
+                    revision="2",
+                    revision_description="Current revision",
+                    source_api_id="service/team-sim/apis/hello;rev=1",
+                    is_current=True,
+                    is_online=True,
+                    tags=["featured"],
+                    operations={
+                        "getHello": OperationConfig(
+                            name="getHello",
+                            method="GET",
+                            url_template="/hello",
+                            tags=["featured"],
+                        )
+                    },
+                    revisions={
+                        "1": ApiRevisionConfig(
+                            revision="1", description="Initial revision", is_current=False, is_online=False
+                        ),
+                        "2": ApiRevisionConfig(
+                            revision="2",
+                            description="Current revision",
+                            is_current=True,
+                            is_online=True,
+                            source_api_id="service/team-sim/apis/hello;rev=1",
+                        ),
+                    },
+                    releases={
+                        "public": ApiReleaseConfig(
+                            name="public",
+                            api_id="service/team-sim/apis/hello;rev=2",
+                            notes="Shipped publicly",
+                            revision="2",
+                        )
+                    },
                 )
             },
         )
@@ -1667,30 +1743,51 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
         subscriptions = client.get("/apim/management/subscriptions", headers=headers)
         backends = client.get("/apim/management/backends", headers=headers)
         named_values = client.get("/apim/management/named-values", headers=headers)
+        loggers = client.get("/apim/management/loggers", headers=headers)
+        diagnostics = client.get("/apim/management/diagnostics", headers=headers)
         version_sets = client.get("/apim/management/api-version-sets", headers=headers)
         fragments = client.get("/apim/management/policy-fragments", headers=headers)
         users = client.get("/apim/management/users", headers=headers)
         groups = client.get("/apim/management/groups", headers=headers)
+        group_users = client.get("/apim/management/groups/admins/users", headers=headers)
+        tags = client.get("/apim/management/tags", headers=headers)
+        api_tags = client.get("/apim/management/apis/hello/tags", headers=headers)
+        api_revisions = client.get("/apim/management/apis/hello/revisions", headers=headers)
+        api_releases = client.get("/apim/management/apis/hello/releases", headers=headers)
+        operation_tags = client.get("/apim/management/apis/hello/operations/getHello/tags", headers=headers)
+        product_tags = client.get("/apim/management/products/starter/tags", headers=headers)
+        product_groups = client.get("/apim/management/products/starter/groups", headers=headers)
 
     assert service.status_code == 200
     assert service.json()["id"] == "service/team-sim"
     assert service.json()["counts"]["apis"] == 1
     assert service.json()["counts"]["operations"] == 1
+    assert service.json()["counts"]["api_revisions"] == 2
+    assert service.json()["counts"]["api_releases"] == 1
+    assert service.json()["counts"]["loggers"] == 1
+    assert service.json()["counts"]["diagnostics"] == 1
+    assert service.json()["counts"]["tags"] == 1
     assert service.json()["counts"]["recent_traces"] == 0
 
     assert summary.status_code == 200
     assert summary.json()["service"]["display_name"] == "Team Simulator"
+    assert summary.json()["tags"][0]["resource_id"] == "service/team-sim/tags/featured"
 
     assert apis.status_code == 200
     assert apis.json()[0]["resource_id"] == "service/team-sim/apis/hello"
     assert apis.json()[0]["policy_scope"] == {"scope_type": "api", "scope_name": "hello"}
+    assert apis.json()[0]["revision"] == "2"
+    assert apis.json()[0]["tags"] == ["featured"]
 
     assert operations.status_code == 200
     assert operations.json()[0]["resource_id"] == "service/team-sim/apis/hello/operations/getHello"
     assert operations.json()[0]["policy_scope"] == {"scope_type": "operation", "scope_name": "hello:getHello"}
+    assert operations.json()[0]["tags"] == ["featured"]
 
     assert products.status_code == 200
     assert products.json()[0]["resource_id"] == "service/team-sim/products/starter"
+    assert products.json()[0]["groups"] == ["admins"]
+    assert products.json()[0]["tags"] == ["featured"]
 
     assert subscriptions.status_code == 200
     assert subscriptions.json()[0]["resource_id"] == "service/team-sim/subscriptions/sub-starter-dev"
@@ -1702,6 +1799,14 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
     assert named_values.json()[0]["resource_id"] == "service/team-sim/named-values/backend-secret"
     assert named_values.json()[0]["value"] == "***"
     assert named_values.json()[0]["resolved"]["value"] == "***"
+
+    assert loggers.status_code == 200
+    assert loggers.json()[0]["resource_id"] == "service/team-sim/loggers/appinsights"
+    assert loggers.json()[0]["application_insights"]["instrumentation_key"] == "***"
+
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()[0]["resource_id"] == "service/team-sim/diagnostics/applicationinsights"
+    assert diagnostics.json()[0]["logger_resource_id"] == "service/team-sim/loggers/appinsights"
 
     assert version_sets.status_code == 200
     assert version_sets.json()[0]["resource_id"] == "service/team-sim/api-version-sets/public"
@@ -1716,6 +1821,519 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
     assert groups.status_code == 200
     assert groups.json()[0]["users"] == ["dev-1"]
     assert groups.json()[0]["resource_id"] == "service/team-sim/groups/admins"
+    assert groups.json()[0]["products"] == ["starter"]
+
+    assert group_users.status_code == 200
+    assert group_users.json()[0]["resource_id"] == "service/team-sim/groups/admins/users/dev-1"
+    assert group_users.json()[0]["user_resource_id"] == "service/team-sim/users/dev-1"
+
+    assert tags.status_code == 200
+    assert tags.json()[0]["resource_id"] == "service/team-sim/tags/featured"
+
+    assert api_tags.status_code == 200
+    assert api_tags.json()[0]["resource_id"] == "service/team-sim/apis/hello/tags/featured"
+
+    assert api_revisions.status_code == 200
+    assert api_revisions.json()[0]["resource_id"] == "service/team-sim/apis/hello/revisions/1"
+
+    assert api_releases.status_code == 200
+    assert api_releases.json()[0]["resource_id"] == "service/team-sim/apis/hello/releases/public"
+
+    assert operation_tags.status_code == 200
+    assert operation_tags.json()[0]["resource_id"] == "service/team-sim/apis/hello/operations/getHello/tags/featured"
+
+    assert product_tags.status_code == 200
+    assert product_tags.json()[0]["resource_id"] == "service/team-sim/products/starter/tags/featured"
+
+    assert product_groups.status_code == 200
+    assert product_groups.json()[0]["resource_id"] == "service/team-sim/products/starter/groups/admins"
+
+
+def test_management_logger_and_diagnostic_endpoints_are_read_only_and_descriptive() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            service={"name": "team-sim", "display_name": "Team Simulator"},
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            loggers={
+                "appinsights": LoggerConfig(
+                    logger_type="application_insights",
+                    description="Primary telemetry sink",
+                    resource_id="/subscriptions/test/resourceGroups/rg/providers/Microsoft.Insights/components/demo",
+                    application_insights=LoggerApplicationInsightsConfig(
+                        instrumentation_key="ikey-secret",
+                        connection_string="InstrumentationKey=ikey-secret;IngestionEndpoint=https://example.test/",
+                    ),
+                )
+            },
+            diagnostics={
+                "applicationinsights": DiagnosticConfig(
+                    identifier="applicationinsights",
+                    logger_id="appinsights",
+                    always_log_errors=True,
+                    sampling_percentage=5.0,
+                    verbosity="verbose",
+                    http_correlation_protocol="W3C",
+                    frontend_request=DiagnosticHttpMessageConfig(
+                        body_bytes=32,
+                        headers_to_log=["content-type", "accept"],
+                    ),
+                )
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+        logger_resp = client.get("/apim/management/loggers/appinsights", headers=headers)
+        diagnostic_resp = client.get("/apim/management/diagnostics/applicationinsights", headers=headers)
+
+    assert logger_resp.status_code == 200
+    assert logger_resp.json()["description"] == "Primary telemetry sink"
+    assert logger_resp.json()["application_insights"]["connection_string"] == "***"
+
+    assert diagnostic_resp.status_code == 200
+    assert diagnostic_resp.json()["logger_id"] == "appinsights"
+    assert diagnostic_resp.json()["logger_resource_id"] == "service/team-sim/loggers/appinsights"
+    assert diagnostic_resp.json()["frontend_request"]["body_bytes"] == 32
+
+
+def test_management_api_schema_endpoints_and_put_preserve_imported_metadata() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            service={"name": "team-sim", "display_name": "Team Simulator"},
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            apis={
+                "weather": ApiConfig(
+                    name="weather",
+                    path="weather",
+                    upstream_base_url="http://weather-upstream",
+                    operations={
+                        "current": OperationConfig(
+                            name="current",
+                            method="GET",
+                            url_template="/current/{city}",
+                            description="Get current weather",
+                            template_parameters=[
+                                OperationParameterConfig(
+                                    name="city",
+                                    required=True,
+                                    type="string",
+                                    description="City slug",
+                                )
+                            ],
+                            request=OperationRequestMetadataConfig(
+                                headers=[
+                                    OperationParameterConfig(
+                                        name="x-region",
+                                        required=False,
+                                        type="string",
+                                        description="Preferred region",
+                                    )
+                                ]
+                            ),
+                            responses=[
+                                OperationResponseMetadataConfig(
+                                    status_code=200,
+                                    description="Weather payload",
+                                    representations=[
+                                        OperationRepresentationConfig(
+                                            content_type="application/json",
+                                            schema_id="WeatherResponse",
+                                            type_name="WeatherResponse",
+                                        )
+                                    ],
+                                )
+                            ],
+                        )
+                    },
+                    schemas={
+                        "WeatherResponse": ApiSchemaConfig(
+                            content_type="application/json",
+                            value='{"type":"object","properties":{"temperature":{"type":"number"}}}',
+                        )
+                    },
+                )
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+
+        list_schemas = client.get("/apim/management/apis/weather/schemas", headers=headers)
+        get_schema = client.get("/apim/management/apis/weather/schemas/WeatherResponse", headers=headers)
+        update_api = client.put(
+            "/apim/management/apis/weather",
+            headers=headers,
+            json={
+                "name": "weather",
+                "path": "weather-v2",
+                "upstream_base_url": "http://weather-upstream-v2",
+            },
+        )
+        update_operation = client.put(
+            "/apim/management/apis/weather/operations/current",
+            headers=headers,
+            json={
+                "name": "current",
+                "method": "GET",
+                "url_template": "/current/{city}",
+            },
+        )
+        get_operation = client.get("/apim/management/apis/weather/operations/current", headers=headers)
+
+    assert list_schemas.status_code == 200
+    assert list_schemas.json()[0]["resource_id"] == "service/team-sim/apis/weather/schemas/WeatherResponse"
+
+    assert get_schema.status_code == 200
+    assert get_schema.json()["content_type"] == "application/json"
+
+    assert update_api.status_code == 200
+    assert update_api.json()["path"] == "weather-v2"
+    assert update_api.json()["operations"][0]["id"] == "current"
+    assert update_api.json()["schemas"][0]["id"] == "WeatherResponse"
+
+    assert update_operation.status_code == 200
+    assert update_operation.json()["description"] == "Get current weather"
+    assert update_operation.json()["template_parameters"][0]["name"] == "city"
+    assert update_operation.json()["request"]["headers"][0]["name"] == "x-region"
+    assert update_operation.json()["responses"][0]["representations"][0]["schema_id"] == "WeatherResponse"
+
+    assert get_operation.status_code == 200
+    assert get_operation.json()["description"] == "Get current weather"
+
+
+def test_management_api_revision_and_release_endpoints_and_put_preserve_metadata() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            service={"name": "team-sim", "display_name": "Team Simulator"},
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            apis={
+                "weather": ApiConfig(
+                    name="weather",
+                    path="weather",
+                    upstream_base_url="http://weather-upstream",
+                    revision="2",
+                    revision_description="Current revision",
+                    source_api_id="service/team-sim/apis/weather;rev=1",
+                    is_current=True,
+                    is_online=True,
+                    revisions={
+                        "1": ApiRevisionConfig(
+                            revision="1", description="Initial revision", is_current=False, is_online=False
+                        ),
+                        "2": ApiRevisionConfig(
+                            revision="2",
+                            description="Current revision",
+                            is_current=True,
+                            is_online=True,
+                            source_api_id="service/team-sim/apis/weather;rev=1",
+                        ),
+                    },
+                    releases={
+                        "public": ApiReleaseConfig(
+                            name="public",
+                            api_id="service/team-sim/apis/weather;rev=2",
+                            notes="Shipped publicly",
+                            revision="2",
+                        )
+                    },
+                )
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+
+        list_revisions = client.get("/apim/management/apis/weather/revisions", headers=headers)
+        get_revision = client.get("/apim/management/apis/weather/revisions/2", headers=headers)
+        list_releases = client.get("/apim/management/apis/weather/releases", headers=headers)
+        get_release = client.get("/apim/management/apis/weather/releases/public", headers=headers)
+        update_api = client.put(
+            "/apim/management/apis/weather",
+            headers=headers,
+            json={
+                "name": "weather",
+                "path": "weather-v2",
+                "upstream_base_url": "http://weather-upstream-v2",
+            },
+        )
+        get_api = client.get("/apim/management/apis/weather", headers=headers)
+
+    assert list_revisions.status_code == 200
+    assert list_revisions.json()[0]["resource_id"] == "service/team-sim/apis/weather/revisions/1"
+
+    assert get_revision.status_code == 200
+    assert get_revision.json()["is_current"] is True
+
+    assert list_releases.status_code == 200
+    assert list_releases.json()[0]["resource_id"] == "service/team-sim/apis/weather/releases/public"
+
+    assert get_release.status_code == 200
+    assert get_release.json()["revision"] == "2"
+
+    assert update_api.status_code == 200
+    assert update_api.json()["revision"] == "2"
+    assert update_api.json()["revisions"][1]["id"] == "2"
+    assert update_api.json()["releases"][0]["id"] == "public"
+
+    assert get_api.status_code == 200
+    assert get_api.json()["releases"][0]["notes"] == "Shipped publicly"
+
+
+def test_management_tag_crud_and_links_persist_without_parent_put_wiping_assignments(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_path = tmp_path / "apim-tags.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "service": {"name": "tag-sim", "display_name": "Tag Simulator"},
+                "allow_anonymous": True,
+                "tenant_access": {"enabled": True, "primary_key": "t1"},
+                "products": {"starter": {"name": "Starter", "require_subscription": True}},
+                "apis": {
+                    "weather": {
+                        "name": "weather",
+                        "path": "weather",
+                        "upstream_base_url": "http://weather-upstream",
+                        "operations": {"current": {"name": "current", "method": "GET", "url_template": "/current"}},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APIM_CONFIG_PATH", str(config_path))
+
+    app = create_app()
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+
+        created_tag = client.put("/apim/management/tags/featured", headers=headers, json={"display_name": "Featured"})
+        api_link = client.put("/apim/management/apis/weather/tags/featured", headers=headers)
+        product_link = client.put("/apim/management/products/starter/tags/featured", headers=headers)
+        operation_link = client.put("/apim/management/apis/weather/operations/current/tags/featured", headers=headers)
+
+        api_update = client.put(
+            "/apim/management/apis/weather",
+            headers=headers,
+            json={"name": "weather", "path": "weather-v2", "upstream_base_url": "http://weather-upstream-v2"},
+        )
+        product_update = client.put(
+            "/apim/management/products/starter",
+            headers=headers,
+            json={"name": "Starter", "description": "Starter tier", "require_subscription": True},
+        )
+        operation_update = client.put(
+            "/apim/management/apis/weather/operations/current",
+            headers=headers,
+            json={"name": "current", "method": "GET", "url_template": "/current"},
+        )
+
+        list_tags = client.get("/apim/management/tags", headers=headers)
+        api_tags = client.get("/apim/management/apis/weather/tags", headers=headers)
+        product_tags = client.get("/apim/management/products/starter/tags", headers=headers)
+        operation_tags = client.get("/apim/management/apis/weather/operations/current/tags", headers=headers)
+
+        persisted_after_create = json.loads(config_path.read_text(encoding="utf-8"))
+
+        deleted_tag = client.delete("/apim/management/tags/featured", headers=headers)
+        persisted_after_delete = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert created_tag.status_code == 200
+    assert created_tag.json()["resource_id"] == "service/tag-sim/tags/featured"
+
+    assert api_link.status_code == 200
+    assert api_link.json()["resource_id"] == "service/tag-sim/apis/weather/tags/featured"
+
+    assert product_link.status_code == 200
+    assert product_link.json()["resource_id"] == "service/tag-sim/products/starter/tags/featured"
+
+    assert operation_link.status_code == 200
+    assert operation_link.json()["resource_id"] == "service/tag-sim/apis/weather/operations/current/tags/featured"
+
+    assert api_update.status_code == 200
+    assert api_update.json()["tags"] == ["featured"]
+
+    assert product_update.status_code == 200
+    assert product_update.json()["tags"] == ["featured"]
+
+    assert operation_update.status_code == 200
+    assert operation_update.json()["tags"] == ["featured"]
+
+    assert list_tags.status_code == 200
+    assert list_tags.json()[0]["display_name"] == "Featured"
+
+    assert api_tags.status_code == 200
+    assert api_tags.json()[0]["resource_id"] == "service/tag-sim/apis/weather/tags/featured"
+
+    assert product_tags.status_code == 200
+    assert product_tags.json()[0]["resource_id"] == "service/tag-sim/products/starter/tags/featured"
+
+    assert operation_tags.status_code == 200
+    assert operation_tags.json()[0]["resource_id"] == "service/tag-sim/apis/weather/operations/current/tags/featured"
+
+    assert persisted_after_create["tags"]["featured"]["display_name"] == "Featured"
+    assert persisted_after_create["apis"]["weather"]["tags"] == ["featured"]
+    assert persisted_after_create["apis"]["weather"]["operations"]["current"]["tags"] == ["featured"]
+    assert persisted_after_create["products"]["starter"]["tags"] == ["featured"]
+
+    assert deleted_tag.status_code == 200
+    assert "featured" not in persisted_after_delete["tags"]
+    assert persisted_after_delete["apis"]["weather"]["tags"] == []
+    assert persisted_after_delete["apis"]["weather"]["operations"]["current"]["tags"] == []
+    assert persisted_after_delete["products"]["starter"]["tags"] == []
+
+
+def test_management_group_crud_and_product_group_links_persist_without_product_put_wiping_assignments(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_path = tmp_path / "apim-groups.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "service": {"name": "group-sim", "display_name": "Group Simulator"},
+                "allow_anonymous": True,
+                "tenant_access": {"enabled": True, "primary_key": "t1"},
+                "products": {"starter": {"name": "Starter", "require_subscription": True}},
+                "groups": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APIM_CONFIG_PATH", str(config_path))
+
+    app = create_app()
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+
+        created_group = client.put(
+            "/apim/management/groups/developers",
+            headers=headers,
+            json={"name": "Developers", "description": "Internal developers", "type": "custom"},
+        )
+        group_link = client.put("/apim/management/products/starter/groups/developers", headers=headers)
+        product_update = client.put(
+            "/apim/management/products/starter",
+            headers=headers,
+            json={"name": "Starter", "description": "Starter tier", "require_subscription": True},
+        )
+        list_groups = client.get("/apim/management/groups", headers=headers)
+        get_group = client.get("/apim/management/groups/developers", headers=headers)
+        product_groups = client.get("/apim/management/products/starter/groups", headers=headers)
+
+        persisted_after_create = json.loads(config_path.read_text(encoding="utf-8"))
+
+        deleted_group = client.delete("/apim/management/groups/developers", headers=headers)
+        persisted_after_delete = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert created_group.status_code == 200
+    assert created_group.json()["resource_id"] == "service/group-sim/groups/developers"
+    assert created_group.json()["description"] == "Internal developers"
+
+    assert group_link.status_code == 200
+    assert group_link.json()["resource_id"] == "service/group-sim/products/starter/groups/developers"
+
+    assert product_update.status_code == 200
+    assert product_update.json()["groups"] == ["developers"]
+
+    assert list_groups.status_code == 200
+    assert list_groups.json()[0]["products"] == ["starter"]
+
+    assert get_group.status_code == 200
+    assert get_group.json()["type"] == "custom"
+
+    assert product_groups.status_code == 200
+    assert product_groups.json()[0]["group_resource_id"] == "service/group-sim/groups/developers"
+
+    assert persisted_after_create["groups"]["developers"]["name"] == "Developers"
+    assert persisted_after_create["products"]["starter"]["groups"] == ["developers"]
+
+    assert deleted_group.status_code == 200
+    assert "developers" not in persisted_after_delete["groups"]
+    assert persisted_after_delete["products"]["starter"]["groups"] == []
+
+
+def test_management_user_crud_and_group_user_links_persist_without_group_put_wiping_memberships(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_path = tmp_path / "apim-group-users.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "service": {"name": "user-sim", "display_name": "User Simulator"},
+                "allow_anonymous": True,
+                "tenant_access": {"enabled": True, "primary_key": "t1"},
+                "users": {},
+                "groups": {"developers": {"id": "developers", "name": "Developers"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APIM_CONFIG_PATH", str(config_path))
+
+    app = create_app()
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+
+        created_user = client.put(
+            "/apim/management/users/alice",
+            headers=headers,
+            json={
+                "email": "alice@example.com",
+                "first_name": "Alice",
+                "last_name": "Dev",
+                "note": "Internal developer",
+                "state": "active",
+                "confirmation": "invite",
+            },
+        )
+        group_user_link = client.put("/apim/management/groups/developers/users/alice", headers=headers)
+        group_update = client.put(
+            "/apim/management/groups/developers",
+            headers=headers,
+            json={"name": "Developers", "description": "Engineering team", "type": "custom"},
+        )
+        list_users = client.get("/apim/management/users", headers=headers)
+        group_users = client.get("/apim/management/groups/developers/users", headers=headers)
+        get_user = client.get("/apim/management/users/alice", headers=headers)
+
+        persisted_after_create = json.loads(config_path.read_text(encoding="utf-8"))
+
+        deleted_user = client.delete("/apim/management/users/alice", headers=headers)
+        persisted_after_delete = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert created_user.status_code == 200
+    assert created_user.json()["resource_id"] == "service/user-sim/users/alice"
+    assert created_user.json()["first_name"] == "Alice"
+    assert created_user.json()["groups"] == []
+
+    assert group_user_link.status_code == 200
+    assert group_user_link.json()["resource_id"] == "service/user-sim/groups/developers/users/alice"
+
+    assert group_update.status_code == 200
+    assert group_update.json()["users"] == ["alice"]
+
+    assert list_users.status_code == 200
+    assert list_users.json()[0]["groups"] == ["developers"]
+
+    assert group_users.status_code == 200
+    assert group_users.json()[0]["user_resource_id"] == "service/user-sim/users/alice"
+
+    assert get_user.status_code == 200
+    assert get_user.json()["name"] == "Alice Dev"
+
+    assert persisted_after_create["groups"]["developers"]["users"] == ["alice"]
+    assert persisted_after_create["users"]["alice"]["email"] == "alice@example.com"
+
+    assert deleted_user.status_code == 200
+    assert "alice" not in persisted_after_delete["users"]
+    assert persisted_after_delete["groups"]["developers"]["users"] == []
 
 
 def test_management_crud_persists_api_authored_resources(tmp_path: Path, monkeypatch) -> None:

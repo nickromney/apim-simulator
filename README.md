@@ -36,10 +36,10 @@ Then open `http://localhost:3000` and create a todo through APIM.
 ## Current Shape
 
 - Python/FastAPI gateway engine for fast iteration and readable policy/auth logic
-- Config-driven APIs, operations, products, subscriptions, tenant access keys, OIDC, traces, and a practical APIM XML policy subset
+- Config-driven APIs, API schemas, revisions/releases metadata, operations, products, groups, users, tags, subscriptions, loggers, diagnostics, tenant access keys, OIDC, traces, and a practical APIM XML policy subset
 - Policy-driven response caching, value caching, and by-key throttling for local APIM-shaped gateway flows
-- Terraform/OpenTofu import of APIM APIs, version sets, backends, named values, policies, and OpenAPI-derived operations
-- APIM-style management resources for service, APIs, operations, products, subscriptions, backends, named values, version sets, policy fragments, users, and groups
+- Terraform/OpenTofu import of APIM service metadata, APIs, API schemas, revisions/releases metadata, groups, users, group-user links, product-group links, tags, operation request/response metadata, version sets, backends, named values, loggers, diagnostics, policies, and OpenAPI-derived operations
+- APIM-style management resources for service, APIs, API schemas, operations, products, tags, subscriptions, backends, named values, loggers, diagnostics, version sets, policy fragments, users, groups, and their descriptive link resources
 - Static compatibility reporting before runtime plus optional live Azure diff tooling for high-confidence verification
 - Compose-first runtime overlays for direct public, edge HTTP, edge TLS, private/internal, OIDC, and MCP scenarios
 - A curated APIM sample compatibility harness plus an operator console over the local management APIs
@@ -255,6 +255,44 @@ Key Vault-backed named values are intentionally local-first. Provide local overr
 ```bash
 export APIM_NAMED_VALUE_BACKEND_SECRET=super-secret-token
 ```
+
+The importer now preserves `azurerm_api_management_api_schema` resources plus
+`azurerm_api_management_api_operation` request/response metadata blocks and
+surfaces them read-only under `/apim/management/apis/{api_id}/schemas` and the
+existing operation endpoints. OpenAPI import still focuses on operation
+discovery rather than full schema/request/response extraction.
+
+Tag resources are now supported too: `azurerm_api_management_tag`,
+`azurerm_api_management_api_tag`, `azurerm_api_management_product_tag`, and the
+slightly adapted `azurerm_api_management_api_operation_tag`. The simulator
+stores a small global tag registry plus descriptive links on APIs, products,
+and operations.
+
+Group and product-group resources are also supported in a narrow local form:
+`azurerm_api_management_group` plus `azurerm_api_management_product_group`.
+Groups are descriptive local resources, and products now carry explicit group
+links under `/apim/management/products/{product_id}/groups`.
+
+Users and group membership are supported too:
+`azurerm_api_management_user` plus `azurerm_api_management_group_user`. User
+metadata imports into the local config and can be edited through
+`/apim/management/users`, while group membership is exposed as descriptive link
+resources under `/apim/management/groups/{group_id}/users`. User passwords are
+intentionally not stored or enforced locally.
+
+API revisions and releases are now surfaced read-only too. The importer keeps
+per-revision metadata from `azurerm_api_management_api` and release metadata
+from `azurerm_api_management_api_release`, exposes them under
+`/apim/management/apis/{api_id}/revisions` and
+`/apim/management/apis/{api_id}/releases`, and collapses multiple revisions
+into one active local API for runtime behavior.
+
+Logger and diagnostic resources are now imported in a similarly narrow way:
+`azurerm_api_management_logger` plus `azurerm_api_management_diagnostic`.
+They are exposed read-only under `/apim/management/loggers` and
+`/apim/management/diagnostics`, but their sink and sampling settings remain
+descriptive only. The simulator still uses its local trace endpoints plus OTEL
+for actual runtime observability.
 
 ### Tear down
 

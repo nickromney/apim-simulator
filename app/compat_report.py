@@ -4,7 +4,13 @@ from dataclasses import asdict
 from typing import Any
 from xml.etree import ElementTree
 
-from app.terraform_import import ImportDiagnostic, import_from_tofu_show_json, iter_tofu_resources
+from app.terraform_import import (
+    ImportDiagnostic,
+    arm_resource_type,
+    azapi_body,
+    import_from_tofu_show_json,
+    iter_tofu_resources,
+)
 
 SUPPORTED_POLICY_TAGS = {
     "policies",
@@ -69,6 +75,12 @@ UNSUPPORTED_POLICY_TAGS = {
     "proxy": "send-request proxy configuration is out of scope.",
 }
 
+AZAPI_POLICY_ARM_TYPES = {
+    "Microsoft.ApiManagement/service/policies",
+    "Microsoft.ApiManagement/service/apis/policies",
+    "Microsoft.ApiManagement/service/apis/operations/policies",
+}
+
 
 def _policy_scope(res_type: str, values: dict[str, Any]) -> str:
     if res_type == "azurerm_api_management_policy":
@@ -80,6 +92,41 @@ def _policy_scope(res_type: str, values: dict[str, Any]) -> str:
         operation_id = values.get("operation_id") or "unknown"
         return f"operation:{api_name}:{operation_id}"
     return res_type
+
+
+def _scope_from_parent_id(parent_id: str, *, marker: str) -> str:
+    parts = parent_id.strip("/").split("/")
+    if marker not in parts:
+        return "unknown"
+    idx = parts.index(marker)
+    if idx + 1 >= len(parts):
+        return "unknown"
+    return parts[idx + 1]
+
+
+def _azapi_policy_scope(values: dict[str, Any], arm_type: str) -> str:
+    if arm_type == "Microsoft.ApiManagement/service/policies":
+        return "gateway"
+
+    parent_id = str(values.get("parent_id") or values.get("id") or "")
+    if arm_type == "Microsoft.ApiManagement/service/apis/policies":
+        return f"api:{_scope_from_parent_id(parent_id, marker='apis')}"
+    if arm_type == "Microsoft.ApiManagement/service/apis/operations/policies":
+        api_name = _scope_from_parent_id(parent_id, marker="apis")
+        operation_id = _scope_from_parent_id(parent_id, marker="operations")
+        return f"operation:{api_name}:{operation_id}"
+    return arm_type
+
+
+def _azapi_policy_xml(values: dict[str, Any]) -> str | None:
+    body = azapi_body(values)
+    properties = body.get("properties")
+    if not isinstance(properties, dict):
+        return None
+    value = properties.get("value")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value
 
 
 def _analyze_policy_tag(tag: str, scope: str, diagnostics: list[ImportDiagnostic]) -> None:
@@ -162,12 +209,27 @@ def build_compat_report(tf: dict[str, Any]) -> dict[str, Any]:
     diagnostics = list(result.diagnostics)
 
     for resource in iter_tofu_resources(tf):
-        if not resource.type.endswith("_policy") and resource.type != "azurerm_api_management_policy":
+        if resource.type.endswith("_policy") or resource.type == "azurerm_api_management_policy":
+            xml = resource.values.get("xml_content")
+            if isinstance(xml, str) and xml:
+                diagnostics.extend(_analyze_policy_xml(xml, _policy_scope(resource.type, resource.values)))
             continue
-        xml = resource.values.get("xml_content")
-        if not isinstance(xml, str) or not xml:
+
+        arm_type = arm_resource_type(resource)
+        if arm_type not in AZAPI_POLICY_ARM_TYPES:
             continue
-        diagnostics.extend(_analyze_policy_xml(xml, _policy_scope(resource.type, resource.values)))
+        xml = _azapi_policy_xml(resource.values)
+        if xml is None:
+            diagnostics.append(
+                ImportDiagnostic(
+                    status="unsupported",
+                    scope=_azapi_policy_scope(resource.values, arm_type),
+                    feature="policy-xml",
+                    detail="AzAPI policy resources are only analyzed when properties.value contains inline XML.",
+                )
+            )
+            continue
+        diagnostics.extend(_analyze_policy_xml(xml, _azapi_policy_scope(resource.values, arm_type)))
 
     supported = [asdict(item) for item in diagnostics if item.status == "supported"]
     adapted = [asdict(item) for item in diagnostics if item.status == "adapted"]
@@ -181,6 +243,13 @@ def build_compat_report(tf: dict[str, Any]) -> dict[str, Any]:
             "apis": len(result.config.apis),
             "routes": len(result.config.routes),
             "products": len(result.config.products),
+            "loggers": len(result.config.loggers),
+            "diagnostics": len(result.config.diagnostics),
+            "users": len(result.config.users),
+            "groups": len(result.config.groups),
+            "tags": len(result.config.tags),
+            "api_revisions": sum(len(api.revisions) for api in result.config.apis.values()),
+            "api_releases": sum(len(api.releases) for api in result.config.apis.values()),
             "subscriptions": len(result.config.subscription.subscriptions),
             "backends": len(result.config.backends),
             "api_version_sets": len(result.config.api_version_sets),

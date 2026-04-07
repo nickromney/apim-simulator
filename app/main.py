@@ -23,15 +23,23 @@ from starlette.responses import StreamingResponse
 
 from app.config import (
     ApiConfig,
+    ApiReleaseConfig,
+    ApiRevisionConfig,
+    ApiSchemaConfig,
     BackendConfig,
+    DiagnosticConfig,
     GatewayConfig,
+    GroupConfig,
     KeyVaultNamedValueConfig,
+    LoggerConfig,
     NamedValueConfig,
     OperationConfig,
     ProductConfig,
     RouteAuthzConfig,
     Subscription,
     SubscriptionState,
+    TagConfig,
+    UserConfig,
     load_config,
 )
 from app.named_values import mask_secret_data
@@ -49,16 +57,27 @@ from app.policy import (
 from app.proxy import build_upstream_headers, build_user_payload, filter_response_headers, resolve_route
 from app.resource_projection import (
     project_api,
+    project_api_release,
+    project_api_revision,
+    project_api_schema,
+    project_api_tag_link,
     project_api_version_set,
     project_backend,
+    project_diagnostic,
     project_group,
+    project_group_user_link,
+    project_logger,
     project_named_value,
     project_operation,
+    project_operation_tag_link,
     project_policy_fragment,
     project_product,
+    project_product_group_link,
+    project_product_tag_link,
     project_service,
     project_subscription,
     project_summary,
+    project_tag,
     project_user,
 )
 from app.security import (
@@ -320,6 +339,7 @@ class OperationUpsert(BaseModel):
     name: str | None = None
     method: str = "GET"
     url_template: str
+    description: str | None = None
     upstream_base_url: str | None = None
     upstream_path_prefix: str | None = None
     backend: str | None = None
@@ -336,6 +356,26 @@ class ProductUpsert(BaseModel):
     name: str
     description: str | None = None
     require_subscription: bool = True
+
+
+class GroupUpsert(BaseModel):
+    name: str
+    description: str | None = None
+    external_id: str | None = None
+    type: str = "custom"
+
+
+class UserUpsert(BaseModel):
+    email: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    note: str | None = None
+    state: str | None = None
+    confirmation: str | None = None
+
+
+class TagUpsert(BaseModel):
+    display_name: str | None = None
 
 
 class BackendUpsert(BaseModel):
@@ -807,17 +847,68 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             raise HTTPException(status_code=404, detail="Operation not found")
         return operation
 
+    def _get_api_schema_or_404(cfg: GatewayConfig, api_id: str, schema_id: str) -> ApiSchemaConfig:
+        api = _get_api_or_404(cfg, api_id)
+        schema = api.schemas.get(schema_id)
+        if schema is None:
+            raise HTTPException(status_code=404, detail="API schema not found")
+        return schema
+
+    def _get_api_revision_or_404(cfg: GatewayConfig, api_id: str, revision_id: str) -> ApiRevisionConfig:
+        api = _get_api_or_404(cfg, api_id)
+        revision = api.revisions.get(revision_id)
+        if revision is None:
+            raise HTTPException(status_code=404, detail="API revision not found")
+        return revision
+
+    def _get_api_release_or_404(cfg: GatewayConfig, api_id: str, release_id: str) -> ApiReleaseConfig:
+        api = _get_api_or_404(cfg, api_id)
+        release = api.releases.get(release_id)
+        if release is None:
+            raise HTTPException(status_code=404, detail="API release not found")
+        return release
+
     def _get_product_or_404(cfg: GatewayConfig, product_id: str) -> ProductConfig:
         product = cfg.products.get(product_id)
         if product is None:
             raise HTTPException(status_code=404, detail="Product not found")
         return product
 
+    def _get_group_or_404(cfg: GatewayConfig, group_id: str) -> GroupConfig:
+        group = cfg.groups.get(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="Group not found")
+        return group
+
+    def _get_user_or_404(cfg: GatewayConfig, user_id: str) -> UserConfig:
+        user = cfg.users.get(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
+
+    def _get_tag_or_404(cfg: GatewayConfig, tag_id: str) -> TagConfig:
+        tag = cfg.tags.get(tag_id)
+        if tag is None:
+            raise HTTPException(status_code=404, detail="Tag not found")
+        return tag
+
     def _get_backend_or_404(cfg: GatewayConfig, backend_id: str) -> BackendConfig:
         backend = cfg.backends.get(backend_id)
         if backend is None:
             raise HTTPException(status_code=404, detail="Backend not found")
         return backend
+
+    def _get_logger_or_404(cfg: GatewayConfig, logger_id: str) -> LoggerConfig:
+        logger_entry = cfg.loggers.get(logger_id)
+        if logger_entry is None:
+            raise HTTPException(status_code=404, detail="Logger not found")
+        return logger_entry
+
+    def _get_diagnostic_or_404(cfg: GatewayConfig, diagnostic_id: str) -> DiagnosticConfig:
+        diagnostic = cfg.diagnostics.get(diagnostic_id)
+        if diagnostic is None:
+            raise HTTPException(status_code=404, detail="Diagnostic not found")
+        return diagnostic
 
     def _get_named_value_or_404(cfg: GatewayConfig, named_value_id: str) -> NamedValueConfig:
         named_value = cfg.named_values.get(named_value_id)
@@ -835,6 +926,18 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         if xml is None:
             return
         parse_policies_xml(xml.strip() or EMPTY_POLICY_XML, policy_fragments=cfg.policy_fragments)
+
+    def _link_list_item(values: list[str], item_id: str) -> bool:
+        if item_id in values:
+            return False
+        values.append(item_id)
+        return True
+
+    def _unlink_list_item(values: list[str], item_id: str) -> bool:
+        if item_id not in values:
+            return False
+        values[:] = [item for item in values if item != item_id]
+        return True
 
     @app.get("/apim/management/status")
     async def management_status(request: Request) -> dict[str, Any]:
@@ -882,6 +985,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         cfg: GatewayConfig = request.app.state.gateway_config
         _ensure_api_authoring_mode(cfg)
         _validate_policy_xml(cfg, body.policies_xml)
+        existing = cfg.apis.get(api_id)
         cfg.apis[api_id] = ApiConfig(
             name=body.name or api_id,
             path=body.path,
@@ -891,9 +995,20 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             products=body.products,
             api_version_set=body.api_version_set,
             api_version=body.api_version,
+            revision=existing.revision if existing is not None else None,
+            revision_description=existing.revision_description if existing is not None else None,
+            version_description=existing.version_description if existing is not None else None,
+            source_api_id=existing.source_api_id if existing is not None else None,
+            is_current=existing.is_current if existing is not None else None,
+            is_online=existing.is_online if existing is not None else None,
             subscription_header_names=body.subscription_header_names,
             subscription_query_param_names=body.subscription_query_param_names,
             policies_xml=body.policies_xml,
+            tags=existing.tags if existing is not None else [],
+            operations=existing.operations if existing is not None else {},
+            schemas=existing.schemas if existing is not None else {},
+            revisions=existing.revisions if existing is not None else {},
+            releases=existing.releases if existing is not None else {},
         )
         updated = _persist_or_apply_config(request, cfg)
         api = _get_api_or_404(updated, api_id)
@@ -929,12 +1044,146 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             for operation_id, operation in api.operations.items()
         ]
 
+    @app.get("/apim/management/apis/{api_id}/schemas")
+    async def list_api_schemas(api_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        return [
+            _masked(cfg, project_api_schema(cfg, api_id, schema_id, schema))
+            for schema_id, schema in api.schemas.items()
+        ]
+
+    @app.get("/apim/management/apis/{api_id}/revisions")
+    async def list_api_revisions(api_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        return [
+            _masked(cfg, project_api_revision(cfg, api_id, revision_id, revision))
+            for revision_id, revision in api.revisions.items()
+        ]
+
+    @app.get("/apim/management/apis/{api_id}/revisions/{revision_id}")
+    async def get_api_revision(api_id: str, revision_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        revision = _get_api_revision_or_404(cfg, api_id, revision_id)
+        return _masked(cfg, project_api_revision(cfg, api_id, revision_id, revision))
+
+    @app.get("/apim/management/apis/{api_id}/releases")
+    async def list_api_releases(api_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        return [
+            _masked(cfg, project_api_release(cfg, api_id, release_id, release))
+            for release_id, release in api.releases.items()
+        ]
+
+    @app.get("/apim/management/apis/{api_id}/releases/{release_id}")
+    async def get_api_release(api_id: str, release_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        release = _get_api_release_or_404(cfg, api_id, release_id)
+        return _masked(cfg, project_api_release(cfg, api_id, release_id, release))
+
+    @app.get("/apim/management/apis/{api_id}/tags")
+    async def list_api_tags(api_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        return [
+            _masked(cfg, project_api_tag_link(cfg, api_id, tag_id, _get_tag_or_404(cfg, tag_id))) for tag_id in api.tags
+        ]
+
+    @app.get("/apim/management/apis/{api_id}/tags/{tag_id}")
+    async def get_api_tag(api_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        if tag_id not in api.tags:
+            raise HTTPException(status_code=404, detail="API tag link not found")
+        return _masked(cfg, project_api_tag_link(cfg, api_id, tag_id, _get_tag_or_404(cfg, tag_id)))
+
+    @app.put("/apim/management/apis/{api_id}/tags/{tag_id}")
+    async def put_api_tag(api_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        _get_tag_or_404(cfg, tag_id)
+        _link_list_item(api.tags, tag_id)
+        updated = _persist_or_apply_config(request, cfg)
+        return _masked(updated, project_api_tag_link(updated, api_id, tag_id, updated.tags[tag_id]))
+
+    @app.delete("/apim/management/apis/{api_id}/tags/{tag_id}")
+    async def delete_api_tag(api_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        api = _get_api_or_404(cfg, api_id)
+        if not _unlink_list_item(api.tags, tag_id):
+            raise HTTPException(status_code=404, detail="API tag link not found")
+        _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "api_id": api_id, "tag_id": tag_id}
+
+    @app.get("/apim/management/apis/{api_id}/schemas/{schema_id}")
+    async def get_api_schema(api_id: str, schema_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        schema = _get_api_schema_or_404(cfg, api_id, schema_id)
+        return _masked(cfg, project_api_schema(cfg, api_id, schema_id, schema))
+
     @app.get("/apim/management/apis/{api_id}/operations/{operation_id}")
     async def get_api_operation(api_id: str, operation_id: str, request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
         operation = _get_operation_or_404(cfg, api_id, operation_id)
         return _masked(cfg, project_operation(cfg, api_id, operation_id, operation))
+
+    @app.get("/apim/management/apis/{api_id}/operations/{operation_id}/tags")
+    async def list_api_operation_tags(api_id: str, operation_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        operation = _get_operation_or_404(cfg, api_id, operation_id)
+        return [
+            _masked(cfg, project_operation_tag_link(cfg, api_id, operation_id, tag_id, _get_tag_or_404(cfg, tag_id)))
+            for tag_id in operation.tags
+        ]
+
+    @app.get("/apim/management/apis/{api_id}/operations/{operation_id}/tags/{tag_id}")
+    async def get_api_operation_tag(api_id: str, operation_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        operation = _get_operation_or_404(cfg, api_id, operation_id)
+        if tag_id not in operation.tags:
+            raise HTTPException(status_code=404, detail="Operation tag link not found")
+        return _masked(
+            cfg,
+            project_operation_tag_link(cfg, api_id, operation_id, tag_id, _get_tag_or_404(cfg, tag_id)),
+        )
+
+    @app.put("/apim/management/apis/{api_id}/operations/{operation_id}/tags/{tag_id}")
+    async def put_api_operation_tag(api_id: str, operation_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        operation = _get_operation_or_404(cfg, api_id, operation_id)
+        _get_tag_or_404(cfg, tag_id)
+        _link_list_item(operation.tags, tag_id)
+        updated = _persist_or_apply_config(request, cfg)
+        return _masked(
+            updated,
+            project_operation_tag_link(updated, api_id, operation_id, tag_id, updated.tags[tag_id]),
+        )
+
+    @app.delete("/apim/management/apis/{api_id}/operations/{operation_id}/tags/{tag_id}")
+    async def delete_api_operation_tag(api_id: str, operation_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        operation = _get_operation_or_404(cfg, api_id, operation_id)
+        if not _unlink_list_item(operation.tags, tag_id):
+            raise HTTPException(status_code=404, detail="Operation tag link not found")
+        _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "api_id": api_id, "operation_id": operation_id, "tag_id": tag_id}
 
     @app.put("/apim/management/apis/{api_id}/operations/{operation_id}")
     async def upsert_api_operation(
@@ -945,10 +1194,14 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         _ensure_api_authoring_mode(cfg)
         api = _get_api_or_404(cfg, api_id)
         _validate_policy_xml(cfg, body.policies_xml)
+        existing = api.operations.get(operation_id)
         api.operations[operation_id] = OperationConfig(
-            name=body.name or operation_id,
+            name=body.name or (existing.name if existing is not None else operation_id),
             method=body.method,
             url_template=body.url_template,
+            description=body.description
+            if body.description is not None
+            else (existing.description if existing else None),
             upstream_base_url=body.upstream_base_url,
             upstream_path_prefix=body.upstream_path_prefix,
             backend=body.backend,
@@ -959,6 +1212,10 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             subscription_query_param_names=body.subscription_query_param_names,
             authz=body.authz,
             policies_xml=body.policies_xml,
+            tags=existing.tags if existing is not None else [],
+            template_parameters=existing.template_parameters if existing is not None else [],
+            request=existing.request if existing is not None else None,
+            responses=existing.responses if existing is not None else [],
         )
         updated = _persist_or_apply_config(request, cfg)
         operation = _get_operation_or_404(updated, api_id, operation_id)
@@ -1077,10 +1334,13 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def upsert_product(product_id: str, request: Request, body: ProductUpsert) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
+        existing = cfg.products.get(product_id)
         cfg.products[product_id] = ProductConfig(
             name=body.name,
             description=body.description,
             require_subscription=body.require_subscription,
+            groups=existing.groups if existing is not None else [],
+            tags=existing.tags if existing is not None else [],
         )
         updated = _persist_or_apply_config(request, cfg)
         product = _get_product_or_404(updated, product_id)
@@ -1105,6 +1365,121 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             route.products = [item for item in route.products if item != product_id]
         updated = _persist_or_apply_config(request, cfg)
         return {"deleted": True, "product_id": product_id, "remaining": len(updated.products)}
+
+    @app.get("/apim/management/products/{product_id}/groups")
+    async def list_product_groups(product_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        return [
+            _masked(cfg, project_product_group_link(cfg, product_id, group_id, _get_group_or_404(cfg, group_id)))
+            for group_id in product.groups
+        ]
+
+    @app.get("/apim/management/products/{product_id}/groups/{group_id}")
+    async def get_product_group(product_id: str, group_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        if group_id not in product.groups:
+            raise HTTPException(status_code=404, detail="Product group link not found")
+        return _masked(cfg, project_product_group_link(cfg, product_id, group_id, _get_group_or_404(cfg, group_id)))
+
+    @app.put("/apim/management/products/{product_id}/groups/{group_id}")
+    async def put_product_group(product_id: str, group_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        _get_group_or_404(cfg, group_id)
+        _link_list_item(product.groups, group_id)
+        updated = _persist_or_apply_config(request, cfg)
+        return _masked(updated, project_product_group_link(updated, product_id, group_id, updated.groups[group_id]))
+
+    @app.delete("/apim/management/products/{product_id}/groups/{group_id}")
+    async def delete_product_group(product_id: str, group_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        if not _unlink_list_item(product.groups, group_id):
+            raise HTTPException(status_code=404, detail="Product group link not found")
+        _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "product_id": product_id, "group_id": group_id}
+
+    @app.get("/apim/management/products/{product_id}/tags")
+    async def list_product_tags(product_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        return [
+            _masked(cfg, project_product_tag_link(cfg, product_id, tag_id, _get_tag_or_404(cfg, tag_id)))
+            for tag_id in product.tags
+        ]
+
+    @app.get("/apim/management/products/{product_id}/tags/{tag_id}")
+    async def get_product_tag(product_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        if tag_id not in product.tags:
+            raise HTTPException(status_code=404, detail="Product tag link not found")
+        return _masked(cfg, project_product_tag_link(cfg, product_id, tag_id, _get_tag_or_404(cfg, tag_id)))
+
+    @app.put("/apim/management/products/{product_id}/tags/{tag_id}")
+    async def put_product_tag(product_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        _get_tag_or_404(cfg, tag_id)
+        _link_list_item(product.tags, tag_id)
+        updated = _persist_or_apply_config(request, cfg)
+        return _masked(updated, project_product_tag_link(updated, product_id, tag_id, updated.tags[tag_id]))
+
+    @app.delete("/apim/management/products/{product_id}/tags/{tag_id}")
+    async def delete_product_tag(product_id: str, tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        product = _get_product_or_404(cfg, product_id)
+        if not _unlink_list_item(product.tags, tag_id):
+            raise HTTPException(status_code=404, detail="Product tag link not found")
+        _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "product_id": product_id, "tag_id": tag_id}
+
+    @app.get("/apim/management/tags")
+    async def list_tags(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [_masked(cfg, project_tag(cfg, tag_id, tag)) for tag_id, tag in cfg.tags.items()]
+
+    @app.get("/apim/management/tags/{tag_id}")
+    async def get_tag(tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        tag = _get_tag_or_404(cfg, tag_id)
+        return _masked(cfg, project_tag(cfg, tag_id, tag))
+
+    @app.put("/apim/management/tags/{tag_id}")
+    async def upsert_tag(tag_id: str, request: Request, body: TagUpsert) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg.tags[tag_id] = TagConfig(display_name=body.display_name or tag_id)
+        updated = _persist_or_apply_config(request, cfg)
+        tag = _get_tag_or_404(updated, tag_id)
+        return _masked(updated, project_tag(updated, tag_id, tag))
+
+    @app.delete("/apim/management/tags/{tag_id}")
+    async def delete_tag(tag_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _get_tag_or_404(cfg, tag_id)
+        del cfg.tags[tag_id]
+        for api in cfg.apis.values():
+            _unlink_list_item(api.tags, tag_id)
+            for operation in api.operations.values():
+                _unlink_list_item(operation.tags, tag_id)
+        for product in cfg.products.values():
+            _unlink_list_item(product.tags, tag_id)
+        updated = _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "tag_id": tag_id, "remaining": len(updated.tags)}
 
     @app.get("/apim/management/subscriptions")
     async def list_subscriptions(request: Request) -> list[dict[str, Any]]:
@@ -1264,6 +1639,35 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         named_value = _get_named_value_or_404(cfg, named_value_id)
         return _masked(cfg, project_named_value(cfg, named_value_id, named_value))
 
+    @app.get("/apim/management/loggers")
+    async def list_loggers(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [_masked(cfg, project_logger(cfg, logger_id, logger)) for logger_id, logger in cfg.loggers.items()]
+
+    @app.get("/apim/management/loggers/{logger_id}")
+    async def get_logger(logger_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        logger_entry = _get_logger_or_404(cfg, logger_id)
+        return _masked(cfg, project_logger(cfg, logger_id, logger_entry))
+
+    @app.get("/apim/management/diagnostics")
+    async def list_diagnostics(request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [
+            _masked(cfg, project_diagnostic(cfg, diagnostic_id, diagnostic))
+            for diagnostic_id, diagnostic in cfg.diagnostics.items()
+        ]
+
+    @app.get("/apim/management/diagnostics/{diagnostic_id}")
+    async def get_diagnostic(diagnostic_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        diagnostic = _get_diagnostic_or_404(cfg, diagnostic_id)
+        return _masked(cfg, project_diagnostic(cfg, diagnostic_id, diagnostic))
+
     @app.put("/apim/management/named-values/{named_value_id}")
     async def upsert_named_value(named_value_id: str, request: Request, body: NamedValueUpsert) -> dict[str, Any]:
         _require_tenant_access(request)
@@ -1347,10 +1751,40 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def get_user(user_id: str, request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        user = cfg.users.get(user_id)
-        if user is None:
-            raise HTTPException(status_code=404, detail="User not found")
+        user = _get_user_or_404(cfg, user_id)
         return _masked(cfg, project_user(cfg, user_id, user))
+
+    @app.put("/apim/management/users/{user_id}")
+    async def upsert_user(user_id: str, request: Request, body: UserUpsert) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        first_name = body.first_name.strip() if body.first_name else None
+        last_name = body.last_name.strip() if body.last_name else None
+        full_name = " ".join(part for part in [first_name, last_name] if part).strip() or user_id
+        cfg.users[user_id] = UserConfig(
+            id=user_id,
+            email=body.email,
+            name=full_name,
+            first_name=first_name,
+            last_name=last_name,
+            note=body.note,
+            state=body.state,
+            confirmation=body.confirmation,
+        )
+        updated = _persist_or_apply_config(request, cfg)
+        user = _get_user_or_404(updated, user_id)
+        return _masked(updated, project_user(updated, user_id, user))
+
+    @app.delete("/apim/management/users/{user_id}")
+    async def delete_user(user_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _get_user_or_404(cfg, user_id)
+        del cfg.users[user_id]
+        for group in cfg.groups.values():
+            _unlink_list_item(group.users, user_id)
+        updated = _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "user_id": user_id, "remaining": len(updated.users)}
 
     @app.get("/apim/management/groups")
     async def list_groups(request: Request) -> list[dict[str, Any]]:
@@ -1358,14 +1792,79 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         cfg: GatewayConfig = request.app.state.gateway_config
         return [_masked(cfg, project_group(cfg, group_id, group)) for group_id, group in cfg.groups.items()]
 
+    @app.get("/apim/management/groups/{group_id}/users")
+    async def list_group_users(group_id: str, request: Request) -> list[dict[str, Any]]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        group = _get_group_or_404(cfg, group_id)
+        return [
+            _masked(cfg, project_group_user_link(cfg, group_id, user_id, _get_user_or_404(cfg, user_id)))
+            for user_id in group.users
+        ]
+
+    @app.get("/apim/management/groups/{group_id}/users/{user_id}")
+    async def get_group_user(group_id: str, user_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        group = _get_group_or_404(cfg, group_id)
+        if user_id not in group.users:
+            raise HTTPException(status_code=404, detail="Group user link not found")
+        return _masked(cfg, project_group_user_link(cfg, group_id, user_id, _get_user_or_404(cfg, user_id)))
+
+    @app.put("/apim/management/groups/{group_id}/users/{user_id}")
+    async def put_group_user(group_id: str, user_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        group = _get_group_or_404(cfg, group_id)
+        _get_user_or_404(cfg, user_id)
+        _link_list_item(group.users, user_id)
+        updated = _persist_or_apply_config(request, cfg)
+        return _masked(updated, project_group_user_link(updated, group_id, user_id, updated.users[user_id]))
+
+    @app.delete("/apim/management/groups/{group_id}/users/{user_id}")
+    async def delete_group_user(group_id: str, user_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        group = _get_group_or_404(cfg, group_id)
+        if not _unlink_list_item(group.users, user_id):
+            raise HTTPException(status_code=404, detail="Group user link not found")
+        _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "group_id": group_id, "user_id": user_id}
+
     @app.get("/apim/management/groups/{group_id}")
     async def get_group(group_id: str, request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        group = cfg.groups.get(group_id)
-        if group is None:
-            raise HTTPException(status_code=404, detail="Group not found")
+        group = _get_group_or_404(cfg, group_id)
         return _masked(cfg, project_group(cfg, group_id, group))
+
+    @app.put("/apim/management/groups/{group_id}")
+    async def upsert_group(group_id: str, request: Request, body: GroupUpsert) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        existing = cfg.groups.get(group_id)
+        cfg.groups[group_id] = GroupConfig(
+            id=group_id,
+            name=body.name,
+            description=body.description,
+            external_id=body.external_id,
+            type=body.type,
+            users=existing.users if existing is not None else [],
+        )
+        updated = _persist_or_apply_config(request, cfg)
+        group = _get_group_or_404(updated, group_id)
+        return _masked(updated, project_group(updated, group_id, group))
+
+    @app.delete("/apim/management/groups/{group_id}")
+    async def delete_group(group_id: str, request: Request) -> dict[str, Any]:
+        _require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _get_group_or_404(cfg, group_id)
+        del cfg.groups[group_id]
+        for product in cfg.products.values():
+            _unlink_list_item(product.groups, group_id)
+        updated = _persist_or_apply_config(request, cfg)
+        return {"deleted": True, "group_id": group_id, "remaining": len(updated.groups)}
 
     @app.post("/apim/management/import/tofu-show")
     async def import_tofu_show_json(request: Request, tf: dict[str, Any]) -> dict:
@@ -1384,7 +1883,12 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         imported.tenant_access = current.tenant_access
         imported.trace_enabled = current.trace_enabled
         imported.policy_fragments = current.policy_fragments
-        imported.service = current.service
+        imported_client_certificate_mode = imported.client_certificate.mode
+        imported.client_certificate = current.client_certificate.model_copy(deep=True)
+        if imported_client_certificate_mode.value != "disabled":
+            imported.client_certificate.mode = imported_client_certificate_mode
+        if not result.service_imported:
+            imported.service = current.service
 
         imported.routes = imported.materialize_routes()
         request.app.state.gateway_config = imported
@@ -1400,8 +1904,14 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         return {
             "routes": len(imported.routes),
             "products": len(imported.products),
+            "loggers": len(imported.loggers),
+            "apim_diagnostics": len(imported.diagnostics),
+            "groups": len(imported.groups),
+            "tags": len(imported.tags),
             "subscriptions": len(imported.subscription.subscriptions),
             "apis": len(imported.apis),
+            "api_revisions": sum(len(api.revisions) for api in imported.apis.values()),
+            "api_releases": sum(len(api.releases) for api in imported.apis.values()),
             "diagnostics": [item.__dict__ for item in result.diagnostics],
         }
 

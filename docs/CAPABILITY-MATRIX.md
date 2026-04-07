@@ -19,12 +19,13 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Startup probe | Yes | N/A | `/apim/startup` |
 | Config reload | Yes | N/A | `/apim/reload` + file watcher |
 | CORS | Yes | `azurerm_api_management` | `allowed_origins` in config |
+| Public network access | Partial | `azurerm_api_management.public_network_access_enabled` / AzAPI `properties.publicNetworkAccess` | Imported into service metadata only; local reachability is not enforced |
 | Client cert (mTLS) | Yes | `azurerm_api_management.client_certificate_enabled` | `client_certificate.mode` |
 | Negotiate client cert | Yes | `azurerm_api_management.hostname_configuration.negotiate_client_certificate` | Via proxy headers |
 | SKU selection | N/A | `azurerm_api_management.sku_name` | Simulator is single-instance |
 | Zones / HA | N/A | `azurerm_api_management.zones` | Not applicable |
-| Virtual network | N/A | `azurerm_api_management.virtual_network_configuration` | Use k8s networking |
-| Custom domains | N/A | `azurerm_api_management.hostname_configuration` | Use ingress/gateway |
+| Virtual network type | Partial | `azurerm_api_management.virtual_network_type` / AzAPI `properties.virtualNetworkType` | Imported into service metadata only; use docker/k8s networking for actual topology |
+| Custom domains / hostnames | Partial | `azurerm_api_management.hostname_configuration` / AzAPI `properties.hostnameConfigurations` | Imported as service hostname metadata; TLS termination remains external |
 
 ## Runtime Scenarios
 
@@ -40,11 +41,17 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
 | API definition | Yes | `azurerm_api_management_api` | `apis` map in config |
+| API revision metadata | Partial | `azurerm_api_management_api.revision` / `revision_description` | Imported and exposed read-only; multiple APIM revisions collapse into one active local API for runtime behavior |
+| API releases | Partial | `azurerm_api_management_api_release` | Imported and exposed read-only via `/apim/management/apis/{api_id}/releases` |
 | Operations | Yes | `azurerm_api_management_api_operation` | `operations` within API |
+| API schemas | Partial | `azurerm_api_management_api_schema` | Imported and exposed read-only via `/apim/management/apis/{api_id}/schemas`; write endpoints are not implemented |
+| Operation descriptions and template params | Yes | `azurerm_api_management_api_operation` | Imported from operation metadata blocks and projected through management APIs |
+| Operation request metadata | Partial | `azurerm_api_management_api_operation.request` | Imported and projected read-only; request validation is not enforced at runtime |
+| Operation response metadata | Partial | `azurerm_api_management_api_operation.response` | Imported and projected read-only; descriptive only |
 | Path routing | Yes | - | `path_prefix` matching |
 | Method routing | Yes | - | Per-operation `method` |
 | API Version Sets | Yes | `azurerm_api_management_api_version_set` | Header/Query/Segment schemes |
-| OpenAPI import | Yes | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu |
+| OpenAPI import | Partial | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu for operation discovery and upstream URL; full schema/request/response extraction is narrower than explicit APIM resources |
 | GraphQL | No | `azurerm_api_management_api` | Not implemented |
 | WebSocket | No | `azurerm_api_management_api` | Not implemented |
 
@@ -54,6 +61,7 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 |---------|-----------|-------------------|-------|
 | Products | Yes | `azurerm_api_management_product` | `products` map |
 | Product-API association | Yes | `azurerm_api_management_product_api` | `products` list on route/API |
+| Product-group association | Yes | `azurerm_api_management_product_group` | Descriptive link resources under `/apim/management/products/{product_id}/groups` |
 | Subscriptions | Yes | `azurerm_api_management_subscription` | `subscription.subscriptions` |
 | Primary/secondary keys | Yes | - | `keys.primary`, `keys.secondary` |
 | Subscription state | Yes | - | `active`, `suspended`, `cancelled` |
@@ -63,13 +71,23 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Approval required | No | `azurerm_api_management_product.approval_required` | Auto-approved |
 | Subscription limits | No | `azurerm_api_management_product.subscriptions_limit` | Not enforced |
 
+## Tags
+
+| Feature | Simulator | Terraform Resource | Notes |
+|---------|-----------|-------------------|-------|
+| Tags | Yes | `azurerm_api_management_tag` | Global tag registry plus `/apim/management/tags` |
+| API tags | Yes | `azurerm_api_management_api_tag` | Descriptive link resources under `/apim/management/apis/{api_id}/tags` |
+| Product tags | Yes | `azurerm_api_management_product_tag` | Descriptive link resources under `/apim/management/products/{product_id}/tags` |
+| Operation tags | Partial | `azurerm_api_management_api_operation_tag` | Imported and exposed through operation tag links; operation tag creation is adapted into the simulator's global tag registry |
+| Tag descriptions | No | `azurerm_api_management_api_tag_description` | Not implemented |
+
 ## Users and Groups
 
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
-| Users | Partial | `azurerm_api_management_user` | Config only, no auth |
-| Groups | Partial | `azurerm_api_management_group` | Config only |
-| Group membership | Partial | `azurerm_api_management_group_user` | Config only |
+| Users | Partial | `azurerm_api_management_user` | Local CRUD + Terraform import; descriptive only, no auth or password enforcement |
+| Groups | Partial | `azurerm_api_management_group` | Local CRUD + Terraform import; still descriptive only |
+| Group membership | Partial | `azurerm_api_management_group_user` | Terraform import plus descriptive link CRUD under `/apim/management/groups/{group_id}/users` |
 | Built-in groups | No | - | Administrators/Developers/Guests |
 
 ## Authentication / Authorization
@@ -143,6 +161,16 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 |---------|-----------|-------------------|-------|
 | Tenant access keys | Yes | `azurerm_api_management.tenant_access` | Primary/secondary |
 | Management summary | Yes | - | `/apim/management/summary` |
+| API schema inspection | Yes | `azurerm_api_management_api_schema` | `/apim/management/apis/{api_id}/schemas` and `/apim/management/apis/{api_id}/schemas/{schema_id}` |
+| API revision inspection | Yes | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/revisions` and `/apim/management/apis/{api_id}/revisions/{revision_id}` |
+| API release inspection | Yes | `azurerm_api_management_api_release` | `/apim/management/apis/{api_id}/releases` and `/apim/management/apis/{api_id}/releases/{release_id}` |
+| Logger inspection | Yes | `azurerm_api_management_logger` | `/apim/management/loggers` and `/apim/management/loggers/{logger_id}` |
+| Diagnostic inspection | Yes | `azurerm_api_management_diagnostic` | `/apim/management/diagnostics` and `/apim/management/diagnostics/{diagnostic_id}` |
+| User CRUD | Partial | `azurerm_api_management_user` | `/apim/management/users`; password and confirmation flows remain descriptive only |
+| Group CRUD | Partial | `azurerm_api_management_group` | `/apim/management/groups` |
+| Group-user link CRUD | Yes | `azurerm_api_management_group_user` | `/apim/management/groups/{group_id}/users` |
+| Product-group link CRUD | Yes | `azurerm_api_management_product_group` | `/apim/management/products/{product_id}/groups` |
+| Tag inspection and CRUD | Yes | `azurerm_api_management_tag` | `/apim/management/tags` plus nested API/product/operation tag link endpoints |
 | Policy inspection/update | Yes | - | `/apim/management/policies/{scope_type}/{scope_name}` |
 | Replay | Yes | - | `/apim/management/replay` |
 | Subscription CRUD | Partial | - | List/create/update/rotate via API; delete not implemented |
@@ -157,10 +185,12 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Trace header | Yes | - | `X-Apim-Trace: true` |
 | Trace lookup | Yes | - | `/apim/trace/{id}` |
 | Trace summaries | Yes | - | `/apim/management/traces` |
+| Logger resources | Partial | `azurerm_api_management_logger` | Imported and exposed read-only; sink configuration is descriptive only |
+| Diagnostic resources | Partial | `azurerm_api_management_diagnostic` | Imported and exposed read-only; sampling and logger routing are descriptive only |
 | Forwarded-header trace fields | Yes | - | `incoming_host`, `forwarded_host`, `forwarded_proto`, `forwarded_for`, `client_ip`, `upstream_url` |
 | Policy execution trace | Yes | - | Includes policy steps, variable writes, JWT validation, send-request activity, selected backend, cache/throttle actions |
 | Application Insights | No | `azurerm_api_management.application_insights` | Use external APM |
-| Diagnostic logs | No | `azurerm_api_management_diagnostic` | Use container logs |
+| Diagnostic logs | No | `azurerm_api_management_diagnostic` | Use container logs and OTEL for actual runtime logging |
 
 ## Named Values / Secrets
 
@@ -197,8 +227,7 @@ These features are explicitly out of scope for the simulator:
 - Email templates (`azurerm_api_management_email_template`)
 - Notifications (`azurerm_api_management_notification_*`)
 - Self-hosted gateway (`azurerm_api_management_gateway`)
-- Tags and tag descriptions
 - Global/workspace policies distinction
-- API revision/release management
 - External cache backends for `cache-*` policies
 - `quota-by-key` bandwidth enforcement
+- Tag descriptions
