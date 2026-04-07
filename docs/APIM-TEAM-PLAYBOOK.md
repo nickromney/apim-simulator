@@ -1,6 +1,6 @@
 # APIM Team Playbook
 
-This is the team-facing playbook for common delivery tasks in this repository.
+Playbook for common delivery tasks in this repository.
 
 Use it when the question is not "what is APIM?" but rather:
 
@@ -8,7 +8,7 @@ Use it when the question is not "what is APIM?" but rather:
 - "How do I validate it before I ask for review?"
 - "What proof should I include in the PR?"
 
-If you are brand new to APIs or APIM, start with:
+If you need the repo-specific APIM model first, start with:
 
 - [`APIM-TRAINING-GUIDE.md`](./APIM-TRAINING-GUIDE.md)
 - [`FIRST-DAY-APIM-CHECKLIST.md`](./FIRST-DAY-APIM-CHECKLIST.md)
@@ -22,8 +22,8 @@ If you want a copy-paste project template, use:
 - Keep the backend private when the gateway is the intended entrypoint.
 - Get the route working before you add multiple auth layers.
 - Add one positive case and one negative case for any auth or policy change.
-- Use the shared OTEL contract where possible so the service can move between
-  this repo and `platform`.
+- Use the shared OTEL contract where possible so gateway and backend telemetry
+  line up without custom per-service wiring.
 - Do not claim a route works until you have both request proof and observability
   proof.
 

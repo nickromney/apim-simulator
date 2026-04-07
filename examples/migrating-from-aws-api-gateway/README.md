@@ -25,6 +25,10 @@ curl -H "Ocp-Apim-Subscription-Key: aws-migration-demo-key" http://localhost:800
 curl -H "Ocp-Apim-Subscription-Key: aws-migration-demo-key" http://localhost:8000/prod/hello
 ```
 
+This config also enables the local management API with tenant key
+`local-dev-tenant-key`, so you can inspect the loaded service and API metadata
+while you test the route shape.
+
 ## Files
 
 - `apim.http-api.json`: stage-style APIM config for the hello backend

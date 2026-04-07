@@ -1,16 +1,13 @@
 # APIM Training Guide
 
-This guide is for people who are new to APIs, new to Azure API Management
-(APIM), or new to OpenTelemetry (OTEL), but now need to work on a project that
-uses them.
+This guide is for engineers who are new to Azure API Management (APIM) or
+OpenTelemetry (OTEL) and need the local working model quickly.
 
-The goal is not to turn you into an APIM expert in one sitting. The goal is to
-give you a practical path from:
+It gives you a practical path to:
 
-- "I do not really know what an API gateway does"
-- to "I can run a local API behind APIM"
-- to "I can secure it with a subscription key and/or JWT"
-- to "I can prove that it works with the right tools"
+- run a local API behind APIM
+- secure it with a subscription key and/or JWT
+- prove the route works with the right tools
 
 If you want the companion docs:
 
@@ -19,7 +16,7 @@ If you want the companion docs:
 - team delivery tasks: [`APIM-TEAM-PLAYBOOK.md`](./APIM-TEAM-PLAYBOOK.md)
 - copy-paste service setup: [`APIM-STARTER-RECIPE.md`](./APIM-STARTER-RECIPE.md)
 
-If you only do one thing first, do this:
+Fastest path:
 
 ```bash
 make up-todo-otel
@@ -33,9 +30,9 @@ Then open:
 - `http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview` for Grafana
 
 Create a todo in the browser, then click `Open OTEL dashboard` in the app. That
-is the shortest path from "user action" to "observable API traffic".
+is the shortest path from user action to observable API traffic.
 
-## What APIM Is, In Plain English
+## APIM In Plain Terms
 
 An API is just a program that accepts requests and returns responses.
 
@@ -88,7 +85,7 @@ Browser -> Astro frontend -> apim-simulator -> FastAPI todo API
                                          -> Grafana LGTM stack
 ```
 
-That single picture is enough to reason about most beginner questions:
+That model covers most of the early debugging questions:
 
 - "Why does the backend work in isolation but fail from the browser?"
 - "Why do I need a subscription key?"
@@ -122,7 +119,7 @@ Use this when you want the simplest possible APIM-shaped setup.
 - Config: `examples/basic.json`
 - Backend: `examples/mock-backend/server.py`
 
-This mode is useful when you are still learning:
+This mode isolates:
 
 - what a route is
 - how APIM forwards a request upstream
@@ -130,14 +127,14 @@ This mode is useful when you are still learning:
 
 ### 2. Subscription-protected API flow
 
-Use this when you want to learn APIM subscriptions first.
+Use this when you want to isolate APIM subscriptions first.
 
 - Stack: `make up-todo-otel`
 - Config: `examples/todo-app/apim.json`
 - Backend: `examples/todo-app/api-fastapi-container-app/main.py`
 - Browser UI: `http://localhost:3000`
 
-This is the best beginner path because it shows:
+This path gives you:
 
 - a real browser calling APIM
 - a backend that stays internal-only
@@ -146,7 +143,7 @@ This is the best beginner path because it shows:
 
 ### 3. JWT plus subscription flow
 
-Use this when you want to learn identity and authorization.
+Use this when you want to isolate identity and authorization.
 
 - Stack: `make up-oidc`
 - Config: `examples/oidc/keycloak.json`
@@ -177,13 +174,13 @@ Make a request through APIM:
 curl http://localhost:8000/api/echo
 ```
 
-What you should see:
+Expected result:
 
 - HTTP `200`
 - JSON response from the mock backend
 - the backend `path` should still show the proxied route
 
-What this proves:
+This confirms:
 
 - APIM is up
 - a route matched
@@ -219,10 +216,9 @@ Then:
 3. Toggle it complete
 4. Click `Open OTEL dashboard`
 
-This is the most important training path in the repo because it is visible and
-concrete.
+This is the most complete path in the repo because it is visible and concrete.
 
-What is happening:
+Request flow:
 
 - the browser is calling `http://localhost:8000/api/...`
 - the frontend sends `Ocp-Apim-Subscription-Key: todo-demo-key`
@@ -255,7 +251,7 @@ curl \
   http://localhost:8000/api/todos
 ```
 
-What you should learn from this step:
+Key point:
 
 - APIM subscriptions are just controlled access, not identity
 - subscription success should return `200`
@@ -507,7 +503,7 @@ For the richer browser-backed example, look at:
 Both are normal FastAPI apps. The APIM-specific work happens in front of them,
 not instead of them.
 
-If you want the most directive path, do this:
+Fastest path:
 
 ```bash
 make up-hello
@@ -536,14 +532,13 @@ The todo backend is the reference implementation for that:
 That is the recommended local standard because it means:
 
 - the backend and gateway speak OTEL the same way
-- the same code can move between this repo and `platform`
 - Grafana can show gateway and backend signals together
 
 ## How To Know It Is Right
 
 Do not rely on one tool. Use the tool that answers the question you have.
 
-### Recommended order for beginners
+### Recommended Tool Order
 
 1. Browser UI
 2. `curl`
@@ -566,11 +561,11 @@ Do not rely on one tool. Use the tool that answers the question you have.
 
 ### Browser
 
-Use the todo app first if you want the least intimidating entry point:
+Use the todo app first if you want a browser-first entry point:
 
 - `http://localhost:3000`
 
-What to look for:
+Look for:
 
 - `Connected via APIM`
 - API call transcript entries against `http://localhost:8000/api/...`
@@ -602,33 +597,37 @@ curl \
   http://localhost:8000/api/echo
 ```
 
-### Bruno
+### Bruno and Postman
 
-Use Bruno when you want versioned request collections checked into git.
+Use Bruno or Postman when you want saved request flows rather than ad hoc
+`curl` calls.
 
-The repo includes a ready-made Bruno collection for the todo example:
+The repo includes ready-made client artifacts for the todo example:
 
 - `examples/todo-app/api-clients/bruno/`
+- `examples/todo-app/api-clients/postman/`
 
-Run it with:
+If you need Bruno itself, use the official install page:
+[Bruno installation options](https://docs.usebruno.com/get-started/bruno-basics/download#installation-options).
+
+Run them with:
 
 ```bash
 make test-todo-bruno
+make test-todo-postman
 ```
 
-Why beginners should care:
+Why they help:
 
-- it captures the expected requests
-- it includes both success and failure auth cases
-- it is easier to repeat than typing everything by hand
+- they capture the expected requests
+- they include both success and failure auth cases
+- they are easier to repeat than typing everything by hand
 
-If your team uses Postman instead of Bruno, the mental model is the same:
+Bruno is still the cleaner fit for git and CI. Postman is checked in for teams
+that already standardize on Postman workspaces and collections.
 
-- a collection of saved requests
-- environment variables for hostnames and keys
-- repeatable checks of known scenarios
-
-This repo ships Bruno because it works well in git and in CI.
+For the repo-specific Bruno and Postman workflow, use
+[`API-CLIENT-GUIDE.md`](./API-CLIENT-GUIDE.md).
 
 ### Proxyman
 
@@ -700,7 +699,7 @@ Use it to answer:
 - do I have logs for this failure?
 - do I have traces for this route?
 
-Use these commands to automate the proof:
+Use these commands to verify the path:
 
 ```bash
 make verify-otel
@@ -748,5 +747,5 @@ clearer.
 - Capability coverage: `docs/CAPABILITY-MATRIX.md`
 - Scope and current boundaries: `docs/SCOPE.md`
 
-If you are new, do not start with the capability matrix. Start with the todo
-demo or the hello starter and this guide.
+Start with the todo demo or the hello starter before diving into the capability
+matrix.

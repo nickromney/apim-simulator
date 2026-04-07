@@ -1,18 +1,17 @@
 # APIM Starter Recipe
 
-This is the copy-paste recipe for creating a brand-new API behind APIM in this
+This guide shows the fastest way to create a brand-new API behind APIM in this
 repository.
 
-The starter is no longer hypothetical. The repo now ships a working scaffold
-under `examples/hello-api/` plus compose overlays and a smoke script, so the
-docs and the example are the same thing.
+The repo ships a working scaffold under `examples/hello-api/` plus compose
+overlays and a smoke script, so the docs and the example stay aligned.
 
 Use this guide in two ways:
 
-- run the checked-in `hello-api` example to learn the pattern
+- run the checked-in `hello-api` example to see the pattern in a working stack
 - copy and rename that scaffold when you need a new service
 
-If you are completely new to APIM, read
+If you need the APIM model first, read
 [`APIM-TRAINING-GUIDE.md`](./APIM-TRAINING-GUIDE.md) first.
 
 ## What Ships In The Scaffold
@@ -37,6 +36,10 @@ That gives you four auth variants out of the box:
 3. JWT-only
 4. subscription plus JWT
 
+The checked-in starter configs keep `tenant_access` disabled. That keeps the
+example small, but it also means `/apim/management/*` and the operator console
+stay unavailable until you add tenant access to the APIM config.
+
 ## Fastest Path
 
 Run the anonymous version first:
@@ -46,7 +49,7 @@ make up-hello
 make smoke-hello
 ```
 
-That proves the basic route works before you add auth.
+That verifies routing before you add auth.
 
 Switch to subscription-only:
 
@@ -116,8 +119,7 @@ These are the gateway-side variants:
 - `apim.oidc.jwt-only.json`: API requires a bearer token but not a subscription
 - `apim.oidc.subscription.json`: API requires both a bearer token and a subscription key
 
-This is the clearest way to teach the difference between the auth patterns,
-because only the config changes.
+This isolates the auth differences because only the config changes.
 
 ### `compose.hello.yml`
 
@@ -304,8 +306,8 @@ The hello scaffold already follows the repo's OTEL standard:
 - the backend emits OTLP to LGTM with env vars
 - the gateway and backend share the same local OTEL contract
 
-That matters because the service should be able to move between this repo and
-`platform` without rewriting observability from scratch.
+That matters because the gateway and backend can share one local OTEL contract
+without extra per-service wiring.
 
 When teaching or reviewing, make these checks:
 

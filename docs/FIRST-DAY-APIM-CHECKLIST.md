@@ -5,18 +5,18 @@ and you need a practical first day, not a theory course.
 
 ## Goal
 
-By the end of this checklist, you should be able to say:
+After following this checklist, you will:
 
-- I know where the backend API is
-- I know where APIM sits in front of it
-- I can call the API through APIM
-- I can tell the difference between subscription auth and JWT auth
-- I can prove the route works with at least two tools
-- I can find logs, traces, and metrics for a real request
+- know where the backend API is
+- know where APIM sits in front of it
+- be able to call the API through APIM
+- be able to tell the difference between subscription auth and JWT auth
+- be able to prove the route works with at least two tools
+- be able to find logs, traces, and metrics for a real request
 
 ## 1. Learn The Shape Of The System
 
-Keep this picture in mind:
+Use this as the system model:
 
 ```mermaid
 flowchart LR
@@ -27,9 +27,7 @@ flowchart LR
   Gateway --> Metrics["Metrics"]
 ```
 
-If you understand that picture, you understand the core of the work.
-
-## 2. Run The Best Beginner Stack
+## 2. Run The Fastest Full Stack
 
 Start here:
 
@@ -60,10 +58,10 @@ In the todo UI, look for:
 - the policy indicator
 - correlation IDs in the call transcript
 
-If the browser is calling the backend directly, your APIM training is already
-off course.
+If the browser is calling the backend directly, the gateway is not the active
+entrypoint.
 
-## 4. Learn Subscription Auth First
+## 4. Check Subscription Auth
 
 Run these three requests:
 
@@ -89,18 +87,18 @@ curl \
   http://localhost:8000/api/todos
 ```
 
-What to observe:
+Expected results:
 
 - success returns `200`
 - missing key returns `401`
 - invalid key returns `401`
 
-That is your first concrete APIM concept:
+Interpretation:
 
 - subscription keys control access to a product
 - they do not represent a user identity
 
-## 5. Learn JWT Auth Second
+## 5. Check JWT Auth
 
 Bring up the OIDC example:
 
@@ -133,14 +131,14 @@ curl \
   http://localhost:8000/admin/api/echo
 ```
 
-What to learn:
+Interpretation:
 
 - the bearer token is identity
 - the subscription key is product access
 - both can be required at once
 - `403` can mean authz failure, not route failure
 
-## 6. Learn The Two Fastest Debug Tools
+## 6. Start With Two Fast Debug Tools
 
 Use these first:
 
@@ -168,7 +166,7 @@ If you need deeper inspection after that, move to:
 
 ## 7. Learn Where The Important Files Live
 
-If someone says "change the API", you probably want one of these:
+If someone says "change the API", start with:
 
 - Smallest starter backend: `examples/hello-api/main.py`
 - Smallest starter APIM config: `examples/hello-api/apim.anonymous.json`
@@ -189,7 +187,7 @@ If someone says "change the API", you probably want one of these:
 5. How will a teammate prove the route works?
 6. How will a teammate observe it in logs, traces, and metrics?
 
-If you cannot answer those, you are not ready to change the route safely.
+If those answers are unclear, resolve them before changing the route.
 
 ## 9. Minimum Definition Of Done
 

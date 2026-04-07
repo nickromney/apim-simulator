@@ -17,7 +17,7 @@ COMPOSE_TODO_OTEL := $(COMPOSE) -f compose.todo.yml -f compose.todo.otel.yml
 COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 
-.PHONY: help ensure-certs install-hooks fmt lint lint-check up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo test-todo-e2e test-todo-bruno export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help ensure-certs install-hooks fmt lint lint-check up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
@@ -68,6 +68,7 @@ help:
 	@printf "  %-22s %s\n" "smoke-todo" "Run the APIM-backed todo demo smoke test"
 	@printf "  %-22s %s\n" "test-todo-e2e" "Run Playwright against the running todo demo stack"
 	@printf "  %-22s %s\n" "test-todo-bruno" "Run the Bruno collection against the running todo demo stack"
+	@printf "  %-22s %s\n" "test-todo-postman" "Run the Postman collection against the running todo demo stack"
 	@printf "  %-22s %s\n" "export-todo-har" "Capture the todo APIM flow as a HAR file for Proxyman"
 	@printf "  %-22s %s\n" "compose-config" "Render docker compose config for the direct public stack"
 	@printf "  %-22s %s\n" "compose-config-otel" "Render docker compose config for the direct public LGTM stack"
@@ -240,6 +241,9 @@ test-todo-e2e:
 
 test-todo-bruno:
 	cd examples/todo-app/api-clients/bruno && npm exec --yes --package=@usebruno/cli -- bru run --env-file ./environments/local.bru .
+
+test-todo-postman:
+	npm exec --yes --package=newman -- newman run examples/todo-app/api-clients/postman/todo-through-apim.postman_collection.json --environment examples/todo-app/api-clients/postman/local.postman_environment.json
 
 export-todo-har:
 	uv run python scripts/export_todo_har.py

@@ -1,11 +1,14 @@
 # APIM SDK Surface Guide
 
-This repo now aligns its local management surface with the main Azure API
-Management resource families exposed by the current .NET management SDK, while
-still behaving like a local simulator rather than an ARM endpoint.
+This guide maps Azure API Management resource families to the simulator's local
+config model and management endpoints.
 
-Use this guide when you are reading Azure SDK or ARM docs and want to know
-which local concept to touch first.
+Use it when you are reading Azure SDK or ARM docs and want to know which local
+config section or management endpoint to inspect first.
+
+Management endpoints exist only when `tenant_access.enabled` is `true`. When it
+is `false`, `/apim/management/*` returns `404`. The smaller hello and todo
+example configs keep that surface off by default.
 
 ## Core Mapping
 
@@ -33,11 +36,18 @@ which local concept to touch first.
 | Policies | `/apim/management/policies/{scope_type}/{scope_name}` |
 | Traces | `/apim/management/traces` and `/apim/trace/{id}` |
 
+The operator-oriented endpoints do not map cleanly to one Azure resource family
+but are part of the local surface:
+
+- `/apim/management/status`
+- `/apim/management/summary`
+- `/apim/management/replay`
+
 ## What Is Intentionally Different
 
 - Resource IDs are stable local IDs such as `service/apim-simulator/apis/hello`.
 - Writes are synchronous config updates plus reload, not ARM async operations.
-- Tenant key auth protects the local management API. ARM auth is out of scope.
+- Tenant-key auth protects the local management API. ARM auth is out of scope.
 - The simulator exposes the resource families developers use most often, not
   the full APIM control plane.
 
@@ -75,6 +85,10 @@ These families support local write operations through the management API:
 - APIs
 - operations
 - products
+- product-group links
+- API tag links
+- product tag links
+- operation tag links
 - users
 - groups
 - group-user links
@@ -85,7 +99,7 @@ These families support local write operations through the management API:
 - policy fragments
 - policies
 
-These families are read-only in this phase:
+These families are read-only in the current simulator:
 
 - service
 - API schemas
@@ -103,9 +117,9 @@ operation management endpoints but do not drive runtime request validation.
 Users and group membership are still intentionally local-first. Passwords,
 invites, and broader APIM identity flows are not enforced.
 
-Loggers and diagnostics are intentionally inspection-only too. Their sink,
-sampling, and capture settings are preserved for learning, but actual runtime
-observability still comes from local traces plus OTEL/Grafana.
+Loggers and diagnostics are intentionally inspection-only. Their sink, sampling,
+and capture settings are preserved for learning, but actual runtime
+observability still comes from local traces plus OTEL and Grafana.
 
 ## Recommended Workflow
 

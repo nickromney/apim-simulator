@@ -2,6 +2,8 @@
 
 This document maps simulator features to Azure APIM concepts and their Terraform resource equivalents.
 
+The management surface below is available when `tenant_access.enabled` is `true`.
+
 ## Legend
 
 | Status | Meaning |
@@ -159,13 +161,20 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
+| Management status | Yes | - | `/apim/management/status` |
 | Tenant access keys | Yes | `azurerm_api_management.tenant_access` | Primary/secondary |
 | Management summary | Yes | - | `/apim/management/summary` |
+| API CRUD | Yes | `azurerm_api_management_api` | `/apim/management/apis` |
+| Operation CRUD | Yes | `azurerm_api_management_api_operation` | `/apim/management/apis/{api_id}/operations` |
+| Product CRUD | Yes | `azurerm_api_management_product` | `/apim/management/products` |
+| Backend CRUD | Yes | `azurerm_api_management_backend` | `/apim/management/backends` |
+| Named value CRUD | Yes | `azurerm_api_management_named_value` | `/apim/management/named-values` |
 | API schema inspection | Yes | `azurerm_api_management_api_schema` | `/apim/management/apis/{api_id}/schemas` and `/apim/management/apis/{api_id}/schemas/{schema_id}` |
 | API revision inspection | Yes | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/revisions` and `/apim/management/apis/{api_id}/revisions/{revision_id}` |
 | API release inspection | Yes | `azurerm_api_management_api_release` | `/apim/management/apis/{api_id}/releases` and `/apim/management/apis/{api_id}/releases/{release_id}` |
 | Logger inspection | Yes | `azurerm_api_management_logger` | `/apim/management/loggers` and `/apim/management/loggers/{logger_id}` |
 | Diagnostic inspection | Yes | `azurerm_api_management_diagnostic` | `/apim/management/diagnostics` and `/apim/management/diagnostics/{diagnostic_id}` |
+| Policy fragment CRUD | Yes | - | `/apim/management/policy-fragments` |
 | User CRUD | Partial | `azurerm_api_management_user` | `/apim/management/users`; password and confirmation flows remain descriptive only |
 | Group CRUD | Partial | `azurerm_api_management_group` | `/apim/management/groups` |
 | Group-user link CRUD | Yes | `azurerm_api_management_group_user` | `/apim/management/groups/{group_id}/users` |
@@ -173,7 +182,7 @@ This document maps simulator features to Azure APIM concepts and their Terraform
 | Tag inspection and CRUD | Yes | `azurerm_api_management_tag` | `/apim/management/tags` plus nested API/product/operation tag link endpoints |
 | Policy inspection/update | Yes | - | `/apim/management/policies/{scope_type}/{scope_name}` |
 | Replay | Yes | - | `/apim/management/replay` |
-| Subscription CRUD | Partial | - | List/create/update/rotate via API; delete not implemented |
+| Subscription CRUD | Yes | `azurerm_api_management_subscription` | List, create, update, delete, and rotate via API |
 | Config import | Yes | - | Terraform/OpenTofu JSON import via management API and `make import-tofu` |
 | Git integration | No | `azurerm_api_management.management.git_configuration_enabled` | Use GitOps |
 

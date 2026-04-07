@@ -59,6 +59,10 @@ make verify-hello-otel
 - Gateway: `http://localhost:8000`
 - Grafana, when OTEL is enabled: `http://localhost:3001`
 
+These starter configs keep tenant access off by default. If you want
+`/apim/management/*` or the operator console, add `tenant_access` to the APIM
+config first.
+
 ## Read Next
 
 - Starter recipe: [`docs/APIM-STARTER-RECIPE.md`](../../docs/APIM-STARTER-RECIPE.md)
