@@ -48,12 +48,12 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Operations | Yes | `azurerm_api_management_api_operation` | `operations` within API |
 | API schemas | Partial | `azurerm_api_management_api_schema` | Imported and exposed read-only via `/apim/management/apis/{api_id}/schemas`; write endpoints are not implemented |
 | Operation descriptions and template params | Yes | `azurerm_api_management_api_operation` | Imported from operation metadata blocks and projected through management APIs |
-| Operation request metadata | Partial | `azurerm_api_management_api_operation.request` | Imported and projected read-only; request validation is not enforced at runtime |
-| Operation response metadata | Partial | `azurerm_api_management_api_operation.response` | Imported and projected read-only; descriptive only |
+| Operation request metadata | Partial | `azurerm_api_management_api_operation.request` | Imported and projected through management APIs, and can be authored on operation PUT; request validation is not enforced at runtime |
+| Operation response metadata | Partial | `azurerm_api_management_api_operation.response` | Imported and projected through management APIs, and can be authored on operation PUT; runtime uses them for `mock-response` examples but not full schema enforcement |
 | Path routing | Yes | - | `path_prefix` matching |
 | Method routing | Yes | - | Per-operation `method` |
 | API Version Sets | Yes | `azurerm_api_management_api_version_set` | Header/Query/Segment schemes |
-| OpenAPI import | Partial | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu for operation discovery and upstream URL; full schema/request/response extraction is narrower than explicit APIM resources |
+| OpenAPI import | Partial | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu and `/apim/management/apis/{api_id}/import`; full schema/request/response extraction is narrower than explicit APIM resources |
 | GraphQL | No | `azurerm_api_management_api` | Not implemented |
 | WebSocket | No | `azurerm_api_management_api` | Not implemented |
 
@@ -141,7 +141,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `cache-lookup-value` | Partial | - | Supports local internal value cache plus default-value; `prefer-external` is adapted and `external` is unsupported |
 | `cache-store-value` | Partial | - | Stores to local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
 | `cache-remove-value` | Partial | - | Removes from local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
-| `mock-response` | No | - | Use `return-response` |
+| `mock-response` | Partial | - | Supports `status-code` and `content-type`, returning the first matching authored response example for the current operation |
 | `send-request` | Yes | - | Supports `new|copy`, headers/body, timeout, ignore-error, managed identity, certificate placeholder |
 | `log-to-eventhub` | No | - | Use observability stack |
 
@@ -165,13 +165,15 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Tenant access keys | Yes | `azurerm_api_management.tenant_access` | Primary/secondary |
 | Management summary | Yes | - | `/apim/management/summary` |
 | API CRUD | Yes | `azurerm_api_management_api` | `/apim/management/apis` |
+| OpenAPI import via management API | Partial | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/import`; imports operations and upstream URL, but not full schema/request/response parity |
 | Operation CRUD | Yes | `azurerm_api_management_api_operation` | `/apim/management/apis/{api_id}/operations` |
 | Product CRUD | Yes | `azurerm_api_management_product` | `/apim/management/products` |
 | Backend CRUD | Yes | `azurerm_api_management_backend` | `/apim/management/backends` |
 | Named value CRUD | Yes | `azurerm_api_management_named_value` | `/apim/management/named-values` |
 | API schema inspection | Yes | `azurerm_api_management_api_schema` | `/apim/management/apis/{api_id}/schemas` and `/apim/management/apis/{api_id}/schemas/{schema_id}` |
-| API revision inspection | Yes | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/revisions` and `/apim/management/apis/{api_id}/revisions/{revision_id}` |
-| API release inspection | Yes | `azurerm_api_management_api_release` | `/apim/management/apis/{api_id}/releases` and `/apim/management/apis/{api_id}/releases/{release_id}` |
+| API revision CRUD | Partial | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/revisions`; revision metadata and current-release bookkeeping are supported, but runtime revision branching remains collapsed to one active API |
+| API release CRUD | Partial | `azurerm_api_management_api_release` | `/apim/management/apis/{api_id}/releases`; descriptive metadata only |
+| API version set CRUD | Yes | `azurerm_api_management_api_version_set` | `/apim/management/api-version-sets` |
 | Logger inspection | Yes | `azurerm_api_management_logger` | `/apim/management/loggers` and `/apim/management/loggers/{logger_id}` |
 | Diagnostic inspection | Yes | `azurerm_api_management_diagnostic` | `/apim/management/diagnostics` and `/apim/management/diagnostics/{diagnostic_id}` |
 | Policy fragment CRUD | Yes | - | `/apim/management/policy-fragments` |

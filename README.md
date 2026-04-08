@@ -66,6 +66,13 @@ curl http://localhost:8000/apim/health
 curl http://localhost:8000/api/echo
 ```
 
+## Tutorial Mirror
+
+For a simulator-native version of the Microsoft Learn getting-started sequence, see:
+
+- `docs/tutorials/apim-get-started/README.md`
+- `./tutorial01.sh` through `./tutorial11.sh` for self-contained mirrored tutorial shortcuts
+
 ## Interacting with the Simulator
 
 ### Choosing the right base URL
@@ -200,6 +207,16 @@ make smoke-mcp
 ```
 
 ## Import and Compatibility
+
+Import a local or remote OpenAPI document directly into a running simulator:
+
+```bash
+OPENAPI_SOURCE=examples/mock-backend/openapi.json \
+APIM_API_ID=tutorial-api \
+APIM_API_NAME="Tutorial API" \
+APIM_API_PATH=tutorial-api \
+uv run python scripts/import_openapi.py
+```
 
 Import a running simulator from a `tofu show -json` payload:
 
