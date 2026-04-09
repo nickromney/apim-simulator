@@ -14,7 +14,7 @@ export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
 These commands assume `tutorial-api` already exists. If it does not, run step
-1 first or use `./tutorial01.sh`.
+1 first or use `./docs/tutorials/apim-get-started/tutorial01.sh --setup`.
 
 Add revision metadata:
 
@@ -60,14 +60,13 @@ curl -sS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial07.sh
-./tutorial07.sh --verify
+./docs/tutorials/apim-get-started/tutorial07.sh --setup
+./docs/tutorials/apim-get-started/tutorial07.sh --verify
 ```
 
-Unlike the manual path above, `tutorial07.sh` starts the local stack itself,
-imports the API, and then authors the revision and release metadata.
+Use `--setup` to have `tutorial07.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial07.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial07.sh --verify` output:
 
 ```text
 Adding revision metadata

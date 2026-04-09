@@ -31,33 +31,15 @@ uv run python scripts/import_openapi.py
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial01.sh
-./tutorial01.sh --verify
+./docs/tutorials/apim-get-started/tutorial01.sh --setup
+./docs/tutorials/apim-get-started/tutorial01.sh --verify
 ```
 
-Unlike the manual path above, `tutorial01.sh` brings the local stack up itself with `docker compose`.
+Use `--setup` to have `tutorial01.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected `./tutorial01.sh --verify` output:
+Expected `./docs/tutorials/apim-get-started/tutorial01.sh --verify` output:
 
 ```text
-Starting tutorial 01 stack with docker compose
-Waiting for gateway health at http://localhost:18000/apim/health
-Importing OpenAPI source into API 'tutorial-api'
-{
-  "api_id": "tutorial-api",
-  "path": "tutorial-api",
-  "operations": [
-    "echo",
-    "health"
-  ],
-  "import": {
-    "diagnostics": [],
-    "format": "openapi+json",
-    "operation_count": 2,
-    "upstream_base_url": "http://mock-backend:8080/api"
-  }
-}
-
 Verifying imported API metadata
 $ curl -sS -H "X-Apim-Tenant-Key: test-tenant-key" "http://localhost:18000/apim/management/apis/tutorial-api"
 {

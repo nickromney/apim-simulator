@@ -14,7 +14,7 @@ export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
 These commands assume `tutorial-api` and `tutorial-key` already exist. If not,
-run steps 1 and 2 first or use `./tutorial02.sh`.
+run steps 1 and 2 first or use `./docs/tutorials/apim-get-started/tutorial02.sh --setup`.
 
 Restart on the OTEL stack so you have logs, traces, and metrics:
 
@@ -53,15 +53,13 @@ Then inspect:
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial05.sh
-./tutorial05.sh --verify
+./docs/tutorials/apim-get-started/tutorial05.sh --setup
+./docs/tutorials/apim-get-started/tutorial05.sh --verify
 ```
 
-Unlike the manual path above, `tutorial05.sh` starts the OTEL stack itself,
-bootstraps the product and subscription prerequisites, and sends trace-enabled
-requests so the management trace list has deterministic entries to inspect.
+Use `--setup` to have `tutorial05.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial05.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial05.sh --verify` output:
 
 ```text
 Waiting for Grafana health at http://localhost:3001/api/health

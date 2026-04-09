@@ -71,7 +71,8 @@ curl http://localhost:8000/api/echo
 For a simulator-native version of the Microsoft Learn getting-started sequence, see:
 
 - `docs/tutorials/apim-get-started/README.md`
-- `./tutorial01.sh` through `./tutorial11.sh` for self-contained mirrored tutorial shortcuts
+- `./docs/tutorials/apim-get-started/tutorial01.sh` through `./docs/tutorials/apim-get-started/tutorial11.sh` for self-contained mirrored tutorial shortcuts kept alongside the matching markdown guides; use `--setup` to apply a step and `--verify` to validate it
+- `./docs/tutorials/apim-get-started/tutorial-cleanup.sh` to stop the tutorial compose stacks
 
 ## Interacting with the Simulator
 

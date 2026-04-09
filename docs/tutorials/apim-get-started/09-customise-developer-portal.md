@@ -40,20 +40,15 @@ The operator console is the supported local surface for:
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial09.sh
-./tutorial09.sh --verify
+./docs/tutorials/apim-get-started/tutorial09.sh --setup
+./docs/tutorials/apim-get-started/tutorial09.sh --verify
 ```
 
-Unlike the manual path above, `tutorial09.sh` starts the UI stack itself and
-waits for both the gateway and operator console to become reachable.
+Use `--setup` to have `tutorial09.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial09.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial09.sh --verify` output:
 
 ```text
-Waiting for operator console at http://localhost:3007
-Operator console is available at http://localhost:3007
-Gateway is available at http://localhost:8000
-
 Verifying the closest local equivalent
 $ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/status"
 {

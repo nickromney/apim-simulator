@@ -14,7 +14,7 @@ export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
 These examples assume `tutorial-api` already exists. If it does not, run step
-1 first or use `./tutorial01.sh`.
+1 first or use `./docs/tutorials/apim-get-started/tutorial01.sh --setup`.
 
 Use Visual Studio Code with either:
 
@@ -55,16 +55,13 @@ Content-Type: application/json
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial10.sh
-./tutorial10.sh --verify
+./docs/tutorials/apim-get-started/tutorial10.sh --setup
+./docs/tutorials/apim-get-started/tutorial10.sh --verify
 ```
 
-Unlike the manual path above, `tutorial10.sh` starts the local stack itself,
-imports the tutorial API, applies the same policy update shown in
-[tutorial10.rest.http](/Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial10.rest.http),
-and verifies the resulting response header.
+Use `--setup` to have `tutorial10.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial10.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial10.sh --verify` output:
 
 ```text
 REST Client example: /Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial10.rest.http

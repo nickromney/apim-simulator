@@ -41,15 +41,13 @@ Those payloads give you:
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial11.sh
-./tutorial11.sh --verify
+./docs/tutorials/apim-get-started/tutorial11.sh --setup
+./docs/tutorials/apim-get-started/tutorial11.sh --verify
 ```
 
-Unlike the manual path above, `tutorial11.sh` starts the local stack itself,
-imports the API, seeds representative inventory metadata, and writes the export
-payloads to `/tmp/apim-simulator-tutorial11` by default.
+Use `--setup` to have `tutorial11.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial11.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial11.sh --verify` output:
 
 ```text
 Exporting simulator inventory to /tmp/apim-simulator-tutorial11

@@ -34,9 +34,12 @@ These tutorials assume the API you import in step 1 uses:
 - subscription ID: `tutorial-sub`
 - subscription key: `tutorial-key`
 
-Each mirrored step also has a root-level `tutorialNN.sh` shortcut. Those
-scripts start the required stack themselves, and `--verify` runs the
-deterministic checks shown inline in each step guide.
+Each mirrored step also has a companion `tutorialNN.sh` script in this
+directory. Run `--setup` or `--execute` to apply a step. Run `--verify` to
+validate the existing tutorial state without restarting the stack.
+
+Use `./docs/tutorials/apim-get-started/tutorial-cleanup.sh` to stop the
+tutorial compose stacks and remove orphaned containers.
 
 ## Status Matrix
 

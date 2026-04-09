@@ -1,23 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$ROOT_DIR/scripts/tutorial_lib.sh"
 
 init_tutorial_env
+EXECUTE=0
 VERIFY=0
 
 usage() {
   cat <<EOF
-Usage: ./tutorial04.sh [--verify]
+Usage: ./docs/tutorials/apim-get-started/tutorial04.sh [--setup|--execute|--verify]
 
-Runs tutorial step 4 for the APIM simulator end-to-end, including starting the
-local stack with docker compose.
+Runs tutorial step 4 for the APIM simulator.
+
+Flags:
+  --setup, --execute  Start the local stack and apply the tutorial protection policy.
+  --verify            Verify the existing tutorial state without restarting it.
+  --help, -h          Show this help text.
 EOF
+}
+
+verify_tutorial() {
+  echo "Verifying transform and throttling"
+
+  echo '$ curl -i -H "Ocp-Apim-Subscription-Key: '"$APIM_SUBSCRIPTION_KEY"'" "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
+  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
+  captured_expect_summary \
+    '{"custom_header":"My custom value","path":"/api/health","status":"ok","status_code":200}' \
+    'summary = {"custom_header": headers.get("custom"), "path": (body_json or {}).get("path"), "status": (body_json or {}).get("status"), "status_code": status}'
+
+  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
+  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
+
+  echo
+  echo '$ curl -i -H "Ocp-Apim-Subscription-Key: '"$APIM_SUBSCRIPTION_KEY"'" "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
+  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
+  captured_expect_summary \
+    '{"body_text":"Rate limit exceeded","retry_after_present":true,"status_code":429}' \
+    'summary = {"body_text": body_text, "retry_after_present": "retry-after" in headers, "status_code": status}'
+  echo
 }
 
 while (($# > 0)); do
   case "$1" in
+    --setup|--execute)
+      EXECUTE=1
+      ;;
     --verify)
       VERIFY=1
       ;;
@@ -33,6 +63,22 @@ while (($# > 0)); do
   esac
   shift
 done
+
+if [[ "$EXECUTE" -eq 1 && "$VERIFY" -eq 1 ]]; then
+  echo "Choose either --setup/--execute or --verify." >&2
+  usage >&2
+  exit 2
+fi
+
+if [[ "$EXECUTE" -eq 0 && "$VERIFY" -eq 0 ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$VERIFY" -eq 1 ]]; then
+  run_verify_with_setup_hint "./docs/tutorials/apim-get-started/tutorial04.sh" verify_tutorial
+  exit 0
+fi
 
 echo "Starting tutorial 04 stack with docker compose"
 recreate_public_gateway_stack
@@ -71,25 +117,5 @@ json_expect_summary \
   "$policy_response" \
   "{\"contains_custom_header\":true,\"contains_rate_limit\":true,\"scope_name\":\"$APIM_API_ID\",\"scope_type\":\"api\"}" \
   'summary = {"contains_custom_header": "Custom" in (data.get("xml") or ""), "contains_rate_limit": "rate-limit-by-key" in (data.get("xml") or ""), "scope_name": data.get("scope_name"), "scope_type": data.get("scope_type")}'
-
-if [[ "$VERIFY" -eq 1 ]]; then
-  echo
-  echo "Verifying transform and throttling"
-
-  echo '$ curl -i -H "Ocp-Apim-Subscription-Key: '"$APIM_SUBSCRIPTION_KEY"'" "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
-  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
-  captured_expect_summary \
-    '{"custom_header":"My custom value","path":"/api/health","status":"ok","status_code":200}' \
-    'summary = {"custom_header": headers.get("custom"), "path": (body_json or {}).get("path"), "status": (body_json or {}).get("status"), "status_code": status}'
-
-  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
-  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
-
-  echo
-  echo '$ curl -i -H "Ocp-Apim-Subscription-Key: '"$APIM_SUBSCRIPTION_KEY"'" "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
-  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
-  captured_expect_summary \
-    '{"body_text":"Rate limit exceeded","retry_after_present":true,"status_code":429}' \
-    'summary = {"body_text": body_text, "retry_after_present": "retry-after" in headers, "status_code": status}'
-  echo
-fi
+echo
+echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial04.sh --verify to validate the policy behaviour."

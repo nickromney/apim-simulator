@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 
 ROOT="/Users/nickromney/Developer/personal/apim-simulator"
+TUTORIAL_DIR="$ROOT/docs/tutorials/apim-get-started"
+TUTORIAL_CLEANUP="$TUTORIAL_DIR/tutorial-cleanup.sh"
 
 setup() {
   export TEST_BIN="$BATS_TEST_TMPDIR/bin"
@@ -302,95 +304,205 @@ EOF
   export PATH="$TEST_BIN:$PATH"
 }
 
-@test "tutorial02.sh --verify bootstraps product access" {
-  run "$ROOT/tutorial02.sh" --verify
+@test "tutorial02-11 without arguments print help" {
+  local script
+  for script in "$TUTORIAL_DIR"/tutorial{02,03,04,05,06,07,08,09,10,11}.sh; do
+    run "$script"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[--setup|--execute|--verify]"* ]]
+  done
+}
+
+@test "tutorial-cleanup.sh stops the tutorial compose stacks" {
+  run "$TUTORIAL_CLEANUP"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Creating product 'tutorial-product'"* ]]
+  [[ "$output" == *"Stopping all tutorial stack variants with docker compose"* ]]
+  [[ "$output" == *"Compose files:"* ]]
+  [[ "$output" == *"/Users/nickromney/Developer/personal/apim-simulator/compose.public.yml"* ]]
+  [[ "$output" == *"/Users/nickromney/Developer/personal/apim-simulator/compose.otel.yml"* ]]
+  [[ "$output" == *"/Users/nickromney/Developer/personal/apim-simulator/compose.ui.yml"* ]]
+  [[ "$output" == *"Running:"* ]]
+  [[ "$output" == *"down --remove-orphans"* ]]
+
+  run cat "$CALL_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"docker compose -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml -f /Users/nickromney/Developer/personal/apim-simulator/compose.otel.yml -f /Users/nickromney/Developer/personal/apim-simulator/compose.ui.yml down --remove-orphans"* ]]
+}
+
+@test "tutorial02.sh --verify bootstraps product access" {
+  run "$TUTORIAL_DIR/tutorial02.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial02.sh" --verify
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Starting tutorial 02 stack with docker compose"* ]]
+  [[ "$output" == *"Verifying product and subscription metadata"* ]]
   [[ "$output" == *'"subscription_count": 1'* ]]
   [[ "$output" == *'"detail": "Missing subscription key"'* ]]
   [[ "$output" == *'"status": "ok"'* ]]
 }
 
+@test "tutorial02.sh --verify suggests setup when state is missing" {
+  cat >"$TEST_BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+method="GET"
+url=""
+
+while (($# > 0)); do
+  case "$1" in
+    -X)
+      method="$2"
+      shift 2
+      ;;
+    -H|-D|-o|-w|--data|--data-binary)
+      shift 2
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      url="$1"
+      shift
+      ;;
+  esac
+done
+
+printf 'curl %s %s\n' "$method" "$url" >>"$CALL_LOG"
+
+case "$url" in
+  "http://localhost:8000/apim/management/products/tutorial-product")
+    echo 'curl: (22) The requested URL returned error: 404' >&2
+    exit 22
+    ;;
+  *)
+    printf '{}'
+    ;;
+esac
+EOF
+  chmod +x "$TEST_BIN/curl"
+
+  run "$TUTORIAL_DIR/tutorial02.sh" --verify
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Verification could not complete."* ]]
+  [[ "$output" == *"./docs/tutorials/apim-get-started/tutorial02.sh --setup first."* ]]
+}
+
 @test "tutorial03.sh --verify configures mock-response" {
-  run "$ROOT/tutorial03.sh" --verify
+  run "$TUTORIAL_DIR/tutorial03.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial03.sh" --verify
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Enabling mock-response on 'mock-only:test-call'"* ]]
-  [[ "$output" == *'"contains_mock_response": true'* ]]
+  [[ "$output" != *"Starting tutorial 03 stack with docker compose"* ]]
+  [[ "$output" == *"Verifying mocked response"* ]]
   [[ "$output" == *'"sampleField": "test"'* ]]
 }
 
 @test "tutorial04.sh --verify checks throttling" {
-  run "$ROOT/tutorial04.sh" --verify
+  run "$TUTORIAL_DIR/tutorial04.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial04.sh" --verify
 
   [ "$status" -eq 0 ]
+  [[ "$output" != *"Starting tutorial 04 stack with docker compose"* ]]
   [[ "$output" == *'"custom_header": "My custom value"'* ]]
   [[ "$output" == *'"status_code": 429'* ]]
   [[ "$output" == *'"retry_after_present": true'* ]]
 }
 
 @test "tutorial05.sh --verify checks grafana and traces" {
-  run "$ROOT/tutorial05.sh" --verify
+  run "$TUTORIAL_DIR/tutorial05.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial05.sh" --verify
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Waiting for Grafana health"* ]]
+  [[ "$output" != *"Starting tutorial 05 stack with docker compose"* ]]
   [[ "$output" == *'"database": "ok"'* ]]
   [[ "$output" == *'"correlation_id": "tutorial05-health"'* ]]
   [[ "$output" == *'"upstream_url": "http://mock-backend:8080/api/echo"'* ]]
 }
 
 @test "tutorial06.sh --verify looks up the captured trace" {
-  run "$ROOT/tutorial06.sh" --verify
+  run "$TUTORIAL_DIR/tutorial06.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial06.sh" --verify
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Requesting a trace-enabled call"* ]]
+  [[ "$output" != *"Starting tutorial 06 stack with docker compose"* ]]
   [[ "$output" == *'/apim/trace/<trace-id>'* ]]
   [[ "$output" == *'"upstream_url": "http://mock-backend:8080/api/health"'* ]]
   [[ "$output" == *'"matching_traces": 1'* ]]
 }
 
 @test "tutorial07.sh --verify records revisions and releases" {
-  run "$ROOT/tutorial07.sh" --verify
+  run "$TUTORIAL_DIR/tutorial07.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial07.sh" --verify
 
   [ "$status" -eq 0 ]
+  [[ "$output" != *"Starting tutorial 07 stack with docker compose"* ]]
   [[ "$output" == *'"id": "public"'* ]]
   [[ "$output" == *'"revision_ids": ['* ]]
   [[ "$output" == *'"releases": ['* ]]
 }
 
 @test "tutorial08.sh --verify routes by version header" {
-  run "$ROOT/tutorial08.sh" --verify
+  run "$TUTORIAL_DIR/tutorial08.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial08.sh" --verify
 
   [ "$status" -eq 0 ]
+  [[ "$output" != *"Starting tutorial 08 stack with docker compose"* ]]
   [[ "$output" == *'"version_header_name": "x-api-version"'* ]]
   [[ "$output" == *'"x_version": null'* ]]
   [[ "$output" == *'"x_version": "v2"'* ]]
 }
 
 @test "tutorial09.sh --verify checks the operator console" {
-  run "$ROOT/tutorial09.sh" --verify
+  run "$TUTORIAL_DIR/tutorial09.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial09.sh" --verify
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Operator console is available"* ]]
+  [[ "$output" != *"Starting tutorial 09 stack with docker compose"* ]]
   [[ "$output" == *'"service_name": "apim-simulator"'* ]]
   [[ "$output" == *'"status_code": 200'* ]]
 }
 
 @test "tutorial10.sh --verify applies the VS Code policy example" {
-  run "$ROOT/tutorial10.sh" --verify
+  run "$TUTORIAL_DIR/tutorial10.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial10.sh" --verify
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"REST Client example:"* ]]
+  [[ "$output" != *"Starting tutorial 10 stack with docker compose"* ]]
+  [[ "$output" == *"Verifying the authored policy and gateway response"* ]]
   [[ "$output" == *'"contains_vscode_header": true'* ]]
   [[ "$output" == *'"x_from_vscode": "true"'* ]]
 }
 
 @test "tutorial11.sh --verify exports simulator inventory" {
-  run "$ROOT/tutorial11.sh" --verify
+  run "$TUTORIAL_DIR/tutorial11.sh" --setup
+  [ "$status" -eq 0 ]
+
+  run "$TUTORIAL_DIR/tutorial11.sh" --verify
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Exporting simulator inventory to /tmp/apim-simulator-tutorial11"* ]]
+  [[ "$output" != *"Starting tutorial 11 stack with docker compose"* ]]
+  [[ "$output" == *"Verifying exported inventory inputs"* ]]
   [[ "$output" == *'"api_version_sets": 1'* ]]
   [[ "$output" == *'"paths": ['* ]]
 }

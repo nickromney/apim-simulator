@@ -57,14 +57,13 @@ curl -sS "$APIM_BASE/mock-only/test"
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial03.sh
-./tutorial03.sh --verify
+./docs/tutorials/apim-get-started/tutorial03.sh --setup
+./docs/tutorials/apim-get-started/tutorial03.sh --verify
 ```
 
-Unlike the manual path above, `tutorial03.sh` starts the local stack itself and
-authors the blank API, operation, and policy for you.
+Use `--setup` to have `tutorial03.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial03.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial03.sh --verify` output:
 
 ```text
 Creating blank API 'mock-only'

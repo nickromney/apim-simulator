@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-SCRIPT="/Users/nickromney/Developer/personal/apim-simulator/tutorial01.sh"
+SCRIPT="/Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial01.sh"
 
 setup() {
   export TEST_BIN="$BATS_TEST_TMPDIR/bin"
@@ -55,11 +55,16 @@ EOF
 }
 
 @test "tutorial01.sh imports the API" {
-  run "$SCRIPT"
+  run "$SCRIPT" --setup
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Starting tutorial 01 stack with docker compose"* ]]
+  [[ "$output" == *"Compose files:"* ]]
+  [[ "$output" == *"/Users/nickromney/Developer/personal/apim-simulator/compose.public.yml"* ]]
+  [[ "$output" == *"Running:"* ]]
+  [[ "$output" == *"up --build -d"* ]]
   [[ "$output" == *"Importing OpenAPI source into API 'tutorial-api'"* ]]
+  [[ "$output" == *"Setup complete. Run ./docs/tutorials/apim-get-started/tutorial01.sh --verify"* ]]
 
   run cat "$CALL_LOG"
   [ "$status" -eq 0 ]
@@ -70,10 +75,25 @@ EOF
   [[ "$output" == *"OPENAPI_SOURCE=$OPENAPI_SOURCE"* ]]
 }
 
+@test "tutorial01.sh without arguments prints help" {
+  run "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage: ./docs/tutorials/apim-get-started/tutorial01.sh [--setup|--execute|--verify]"* ]]
+  [[ "$output" == *"--setup, --execute"* ]]
+  [[ "$output" == *"--verify"* ]]
+}
+
 @test "tutorial01.sh --verify runs the tutorial curl checks" {
+  run "$SCRIPT" --setup
+  [ "$status" -eq 0 ]
+  : >"$CALL_LOG"
+
   run "$SCRIPT" --verify
 
   [ "$status" -eq 0 ]
+  [[ "$output" != *"Starting tutorial 01 stack with docker compose"* ]]
+  [[ "$output" != *"Importing OpenAPI source into API 'tutorial-api'"* ]]
   [[ "$output" == *"Verifying imported API metadata"* ]]
   [[ "$output" == *"Verifying imported API routes"* ]]
   [[ "$output" == *'"operations": ['* ]]
@@ -82,7 +102,32 @@ EOF
 
   run cat "$CALL_LOG"
   [ "$status" -eq 0 ]
+  [[ "$output" != *"docker compose"* ]]
+  [[ "$output" != *"uv run python"* ]]
   [[ "$output" == *"curl -fsS -H X-Apim-Tenant-Key: test-tenant-key http://localhost:18000/apim/management/apis/tutorial-api"* ]]
   [[ "$output" == *"curl -fsS http://localhost:18000/tutorial-api/health"* ]]
   [[ "$output" == *"curl -fsS http://localhost:18000/tutorial-api/echo"* ]]
+}
+
+@test "tutorial01.sh --verify suggests setup when state is missing" {
+  cat >"$TEST_BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+printf 'curl %s\n' "$*" >>"$CALL_LOG"
+case "$*" in
+  *"/apim/management/apis/"*)
+    echo 'curl: (22) The requested URL returned error: 404' >&2
+    exit 22
+    ;;
+  *)
+    printf '{}\n'
+    ;;
+esac
+EOF
+  chmod +x "$TEST_BIN/curl"
+
+  run "$SCRIPT" --verify
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Verification could not complete."* ]]
+  [[ "$output" == *"./docs/tutorials/apim-get-started/tutorial01.sh --setup first."* ]]
 }

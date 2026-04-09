@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$ROOT_DIR/scripts/tutorial_lib.sh"
 
 init_tutorial_env
+EXECUTE=0
 VERIFY=0
 MOCK_API_ID="${MOCK_API_ID:-mock-only}"
 MOCK_API_PATH="${MOCK_API_PATH:-mock-only}"
@@ -12,15 +14,34 @@ MOCK_OPERATION_ID="${MOCK_OPERATION_ID:-test-call}"
 
 usage() {
   cat <<EOF
-Usage: ./tutorial03.sh [--verify]
+Usage: ./docs/tutorials/apim-get-started/tutorial03.sh [--setup|--execute|--verify]
 
-Runs tutorial step 3 for the APIM simulator end-to-end, including starting the
-local stack with docker compose.
+Runs tutorial step 3 for the APIM simulator.
+
+Flags:
+  --setup, --execute  Start the local stack and author the mocked tutorial API.
+  --verify            Verify the existing tutorial state without restarting it.
+  --help, -h          Show this help text.
 EOF
+}
+
+verify_tutorial() {
+  echo "Verifying mocked response"
+
+  echo '$ curl -sS "'"$APIM_BASE"'/'"$MOCK_API_PATH"'/test"'
+  mocked_response="$(gateway_get "/$MOCK_API_PATH/test")"
+  json_expect_summary \
+    "$mocked_response" \
+    '{"sampleField":"test"}' \
+    'summary = {"sampleField": data.get("sampleField")}'
+  echo
 }
 
 while (($# > 0)); do
   case "$1" in
+    --setup|--execute)
+      EXECUTE=1
+      ;;
     --verify)
       VERIFY=1
       ;;
@@ -36,6 +57,22 @@ while (($# > 0)); do
   esac
   shift
 done
+
+if [[ "$EXECUTE" -eq 1 && "$VERIFY" -eq 1 ]]; then
+  echo "Choose either --setup/--execute or --verify." >&2
+  usage >&2
+  exit 2
+fi
+
+if [[ "$EXECUTE" -eq 0 && "$VERIFY" -eq 0 ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$VERIFY" -eq 1 ]]; then
+  run_verify_with_setup_hint "./docs/tutorials/apim-get-started/tutorial03.sh" verify_tutorial
+  exit 0
+fi
 
 echo "Starting tutorial 03 stack with docker compose"
 start_public_stack
@@ -74,16 +111,5 @@ json_expect_summary \
   "$policy_response" \
   "{\"contains_mock_response\":true,\"scope_name\":\"$MOCK_API_ID:$MOCK_OPERATION_ID\",\"scope_type\":\"operation\"}" \
   'summary = {"contains_mock_response": "mock-response" in (data.get("xml") or ""), "scope_name": data.get("scope_name"), "scope_type": data.get("scope_type")}'
-
-if [[ "$VERIFY" -eq 1 ]]; then
-  echo
-  echo "Verifying mocked response"
-
-  echo '$ curl -sS "'"$APIM_BASE"'/'"$MOCK_API_PATH"'/test"'
-  mocked_response="$(gateway_get "/$MOCK_API_PATH/test")"
-  json_expect_summary \
-    "$mocked_response" \
-    '{"sampleField":"test"}' \
-    'summary = {"sampleField": data.get("sampleField")}'
-  echo
-fi
+echo
+echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial03.sh --verify to validate the mocked response."

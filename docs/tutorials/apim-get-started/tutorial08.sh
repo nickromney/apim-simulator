@@ -1,25 +1,60 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$ROOT_DIR/scripts/tutorial_lib.sh"
 
 init_tutorial_env
+EXECUTE=0
 VERIFY=0
 VERSION_SET_ID="${VERSION_SET_ID:-public}"
 VERSIONED_PATH="${VERSIONED_PATH:-versioned}"
 
 usage() {
   cat <<EOF
-Usage: ./tutorial08.sh [--verify]
+Usage: ./docs/tutorials/apim-get-started/tutorial08.sh [--setup|--execute|--verify]
 
-Runs tutorial step 8 for the APIM simulator end-to-end, including starting the
-local stack with docker compose.
+Runs tutorial step 8 for the APIM simulator.
+
+Flags:
+  --setup, --execute  Start the local stack and create the tutorial version set.
+  --verify            Verify the existing tutorial state without restarting it.
+  --help, -h          Show this help text.
 EOF
+}
+
+verify_tutorial() {
+  echo "Verifying version routing"
+
+  echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/api-version-sets/'"$VERSION_SET_ID"'"'
+  fetched_version_set="$(management_get "/apim/management/api-version-sets/$VERSION_SET_ID")"
+  json_expect_summary \
+    "$fetched_version_set" \
+    "{\"default_version\":\"v1\",\"id\":\"$VERSION_SET_ID\",\"version_header_name\":\"x-api-version\"}" \
+    'summary = {"default_version": data.get("default_version"), "id": data.get("id"), "version_header_name": data.get("version_header_name")}'
+
+  echo
+  echo '$ curl -i -H "x-api-version: v1" "'"$APIM_BASE"'/'"$VERSIONED_PATH"'/echo"'
+  capture_http_request -H "x-api-version: v1" "$APIM_BASE/$VERSIONED_PATH/echo"
+  captured_expect_summary \
+    '{"path":"/api/echo","status_code":200,"x_version":null}' \
+    'summary = {"path": (body_json or {}).get("path"), "status_code": status, "x_version": headers.get("x-version")}'
+
+  echo
+  echo '$ curl -i -H "x-api-version: v2" "'"$APIM_BASE"'/'"$VERSIONED_PATH"'/echo"'
+  capture_http_request -H "x-api-version: v2" "$APIM_BASE/$VERSIONED_PATH/echo"
+  captured_expect_summary \
+    '{"path":"/api/echo","status_code":200,"x_version":"v2"}' \
+    'summary = {"path": (body_json or {}).get("path"), "status_code": status, "x_version": headers.get("x-version")}'
+  echo
 }
 
 while (($# > 0)); do
   case "$1" in
+    --setup|--execute)
+      EXECUTE=1
+      ;;
     --verify)
       VERIFY=1
       ;;
@@ -35,6 +70,22 @@ while (($# > 0)); do
   esac
   shift
 done
+
+if [[ "$EXECUTE" -eq 1 && "$VERIFY" -eq 1 ]]; then
+  echo "Choose either --setup/--execute or --verify." >&2
+  usage >&2
+  exit 2
+fi
+
+if [[ "$EXECUTE" -eq 0 && "$VERIFY" -eq 0 ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$VERIFY" -eq 1 ]]; then
+  run_verify_with_setup_hint "./docs/tutorials/apim-get-started/tutorial08.sh" verify_tutorial
+  exit 0
+fi
 
 echo "Starting tutorial 08 stack with docker compose"
 start_public_stack
@@ -83,30 +134,5 @@ management_put "/apim/management/apis/versioned-v2/operations/echo" "$(cat <<JSO
 JSON
 )" >/dev/null
 echo "Added the echo operation to both versions"
-
-if [[ "$VERIFY" -eq 1 ]]; then
-  echo
-  echo "Verifying version routing"
-
-  echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/api-version-sets/'"$VERSION_SET_ID"'"'
-  fetched_version_set="$(management_get "/apim/management/api-version-sets/$VERSION_SET_ID")"
-  json_expect_summary \
-    "$fetched_version_set" \
-    "{\"default_version\":\"v1\",\"id\":\"$VERSION_SET_ID\",\"version_header_name\":\"x-api-version\"}" \
-    'summary = {"default_version": data.get("default_version"), "id": data.get("id"), "version_header_name": data.get("version_header_name")}'
-
-  echo
-  echo '$ curl -i -H "x-api-version: v1" "'"$APIM_BASE"'/'"$VERSIONED_PATH"'/echo"'
-  capture_http_request -H "x-api-version: v1" "$APIM_BASE/$VERSIONED_PATH/echo"
-  captured_expect_summary \
-    '{"path":"/api/echo","status_code":200,"x_version":null}' \
-    'summary = {"path": (body_json or {}).get("path"), "status_code": status, "x_version": headers.get("x-version")}'
-
-  echo
-  echo '$ curl -i -H "x-api-version: v2" "'"$APIM_BASE"'/'"$VERSIONED_PATH"'/echo"'
-  capture_http_request -H "x-api-version: v2" "$APIM_BASE/$VERSIONED_PATH/echo"
-  captured_expect_summary \
-    '{"path":"/api/echo","status_code":200,"x_version":"v2"}' \
-    'summary = {"path": (body_json or {}).get("path"), "status_code": status, "x_version": headers.get("x-version")}'
-  echo
-fi
+echo
+echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial08.sh --verify to validate version routing."

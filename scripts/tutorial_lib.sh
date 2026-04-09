@@ -25,9 +25,38 @@ init_tutorial_env() {
 
 start_compose_stack() {
   local compose_log
+  local -a compose_files
+  local -a original_args
+  local -a remaining_args
+  local compose_file
+  compose_files=()
+  original_args=("$@")
+  remaining_args=()
   compose_log="$(mktemp)"
 
-  if ! "$DOCKER_BIN" compose "$@" >"$compose_log" 2>&1; then
+  while (($# > 0)); do
+    if [[ "$1" == "-f" ]]; then
+      compose_files+=("$2")
+      shift 2
+      continue
+    fi
+    remaining_args=("$@")
+    break
+  done
+
+  echo "Compose files:"
+  local compose_file
+  for compose_file in "${compose_files[@]}"; do
+    echo "  - $compose_file"
+  done
+  echo "Running:"
+  echo "  $DOCKER_BIN compose \\"
+  for compose_file in "${compose_files[@]}"; do
+    echo "    -f $compose_file \\"
+  done
+  echo "    ${remaining_args[*]}"
+
+  if ! "$DOCKER_BIN" compose "${original_args[@]}" >"$compose_log" 2>&1; then
     echo "docker compose failed while starting the tutorial stack:" >&2
     cat "$compose_log" >&2
     rm -f "$compose_log"
@@ -93,6 +122,26 @@ wait_for_grafana() {
 
 wait_for_operator_console() {
   wait_for_url "$OPERATOR_CONSOLE_BASE" "Operator console"
+}
+
+run_verify_with_setup_hint() {
+  local script_path="$1"
+  shift
+  local status
+
+  set +e
+  (
+    set -e
+    "$@"
+  )
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 0 ]]; then
+    echo >&2
+    echo "Verification could not complete. Ensure the relevant tutorial stack is running and run $script_path --setup first." >&2
+    exit "$status"
+  fi
 }
 
 management_get() {

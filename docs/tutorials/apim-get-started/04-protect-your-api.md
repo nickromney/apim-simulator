@@ -14,7 +14,7 @@ export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
 These commands assume `tutorial-api` and `tutorial-key` already exist. If not,
-run steps 1 and 2 first or use `./tutorial02.sh`.
+run steps 1 and 2 first or use `./docs/tutorials/apim-get-started/tutorial02.sh --setup`.
 
 Apply an API policy that adds a custom header and rate-limits by subscription:
 
@@ -45,15 +45,13 @@ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/he
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial04.sh
-./tutorial04.sh --verify
+./docs/tutorials/apim-get-started/tutorial04.sh --setup
+./docs/tutorials/apim-get-started/tutorial04.sh --verify
 ```
 
-Unlike the manual path above, `tutorial04.sh` starts the local stack itself,
-reimports the API, recreates the tutorial subscription, and force-recreates the
-gateway container so the throttling check starts from a clean in-memory state.
+Use `--setup` to have `tutorial04.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial04.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial04.sh --verify` output:
 
 ```text
 Applying transform and rate-limit policy to 'tutorial-api'

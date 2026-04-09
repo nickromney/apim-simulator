@@ -68,14 +68,13 @@ curl -i -H "x-api-version: v2" "$APIM_BASE/versioned/echo"
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial08.sh
-./tutorial08.sh --verify
+./docs/tutorials/apim-get-started/tutorial08.sh --setup
+./docs/tutorials/apim-get-started/tutorial08.sh --verify
 ```
 
-Unlike the manual path above, `tutorial08.sh` starts the local stack itself and
-creates the version set, APIs, and operations in one run.
+Use `--setup` to have `tutorial08.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial08.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial08.sh --verify` output:
 
 ```text
 Creating version set 'public'

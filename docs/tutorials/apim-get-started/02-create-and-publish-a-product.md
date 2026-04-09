@@ -14,7 +14,7 @@ export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
 These commands assume `tutorial-api` already exists. If you have not imported
-it yet, run step 1 first or use `./tutorial01.sh`.
+it yet, run step 1 first or use `./docs/tutorials/apim-get-started/tutorial01.sh --setup`.
 
 Create the product:
 
@@ -61,15 +61,13 @@ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/he
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial02.sh
-./tutorial02.sh --verify
+./docs/tutorials/apim-get-started/tutorial02.sh --setup
+./docs/tutorials/apim-get-started/tutorial02.sh --verify
 ```
 
-Unlike the manual path above, `tutorial02.sh` starts the local stack itself,
-imports the API, creates the product, and recreates the tutorial subscription if
-it already exists.
+Use `--setup` to have `tutorial02.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial02.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial02.sh --verify` output:
 
 ```text
 Creating product 'tutorial-product'

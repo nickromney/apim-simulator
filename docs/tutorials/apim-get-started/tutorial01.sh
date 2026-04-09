@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 APIM_BASE="${APIM_BASE:-http://localhost:8000}"
@@ -12,29 +13,34 @@ APIM_API_NAME="${APIM_API_NAME:-Tutorial API}"
 APIM_API_PATH="${APIM_API_PATH:-tutorial-api}"
 APIM_HEALTH_ATTEMPTS="${APIM_HEALTH_ATTEMPTS:-30}"
 APIM_HEALTH_DELAY_SECONDS="${APIM_HEALTH_DELAY_SECONDS:-1}"
+EXECUTE=0
 VERIFY=0
 
 usage() {
   cat <<EOF
-Usage: ./tutorial01.sh [--verify]
+Usage: ./docs/tutorials/apim-get-started/tutorial01.sh [--setup|--execute|--verify]
 
-Runs tutorial step 1 for the APIM simulator end-to-end, including starting the
-local stack with docker compose.
+Runs tutorial step 1 for the APIM simulator.
+
+Flags:
+  --setup, --execute   Start the local stack and import the tutorial API.
+  --verify             Verify the existing tutorial state without restarting it.
+  --help, -h           Show this help text.
 
 Environment overrides:
-  DOCKER_BIN        Docker CLI binary. Default: $DOCKER_BIN
-  APIM_BASE         Gateway base URL. Default: $APIM_BASE
-  APIM_TENANT_KEY   Management tenant key. Default: $APIM_TENANT_KEY
-  OPENAPI_SOURCE    OpenAPI file path or URL. Default: $OPENAPI_SOURCE
-  APIM_API_ID       API identifier to create. Default: $APIM_API_ID
-  APIM_API_NAME     API display name. Default: $APIM_API_NAME
-  APIM_API_PATH     Public API path. Default: $APIM_API_PATH
-  APIM_HEALTH_ATTEMPTS      Health-check retry attempts. Default: $APIM_HEALTH_ATTEMPTS
-  APIM_HEALTH_DELAY_SECONDS Health-check retry delay. Default: $APIM_HEALTH_DELAY_SECONDS
+  DOCKER_BIN                   Docker CLI binary. Default: $DOCKER_BIN
+  APIM_BASE                    Gateway base URL. Default: $APIM_BASE
+  APIM_TENANT_KEY              Management tenant key. Default: $APIM_TENANT_KEY
+  OPENAPI_SOURCE               OpenAPI file path or URL. Default: $OPENAPI_SOURCE
+  APIM_API_ID                  API identifier to create. Default: $APIM_API_ID
+  APIM_API_NAME                API display name. Default: $APIM_API_NAME
+  APIM_API_PATH                Public API path. Default: $APIM_API_PATH
+  APIM_HEALTH_ATTEMPTS         Health-check retry attempts. Default: $APIM_HEALTH_ATTEMPTS
+  APIM_HEALTH_DELAY_SECONDS    Health-check retry delay. Default: $APIM_HEALTH_DELAY_SECONDS
 
 Examples:
-  ./tutorial01.sh
-  ./tutorial01.sh --verify
+  ./docs/tutorials/apim-get-started/tutorial01.sh --setup
+  ./docs/tutorials/apim-get-started/tutorial01.sh --verify
 EOF
 }
 
@@ -54,8 +60,25 @@ wait_for_gateway() {
 
 start_stack() {
   local compose_log
+  local compose_file
+  local -a compose_files
   compose_log="$(mktemp)"
+  compose_files=(
+    "$ROOT_DIR/compose.yml"
+    "$ROOT_DIR/compose.public.yml"
+  )
   trap 'rm -f "$compose_log"' RETURN
+
+  echo "Compose files:"
+  for compose_file in "${compose_files[@]}"; do
+    echo "  - $compose_file"
+  done
+  echo "Running:"
+  echo "  $DOCKER_BIN compose \\"
+  for compose_file in "${compose_files[@]}"; do
+    echo "    -f $compose_file \\"
+  done
+  echo "    up --build -d"
 
   if ! "$DOCKER_BIN" compose \
     -f "$ROOT_DIR/compose.yml" \
@@ -152,8 +175,41 @@ print(json.dumps(summary, indent=2, sort_keys=True))
 PY
 }
 
+verify_tutorial() {
+  echo "Verifying imported API metadata"
+  verify_api_metadata
+
+  echo
+  echo "Verifying imported API routes"
+  verify_health_route
+  echo
+  verify_echo_route
+  echo
+}
+
+run_verify_with_setup_hint() {
+  local status
+
+  set +e
+  (
+    set -e
+    verify_tutorial
+  )
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 0 ]]; then
+    echo >&2
+    echo "Verification could not complete. Ensure the relevant tutorial stack is running and run ./docs/tutorials/apim-get-started/tutorial01.sh --setup first." >&2
+    exit "$status"
+  fi
+}
+
 while (($# > 0)); do
   case "$1" in
+    --setup|--execute)
+      EXECUTE=1
+      ;;
     --verify)
       VERIFY=1
       ;;
@@ -170,6 +226,22 @@ while (($# > 0)); do
   shift
 done
 
+if [[ "$EXECUTE" -eq 1 && "$VERIFY" -eq 1 ]]; then
+  echo "Choose either --setup/--execute or --verify." >&2
+  usage >&2
+  exit 2
+fi
+
+if [[ "$EXECUTE" -eq 0 && "$VERIFY" -eq 0 ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$VERIFY" -eq 1 ]]; then
+  run_verify_with_setup_hint
+  exit 0
+fi
+
 echo "Starting tutorial 01 stack with docker compose"
 start_stack
 
@@ -184,16 +256,5 @@ APIM_API_ID="$APIM_API_ID" \
 APIM_API_NAME="$APIM_API_NAME" \
 APIM_API_PATH="$APIM_API_PATH" \
 uv run python "$ROOT_DIR/scripts/import_openapi.py"
-
-if [[ "$VERIFY" -eq 1 ]]; then
-  echo
-  echo "Verifying imported API metadata"
-  verify_api_metadata
-
-  echo
-  echo "Verifying imported API routes"
-  verify_health_route
-  echo
-  verify_echo_route
-  echo
-fi
+echo
+echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial01.sh --verify to validate the imported API."

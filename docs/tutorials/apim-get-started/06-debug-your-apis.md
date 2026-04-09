@@ -14,7 +14,7 @@ export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
 These commands assume `tutorial-api` and `tutorial-key` already exist. If not,
-run steps 1 and 2 first or use `./tutorial02.sh`.
+run steps 1 and 2 first or use `./docs/tutorials/apim-get-started/tutorial02.sh --setup`.
 
 Request a trace:
 
@@ -49,35 +49,26 @@ curl -sS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
 If you want the scripted shortcut instead of running the commands manually:
 
 ```bash
-./tutorial06.sh
-./tutorial06.sh --verify
+./docs/tutorials/apim-get-started/tutorial06.sh --setup
+./docs/tutorials/apim-get-started/tutorial06.sh --verify
 ```
 
-Unlike the manual path above, `tutorial06.sh` starts the local stack itself,
-imports the API, bootstraps the product and subscription prerequisites, issues a
-trace-enabled request, and then looks the trace up automatically.
+Use `--setup` to have `tutorial06.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
-Expected key `./tutorial06.sh --verify` output:
+Expected key `./docs/tutorials/apim-get-started/tutorial06.sh --verify` output:
 
 ```text
-Requesting a trace-enabled call
+Verifying stored trace details
+$ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/traces"
 {
-  "correlation_id": "tutorial06-health",
-  "status_code": 200,
-  "trace_id_present": true
+  "matching_traces": 1
 }
 
-Verifying stored trace details
 $ curl -sS "http://localhost:8000/apim/trace/<trace-id>"
 {
   "correlation_id": "tutorial06-health",
   "status": 200,
   "upstream_url": "http://mock-backend:8080/api/health"
-}
-
-$ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/traces"
-{
-  "matching_traces": 1
 }
 ```
 
