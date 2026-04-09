@@ -11,7 +11,7 @@ Keep growing the curated APIM sample fixture set under `tests/fixtures/apim_samp
 Good additions are:
 
 - widely used policy patterns
-- behaviors that are easy to verify locally
+- behaviours that are easy to verify locally
 - cases where the simulator needs to clearly label support as `supported`, `adapted`, or `unsupported`
 
 ### Better Import Fidelity
@@ -36,7 +36,7 @@ Prefer new examples that exercise shipped capabilities rather than speculative p
 
 - mixed auth flows
 - richer mTLS examples
-- policy-heavy examples that pair runtime behavior with traces and OTEL
+- policy-heavy examples that pair runtime behaviour with traces and OTEL
 
 ## Still Deferred
 
@@ -50,4 +50,4 @@ Prefer new examples that exercise shipped capabilities rather than speculative p
 
 1. The feature must be testable locally.
 2. The feature must improve learning, debugging, or iteration speed.
-3. The feature must document any adapted behavior instead of implying Azure parity.
+3. The feature must document any adapted behaviour instead of implying Azure parity.

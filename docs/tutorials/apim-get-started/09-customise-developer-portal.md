@@ -1,6 +1,6 @@
-# 9 - Customize Developer Portal
+# 9 - Customise Developer Portal
 
-Source: [Tutorial: Access and customize the developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize)
+Source: [Tutorial: Access and customise the developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize)
 
 Simulator status: Not appropriate
 
@@ -70,4 +70,4 @@ $ curl -sS "http://localhost:3007"
 ## Guidance
 
 If you need to rehearse developer-portal workflows, use real Azure APIM.
-If you need to rehearse gateway behavior, policies, traces, and management edits locally, stay in the simulator.
+If you need to rehearse gateway behaviour, policies, traces, and management edits locally, stay in the simulator.

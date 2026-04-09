@@ -86,10 +86,6 @@ $ curl -sS "http://localhost:18000/tutorial-api/echo"
 }
 ```
 
-Expected scripted output is captured in:
-
-- [tutorial01.expected.showboat.md](/Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial01.expected.showboat.md)
-
 ## Differences From Azure APIM
 
 - This uses the simulator management API plus `scripts/import_openapi.py`, not the Azure portal.

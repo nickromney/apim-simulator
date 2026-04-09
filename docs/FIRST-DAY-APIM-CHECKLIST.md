@@ -156,7 +156,7 @@ Best for:
 
 - "did the system see my request?"
 - "do I have logs, traces, and metrics?"
-- "can I compare gateway and backend behavior?"
+- "can I compare gateway and backend behaviour?"
 
 If you need deeper inspection after that, move to:
 

@@ -35,8 +35,8 @@ Before running the simulator:
 | Hello starter | `make up-hello` | `http://localhost:8000/api/hello` | You want the smallest backend scaffold behind APIM |
 | OIDC example | `make up-oidc` | `http://localhost:8000` | You want JWT plus subscription flows |
 | MCP example | `make up-mcp` | `http://localhost:8000/mcp` | You want an MCP server behind APIM |
-| Edge HTTP | `make up-edge` | `http://apim.localtest.me:8088` | You want forwarded-header and reverse-proxy behavior |
-| Edge TLS | `make up-tls` | `https://apim.localtest.me:8443` | You want local TLS termination behavior |
+| Edge HTTP | `make up-edge` | `http://apim.localtest.me:8088` | You want forwarded-header and reverse-proxy behaviour |
+| Edge TLS | `make up-tls` | `https://apim.localtest.me:8443` | You want local TLS termination behaviour |
 | Operator console | `make up-ui` | `http://localhost:3007` | You want to inspect and edit a running management-enabled stack |
 
 ## Quick Start

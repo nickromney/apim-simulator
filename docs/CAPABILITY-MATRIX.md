@@ -43,7 +43,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
 | API definition | Yes | `azurerm_api_management_api` | `apis` map in config |
-| API revision metadata | Partial | `azurerm_api_management_api.revision` / `revision_description` | Imported and exposed read-only; multiple APIM revisions collapse into one active local API for runtime behavior |
+| API revision metadata | Partial | `azurerm_api_management_api.revision` / `revision_description` | Imported and exposed read-only; multiple APIM revisions collapse into one active local API for runtime behaviour |
 | API releases | Partial | `azurerm_api_management_api_release` | Imported and exposed read-only via `/apim/management/apis/{api_id}/releases` |
 | Operations | Yes | `azurerm_api_management_api_operation` | `operations` within API |
 | API schemas | Partial | `azurerm_api_management_api_schema` | Imported and exposed read-only via `/apim/management/apis/{api_id}/schemas`; write endpoints are not implemented |

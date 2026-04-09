@@ -12,7 +12,7 @@ Source sequence, verified on 2026-04-08 from the API Management TOC:
 6. Debug your APIs
 7. Add revisions
 8. Add multiple versions
-9. Customize developer portal
+9. Customise developer portal
 10. Manage APIs in Visual Studio Code
 11. Link to an API Center
 
@@ -50,13 +50,13 @@ deterministic checks shown inline in each step guide.
 | 6 | [Debug your APIs](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-api-inspector) | Adapted | [06](./06-debug-your-apis.md) |
 | 7 | [Add revisions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-revise-api) | Partial | [07](./07-add-revisions.md) |
 | 8 | [Add multiple versions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-publish-versions) | Supported | [08](./08-add-multiple-versions.md) |
-| 9 | [Customize developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize) | Not appropriate | [09](./09-customize-developer-portal.md) |
+| 9 | [Customise developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize) | Not appropriate | [09](./09-customise-developer-portal.md) |
 | 10 | [Manage APIs in Visual Studio Code](https://learn.microsoft.com/en-us/azure/api-management/visual-studio-code-tutorial) | Adapted | [10](./10-manage-apis-in-visual-studio-code.md) |
 | 11 | [Link to an API Center](https://learn.microsoft.com/en-us/azure/api-management/tutorials/link-api-center) | Not appropriate | [11](./11-link-to-an-api-center.md) |
 
 ## Interpretation Rules
 
-- `Supported` means the simulator can demonstrate the main tutorial behavior locally.
+- `Supported` means the simulator can demonstrate the main tutorial behaviour locally.
 - `Adapted` means the Azure-specific surface is different, but the learning goal maps cleanly.
 - `Partial` means the simulator supports the control-plane shape but not the full Azure runtime semantics.
 - `Not appropriate` means the Azure feature is intentionally outside the simulator's local-gateway scope.

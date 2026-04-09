@@ -1,6 +1,6 @@
 # Scope
 
-This repository is not trying to clone all of Azure API Management. It is a local learning and iteration tool with a deliberate bias toward gateway behavior, policy experimentation, auth flows, networking scenarios, and management-surface workflows that are useful in development.
+This repository is not trying to clone all of Azure API Management. It is a local learning and iteration tool with a deliberate bias toward gateway behaviour, policy experimentation, auth flows, networking scenarios, and management-surface workflows that are useful in development.
 
 ## Supported Now
 
