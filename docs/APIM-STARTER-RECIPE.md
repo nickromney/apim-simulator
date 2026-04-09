@@ -170,7 +170,7 @@ Typical rename targets:
 Do not start by writing brand-new files from scratch. Copy the working example
 first, then change one thing at a time.
 
-### Step 2: Change The Backend Behavior
+### Step 2: Change The Backend Behaviour
 
 Edit the backend file:
 
@@ -348,7 +348,7 @@ Use these depending on the audience:
 - `curl` for quick route proof
 - smoke scripts for repeatable checks
 - Bruno for saved request flows
-- Proxyman or HAR when browser behavior matters
+- Proxyman or HAR when browser behaviour matters
 - `/apim/trace/{id}` for APIM-specific explanation
 - Grafana for logs, traces, and metrics
 

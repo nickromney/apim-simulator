@@ -34,7 +34,7 @@ For almost every APIM change, work in this order:
 1. Make the backend route work
 2. Put APIM in front of it
 3. Add auth
-4. Add policy behavior
+4. Add policy behaviour
 5. Add observability
 6. Add repeatable checks
 7. Update docs
@@ -163,7 +163,7 @@ Good proof:
 - the token shape you expected
 - the negative case you tested
 
-### Add Or Change Policy Behavior
+### Add Or Change Policy Behaviour
 
 Use this when:
 
@@ -172,7 +172,7 @@ Use this when:
 Touch:
 
 - `policies_xml`
-- policy fragments when shared behavior is intended
+- policy fragments when shared behaviour is intended
 
 Examples:
 
@@ -183,7 +183,7 @@ Examples:
 
 Required checks:
 
-- the changed behavior is visible in a response, trace, or both
+- the changed behaviour is visible in a response, trace, or both
 - a negative case exists when the policy is supposed to reject requests
 
 Good proof:

@@ -35,8 +35,8 @@ Before running the simulator:
 | Hello starter | `make up-hello` | `http://localhost:8000/api/hello` | You want the smallest backend scaffold behind APIM |
 | OIDC example | `make up-oidc` | `http://localhost:8000` | You want JWT plus subscription flows |
 | MCP example | `make up-mcp` | `http://localhost:8000/mcp` | You want an MCP server behind APIM |
-| Edge HTTP | `make up-edge` | `http://apim.localtest.me:8088` | You want forwarded-header and reverse-proxy behavior |
-| Edge TLS | `make up-tls` | `https://apim.localtest.me:8443` | You want local TLS termination behavior |
+| Edge HTTP | `make up-edge` | `http://apim.localtest.me:8088` | You want forwarded-header and reverse-proxy behaviour |
+| Edge TLS | `make up-tls` | `https://apim.localtest.me:8443` | You want local TLS termination behaviour |
 | Operator console | `make up-ui` | `http://localhost:3007` | You want to inspect and edit a running management-enabled stack |
 
 ## Quick Start
@@ -65,6 +65,14 @@ make up
 curl http://localhost:8000/apim/health
 curl http://localhost:8000/api/echo
 ```
+
+## Tutorial Mirror
+
+For a simulator-native version of the Microsoft Learn getting-started sequence, see:
+
+- `docs/tutorials/apim-get-started/README.md`
+- `./docs/tutorials/apim-get-started/tutorial01.sh` through `./docs/tutorials/apim-get-started/tutorial11.sh` for self-contained mirrored tutorial shortcuts kept alongside the matching markdown guides; use `--setup` to apply a step and `--verify` to validate it
+- `./docs/tutorials/apim-get-started/tutorial-cleanup.sh` to stop the tutorial compose stacks
 
 ## Interacting with the Simulator
 
@@ -200,6 +208,16 @@ make smoke-mcp
 ```
 
 ## Import and Compatibility
+
+Import a local or remote OpenAPI document directly into a running simulator:
+
+```bash
+OPENAPI_SOURCE=examples/mock-backend/openapi.json \
+APIM_API_ID=tutorial-api \
+APIM_API_NAME="Tutorial API" \
+APIM_API_PATH=tutorial-api \
+uv run python scripts/import_openapi.py
+```
 
 Import a running simulator from a `tofu show -json` payload:
 

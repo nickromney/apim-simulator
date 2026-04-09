@@ -16,7 +16,7 @@ the API" and you need a translation layer into this repo.
 | Product | A named access bundle | `products` in config JSON |
 | Subscription | A client key pair tied to products | `subscription.subscriptions` in config JSON |
 | Subscription key | The header clients send | `Ocp-Apim-Subscription-Key` |
-| Policy | Gateway behavior before/after backend call | `policies_xml` |
+| Policy | Gateway behaviour before/after backend call | `policies_xml` |
 | Backend | The upstream service APIM calls | `upstream_base_url`, `backends` |
 | JWT validation | Bearer token verification | `oidc`, `authz`, `validate-jwt` |
 | Trace | Per-request APIM detail | `/apim/trace/{id}` |
@@ -33,7 +33,7 @@ In this repo, that is primarily:
 - the `apim-simulator` container
 - the FastAPI gateway in `app/main.py`
 
-If you are changing gateway behavior, auth flow, routing, or policy execution,
+If you are changing gateway behaviour, auth flow, routing, or policy execution,
 you are changing the local APIM service equivalent.
 
 ### API
@@ -183,7 +183,7 @@ Operationally:
 
 ### Trace
 
-In Azure APIM, trace and diagnostic tooling help you explain gateway behavior.
+In Azure APIM, trace and diagnostic tooling help you explain gateway behaviour.
 
 In this repo, the APIM-shaped trace surface is:
 

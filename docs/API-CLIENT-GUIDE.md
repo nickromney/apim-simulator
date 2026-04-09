@@ -12,7 +12,7 @@ same request flow for teams that already standardize on Postman.
 - Use `curl` for one-off checks and docs snippets.
 - Use Bruno when you want request files in git and CLI-friendly execution.
 - Use Postman when your team already standardizes on Postman workspaces and collections.
-- Use Proxyman or the HAR capture when browser behavior is the question.
+- Use Proxyman or the HAR capture when browser behaviour is the question.
 
 ## Fastest Stack For Saved Request Flows
 
