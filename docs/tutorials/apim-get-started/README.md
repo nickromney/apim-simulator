@@ -38,7 +38,7 @@ Each mirrored step also has a companion `tutorialNN.sh` script in this
 directory. Run `--setup` or `--execute` to apply a step. Run `--verify` to
 validate the existing tutorial state without restarting the stack.
 
-Use `./docs/tutorials/apim-get-started/tutorial-cleanup.sh` to stop the
+Use [`./docs/tutorials/apim-get-started/tutorial-cleanup.sh`](tutorial-cleanup.sh) to stop the
 tutorial compose stacks and remove orphaned containers.
 
 ## Status Matrix

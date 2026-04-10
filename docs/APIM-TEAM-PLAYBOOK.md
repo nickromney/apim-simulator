@@ -52,19 +52,19 @@ Use this when:
 
 Touch:
 
-- backend app code under `examples/` or the appropriate service folder
+- backend app code under [`examples/`](../examples/) or the appropriate service folder
 - backend Dockerfile
 - APIM config JSON
 - a compose overlay or compose service entry
 
 Usually start from:
 
-- `examples/hello-api/main.py`
-- `examples/hello-api/Dockerfile`
-- `examples/hello-api/apim.anonymous.json`
-- `examples/todo-app/api-fastapi-container-app/main.py`
-- `examples/todo-app/api-fastapi-container-app/Dockerfile`
-- `examples/todo-app/apim.json`
+- [`examples/hello-api/main.py`](../examples/hello-api/main.py)
+- [`examples/hello-api/Dockerfile`](../examples/hello-api/Dockerfile)
+- [`examples/hello-api/apim.anonymous.json`](../examples/hello-api/apim.anonymous.json)
+- [`examples/todo-app/api-fastapi-container-app/main.py`](../examples/todo-app/api-fastapi-container-app/main.py)
+- [`examples/todo-app/api-fastapi-container-app/Dockerfile`](../examples/todo-app/api-fastapi-container-app/Dockerfile)
+- [`examples/todo-app/apim.json`](../examples/todo-app/apim.json)
 
 Validation:
 
@@ -203,13 +203,13 @@ Use this when:
 
 Touch:
 
-- `app/telemetry.py` integration in the backend
+- [`app/telemetry.py`](../app/telemetry.py) integration in the backend
 - compose OTEL overlay if needed
 - dashboard or verification docs when the signal is user-facing
 
 For Python services, prefer the shared helper and copy the shape of:
 
-- `examples/todo-app/api-fastapi-container-app/main.py`
+- [`examples/todo-app/api-fastapi-container-app/main.py`](../examples/todo-app/api-fastapi-container-app/main.py)
 
 Required checks:
 

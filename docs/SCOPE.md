@@ -37,7 +37,7 @@ This repository is not trying to clone all of Azure API Management. It is a loca
   - `set-backend-service`
   - `send-request`
 - Curated Azure-Samples/APIM compatibility fixtures with documented supported, adapted, and unsupported cases
-- Compose-backed direct public, edge HTTP, edge TLS, private/internal, OIDC, MCP, hello starter, todo demo, and OTEL/LGTM scenarios
+- Compose-backed direct public, edge HTTP, edge TLS, private/internal, OIDC, MCP, hello starter, todo demo, and OTEL/[LGTM](https://github.com/grafana/docker-otel-lgtm) scenarios
 
 ## Currently Deferred
 
