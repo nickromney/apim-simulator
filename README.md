@@ -25,6 +25,58 @@ Before running the simulator:
 - use `uv` if you want to run smoke scripts, import helpers, or tests from the host
 - use `npm` only for the browser-facing demo checks such as Playwright, Bruno, or the UI toolchain
 
+## Container Hardening
+
+The stateless services now default to a tighter local runtime posture:
+
+- non-root users in the Python and nginx containers
+- read-only root filesystems for the gateway, mock backend, MCP example, hello
+  example, todo API, todo frontend, and edge proxy
+- read-only roots for the LGTM container and the private smoke runner, with
+  writable state moved onto named volumes or `tmpfs`
+- `cap_drop: [ALL]`, `security_opt: ["no-new-privileges:true"]`, `tmpfs` for
+  writable scratch paths, and `init: true` where it helps process handling
+- a prebuilt static operator console image instead of `npm install && vite dev`
+  inside the running container
+- Docker Hardened runtime bases by default for the shipped Python and nginx
+  images
+
+By default, the shipped runtime images use Docker Hardened Images for the
+Python and nginx stages. If you need the non-DHI path instead, create a local
+override file and set the upstream image refs explicitly:
+
+```bash
+cp .env.example .env
+```
+
+Then uncomment the upstream overrides:
+
+- `PYTHON_BUILD_IMAGE=python:3.13-slim`
+- `PYTHON_RUNTIME_IMAGE=python:3.13-slim`
+- `NGINX_RUNTIME_IMAGE=nginx:1.27-alpine`
+- `EDGE_PROXY_IMAGE=nginx:1.27-alpine`
+- `SMOKE_RUNNER_IMAGE=python:3.13-slim`
+
+If you stay on the default path, authenticate once with:
+
+```bash
+docker login dhi.io
+```
+
+The Docker-backed CI jobs use the same idea as the platform repo: they check
+whether the runner already has `dhi.io` credentials and use the hardened image
+defaults when available, otherwise they fall back to the upstream image
+overrides automatically. There is no separate nightly DHI workflow.
+
+Keycloak is still the main exception. The shipped `start-dev` path rebuilds
+Quarkus artifacts on startup, so it cannot use a read-only root without moving
+to a custom optimized image.
+
+The current Docker Hardened `node` image is also not a drop-in npm builder for
+this repo. It ships `node`, but not `npm`, so the Node build stages still stay
+on the upstream Node builder images for now while the final shipped nginx image
+stays on a hardened runtime base.
+
 ## Choose the Right Stack
 
 | Scenario | Start command | Entry point | Use when |

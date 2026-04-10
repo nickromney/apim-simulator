@@ -105,6 +105,11 @@ This matches the repo's standard Python service container pattern:
 
 - builds the virtualenv once with `uv`
 - copies the shared `app/` package so OTEL helpers are available
+- accepts `PYTHON_BUILD_IMAGE` and `PYTHON_RUNTIME_IMAGE` build args, so the
+  same Dockerfile can stay on `python:3.13-slim` or switch to
+  `dhi.io/python:3.13-debian13*`
+- runs as a non-root UID/GID and is designed for the repo's read-only compose
+  hardening defaults
 - runs the backend internally on port `8000`
 
 If your new backend is also Python, start here before inventing a new container

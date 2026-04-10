@@ -17,7 +17,7 @@ COMPOSE_TODO_OTEL := $(COMPOSE) -f compose.todo.yml -f compose.todo.otel.yml
 COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 
-.PHONY: help ensure-certs install-hooks fmt lint lint-check up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help ensure-certs install-hooks fmt lint lint-check frontend-check up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
@@ -49,6 +49,7 @@ help:
 	@printf "  %-22s %s\n" "fmt" "Format Python code with Ruff"
 	@printf "  %-22s %s\n" "lint" "Format Python code with Ruff and run lint checks"
 	@printf "  %-22s %s\n" "lint-check" "Check Python formatting and lint with Ruff without modifying files"
+	@printf "  %-22s %s\n" "frontend-check" "Run Biome, TypeScript, and Astro checks for repo frontends"
 	@printf "  %-22s %s\n" "test" "Run Python and shell tests"
 	@printf "  %-22s %s\n" "test-python" "Run the Python test suite"
 	@printf "  %-22s %s\n" "test-shell" "Run the shell script test suite with BATS"
@@ -66,6 +67,7 @@ help:
 	@printf "  %-22s %s\n" "smoke-private" "Run the private-mode smoke test and internal probe"
 	@printf "  %-22s %s\n" "smoke-hello" "Run the hello API smoke test (mode via SMOKE_HELLO_MODE)"
 	@printf "  %-22s %s\n" "smoke-todo" "Run the APIM-backed todo demo smoke test"
+	@printf "  %-22s %s\n" "smoke-tutorials-live" "Run all numbered tutorial scripts against live local stacks"
 	@printf "  %-22s %s\n" "test-todo-e2e" "Run Playwright against the running todo demo stack"
 	@printf "  %-22s %s\n" "test-todo-bruno" "Run the Bruno collection against the running todo demo stack"
 	@printf "  %-22s %s\n" "test-todo-postman" "Run the Postman collection against the running todo demo stack"
@@ -182,6 +184,12 @@ lint-check:
 	uv run --extra dev ruff format --check .
 	uv run --extra dev ruff check .
 
+frontend-check:
+	npm --prefix ui ci
+	npm --prefix ui run check
+	npm --prefix examples/todo-app/frontend-astro ci
+	npm --prefix examples/todo-app/frontend-astro run check
+
 test: test-python test-shell
 
 test-python:
@@ -224,15 +232,21 @@ smoke-edge:
 smoke-tls:
 	SMOKE_EDGE_BASE_URL=https://apim.localtest.me:8443 uv run --with mcp python scripts/smoke_edge.py
 
+check-private-port-clear:
+	uv run python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', 8000)); sock.close(); print('Host port 8000 is unavailable, as required for private mode.') if code else (_ for _ in ()).throw(SystemExit('localhost:8000 is already reachable before private-mode launch; stop the conflicting listener before continuing'))"
+
 smoke-private:
-	uv run python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', 8000)); sock.close(); print('Host port 8000 is unavailable, as expected.') if code else (_ for _ in ()).throw(SystemExit('localhost:8000 is reachable; private mode should not publish the gateway port'))"
-	$(COMPOSE_PRIVATE) run --rm smoke-runner sh -lc "python -m pip install -q httpx mcp && python scripts/smoke_private.py"
+	$(MAKE) check-private-port-clear
+	$(COMPOSE_PRIVATE) run --rm --entrypoint python3 smoke-runner scripts/run_smoke_private.py
 
 smoke-hello:
 	uv run python scripts/smoke_hello.py
 
 smoke-todo:
 	uv run python scripts/smoke_todo.py
+
+smoke-tutorials-live:
+	./scripts/run_tutorial_smoke.sh
 
 test-todo-e2e:
 	npm --prefix examples/todo-app/frontend-astro ci
