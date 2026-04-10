@@ -68,6 +68,9 @@ if ! has_valid_ca; then
     -out "$CA_CERT_PATH" >/dev/null 2>&1
 fi
 
+chmod 600 "$CA_KEY_PATH"
+chmod 644 "$CA_CERT_PATH"
+
 openssl req \
   -nodes \
   -newkey rsa:2048 \
@@ -90,6 +93,12 @@ openssl x509 \
   -out "$CERT_PATH" >/dev/null 2>&1
 
 rm -f "$CSR_PATH"
+
+# The edge proxy runs as a non-root numeric UID. On Linux bind mounts, a 0600
+# key owned by the host user is unreadable inside the container, so keep the
+# generated dev server cert and key world-readable. These files are ignored and
+# used only for the local self-signed edge stack, not as production secrets.
+chmod 644 "$CERT_PATH" "$KEY_PATH"
 
 printf 'Generated %s and %s\n' "$CERT_PATH" "$KEY_PATH"
 printf 'Local CA available at %s\n' "$CA_CERT_PATH"
