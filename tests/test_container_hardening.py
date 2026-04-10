@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import stat
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -116,6 +119,25 @@ def test_local_smoke_clients_bypass_proxy_environment() -> None:
     assert "trust_env=False" in smoke_mcp
     assert "make_async_client(timeout=20.0, verify=VERIFY_TLS)" in smoke_edge
     assert "make_async_client(timeout=20.0)" in smoke_private
+
+
+def test_generated_edge_certs_keep_server_key_readable_for_rootless_nginx(tmp_path: Path) -> None:
+    subprocess.run(
+        ["sh", str(REPO_ROOT / "scripts" / "gen_dev_certs.sh")],
+        check=True,
+        env={**os.environ, "APIM_SIMULATOR_ROOT_DIR": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+
+    cert_dir = tmp_path / "examples" / "edge" / "certs"
+    server_cert_mode = stat.S_IMODE((cert_dir / "apim.localtest.me.crt").stat().st_mode)
+    server_key_mode = stat.S_IMODE((cert_dir / "apim.localtest.me.key").stat().st_mode)
+    ca_key_mode = stat.S_IMODE((cert_dir / "dev-root-ca.key").stat().st_mode)
+
+    assert server_cert_mode == 0o644
+    assert server_key_mode == 0o644
+    assert ca_key_mode == 0o600
 
 
 def test_todo_frontend_supports_runtime_image_override() -> None:
