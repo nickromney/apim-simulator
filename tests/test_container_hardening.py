@@ -108,6 +108,16 @@ def test_ci_runs_frontend_checks() -> None:
     assert run_checks["run"] == "make frontend-check"
 
 
+def test_local_smoke_clients_bypass_proxy_environment() -> None:
+    smoke_mcp = (REPO_ROOT / "scripts" / "smoke_mcp.py").read_text()
+    smoke_edge = (REPO_ROOT / "scripts" / "smoke_edge.py").read_text()
+    smoke_private = (REPO_ROOT / "scripts" / "smoke_private.py").read_text()
+
+    assert "trust_env=False" in smoke_mcp
+    assert "make_async_client(timeout=20.0, verify=VERIFY_TLS)" in smoke_edge
+    assert "make_async_client(timeout=20.0)" in smoke_private
+
+
 def test_todo_frontend_supports_runtime_image_override() -> None:
     contents = (REPO_ROOT / "examples/todo-app/frontend-astro/Dockerfile").read_text()
     assert "ARG NGINX_RUNTIME_IMAGE" in contents
