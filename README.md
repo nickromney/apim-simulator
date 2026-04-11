@@ -13,7 +13,7 @@ The simulator gives you a local APIM-shaped gateway with:
 - a practical XML policy subset, including routing, transforms, throttling, caching, JWT validation, backend selection, and `send-request`
 - tenant-key-protected management APIs, per-request traces, replay, and a local operator console
 - Terraform/OpenTofu import and static compatibility reporting
-- direct public, edge HTTP, edge TLS, private/internal, OIDC, MCP, hello starter, todo demo, and OTEL/LGTM runtime shapes
+- direct public, edge HTTP, edge TLS, private/internal, OIDC, MCP, hello starter, todo demo, and OTEL/[LGTM](https://github.com/grafana/docker-otel-lgtm) runtime shapes
 
 Local internal caching is supported for the `cache-*` policies. External cache backends and `quota-by-key` bandwidth enforcement remain out of scope.
 
@@ -25,6 +25,16 @@ Before running the simulator:
 - use `uv` if you want to run smoke scripts, import helpers, or tests from the host
 - use `npm` only for the browser-facing demo checks such as Playwright, Bruno, or the UI toolchain
 
+## Dependency Cooldown
+
+This repository carries repo-local dependency age gates so local installs and
+container builds do not rely on host dotfiles.
+
+- Python resolution via `uv` uses a seven-day cutoff in [`pyproject.toml`](pyproject.toml)
+- npm package roots ship local `.npmrc` with `min-release-age=7`
+- frontend Dockerfiles copy `.npmrc` before `npm ci` so image builds keep the
+  same cooldown policy
+
 ## Container Hardening
 
 The stateless services now default to a tighter local runtime posture:
@@ -32,7 +42,7 @@ The stateless services now default to a tighter local runtime posture:
 - non-root users in the Python and nginx containers
 - read-only root filesystems for the gateway, mock backend, MCP example, hello
   example, todo API, todo frontend, and edge proxy
-- read-only roots for the LGTM container and the private smoke runner, with
+- read-only roots for the [LGTM](https://github.com/grafana/docker-otel-lgtm) container and the private smoke runner, with
   writable state moved onto named volumes or `tmpfs`
 - `cap_drop: [ALL]`, `security_opt: ["no-new-privileges:true"]`, `tmpfs` for
   writable scratch paths, and `init: true` where it helps process handling
@@ -122,9 +132,9 @@ curl http://localhost:8000/api/echo
 
 For a simulator-native version of the Microsoft Learn getting-started sequence, see:
 
-- `docs/tutorials/apim-get-started/README.md`
-- `./docs/tutorials/apim-get-started/tutorial01.sh` through `./docs/tutorials/apim-get-started/tutorial11.sh` for self-contained mirrored tutorial shortcuts kept alongside the matching markdown guides; use `--setup` to apply a step and `--verify` to validate it
-- `./docs/tutorials/apim-get-started/tutorial-cleanup.sh` to stop the tutorial compose stacks
+- [apim-get-started](docs/tutorials/apim-get-started/README.md)
+- [tutorial01.sh](docs/tutorials/apim-get-started/tutorial01.sh) through [tutorial11.sh](docs/tutorials/apim-get-started/tutorial11.sh) for self-contained mirrored tutorial shortcuts kept alongside the matching markdown guides; use `--setup` to apply a step and `--verify` to validate it
+- [tutorial-cleanup.sh](docs/tutorials/apim-get-started/tutorial-cleanup.sh) to stop the tutorial compose stacks
 
 ## Interacting with the Simulator
 
@@ -152,15 +162,15 @@ The management API exists only when the loaded config enables `tenant_access`.
 
 These shipped configs enable it:
 
-- `examples/basic.json`
-- `examples/mcp/http.json`
-- `examples/oidc/keycloak.json`
-- `examples/migrating-from-aws-api-gateway/apim.http-api.json`
+- [examples/basic.json](examples/basic.json)
+- [examples/mcp/http.json](examples/mcp/http.json)
+- [examples/oidc/keycloak.json](examples/oidc/keycloak.json)
+- [examples/migrating-from-aws-api-gateway/apim.http-api.json](examples/migrating-from-aws-api-gateway/apim.http-api.json)
 
 These shipped configs keep it off by default:
 
-- `examples/hello-api/apim.*.json`
-- `examples/todo-app/apim.json`
+- the `apim.*.json` files under [examples/hello-api/](examples/hello-api/)
+- [examples/todo-app/apim.json](examples/todo-app/apim.json)
 
 When the management API is enabled, use the tenant key header:
 
@@ -237,9 +247,9 @@ make export-todo-har
 
 Client artifacts live under:
 
-- `examples/todo-app/api-clients/bruno/`
-- `examples/todo-app/api-clients/postman/`
-- `examples/todo-app/api-clients/proxyman/`
+- [examples/todo-app/api-clients/bruno/](examples/todo-app/api-clients/bruno/)
+- [examples/todo-app/api-clients/postman/](examples/todo-app/api-clients/postman/)
+- [examples/todo-app/api-clients/proxyman/](examples/todo-app/api-clients/proxyman/)
 
 ### AWS API Gateway migration starter
 

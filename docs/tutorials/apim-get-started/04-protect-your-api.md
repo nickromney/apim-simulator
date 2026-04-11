@@ -49,7 +49,7 @@ If you want the scripted shortcut instead of running the commands manually:
 ./docs/tutorials/apim-get-started/tutorial04.sh --verify
 ```
 
-Use `--setup` to have `tutorial04.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
+Use `--setup` to have [`tutorial04.sh`](tutorial04.sh) perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
 Expected key `./docs/tutorials/apim-get-started/tutorial04.sh --verify` output:
 

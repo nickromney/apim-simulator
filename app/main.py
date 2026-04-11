@@ -600,7 +600,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         if created:
             await app.state.http_client.aclose()
 
-    app = FastAPI(title="Local APIM Simulator", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Local APIM Simulator", version=APIM_SERVICE_VERSION, lifespan=lifespan)
     app.state.telemetry = telemetry
     app.state.gateway_metrics = _get_gateway_metrics(telemetry)
     app.add_middleware(

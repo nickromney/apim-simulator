@@ -6,7 +6,7 @@ This file tracks open areas that would materially expand the simulator. It is no
 
 ### Broader Sample Compatibility Coverage
 
-Keep growing the curated APIM sample fixture set under `tests/fixtures/apim_samples/`.
+Keep growing the curated APIM sample fixture set under [`tests/fixtures/apim_samples/`](../tests/fixtures/apim_samples/).
 
 Good additions are:
 

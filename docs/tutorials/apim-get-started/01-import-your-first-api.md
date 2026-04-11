@@ -35,7 +35,7 @@ If you want the scripted shortcut instead of running the commands manually:
 ./docs/tutorials/apim-get-started/tutorial01.sh --verify
 ```
 
-Use `--setup` to have `tutorial01.sh` perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
+Use `--setup` to have [`tutorial01.sh`](tutorial01.sh) perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
 
 Expected `./docs/tutorials/apim-get-started/tutorial01.sh --verify` output:
 
@@ -70,5 +70,5 @@ $ curl -sS "http://localhost:18000/tutorial-api/echo"
 
 ## Differences From Azure APIM
 
-- This uses the simulator management API plus `scripts/import_openapi.py`, not the Azure portal.
+- This uses the simulator management API plus [`scripts/import_openapi.py`](../../../scripts/import_openapi.py), not the Azure portal.
 - The sample spec is local and points at the checked-in mock backend instead of the public Petstore service.
