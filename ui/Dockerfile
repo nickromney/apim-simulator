@@ -5,7 +5,7 @@ FROM ${UI_BUILD_IMAGE} AS builder
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN ["npm", "ci"]
 
 COPY . .

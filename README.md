@@ -25,6 +25,16 @@ Before running the simulator:
 - use `uv` if you want to run smoke scripts, import helpers, or tests from the host
 - use `npm` only for the browser-facing demo checks such as Playwright, Bruno, or the UI toolchain
 
+## Dependency Cooldown
+
+This repository carries repo-local dependency age gates so local installs and
+container builds do not rely on host dotfiles.
+
+- Python resolution via `uv` uses a seven-day cutoff in [`pyproject.toml`](pyproject.toml)
+- npm package roots ship local `.npmrc` with `min-release-age=7`
+- frontend Dockerfiles copy `.npmrc` before `npm ci` so image builds keep the
+  same cooldown policy
+
 ## Container Hardening
 
 The stateless services now default to a tighter local runtime posture:
