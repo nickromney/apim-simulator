@@ -108,7 +108,7 @@ from app.terraform_import import import_from_tofu_show_json
 logger = logging.getLogger("apim-simulator")
 
 APIM_SERVICE_NAME = "apim-simulator"
-APIM_SERVICE_VERSION = "0.1.0"
+APIM_SERVICE_VERSION = "0.2.0"
 EMPTY_POLICY_XML = "<policies><inbound /><backend /><outbound /><on-error /></policies>"
 POLICY_SECTION_NAMES = ("inbound", "backend", "outbound", "on-error")
 _GATEWAY_METRICS: GatewayMetrics | None = None
