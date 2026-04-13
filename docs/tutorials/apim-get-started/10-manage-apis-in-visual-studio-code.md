@@ -19,12 +19,12 @@ These examples assume `tutorial-api` already exists. If it does not, run step
 Use Visual Studio Code with either:
 
 - the built-in terminal and `curl`
-- the checked-in REST Client example at [tutorial10.rest.http](/Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial10.rest.http)
+- the checked-in REST Client example at [tutorial10.rest.http](tutorial10.rest.http)
 - direct editing of the checked-in JSON config files in this repo
 
 ## Minimal REST Client Example
 
-Open [tutorial10.rest.http](/Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial10.rest.http) in VS Code, or create a `.http` file like this:
+Open [tutorial10.rest.http](tutorial10.rest.http) in VS Code, or create a `.http` file like this:
 
 ```http
 @base = http://localhost:8000
@@ -64,7 +64,7 @@ Use `--setup` to have [`tutorial10.sh`](tutorial10.sh) perform the local setup f
 Expected key `./docs/tutorials/apim-get-started/tutorial10.sh --verify` output:
 
 ```text
-REST Client example: /Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial10.rest.http
+REST Client example: `docs/tutorials/apim-get-started/tutorial10.rest.http`
 Applying the REST Client policy update to 'tutorial-api'
 {
   "contains_vscode_header": true,

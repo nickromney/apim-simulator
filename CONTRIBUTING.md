@@ -65,6 +65,18 @@ Use the repository structure as a guide when deciding where work belongs:
 If your change introduces a new workflow, document it close to the code it
 affects and link it from the nearest existing README.
 
+## Downstream Vendoring
+
+This repository is the authoritative source when another repo vendors
+`apim-simulator`.
+
+If you refresh a downstream mirror:
+
+1. Vendor from a tag or a specific commit SHA.
+2. Record the resolved commit in the downstream repo.
+3. Do not hand-edit the vendored subtree and assume those edits will survive the
+   next sync. Land source changes here first, then re-vendor.
+
 ## AI Usage
 
 AI-assisted contributions are allowed, but disclosure and human understanding

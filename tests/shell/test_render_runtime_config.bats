@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
 
-SCRIPT="/Users/nickromney/Developer/personal/apim-simulator/examples/todo-app/frontend-astro/scripts/render-runtime-config.sh"
-
 setup() {
+  export REPO_ROOT
+  REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../.." && pwd)"
+  export SCRIPT="${REPO_ROOT}/examples/todo-app/frontend-astro/scripts/render-runtime-config.sh"
   export TEMPLATE_PATH="$BATS_TEST_TMPDIR/runtime-config.template.js"
   export OUTPUT_PATH="$BATS_TEST_TMPDIR/html/runtime-config.js"
 

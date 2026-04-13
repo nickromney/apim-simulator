@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
 
-SCRIPT="/Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial01.sh"
-
 setup() {
+  export REPO_ROOT
+  REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../.." && pwd)"
+  export SCRIPT="${REPO_ROOT}/docs/tutorials/apim-get-started/tutorial01.sh"
   export TEST_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$TEST_BIN"
   export CALL_LOG="$BATS_TEST_TMPDIR/calls.log"
@@ -60,7 +61,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Starting tutorial 01 stack with docker compose"* ]]
   [[ "$output" == *"Compose files:"* ]]
-  [[ "$output" == *"/Users/nickromney/Developer/personal/apim-simulator/compose.public.yml"* ]]
+  [[ "$output" == *"${REPO_ROOT}/compose.public.yml"* ]]
   [[ "$output" == *"Running:"* ]]
   [[ "$output" == *"up --build -d"* ]]
   [[ "$output" == *"Importing OpenAPI source into API 'tutorial-api'"* ]]
@@ -68,9 +69,9 @@ EOF
 
   run cat "$CALL_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"docker compose -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml up --build -d"* ]]
+  [[ "$output" == *"docker compose -f ${REPO_ROOT}/compose.yml -f ${REPO_ROOT}/compose.public.yml up --build -d"* ]]
   [[ "$output" == *"curl -fsS http://localhost:18000/apim/health"* ]]
-  [[ "$output" == *"uv run python /Users/nickromney/Developer/personal/apim-simulator/scripts/import_openapi.py"* ]]
+  [[ "$output" == *"uv run python ${REPO_ROOT}/scripts/import_openapi.py"* ]]
   [[ "$output" == *"APIM_BASE_URL=http://localhost:18000"* ]]
   [[ "$output" == *"OPENAPI_SOURCE=$OPENAPI_SOURCE"* ]]
 }
