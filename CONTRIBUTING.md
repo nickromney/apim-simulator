@@ -44,6 +44,10 @@ Use the smallest relevant validation surface for your change:
 4. `make compat` and `make compat-report` for APIM compatibility work.
 5. The relevant `make up-*`, `make smoke-*`, or `make verify-*` flow when your
    change affects a running stack.
+6. When you change a documented contract, update
+   [`contracts/contract_matrix.yml`](contracts/contract_matrix.yml) and mark the
+   owning pytest case with `@pytest.mark.contract(...)` before you implement the
+   code change.
 
 ## Repository Shape
 

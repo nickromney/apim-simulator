@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from app.compat_report import build_compat_report
@@ -16,6 +17,7 @@ def _tf_json(resources: list[dict]) -> dict:
     return {"values": {"root_module": {"resources": resources}}}
 
 
+@pytest.mark.contract("TF-IMPORT-MVP")
 def test_config_from_tofu_show_json_mvp() -> None:
     tf = _tf_json(
         [
@@ -620,6 +622,7 @@ def test_config_from_tofu_show_json_imports_loggers_and_diagnostics() -> None:
     assert "runtime_settings" in adapted_features
 
 
+@pytest.mark.contract("TF-COMPAT-REPORT")
 def test_compat_report_is_green_for_supported_fixture() -> None:
     fixture = Path(__file__).parent / "fixtures" / "tofu_show" / "sample.json"
     payload = json.loads(fixture.read_text(encoding="utf-8"))

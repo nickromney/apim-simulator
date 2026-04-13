@@ -27,6 +27,12 @@ setup() {
   [[ "$output" == *"DNS:apim.localtest.me"* ]]
   [[ "$output" == *"DNS:localhost"* ]]
   [[ "$output" == *"IP Address:127.0.0.1"* ]]
+  [[ "$output" == *"Subject Key Identifier"* ]]
+  [[ "$output" == *"Authority Key Identifier"* ]]
+
+  run openssl verify -CAfile "$CERT_DIR/dev-root-ca.crt" "$CERT_DIR/apim.localtest.me.crt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$CERT_DIR/apim.localtest.me.crt: OK"* ]]
 }
 
 @test "gen_dev_certs.sh keeps an existing valid CA on rerun" {

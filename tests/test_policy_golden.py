@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.config import GatewayConfig, NamedValueConfig
 from app.policy import (
     CacheLookup,
@@ -18,6 +20,7 @@ from app.policy import (
 )
 
 
+@pytest.mark.contract("POLICY-SET-HEADER")
 def test_golden_policy_set_header_override() -> None:
     doc = parse_policies_xml(
         """\
@@ -37,6 +40,7 @@ def test_golden_policy_set_header_override() -> None:
     assert req.headers["x-a"] == "1"
 
 
+@pytest.mark.contract("POLICY-RETURN-RESPONSE")
 def test_golden_policy_return_response() -> None:
     doc = parse_policies_xml(
         """\
@@ -330,6 +334,7 @@ def test_golden_policy_return_response_supports_set_body_template() -> None:
     assert early.body == b'{"mode":"trace"}'
 
 
+@pytest.mark.contract("POLICY-INCLUDE-FRAGMENT")
 def test_golden_policy_include_fragment_inserts_fragment_nodes() -> None:
     doc = parse_policies_xml(
         """\

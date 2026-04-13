@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 import jwt
+import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
@@ -76,6 +77,7 @@ def _make_token(
     return jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": "test-kid"})
 
 
+@pytest.mark.contract("GW-HEALTH")
 def test_health() -> None:
     app = create_app(
         config=GatewayConfig(
@@ -93,6 +95,7 @@ def test_health() -> None:
     assert resp.json() == {"status": "healthy"}
 
 
+@pytest.mark.contract("GW-ROOT-HINT")
 def test_root_hint_lists_builtin_entrypoints() -> None:
     app = create_app(
         config=GatewayConfig(
@@ -127,6 +130,7 @@ def test_root_hint_lists_builtin_entrypoints() -> None:
     }
 
 
+@pytest.mark.contract("ROUTE-HOST-MATCH")
 def test_route_host_match_selects_expected_upstream() -> None:
     seen_urls: list[str] = []
 
@@ -207,6 +211,7 @@ def test_route_host_match_prefers_x_forwarded_host() -> None:
     assert seen_urls == ["http://upstream-uat/api/v1/health"]
 
 
+@pytest.mark.contract("TRACE-LOOKUP")
 def test_trace_headers_and_trace_lookup_work() -> None:
     config = GatewayConfig(
         allow_anonymous=True,
@@ -237,6 +242,7 @@ def test_trace_headers_and_trace_lookup_work() -> None:
     assert payload["correlation_id"] == corr_id
 
 
+@pytest.mark.contract("AUTH-SUBSCRIPTION-REQUIRED")
 def test_missing_subscription_key_returns_401() -> None:
     issuer = "http://issuer.example"
     audience = "api"
@@ -648,6 +654,7 @@ def test_proxy_injects_identity_headers_and_filters_hop_by_hop() -> None:
     assert "connection" not in {k.lower() for k in resp.headers.keys()}
 
 
+@pytest.mark.contract("ROUTE-VERSION-HEADER")
 def test_api_version_set_header_routes_to_correct_version() -> None:
     config = GatewayConfig(
         allow_anonymous=True,
@@ -689,6 +696,7 @@ def test_api_version_set_header_routes_to_correct_version() -> None:
     assert resp.json() == {"ok": True}
 
 
+@pytest.mark.contract("ROUTE-VERSION-QUERY")
 def test_api_version_set_query_routes_to_correct_version() -> None:
     config = GatewayConfig(
         allow_anonymous=True,
@@ -730,6 +738,7 @@ def test_api_version_set_query_routes_to_correct_version() -> None:
     assert resp.json() == {"ok": True}
 
 
+@pytest.mark.contract("ROUTE-VERSION-SEGMENT")
 def test_api_version_set_segment_routes_and_strips_version_segment_for_upstream() -> None:
     config = GatewayConfig(
         allow_anonymous=True,
@@ -1367,6 +1376,7 @@ def test_secondary_subscription_key_works() -> None:
     assert resp.status_code == 200
 
 
+@pytest.mark.contract("AUTH-PRODUCT-GRANT")
 def test_product_access_denied_without_product_grant() -> None:
     issuer = "http://issuer.example"
     audience = "api"
@@ -1469,6 +1479,7 @@ def test_rotate_subscription_key_updates_gateway_lookup() -> None:
         assert resp.status_code == 200
 
 
+@pytest.mark.contract("MGMT-TENANT-KEY")
 def test_management_plane_requires_tenant_key() -> None:
     config = GatewayConfig(
         allow_anonymous=True,
@@ -1600,6 +1611,7 @@ def test_trace_payload_captures_forwarded_headers() -> None:
     assert payload["upstream_url"] == "http://upstream/api/health"
 
 
+@pytest.mark.contract("MGMT-SUMMARY")
 def test_management_summary_lists_routes_and_gateway_scope() -> None:
     app = create_app(
         config=GatewayConfig(
@@ -1626,6 +1638,7 @@ def test_management_summary_lists_routes_and_gateway_scope() -> None:
     assert payload["routes"][0]["policy_scope"] == {"scope_type": "route", "scope_name": "r1"}
 
 
+@pytest.mark.contract("MGMT-RESOURCE-COLLECTIONS")
 def test_management_resource_collections_expose_service_scoped_ids() -> None:
     app = create_app(
         config=GatewayConfig(
@@ -2145,6 +2158,7 @@ def test_management_api_revision_and_release_endpoints_and_put_preserve_metadata
     assert get_api.json()["releases"][0]["notes"] == "Shipped publicly"
 
 
+@pytest.mark.contract("MGMT-OPENAPI-IMPORT")
 def test_management_api_import_openapi_endpoint_creates_routable_api() -> None:
     upstream_urls: list[str] = []
 
@@ -2645,6 +2659,73 @@ def test_management_crud_persists_api_authored_resources(tmp_path: Path, monkeyp
     assert "add-stage" not in persisted_after_delete["policy_fragments"]
 
 
+def test_management_delete_product_uses_management_plane_and_removes_assignments() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            products={"starter": ProductConfig(name="Starter", require_subscription=True)},
+            subscription=SubscriptionConfig(
+                subscriptions={
+                    "demo": Subscription(
+                        id="demo",
+                        name="Demo",
+                        keys=SubscriptionKeyPair(primary="good", secondary="good2"),
+                        products=["starter"],
+                    )
+                }
+            ),
+        )
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+        deleted = client.delete("/apim/management/products/starter", headers=headers)
+        subscription = client.get("/apim/management/subscriptions/demo", headers=headers)
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True, "product_id": "starter", "remaining": 0}
+    assert subscription.status_code == 200
+    assert subscription.json()["products"] == []
+
+
+def test_management_subscription_crud_endpoints_delegate_through_management_plane() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            products={"starter": ProductConfig(name="Starter", require_subscription=True)},
+        )
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+        created = client.post(
+            "/apim/management/subscriptions",
+            headers=headers,
+            json={"id": "demo", "name": "Demo", "products": ["starter"]},
+        )
+        updated = client.patch(
+            "/apim/management/subscriptions/demo",
+            headers=headers,
+            json={"name": "Demo Plus", "state": "suspended", "products": ["starter"]},
+        )
+        deleted = client.delete("/apim/management/subscriptions/demo", headers=headers)
+
+    assert created.status_code == 200
+    assert created.json()["name"] == "Demo"
+    assert created.json()["products"] == ["starter"]
+    assert created.json()["state"] == "active"
+
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Demo Plus"
+    assert updated.json()["state"] == "suspended"
+    assert updated.json()["products"] == ["starter"]
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True, "subscription_id": "demo", "remaining": 0}
+
+
 def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monkeypatch) -> None:
     issuer = "http://issuer.example"
     audience = "api-app"
@@ -3063,6 +3144,7 @@ def test_mtls_custom_header_names() -> None:
         assert resp.status_code == 200
 
 
+@pytest.mark.contract("GW-STARTUP-PROBE")
 def test_startup_probe_returns_200_when_ready() -> None:
     """Startup probe returns 200 once app is ready."""
     app = create_app(
@@ -3084,6 +3166,7 @@ def test_startup_probe_returns_200_when_ready() -> None:
         assert resp.json()["status"] == "started"
 
 
+@pytest.mark.contract("MGMT-RELOAD")
 def test_reload_endpoint_reloads_config() -> None:
     """Reload endpoint triggers config reload."""
     app = create_app(

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.config import (
     ApiConfig,
     ApiReleaseConfig,
@@ -31,6 +33,7 @@ from app.config import (
 from app.resource_projection import project_summary
 
 
+@pytest.mark.contract("PROJECTION-SUMMARY")
 def test_project_summary_uses_service_scoped_ids_and_masks_secrets() -> None:
     cfg = GatewayConfig(
         service={

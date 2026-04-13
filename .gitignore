@@ -8,6 +8,9 @@ __pycache__/
 .env.*
 !.env.example
 *.log
+.coverage
+coverage.xml
+htmlcov/
 build/
 dist/
 examples/edge/certs/

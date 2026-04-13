@@ -98,7 +98,8 @@ help:
 	@printf $(HELP_FMT) "compose-config-todo-otel" "Render docker compose config for the todo demo LGTM stack"
 	@printf $(HELP_FMT) "compose-config-ui" "Render docker compose config for the console stack"
 
-ensure-certs: $(DEV_CERTS)
+ensure-certs:
+	./scripts/gen_dev_certs.sh
 
 $(DEV_CERTS):
 	./scripts/gen_dev_certs.sh
@@ -224,7 +225,7 @@ release-tag-dry-run:
 test: test-python test-shell
 
 test-python:
-	uv run --extra dev pytest -q
+	uv run --extra dev pytest -q --cov=app --cov-branch --cov-report=term-missing --cov-report=xml
 
 test-shell:
 	@command -v bats >/dev/null 2>&1 || { echo "bats is required for shell tests"; exit 1; }
