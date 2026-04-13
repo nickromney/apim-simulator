@@ -5,6 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+PINNED_HTTPX = "httpx==0.28.1"
+PINNED_MCP = "mcp==1.26.0"
+
 
 def main() -> None:
     site_packages_path = Path("/run/smoke/site-packages")
@@ -21,8 +24,8 @@ def main() -> None:
             "-q",
             "--target",
             str(site_packages_path),
-            "httpx",
-            "mcp",
+            PINNED_HTTPX,
+            PINNED_MCP,
         ],
         check=True,
     )

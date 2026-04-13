@@ -1,0 +1,23 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Intentional local-only demo credentials and tutorial keys"
+regexTarget = "line"
+regexes = [
+  '''(?i)\blocal-dev-tenant-key(?:-secondary)?\b''',
+  '''(?i)\btodo-demo-key(?:-invalid|-secondary)?\b''',
+  '''(?i)\bmcp-demo-key(?:-secondary)?\b''',
+  '''(?i)\bhello-demo-key(?:-invalid)?\b''',
+  '''(?i)\boidc-(?:demo|admin)-key(?:-secondary)?\b''',
+  '''(?i)\baws-migration-demo-key(?:-secondary)?\b''',
+  '''(?i)\btutorial-key(?:-secondary)?\b''',
+  '''(?i)\bdemo-password\b''',
+]
+
+[[allowlists]]
+description = "Generated local development TLS private keys"
+paths = [
+  '''examples/edge/certs/apim\.localtest\.me\.key''',
+  '''examples/edge/certs/dev-root-ca\.key''',
+]

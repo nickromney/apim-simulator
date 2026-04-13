@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 ARG PYTHON_BUILD_IMAGE=dhi.io/python:3.13-debian13-dev
 ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13
 FROM ${PYTHON_BUILD_IMAGE} AS builder
@@ -7,11 +8,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN python -m venv /app/.venv
+COPY --from=ghcr.io/astral-sh/uv:0.10.4 /uv /usr/local/bin/uv
 
-ENV PATH="/app/.venv/bin:$PATH"
+COPY pyproject.toml uv.lock ./
 
-RUN pip install --no-cache-dir mcp==1.26.0
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra mcp --no-install-project
 
 FROM ${PYTHON_RUNTIME_IMAGE}
 
@@ -27,7 +29,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY --chown=${APP_UID}:${APP_GID} --from=builder /app/.venv /app/.venv
-COPY --chown=${APP_UID}:${APP_GID} server.py .
+COPY --chown=${APP_UID}:${APP_GID} examples/mcp-server/server.py ./server.py
 
 EXPOSE 8080
 

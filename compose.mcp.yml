@@ -18,8 +18,8 @@ services:
   mcp-server:
     <<: *python-service-hardening
     build:
-      context: ./examples/mcp-server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: examples/mcp-server/Dockerfile
       args: *python-build-args
     image: apim-simulator-mcp-server:latest
     expose:

@@ -12,6 +12,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,uid=${NGINX_UID:-101},gid=${NGINX_GID:-101},mode=1777
       - /var/cache/nginx:rw,noexec,nosuid,nodev,uid=${NGINX_UID:-101},gid=${NGINX_GID:-101},mode=0755
+      - /run/nginx:rw,noexec,nosuid,nodev,uid=${NGINX_UID:-101},gid=${NGINX_GID:-101},mode=0755
       - /var/run:rw,noexec,nosuid,nodev,uid=${NGINX_UID:-101},gid=${NGINX_GID:-101},mode=0755
     security_opt:
       - no-new-privileges:true
