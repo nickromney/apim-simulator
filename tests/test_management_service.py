@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from app.config import (
     ApiConfig,
     GatewayConfig,
+    GroupConfig,
     OperationConfig,
     ProductConfig,
     RouteConfig,
@@ -13,6 +17,8 @@ from app.config import (
     SubscriptionConfig,
     SubscriptionKeyPair,
     SubscriptionState,
+    TagConfig,
+    UserConfig,
 )
 from app.management_service import ManagementService
 
@@ -99,6 +105,22 @@ def test_delete_product_unlinks_legacy_routes_and_subscriptions() -> None:
                 )
             }
         ),
+        apis={
+            "weather": ApiConfig(
+                name="weather",
+                path="weather",
+                upstream_base_url="http://upstream",
+                products=["starter"],
+                operations={
+                    "current": OperationConfig(
+                        name="current",
+                        method="GET",
+                        url_template="/current",
+                        products=["starter", "pro"],
+                    )
+                },
+            )
+        },
         routes=[
             RouteConfig(
                 name="legacy",
@@ -115,8 +137,10 @@ def test_delete_product_unlinks_legacy_routes_and_subscriptions() -> None:
 
     assert "starter" not in updated.products
     assert updated.subscription.subscriptions["demo"].products == []
-    assert updated.routes[0].product is None
-    assert updated.routes[0].products == []
+    assert updated.apis["weather"].products == []
+    assert updated.apis["weather"].operations["current"].products == ["pro"]
+    assert all(route.product != "starter" for route in updated.routes)
+    assert all("starter" not in route.products for route in updated.routes)
 
 
 def test_subscription_lifecycle_round_trips_through_persistence() -> None:
@@ -151,3 +175,97 @@ def test_subscription_lifecycle_round_trips_through_persistence() -> None:
 
     deleted = service.delete_subscription(rotated, "demo")
     assert "demo" not in deleted.subscription.subscriptions
+
+
+def test_persist_or_apply_config_returns_http_500_when_write_fails(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APIM_CONFIG_PATH", str(tmp_path))
+    cfg = GatewayConfig(products={"starter": ProductConfig(name="Starter")})
+    service, _, _ = _make_service(cfg)
+
+    with pytest.raises(HTTPException, match="Unable to persist config update") as exc_info:
+        service.persist_or_apply_config(cfg)
+
+    assert exc_info.value.status_code == 500
+
+
+def test_subscription_error_paths_and_primary_rotation() -> None:
+    cfg = GatewayConfig(
+        subscription=SubscriptionConfig(
+            subscriptions={
+                "demo": Subscription(
+                    id="demo",
+                    name="Demo",
+                    keys=SubscriptionKeyPair(primary="good", secondary="good2"),
+                    products=[],
+                )
+            }
+        )
+    )
+    service, _, _ = _make_service(cfg)
+
+    with pytest.raises(HTTPException, match="Subscription already exists") as duplicate_exc:
+        service.create_subscription(
+            cfg,
+            SimpleNamespace(
+                id="demo",
+                name="Duplicate",
+                state=SubscriptionState.Active,
+                products=[],
+                primary_key=None,
+                secondary_key=None,
+            ),
+        )
+    assert duplicate_exc.value.status_code == 409
+
+    with pytest.raises(HTTPException, match="Subscription not found") as missing_update_exc:
+        service.update_subscription(cfg, "missing", SimpleNamespace(name="x", state=None, products=None))
+    assert missing_update_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException, match="Subscription not found") as missing_delete_exc:
+        service.delete_subscription(cfg, "missing")
+    assert missing_delete_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException, match="Subscription not found") as missing_rotate_exc:
+        service.rotate_subscription_key(cfg, "missing")
+    assert missing_rotate_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException, match="Invalid key") as invalid_key_exc:
+        service.rotate_subscription_key(cfg, "demo", "tertiary")
+    assert invalid_key_exc.value.status_code == 400
+
+    rotated, new_key = service.rotate_subscription_key(cfg, "demo", "primary")
+    assert rotated.subscription.subscriptions["demo"].keys.primary == new_key
+
+
+def test_management_service_raises_not_found_for_missing_resources() -> None:
+    cfg = GatewayConfig(
+        groups={"admins": GroupConfig(id="admins", name="Admins")},
+        users={"alice": UserConfig(id="alice", name="Alice", email="alice@example.com")},
+        tags={"featured": TagConfig(display_name="Featured")},
+    )
+    service, _, _ = _make_service(cfg)
+
+    with pytest.raises(HTTPException, match="Product not found") as product_exc:
+        service.delete_product(cfg, "missing")
+    assert product_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException, match="Group not found") as group_exc:
+        service.delete_group(cfg, "missing")
+    assert group_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException, match="User not found") as user_exc:
+        service.delete_user(cfg, "missing")
+    assert user_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException, match="Tag not found") as tag_exc:
+        service.delete_tag(cfg, "missing")
+    assert tag_exc.value.status_code == 404
+
+
+def test_unlink_list_item_returns_false_when_item_is_missing() -> None:
+    values = ["starter"]
+
+    result = ManagementService._unlink_list_item(values, "missing")
+
+    assert result is False
+    assert values == ["starter"]

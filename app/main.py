@@ -494,11 +494,6 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 
     management_plane: ManagementService | None = None
 
-    def _reload_config(app: FastAPI) -> GatewayConfig:
-        """Reload configuration from file and update app state."""
-        assert management_plane is not None
-        return management_plane.reload_config()
-
     async def _config_watcher(app: FastAPI, config_path: str, interval: float = 5.0) -> None:
         """Watch config file for changes and reload when modified.
 
@@ -537,7 +532,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 
                 if changed:
                     logger.info("config file changed, reloading...")
-                    _reload_config(app)
+                    assert management_plane is not None
+                    management_plane.reload_config()
             except Exception as exc:
                 logger.warning("config watcher error: %s", exc)
 
@@ -795,10 +791,6 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         else:
             sub.keys.secondary = new_key
         return {"subscription_id": sub.id, "subscription_name": sub.name, "rotated": key, "new_key": new_key}
-
-    def _apply_runtime_config(app: FastAPI, cfg: GatewayConfig) -> GatewayConfig:
-        assert management_plane is not None
-        return management_plane.apply_runtime_config(cfg)
 
     def _persist_or_apply_config(request: Request, cfg: GatewayConfig) -> GatewayConfig:
         assert management_plane is not None

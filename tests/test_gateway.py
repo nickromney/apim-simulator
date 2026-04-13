@@ -2659,6 +2659,73 @@ def test_management_crud_persists_api_authored_resources(tmp_path: Path, monkeyp
     assert "add-stage" not in persisted_after_delete["policy_fragments"]
 
 
+def test_management_delete_product_uses_management_plane_and_removes_assignments() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            products={"starter": ProductConfig(name="Starter", require_subscription=True)},
+            subscription=SubscriptionConfig(
+                subscriptions={
+                    "demo": Subscription(
+                        id="demo",
+                        name="Demo",
+                        keys=SubscriptionKeyPair(primary="good", secondary="good2"),
+                        products=["starter"],
+                    )
+                }
+            ),
+        )
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+        deleted = client.delete("/apim/management/products/starter", headers=headers)
+        subscription = client.get("/apim/management/subscriptions/demo", headers=headers)
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True, "product_id": "starter", "remaining": 0}
+    assert subscription.status_code == 200
+    assert subscription.json()["products"] == []
+
+
+def test_management_subscription_crud_endpoints_delegate_through_management_plane() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            products={"starter": ProductConfig(name="Starter", require_subscription=True)},
+        )
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+        created = client.post(
+            "/apim/management/subscriptions",
+            headers=headers,
+            json={"id": "demo", "name": "Demo", "products": ["starter"]},
+        )
+        updated = client.patch(
+            "/apim/management/subscriptions/demo",
+            headers=headers,
+            json={"name": "Demo Plus", "state": "suspended", "products": ["starter"]},
+        )
+        deleted = client.delete("/apim/management/subscriptions/demo", headers=headers)
+
+    assert created.status_code == 200
+    assert created.json()["name"] == "Demo"
+    assert created.json()["products"] == ["starter"]
+    assert created.json()["state"] == "active"
+
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Demo Plus"
+    assert updated.json()["state"] == "suspended"
+    assert updated.json()["products"] == ["starter"]
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True, "subscription_id": "demo", "remaining": 0}
+
+
 def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monkeypatch) -> None:
     issuer = "http://issuer.example"
     audience = "api-app"
