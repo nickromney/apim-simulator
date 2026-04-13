@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
 
-SCRIPT="/Users/nickromney/Developer/personal/apim-simulator/scripts/run_tutorial_smoke.sh"
-
 setup() {
+  export REPO_ROOT
+  REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../.." && pwd)"
+  export SCRIPT="${REPO_ROOT}/scripts/run_tutorial_smoke.sh"
   export TUTORIAL_DIR="$BATS_TEST_TMPDIR/tutorials"
   export CALL_LOG="$BATS_TEST_TMPDIR/calls.log"
   mkdir -p "$TUTORIAL_DIR"

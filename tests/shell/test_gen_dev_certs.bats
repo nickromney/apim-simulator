@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
 
-SCRIPT="/Users/nickromney/Developer/personal/apim-simulator/scripts/gen_dev_certs.sh"
-
 setup() {
+  export REPO_ROOT
+  REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../.." && pwd)"
+  export SCRIPT="${REPO_ROOT}/scripts/gen_dev_certs.sh"
   export APIM_ROOT="$BATS_TEST_TMPDIR/apim-root"
   export CERT_DIR="$APIM_ROOT/examples/edge/certs"
 }

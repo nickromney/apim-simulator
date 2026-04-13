@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 
-ROOT="/Users/nickromney/Developer/personal/apim-simulator"
-TUTORIAL_DIR="$ROOT/docs/tutorials/apim-get-started"
-TUTORIAL_CLEANUP="$TUTORIAL_DIR/tutorial-cleanup.sh"
-
 setup() {
+  export ROOT
+  ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../.." && pwd)"
+  export TUTORIAL_DIR="${ROOT}/docs/tutorials/apim-get-started"
+  export TUTORIAL_CLEANUP="${TUTORIAL_DIR}/tutorial-cleanup.sh"
   export TEST_BIN="$BATS_TEST_TMPDIR/bin"
   export STATE_DIR="$BATS_TEST_TMPDIR/state"
   export CALL_LOG="$BATS_TEST_TMPDIR/calls.log"
@@ -319,15 +319,15 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Stopping all tutorial stack variants with docker compose"* ]]
   [[ "$output" == *"Compose files:"* ]]
-  [[ "$output" == *"/Users/nickromney/Developer/personal/apim-simulator/compose.public.yml"* ]]
-  [[ "$output" == *"/Users/nickromney/Developer/personal/apim-simulator/compose.otel.yml"* ]]
-  [[ "$output" == *"/Users/nickromney/Developer/personal/apim-simulator/compose.ui.yml"* ]]
+  [[ "$output" == *"${ROOT}/compose.public.yml"* ]]
+  [[ "$output" == *"${ROOT}/compose.otel.yml"* ]]
+  [[ "$output" == *"${ROOT}/compose.ui.yml"* ]]
   [[ "$output" == *"Running:"* ]]
   [[ "$output" == *"down --remove-orphans"* ]]
 
   run cat "$CALL_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"docker compose -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml -f /Users/nickromney/Developer/personal/apim-simulator/compose.otel.yml -f /Users/nickromney/Developer/personal/apim-simulator/compose.ui.yml down --remove-orphans"* ]]
+  [[ "$output" == *"docker compose -f ${ROOT}/compose.yml -f ${ROOT}/compose.public.yml -f ${ROOT}/compose.otel.yml -f ${ROOT}/compose.ui.yml down --remove-orphans"* ]]
 }
 
 @test "tutorial02.sh --verify bootstraps product access" {

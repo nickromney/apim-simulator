@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
 
-SCRIPT="/Users/nickromney/Developer/personal/apim-simulator/scripts/check-version.sh"
-REPO_ROOT="/Users/nickromney/Developer/personal/apim-simulator"
-
 setup() {
+  export REPO_ROOT
+  REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../.." && pwd)"
+  export SCRIPT="${REPO_ROOT}/scripts/check-version.sh"
   export MOCK_ROOT="$BATS_TEST_TMPDIR/mock"
   export GITHUB_FIXTURES="$MOCK_ROOT/github"
   export DOCKER_FIXTURES="$MOCK_ROOT/docker"
