@@ -16,79 +16,87 @@ COMPOSE_TODO := $(COMPOSE) -f compose.todo.yml
 COMPOSE_TODO_OTEL := $(COMPOSE) -f compose.todo.yml -f compose.todo.otel.yml
 COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
+HELP_FMT := "  %-34s %s\n"
 
-.PHONY: help ensure-certs install-hooks fmt lint lint-check frontend-check release release-dry-run release-tag release-tag-dry-run up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help ensure-certs install-hooks fmt lint lint-check frontend-check check-version release release-dry-run release-tag release-tag-dry-run up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
-	@printf "  %-22s %s\n" "up" "Start the direct public simulator stack"
-	@printf "  %-22s %s\n" "up-otel" "Start the direct public simulator stack with LGTM"
-	@printf "  %-22s %s\n" "up-oidc" "Start the simulator with the Keycloak overlay"
-	@printf "  %-22s %s\n" "up-mcp" "Start the simulator with the MCP example overlay"
-	@printf "  %-22s %s\n" "up-edge" "Start the edge HTTP MCP stack on apim.localtest.me:8088"
-	@printf "  %-22s %s\n" "up-tls" "Start the edge TLS MCP stack on apim.localtest.me:8443"
-	@printf "  %-22s %s\n" "up-ui" "Start the operator console on localhost:3007"
-	@printf "  %-22s %s\n" "up-hello" "Start the anonymous hello API example behind APIM"
-	@printf "  %-22s %s\n" "up-hello-subscription" "Start the subscription-protected hello API example behind APIM"
-	@printf "  %-22s %s\n" "up-hello-otel" "Start the hello API example with LGTM"
-	@printf "  %-22s %s\n" "up-hello-oidc" "Start the JWT-only hello API example with Keycloak"
-	@printf "  %-22s %s\n" "up-hello-oidc-subscription" "Start the subscription-plus-JWT hello API example with Keycloak"
-	@printf "  %-22s %s\n" "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
-	@printf "  %-22s %s\n" "up-todo-otel" "Start the todo demo stack with LGTM on localhost:3001"
-	@printf "  %-22s %s\n" "down" "Stop all compose services defined by this repo"
-	@printf "  %-22s %s\n" "logs" "Tail core stack logs"
-	@printf "  %-22s %s\n" "logs-otel" "Tail core stack logs with LGTM"
-	@printf "  %-22s %s\n" "logs-oidc" "Tail OIDC stack logs"
-	@printf "  %-22s %s\n" "logs-mcp" "Tail MCP stack logs"
-	@printf "  %-22s %s\n" "logs-hello" "Tail hello API example stack logs"
-	@printf "  %-22s %s\n" "logs-hello-otel" "Tail hello API example logs with LGTM"
-	@printf "  %-22s %s\n" "logs-hello-oidc" "Tail hello API example logs with Keycloak"
-	@printf "  %-22s %s\n" "logs-todo" "Tail todo demo stack logs"
-	@printf "  %-22s %s\n" "logs-todo-otel" "Tail todo demo stack logs with LGTM"
-	@printf "  %-22s %s\n" "install-hooks" "Enable the repo-managed git pre-commit hook"
-	@printf "  %-22s %s\n" "fmt" "Format Python code with Ruff"
-	@printf "  %-22s %s\n" "lint" "Format Python code with Ruff and run lint checks"
-	@printf "  %-22s %s\n" "lint-check" "Check Python formatting and lint with Ruff without modifying files"
-	@printf "  %-22s %s\n" "frontend-check" "Run Biome, TypeScript, and Astro checks for repo frontends"
-	@printf "  %-22s %s\n" "release" "Bump to VERSION, run checks, and create a release commit"
-	@printf "  %-22s %s\n" "release-dry-run" "Preview the release-commit flow for VERSION without changing files"
-	@printf "  %-22s %s\n" "release-tag" "Create an annotated vVERSION tag from the current main commit"
-	@printf "  %-22s %s\n" "release-tag-dry-run" "Preview tag creation for VERSION without changing git state"
-	@printf "  %-22s %s\n" "test" "Run Python and shell tests"
-	@printf "  %-22s %s\n" "test-python" "Run the Python test suite"
-	@printf "  %-22s %s\n" "test-shell" "Run the shell script test suite with BATS"
-	@printf "  %-22s %s\n" "compat" "Run the curated APIM sample compatibility harness"
-	@printf "  %-22s %s\n" "compat-report" "Run static Terraform/APIM compatibility analysis (requires TOFU_SHOW=...)"
-	@printf "  %-22s %s\n" "import-tofu" "Import a tofu show JSON file into a running simulator (requires TOFU_SHOW=...)"
-	@printf "  %-22s %s\n" "verify-azure" "Diff curated requests against simulator and live Azure APIM"
-	@printf "  %-22s %s\n" "verify-otel" "Verify Grafana, Loki, Tempo, and Prometheus for the OTEL stack"
-	@printf "  %-22s %s\n" "verify-hello-otel" "Verify OTEL signals for the LGTM-backed hello API starter"
-	@printf "  %-22s %s\n" "verify-todo-otel" "Verify OTEL signals for the LGTM-backed todo demo stack"
-	@printf "  %-22s %s\n" "smoke-oidc" "Run the end-to-end OIDC smoke test against a running stack"
-	@printf "  %-22s %s\n" "smoke-mcp" "Run the end-to-end MCP smoke test against a running stack"
-	@printf "  %-22s %s\n" "smoke-edge" "Run the edge MCP and forwarded-header smoke test"
-	@printf "  %-22s %s\n" "smoke-tls" "Run the TLS edge smoke test using the generated local CA"
-	@printf "  %-22s %s\n" "smoke-private" "Run the private-mode smoke test and internal probe"
-	@printf "  %-22s %s\n" "smoke-hello" "Run the hello API smoke test (mode via SMOKE_HELLO_MODE)"
-	@printf "  %-22s %s\n" "smoke-todo" "Run the APIM-backed todo demo smoke test"
-	@printf "  %-22s %s\n" "smoke-tutorials-live" "Run all numbered tutorial scripts against live local stacks"
-	@printf "  %-22s %s\n" "test-todo-e2e" "Run Playwright against the running todo demo stack"
-	@printf "  %-22s %s\n" "test-todo-bruno" "Run the Bruno collection against the running todo demo stack"
-	@printf "  %-22s %s\n" "test-todo-postman" "Run the Postman collection against the running todo demo stack"
-	@printf "  %-22s %s\n" "export-todo-har" "Capture the todo APIM flow as a HAR file for Proxyman"
-	@printf "  %-22s %s\n" "compose-config" "Render docker compose config for the direct public stack"
-	@printf "  %-22s %s\n" "compose-config-otel" "Render docker compose config for the direct public LGTM stack"
-	@printf "  %-22s %s\n" "compose-config-oidc" "Render docker compose config for the OIDC stack"
-	@printf "  %-22s %s\n" "compose-config-mcp" "Render docker compose config for the MCP stack"
-	@printf "  %-22s %s\n" "compose-config-edge" "Render docker compose config for the edge HTTP stack"
-	@printf "  %-22s %s\n" "compose-config-tls" "Render docker compose config for the edge TLS stack"
-	@printf "  %-22s %s\n" "compose-config-private" "Render docker compose config for the private MCP stack"
-	@printf "  %-22s %s\n" "compose-config-ui" "Render docker compose config for the console stack"
-	@printf "  %-22s %s\n" "compose-config-hello" "Render docker compose config for the hello API example"
-	@printf "  %-22s %s\n" "compose-config-hello-otel" "Render docker compose config for the hello API example with LGTM"
-	@printf "  %-22s %s\n" "compose-config-hello-oidc" "Render docker compose config for the hello API example with Keycloak"
-	@printf "  %-22s %s\n" "compose-config-todo" "Render docker compose config for the todo demo stack"
-	@printf "  %-22s %s\n" "compose-config-todo-otel" "Render docker compose config for the todo demo LGTM stack"
+	@printf "\nStack Lifecycle:\n"
+	@printf $(HELP_FMT) "down" "Stop all compose services defined by this repo"
+	@printf $(HELP_FMT) "up" "Start the direct public simulator stack"
+	@printf $(HELP_FMT) "up-edge" "Start the edge HTTP MCP stack on apim.localtest.me:8088"
+	@printf $(HELP_FMT) "up-hello" "Start the anonymous hello API example behind APIM"
+	@printf $(HELP_FMT) "up-hello-oidc" "Start the JWT-only hello API example with Keycloak"
+	@printf $(HELP_FMT) "up-hello-oidc-subscription" "Start the subscription-plus-JWT hello API example with Keycloak"
+	@printf $(HELP_FMT) "up-hello-otel" "Start the hello API example with LGTM"
+	@printf $(HELP_FMT) "up-hello-subscription" "Start the subscription-protected hello API example behind APIM"
+	@printf $(HELP_FMT) "up-mcp" "Start the simulator with the MCP example overlay"
+	@printf $(HELP_FMT) "up-oidc" "Start the simulator with the Keycloak overlay"
+	@printf $(HELP_FMT) "up-otel" "Start the direct public simulator stack with LGTM"
+	@printf $(HELP_FMT) "up-tls" "Start the edge TLS MCP stack on apim.localtest.me:8443"
+	@printf $(HELP_FMT) "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
+	@printf $(HELP_FMT) "up-todo-otel" "Start the todo demo stack with LGTM on localhost:3001"
+	@printf $(HELP_FMT) "up-ui" "Start the operator console on localhost:3007"
+	@printf "\nLogs:\n"
+	@printf $(HELP_FMT) "logs" "Tail core stack logs"
+	@printf $(HELP_FMT) "logs-hello" "Tail hello API example stack logs"
+	@printf $(HELP_FMT) "logs-hello-oidc" "Tail hello API example logs with Keycloak"
+	@printf $(HELP_FMT) "logs-hello-otel" "Tail hello API example logs with LGTM"
+	@printf $(HELP_FMT) "logs-mcp" "Tail MCP stack logs"
+	@printf $(HELP_FMT) "logs-oidc" "Tail OIDC stack logs"
+	@printf $(HELP_FMT) "logs-otel" "Tail core stack logs with LGTM"
+	@printf $(HELP_FMT) "logs-todo" "Tail todo demo stack logs"
+	@printf $(HELP_FMT) "logs-todo-otel" "Tail todo demo stack logs with LGTM"
+	@printf "\nCode Quality and Tooling:\n"
+	@printf $(HELP_FMT) "check-version" "Check synchronized release versions and pinned upstream refs"
+	@printf $(HELP_FMT) "compat" "Run the curated APIM sample compatibility harness"
+	@printf $(HELP_FMT) "compat-report" "Run static Terraform/APIM compatibility analysis (requires TOFU_SHOW=...)"
+	@printf $(HELP_FMT) "fmt" "Format Python code with Ruff"
+	@printf $(HELP_FMT) "frontend-check" "Run Biome, TypeScript, and Astro checks for repo frontends"
+	@printf $(HELP_FMT) "import-tofu" "Import a tofu show JSON file into a running simulator (requires TOFU_SHOW=...)"
+	@printf $(HELP_FMT) "install-hooks" "Enable the repo-managed git pre-commit hook"
+	@printf $(HELP_FMT) "lint" "Format Python code with Ruff and run lint checks"
+	@printf $(HELP_FMT) "lint-check" "Check Python formatting and lint with Ruff without modifying files"
+	@printf $(HELP_FMT) "test" "Run Python and shell tests"
+	@printf $(HELP_FMT) "test-python" "Run the Python test suite"
+	@printf $(HELP_FMT) "test-shell" "Run the shell script test suite with BATS"
+	@printf "\nVerification and Smoke:\n"
+	@printf $(HELP_FMT) "export-todo-har" "Capture the todo APIM flow as a HAR file for Proxyman"
+	@printf $(HELP_FMT) "smoke-edge" "Run the edge MCP and forwarded-header smoke test"
+	@printf $(HELP_FMT) "smoke-hello" "Run the hello API smoke test (mode via SMOKE_HELLO_MODE)"
+	@printf $(HELP_FMT) "smoke-mcp" "Run the end-to-end MCP smoke test against a running stack"
+	@printf $(HELP_FMT) "smoke-oidc" "Run the end-to-end OIDC smoke test against a running stack"
+	@printf $(HELP_FMT) "smoke-private" "Run the private-mode smoke test and internal probe"
+	@printf $(HELP_FMT) "smoke-tls" "Run the TLS edge smoke test using the generated local CA"
+	@printf $(HELP_FMT) "smoke-todo" "Run the APIM-backed todo demo smoke test"
+	@printf $(HELP_FMT) "smoke-tutorials-live" "Run all numbered tutorial scripts against live local stacks"
+	@printf $(HELP_FMT) "test-todo-bruno" "Run the Bruno collection against the running todo demo stack"
+	@printf $(HELP_FMT) "test-todo-e2e" "Run Playwright against the running todo demo stack"
+	@printf $(HELP_FMT) "test-todo-postman" "Run the Postman collection against the running todo demo stack"
+	@printf $(HELP_FMT) "verify-azure" "Diff curated requests against simulator and live Azure APIM"
+	@printf $(HELP_FMT) "verify-hello-otel" "Verify OTEL signals for the LGTM-backed hello API starter"
+	@printf $(HELP_FMT) "verify-otel" "Verify Grafana, Loki, Tempo, and Prometheus for the OTEL stack"
+	@printf $(HELP_FMT) "verify-todo-otel" "Verify OTEL signals for the LGTM-backed todo demo stack"
+	@printf "\nRelease:\n"
+	@printf $(HELP_FMT) "release" "Bump to VERSION, run checks, and create a release commit"
+	@printf $(HELP_FMT) "release-dry-run" "Preview the release-commit flow for VERSION without changing files"
+	@printf $(HELP_FMT) "release-tag" "Create an annotated vVERSION tag from the current main commit"
+	@printf $(HELP_FMT) "release-tag-dry-run" "Preview tag creation for VERSION without changing git state"
+	@printf "\nCompose Config:\n"
+	@printf $(HELP_FMT) "compose-config" "Render docker compose config for the direct public stack"
+	@printf $(HELP_FMT) "compose-config-edge" "Render docker compose config for the edge HTTP stack"
+	@printf $(HELP_FMT) "compose-config-hello" "Render docker compose config for the hello API example"
+	@printf $(HELP_FMT) "compose-config-hello-oidc" "Render docker compose config for the hello API example with Keycloak"
+	@printf $(HELP_FMT) "compose-config-hello-otel" "Render docker compose config for the hello API example with LGTM"
+	@printf $(HELP_FMT) "compose-config-mcp" "Render docker compose config for the MCP stack"
+	@printf $(HELP_FMT) "compose-config-oidc" "Render docker compose config for the OIDC stack"
+	@printf $(HELP_FMT) "compose-config-otel" "Render docker compose config for the direct public LGTM stack"
+	@printf $(HELP_FMT) "compose-config-private" "Render docker compose config for the private MCP stack"
+	@printf $(HELP_FMT) "compose-config-tls" "Render docker compose config for the edge TLS stack"
+	@printf $(HELP_FMT) "compose-config-todo" "Render docker compose config for the todo demo stack"
+	@printf $(HELP_FMT) "compose-config-todo-otel" "Render docker compose config for the todo demo LGTM stack"
+	@printf $(HELP_FMT) "compose-config-ui" "Render docker compose config for the console stack"
 
 ensure-certs: $(DEV_CERTS)
 
@@ -114,7 +122,7 @@ up-tls: ensure-certs
 	$(COMPOSE_TLS) up --build -d
 
 up-ui:
-	$(COMPOSE_UI) up -d
+	$(COMPOSE_UI) up --build -d
 
 up-hello:
 	$(COMPOSE_HELLO) up --build -d
@@ -194,6 +202,9 @@ frontend-check:
 	npm --prefix examples/todo-app/frontend-astro ci
 	npm --prefix examples/todo-app/frontend-astro run check
 
+check-version:
+	./scripts/check-version.sh
+
 release:
 	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release VERSION=0.2.0"; exit 1; }
 	./scripts/release.sh "$(VERSION)"
@@ -244,13 +255,13 @@ smoke-oidc:
 	uv run python scripts/smoke_oidc.py
 
 smoke-mcp:
-	uv run --with mcp python scripts/smoke_mcp.py
+	uv run --extra mcp python scripts/smoke_mcp.py
 
 smoke-edge:
-	uv run --with mcp python scripts/smoke_edge.py
+	uv run --extra mcp python scripts/smoke_edge.py
 
 smoke-tls:
-	SMOKE_EDGE_BASE_URL=https://apim.localtest.me:8443 uv run --with mcp python scripts/smoke_edge.py
+	SMOKE_EDGE_BASE_URL=https://apim.localtest.me:8443 uv run --extra mcp python scripts/smoke_edge.py
 
 check-private-port-clear:
 	uv run python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', 8000)); sock.close(); print('Host port 8000 is unavailable, as required for private mode.') if code else (_ for _ in ()).throw(SystemExit('localhost:8000 is already reachable before private-mode launch; stop the conflicting listener before continuing'))"

@@ -4,6 +4,12 @@ Docker-first Azure API Management lab for local gateway work, policy testing, au
 
 Development and testing only. This project is for local iteration, not production APIM replacement.
 
+## Security Note
+
+- Keep this stack local-only. Do not expose it to the internet or use it as a production gateway.
+- Demo passwords, tenant keys, and subscription keys in this repository are intentional and exist only for local examples, tutorials, and smoke tests.
+- Do not expose or port-forward the demo Keycloak service on `localhost:8180`, especially when running management-enabled stacks.
+
 ## About the Simulator
 
 The simulator gives you a local APIM-shaped gateway with:
