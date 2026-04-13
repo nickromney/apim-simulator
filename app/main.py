@@ -47,6 +47,7 @@ from app.config import (
     UserConfig,
     load_config,
 )
+from app.management_service import ManagementService
 from app.named_values import mask_secret_data
 from app.openapi_import import parse_api_import
 from app.policy import (
@@ -491,26 +492,12 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             )
         return verifiers
 
-    oidc_verifiers = _build_oidc_verifiers(gateway_config)
+    management_plane: ManagementService | None = None
 
     def _reload_config(app: FastAPI) -> GatewayConfig:
         """Reload configuration from file and update app state."""
-        new_config = load_config()
-        new_config.routes = new_config.materialize_routes()
-        new_verifiers = _build_oidc_verifiers(new_config)
-        app.state.gateway_config = new_config
-        app.state.oidc_verifiers = new_verifiers
-        app.state.policy_cache = {}  # Clear policy cache on reload
-        app.state.policy_response_cache = {}
-        app.state.policy_value_cache = {}
-        app.state.gateway_metrics.config_reloads.add(1, {"result": "success"})
-        logger.info(
-            "config reloaded | routes=%d | origins=%s | anonymous=%s",
-            len(new_config.routes),
-            new_config.allowed_origins,
-            new_config.allow_anonymous,
-        )
-        return new_config
+        assert management_plane is not None
+        return management_plane.reload_config()
 
     async def _config_watcher(app: FastAPI, config_path: str, interval: float = 5.0) -> None:
         """Watch config file for changes and reload when modified.
@@ -563,8 +550,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         else:
             app.state.http_client = http_client
         instrument_httpx_client(app.state.http_client, telemetry)
-        app.state.gateway_config = gateway_config
-        app.state.oidc_verifiers = oidc_verifiers
+        management_plane.apply_runtime_config(gateway_config)
         app.state.cache = {}
         app.state.policy_cache = {}
         app.state.policy_response_cache = {}
@@ -572,7 +558,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         app.state.rate_limit_store = {}
         app.state.quota_store = {}
         app.state.trace_store = {}
-        app.state.config_reload_fn = lambda: _reload_config(app)
+        app.state.config_reload_fn = management_plane.reload_config
         app.state.startup_complete = True
 
         watcher_task: asyncio.Task | None = None
@@ -601,6 +587,11 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             await app.state.http_client.aclose()
 
     app = FastAPI(title="Local APIM Simulator", version=APIM_SERVICE_VERSION, lifespan=lifespan)
+    management_plane = ManagementService(
+        app=app,
+        serialize_gateway_config=_serialize_gateway_config,
+        build_oidc_verifiers=_build_oidc_verifiers,
+    )
     app.state.telemetry = telemetry
     app.state.gateway_metrics = _get_gateway_metrics(telemetry)
     app.add_middleware(
@@ -806,28 +797,12 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         return {"subscription_id": sub.id, "subscription_name": sub.name, "rotated": key, "new_key": new_key}
 
     def _apply_runtime_config(app: FastAPI, cfg: GatewayConfig) -> GatewayConfig:
-        cfg.routes = cfg.materialize_routes()
-        app.state.gateway_config = cfg
-        app.state.oidc_verifiers = _build_oidc_verifiers(cfg)
-        app.state.policy_cache = {}
-        app.state.policy_response_cache = {}
-        app.state.policy_value_cache = {}
-        return cfg
+        assert management_plane is not None
+        return management_plane.apply_runtime_config(cfg)
 
     def _persist_or_apply_config(request: Request, cfg: GatewayConfig) -> GatewayConfig:
-        config_path = os.getenv("APIM_CONFIG_PATH", "").strip()
-        if not config_path:
-            return _apply_runtime_config(request.app, cfg)
-
-        try:
-            Path(config_path).write_text(_serialize_gateway_config(cfg), encoding="utf-8")
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail="Unable to persist config update") from exc
-
-        reload_fn = getattr(request.app.state, "config_reload_fn", None)
-        if reload_fn is None:
-            raise HTTPException(status_code=500, detail="Reload not available")
-        return reload_fn()
+        assert management_plane is not None
+        return management_plane.persist_or_apply_config(cfg)
 
     def _policy_scope_target(cfg: GatewayConfig, scope_type: str, scope_name: str) -> Any:
         scope = scope_type.lower()
@@ -1607,15 +1582,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def upsert_product(product_id: str, request: Request, body: ProductUpsert) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        existing = cfg.products.get(product_id)
-        cfg.products[product_id] = ProductConfig(
-            name=body.name,
-            description=body.description,
-            require_subscription=body.require_subscription,
-            groups=existing.groups if existing is not None else [],
-            tags=existing.tags if existing is not None else [],
-        )
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.upsert_product(cfg, product_id, body)
         product = _get_product_or_404(updated, product_id)
         return _masked(updated, project_product(updated, product_id, product))
 
@@ -1623,20 +1591,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def delete_product(product_id: str, request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        _get_product_or_404(cfg, product_id)
-        del cfg.products[product_id]
-        for subscription in cfg.subscription.subscriptions.values():
-            subscription.products = [item for item in subscription.products if item != product_id]
-        for api in cfg.apis.values():
-            api.products = [item for item in api.products if item != product_id]
-            for operation in api.operations.values():
-                if operation.products is not None:
-                    operation.products = [item for item in operation.products if item != product_id]
-        for route in cfg.routes:
-            if route.product == product_id:
-                route.product = None
-            route.products = [item for item in route.products if item != product_id]
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.delete_product(cfg, product_id)
         return {"deleted": True, "product_id": product_id, "remaining": len(updated.products)}
 
     @app.get("/apim/management/products/{product_id}/groups")
@@ -1734,8 +1690,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def upsert_tag(tag_id: str, request: Request, body: TagUpsert) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        cfg.tags[tag_id] = TagConfig(display_name=body.display_name or tag_id)
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.upsert_tag(cfg, tag_id, body)
         tag = _get_tag_or_404(updated, tag_id)
         return _masked(updated, project_tag(updated, tag_id, tag))
 
@@ -1743,15 +1699,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def delete_tag(tag_id: str, request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        _get_tag_or_404(cfg, tag_id)
-        del cfg.tags[tag_id]
-        for api in cfg.apis.values():
-            _unlink_list_item(api.tags, tag_id)
-            for operation in api.operations.values():
-                _unlink_list_item(operation.tags, tag_id)
-        for product in cfg.products.values():
-            _unlink_list_item(product.tags, tag_id)
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.delete_tag(cfg, tag_id)
         return {"deleted": True, "tag_id": tag_id, "remaining": len(updated.tags)}
 
     @app.get("/apim/management/subscriptions")
@@ -1777,22 +1726,9 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def create_subscription(request: Request, body: SubscriptionUpsert) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        if _find_subscription_by_id(cfg, body.id) is not None:
-            raise HTTPException(status_code=409, detail="Subscription already exists")
-
-        primary = body.primary_key or f"sub-{body.id}-primary"
-        secondary = body.secondary_key or f"sub-{body.id}-secondary"
-        sub = Subscription(
-            id=body.id,
-            name=body.name,
-            keys={"primary": primary, "secondary": secondary},
-            state=body.state,
-            products=body.products,
-            created_by="management",
-        )
-        cfg.subscription.subscriptions[body.id] = sub
-        updated = _persist_or_apply_config(request, cfg)
-        entry = _find_subscription_entry(updated, body.id)
+        assert management_plane is not None
+        updated = management_plane.create_subscription(cfg, body)
+        entry = management_plane.find_subscription_entry(updated, body.id)
         if entry is None:
             raise HTTPException(status_code=500, detail="Subscription persistence failed")
         config_key, subscription = entry
@@ -1802,18 +1738,9 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def update_subscription(request: Request, subscription_id: str, body: SubscriptionUpdate) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        sub = _find_subscription_by_id(cfg, subscription_id)
-        if sub is None:
-            raise HTTPException(status_code=404, detail="Subscription not found")
-
-        if body.name is not None:
-            sub.name = body.name
-        if body.state is not None:
-            sub.state = body.state
-        if body.products is not None:
-            sub.products = body.products
-        updated = _persist_or_apply_config(request, cfg)
-        entry = _find_subscription_entry(updated, subscription_id)
+        assert management_plane is not None
+        updated = management_plane.update_subscription(cfg, subscription_id, body)
+        entry = management_plane.find_subscription_entry(updated, subscription_id)
         if entry is None:
             raise HTTPException(status_code=500, detail="Subscription persistence failed")
         config_key, subscription = entry
@@ -1823,12 +1750,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def delete_subscription(subscription_id: str, request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        entry = _find_subscription_entry(cfg, subscription_id)
-        if entry is None:
-            raise HTTPException(status_code=404, detail="Subscription not found")
-        config_key, _subscription = entry
-        del cfg.subscription.subscriptions[config_key]
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.delete_subscription(cfg, subscription_id)
         return {
             "deleted": True,
             "subscription_id": subscription_id,
@@ -1841,19 +1764,9 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     ) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        sub = _find_subscription_by_id(cfg, subscription_id)
-        if sub is None:
-            raise HTTPException(status_code=404, detail="Subscription not found")
-        if key not in {"primary", "secondary"}:
-            raise HTTPException(status_code=400, detail="Invalid key")
-
-        new_key = f"rotated-{sub.id}-{key}"
-        if key == "primary":
-            sub.keys.primary = new_key
-        else:
-            sub.keys.secondary = new_key
-        updated = _persist_or_apply_config(request, cfg)
-        entry = _find_subscription_entry(updated, subscription_id)
+        assert management_plane is not None
+        updated, new_key = management_plane.rotate_subscription_key(cfg, subscription_id, key)
+        entry = management_plane.find_subscription_entry(updated, subscription_id)
         if entry is None:
             raise HTTPException(status_code=500, detail="Subscription persistence failed")
         config_key, subscription = entry
@@ -2078,20 +1991,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def upsert_user(user_id: str, request: Request, body: UserUpsert) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        first_name = body.first_name.strip() if body.first_name else None
-        last_name = body.last_name.strip() if body.last_name else None
-        full_name = " ".join(part for part in [first_name, last_name] if part).strip() or user_id
-        cfg.users[user_id] = UserConfig(
-            id=user_id,
-            email=body.email,
-            name=full_name,
-            first_name=first_name,
-            last_name=last_name,
-            note=body.note,
-            state=body.state,
-            confirmation=body.confirmation,
-        )
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.upsert_user(cfg, user_id, body)
         user = _get_user_or_404(updated, user_id)
         return _masked(updated, project_user(updated, user_id, user))
 
@@ -2099,11 +2000,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def delete_user(user_id: str, request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        _get_user_or_404(cfg, user_id)
-        del cfg.users[user_id]
-        for group in cfg.groups.values():
-            _unlink_list_item(group.users, user_id)
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.delete_user(cfg, user_id)
         return {"deleted": True, "user_id": user_id, "remaining": len(updated.users)}
 
     @app.get("/apim/management/groups")
@@ -2162,16 +2060,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def upsert_group(group_id: str, request: Request, body: GroupUpsert) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        existing = cfg.groups.get(group_id)
-        cfg.groups[group_id] = GroupConfig(
-            id=group_id,
-            name=body.name,
-            description=body.description,
-            external_id=body.external_id,
-            type=body.type,
-            users=existing.users if existing is not None else [],
-        )
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.upsert_group(cfg, group_id, body)
         group = _get_group_or_404(updated, group_id)
         return _masked(updated, project_group(updated, group_id, group))
 
@@ -2179,11 +2069,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def delete_group(group_id: str, request: Request) -> dict[str, Any]:
         _require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
-        _get_group_or_404(cfg, group_id)
-        del cfg.groups[group_id]
-        for product in cfg.products.values():
-            _unlink_list_item(product.groups, group_id)
-        updated = _persist_or_apply_config(request, cfg)
+        assert management_plane is not None
+        updated = management_plane.delete_group(cfg, group_id)
         return {"deleted": True, "group_id": group_id, "remaining": len(updated.groups)}
 
     @app.post("/apim/management/import/tofu-show")
@@ -2210,9 +2097,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         if not result.service_imported:
             imported.service = current.service
 
-        imported.routes = imported.materialize_routes()
-        request.app.state.gateway_config = imported
-        request.app.state.oidc_verifiers = _build_oidc_verifiers(imported)
+        management_plane.apply_runtime_config(imported)
         request.app.state.cache = {}
         request.app.state.policy_cache = {}
         request.app.state.policy_response_cache = {}

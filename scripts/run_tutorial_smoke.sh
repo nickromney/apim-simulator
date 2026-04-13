@@ -88,10 +88,15 @@ main() {
     esac
   fi
 
+  tutorials=()
   if (($# == 0)); then
-    mapfile -t tutorials < <(discover_tutorials)
+    while IFS= read -r tutorial_script; do
+      [[ -n "$tutorial_script" ]] && tutorials+=("$tutorial_script")
+    done < <(discover_tutorials)
   else
-    mapfile -t tutorials < <(resolve_requested_tutorials "$@")
+    while IFS= read -r tutorial_script; do
+      [[ -n "$tutorial_script" ]] && tutorials+=("$tutorial_script")
+    done < <(resolve_requested_tutorials "$@")
   fi
 
   if ((${#tutorials[@]} == 0)); then
