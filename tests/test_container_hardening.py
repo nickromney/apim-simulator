@@ -197,6 +197,38 @@ def test_ci_runs_frontend_checks() -> None:
     assert run_checks["run"] == "make frontend-check"
 
 
+def test_ci_installs_mkcert_before_tls_sensitive_steps() -> None:
+    ci = _load_yaml(".github/workflows/ci.yml")
+    assert ci["env"]["MKCERT_VERSION"] == "v1.4.4"
+    expected_jobs = {
+        "test": "Run test suite",
+        "compose-config": "Generate dev certs for edge/TLS overlays",
+        "compose-smokes": "Edge HTTP smoke",
+    }
+
+    for job_name, anchor_step_name in expected_jobs.items():
+        steps = ci["jobs"][job_name]["steps"]
+        install_index = next(index for index, step in enumerate(steps) if step["name"] == "Install mkcert")
+        anchor_index = next(index for index, step in enumerate(steps) if step["name"] == anchor_step_name)
+        install_step = steps[install_index]
+
+        assert "${MKCERT_VERSION}" in install_step["run"]
+        assert "mkcert -install" in install_step["run"]
+        assert install_index < anchor_index
+
+
+def test_gitleaks_allows_local_apim_hostnames() -> None:
+    gitleaks = _load_toml(".gitleaks.toml")
+    allowlists = gitleaks["allowlists"]
+    hostname_allowlist = next(
+        entry for entry in allowlists if entry["description"] == "Intentional local-only APIM hostnames"
+    )
+
+    regexes = "\n".join(hostname_allowlist["regexes"])
+    assert "apim\\.127\\.0\\.0\\.1\\.sslip\\.io" in regexes
+    assert "(?:edge\\.)?(?:\\*\\.)?apim\\.127\\.0\\.0\\.1\\.sslip\\.io" in regexes
+
+
 def test_local_smoke_clients_bypass_proxy_environment() -> None:
     smoke_mcp = (REPO_ROOT / "scripts" / "smoke_mcp.py").read_text()
     smoke_edge = (REPO_ROOT / "scripts" / "smoke_edge.py").read_text()

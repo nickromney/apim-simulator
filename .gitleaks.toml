@@ -20,3 +20,10 @@ description = "Generated local development TLS private keys"
 paths = [
   '''examples/edge/certs/edge\.apim\.127\.0\.0\.1\.sslip\.io\.key''',
 ]
+
+[[allowlists]]
+description = "Intentional local-only APIM hostnames"
+regexTarget = "line"
+regexes = [
+  '''(?i)(?:edge\.)?(?:\*\.)?apim\.127\.0\.0\.1\.sslip\.io''',
+]
