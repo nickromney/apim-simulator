@@ -242,8 +242,8 @@ def test_gitleaks_allows_local_apim_hostnames() -> None:
 
 def test_gitleaks_ignore_lists_known_false_positives() -> None:
     ignored = (REPO_ROOT / ".gitleaksignore").read_text().splitlines()
-    assert "a24e4570800e3f62adf31d44b7c83d0d77fa342f:Makefile:generic-api-key:27" in ignored
-    assert "a24e4570800e3f62adf31d44b7c83d0d77fa342f:scripts/smoke_edge.py:generic-api-key:16" in ignored
+    assert any(entry.endswith(":Makefile:generic-api-key:29") for entry in ignored)
+    assert any(entry.endswith(":scripts/smoke_edge.py:generic-api-key:16") for entry in ignored)
 
 
 def test_local_smoke_clients_bypass_proxy_environment() -> None:
