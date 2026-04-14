@@ -16,6 +16,7 @@ FROM ${NGINX_RUNTIME_IMAGE}
 ARG NGINX_UID=101
 ARG NGINX_GID=101
 
+COPY --chown=${NGINX_UID}:${NGINX_GID} nginx-main.conf /etc/nginx/nginx.conf
 COPY --chown=${NGINX_UID}:${NGINX_GID} nginx.conf /etc/nginx/conf.d/default.conf
 COPY --chown=${NGINX_UID}:${NGINX_GID} --from=builder /app/dist /usr/share/nginx/html
 

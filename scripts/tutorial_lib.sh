@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 
+SCRIPT_DIR_TUTORIAL_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./stack-env.sh
+source "$SCRIPT_DIR_TUTORIAL_LIB/stack-env.sh"
+
 init_tutorial_env() {
+  stack_env_init
+
   DOCKER_BIN="${DOCKER_BIN:-docker}"
   UV_BIN="${UV_BIN:-uv}"
-  APIM_BASE="${APIM_BASE:-http://localhost:8000}"
+  APIM_BASE="${APIM_BASE:-$APIM_BASE_URL}"
   APIM_TENANT_KEY="${APIM_TENANT_KEY:-local-dev-tenant-key}"
-  GRAFANA_BASE="${GRAFANA_BASE:-http://localhost:3001}"
-  OPERATOR_CONSOLE_BASE="${OPERATOR_CONSOLE_BASE:-http://localhost:3007}"
+  GRAFANA_BASE="${GRAFANA_BASE:-$GRAFANA_BASE_URL}"
+  OPERATOR_CONSOLE_BASE="${OPERATOR_CONSOLE_BASE:-$OPERATOR_CONSOLE_URL}"
   OPENAPI_SOURCE="${OPENAPI_SOURCE:-$ROOT_DIR/examples/mock-backend/openapi.json}"
   APIM_API_ID="${APIM_API_ID:-tutorial-api}"
   APIM_API_NAME="${APIM_API_NAME:-Tutorial API}"
@@ -21,6 +27,15 @@ init_tutorial_env() {
   APIM_HEALTH_DELAY_SECONDS="${APIM_HEALTH_DELAY_SECONDS:-1}"
   APIM_EXPORT_DIR="${APIM_EXPORT_DIR:-/tmp/apim-simulator-tutorial11}"
   TUTORIAL10_REST_FILE="${TUTORIAL10_REST_FILE:-$ROOT_DIR/docs/tutorials/apim-get-started/tutorial10.rest.http}"
+
+  if [[ -n "${STACK_INSTANCE_SUFFIX:-}" ]]; then
+    COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-apim-simulator-tutorial-${STACK_INSTANCE_SUFFIX}}"
+    export COMPOSE_PROJECT_NAME
+  fi
+}
+
+tutorial_python() {
+  "$UV_BIN" run --project "$ROOT_DIR" python "$@"
 }
 
 start_compose_stack() {
@@ -47,12 +62,12 @@ start_compose_stack() {
   echo "Compose files:"
   local compose_file
   for compose_file in "${compose_files[@]}"; do
-    echo "  - $compose_file"
+    echo "  - $(stack_env_display_path "$compose_file")"
   done
   echo "Running:"
   echo "  $DOCKER_BIN compose \\"
   for compose_file in "${compose_files[@]}"; do
-    echo "    -f $compose_file \\"
+    echo "    -f $(stack_env_display_path "$compose_file") \\"
   done
   echo "    ${remaining_args[*]}"
 
@@ -213,7 +228,7 @@ capture_http_request() {
 
 pretty_json() {
   local actual_json="$1"
-  ACTUAL_JSON="$actual_json" python3 - <<'PY'
+  ACTUAL_JSON="$actual_json" tutorial_python - <<'PY'
 import json
 import os
 
@@ -225,7 +240,7 @@ json_expect_summary() {
   local actual_json="$1"
   local expected_json="$2"
   local summary_script="$3"
-  ACTUAL_JSON="$actual_json" EXPECTED_JSON="$expected_json" SUMMARY_SCRIPT="$summary_script" python3 - <<'PY'
+  ACTUAL_JSON="$actual_json" EXPECTED_JSON="$expected_json" SUMMARY_SCRIPT="$summary_script" tutorial_python - <<'PY'
 import json
 import os
 import sys
@@ -253,7 +268,7 @@ captured_expect_summary() {
   CAPTURE_BODY="$CAPTURE_BODY" \
   EXPECTED_JSON="$expected_json" \
   SUMMARY_SCRIPT="$summary_script" \
-  python3 - <<'PY'
+  tutorial_python - <<'PY'
 import json
 import os
 import sys
@@ -299,7 +314,7 @@ import_tutorial_api() {
   APIM_API_ID="$APIM_API_ID" \
   APIM_API_NAME="$APIM_API_NAME" \
   APIM_API_PATH="$APIM_API_PATH" \
-  "$UV_BIN" run python "$ROOT_DIR/scripts/import_openapi.py"
+  tutorial_python "$ROOT_DIR/scripts/import_openapi.py"
 }
 
 ensure_subscription_absent() {

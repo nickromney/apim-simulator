@@ -46,6 +46,22 @@ EOF
   cat >"$TEST_BIN/uv" <<'EOF'
 #!/usr/bin/env bash
 printf 'uv %s\n' "$*" >>"$CALL_LOG"
+if [[ "${1:-}" == "run" ]]; then
+  shift
+  if [[ "${1:-}" == "--project" ]]; then
+    shift 2
+  fi
+  if [[ "${1:-}" == "python" && "${2:-}" == "-" ]]; then
+    shift
+    exec python3 "$@"
+  fi
+  if [[ "${1:-}" == "python" && "${2:-}" == *"/scripts/import_openapi.py" ]]; then
+    printf 'APIM_BASE_URL=%s\n' "${APIM_BASE_URL:-}" >>"$CALL_LOG"
+    printf 'OPENAPI_SOURCE=%s\n' "${OPENAPI_SOURCE:-}" >>"$CALL_LOG"
+    printf '{"api_id":"tutorial-api"}\n'
+    exit 0
+  fi
+fi
 printf 'APIM_BASE_URL=%s\n' "${APIM_BASE_URL:-}" >>"$CALL_LOG"
 printf 'OPENAPI_SOURCE=%s\n' "${OPENAPI_SOURCE:-}" >>"$CALL_LOG"
 printf '{"api_id":"tutorial-api"}\n'
@@ -71,7 +87,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"docker compose -f ${REPO_ROOT}/compose.yml -f ${REPO_ROOT}/compose.public.yml up --build -d"* ]]
   [[ "$output" == *"curl -fsS http://localhost:18000/apim/health"* ]]
-  [[ "$output" == *"uv run python ${REPO_ROOT}/scripts/import_openapi.py"* ]]
+  [[ "$output" == *"uv run --project ${REPO_ROOT} python ${REPO_ROOT}/scripts/import_openapi.py"* ]]
   [[ "$output" == *"APIM_BASE_URL=http://localhost:18000"* ]]
   [[ "$output" == *"OPENAPI_SOURCE=$OPENAPI_SOURCE"* ]]
 }
@@ -104,7 +120,7 @@ EOF
   run cat "$CALL_LOG"
   [ "$status" -eq 0 ]
   [[ "$output" != *"docker compose"* ]]
-  [[ "$output" != *"uv run python"* ]]
+  [[ "$output" != *"${REPO_ROOT}/scripts/import_openapi.py"* ]]
   [[ "$output" == *"curl -fsS -H X-Apim-Tenant-Key: test-tenant-key http://localhost:18000/apim/management/apis/tutorial-api"* ]]
   [[ "$output" == *"curl -fsS http://localhost:18000/tutorial-api/health"* ]]
   [[ "$output" == *"curl -fsS http://localhost:18000/tutorial-api/echo"* ]]

@@ -3,7 +3,7 @@ services:
     image: quay.io/keycloak/keycloak:26.4.7
     init: true
     ports:
-      - "8180:8080"
+      - "${KEYCLOAK_PORT:-8180}:8080"
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: demo@admin.test
       KC_BOOTSTRAP_ADMIN_PASSWORD: demo-password
@@ -44,6 +44,7 @@ services:
     environment:
       APIM_CONFIG_PATH: /tmp/oidc-apim-config.json
       APIM_CONFIG_SOURCE_PATH: /app/examples/oidc/keycloak.json
+      OIDC_ISSUER_EXTERNAL: ${OIDC_ISSUER_EXTERNAL:-http://localhost:8180/realms/subnet-calculator}
     depends_on:
       mock-backend:
         condition: service_started

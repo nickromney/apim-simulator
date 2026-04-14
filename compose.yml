@@ -42,6 +42,13 @@ services:
     environment:
       APIM_CONFIG_PATH: ${APIM_CONFIG_PATH:-/tmp/apim-config.json}
       APIM_CONFIG_SOURCE_PATH: ${APIM_CONFIG_SOURCE_PATH:-/app/examples/basic.json}
+      APIM_CONFIG_TEMPLATE_SUBSTITUTE: "true"
+      APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST: ${APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST:-http://localhost:3000}
+      APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE: ${APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE:-http://localhost:3007}
+      APIM_ALLOWED_ORIGIN_VITE: ${APIM_ALLOWED_ORIGIN_VITE:-http://localhost:5173}
+      APIM_ALLOWED_ORIGIN_GATEWAY: ${APIM_ALLOWED_ORIGIN_GATEWAY:-http://localhost:8000}
+      OIDC_ISSUER_EXTERNAL: ${OIDC_ISSUER_EXTERNAL:-http://localhost:8180/realms/subnet-calculator}
+      OPERATOR_CONSOLE_URL: ${OPERATOR_CONSOLE_URL:-http://localhost:3007}
       OTEL_SERVICE_NAME: apim-simulator
     depends_on:
       mock-backend:

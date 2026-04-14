@@ -1591,7 +1591,7 @@ def test_trace_payload_captures_forwarded_headers() -> None:
         resp = client.get(
             "/api/health",
             headers={
-                "Host": "apim.localtest.me:8443",
+                "Host": "apim.localtest.me:9443",
                 "X-Forwarded-Host": "apim.localtest.me",
                 "X-Forwarded-Proto": "https",
                 "X-Forwarded-For": "203.0.113.10, 10.0.0.5",
@@ -1603,7 +1603,7 @@ def test_trace_payload_captures_forwarded_headers() -> None:
     assert resp.status_code == 200
     assert trace.status_code == 200
     payload = trace.json()
-    assert payload["incoming_host"] == "apim.localtest.me:8443"
+    assert payload["incoming_host"] == "apim.localtest.me:9443"
     assert payload["forwarded_host"] == "apim.localtest.me"
     assert payload["forwarded_proto"] == "https"
     assert payload["forwarded_for"] == "203.0.113.10, 10.0.0.5"

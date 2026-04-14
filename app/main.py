@@ -637,6 +637,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     async def root_hint(request: Request) -> dict[str, Any]:
         cfg: GatewayConfig = request.app.state.gateway_config
         route_prefixes = sorted({route.path_prefix or "/" for route in cfg.routes})
+        operator_console_url = os.getenv("OPERATOR_CONSOLE_URL", "http://localhost:3007")
         return {
             "service": cfg.service.display_name,
             "message": "This is an API gateway. Try /apim/health, /apim/startup, or one of the configured route prefixes.",
@@ -648,7 +649,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 "required_header": "X-Apim-Tenant-Key" if cfg.tenant_access.enabled else None,
             },
             "operator_console": {
-                "url": "http://localhost:3007",
+                "url": operator_console_url,
                 "note": "Run make up-ui to start the operator console.",
             },
         }

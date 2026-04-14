@@ -3,18 +3,28 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# shellcheck source=../../../scripts/stack-env.sh
+source "$ROOT_DIR/scripts/stack-env.sh"
+stack_env_init
 
 DOCKER_BIN="${DOCKER_BIN:-docker}"
-APIM_BASE="${APIM_BASE:-http://localhost:8000}"
+APIM_BASE="${APIM_BASE:-$APIM_BASE_URL}"
 APIM_TENANT_KEY="${APIM_TENANT_KEY:-local-dev-tenant-key}"
 OPENAPI_SOURCE="${OPENAPI_SOURCE:-$ROOT_DIR/examples/mock-backend/openapi.json}"
+OPENAPI_SOURCE_DISPLAY="${OPENAPI_SOURCE_DISPLAY:-$(stack_env_display_path "$OPENAPI_SOURCE")}"
 APIM_API_ID="${APIM_API_ID:-tutorial-api}"
 APIM_API_NAME="${APIM_API_NAME:-Tutorial API}"
 APIM_API_PATH="${APIM_API_PATH:-tutorial-api}"
 APIM_HEALTH_ATTEMPTS="${APIM_HEALTH_ATTEMPTS:-30}"
 APIM_HEALTH_DELAY_SECONDS="${APIM_HEALTH_DELAY_SECONDS:-1}"
+UV_BIN="${UV_BIN:-uv}"
 EXECUTE=0
 VERIFY=0
+
+if [[ -n "${STACK_INSTANCE_SUFFIX:-}" ]]; then
+  COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-apim-simulator-tutorial-${STACK_INSTANCE_SUFFIX}}"
+  export COMPOSE_PROJECT_NAME
+fi
 
 usage() {
   cat <<EOF
@@ -31,7 +41,7 @@ Environment overrides:
   DOCKER_BIN                   Docker CLI binary. Default: $DOCKER_BIN
   APIM_BASE                    Gateway base URL. Default: $APIM_BASE
   APIM_TENANT_KEY              Management tenant key. Default: $APIM_TENANT_KEY
-  OPENAPI_SOURCE               OpenAPI file path or URL. Default: $OPENAPI_SOURCE
+  OPENAPI_SOURCE               OpenAPI file path or URL. Default: $OPENAPI_SOURCE_DISPLAY
   APIM_API_ID                  API identifier to create. Default: $APIM_API_ID
   APIM_API_NAME                API display name. Default: $APIM_API_NAME
   APIM_API_PATH                Public API path. Default: $APIM_API_PATH
@@ -42,6 +52,10 @@ Examples:
   ./docs/tutorials/apim-get-started/tutorial01.sh --setup
   ./docs/tutorials/apim-get-started/tutorial01.sh --verify
 EOF
+}
+
+repo_python() {
+  "$UV_BIN" run --project "$ROOT_DIR" python "$@"
 }
 
 wait_for_gateway() {
@@ -71,12 +85,12 @@ start_stack() {
 
   echo "Compose files:"
   for compose_file in "${compose_files[@]}"; do
-    echo "  - $compose_file"
+    echo "  - $(stack_env_display_path "$compose_file")"
   done
   echo "Running:"
   echo "  $DOCKER_BIN compose \\"
   for compose_file in "${compose_files[@]}"; do
-    echo "    -f $compose_file \\"
+    echo "    -f $(stack_env_display_path "$compose_file") \\"
   done
   echo "    up --build -d"
 
@@ -96,7 +110,7 @@ verify_api_metadata() {
   echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/apis/'"$APIM_API_ID"'"'
   response="$(curl -fsS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" "$APIM_BASE/apim/management/apis/$APIM_API_ID")"
 
-  ACTUAL_JSON="$response" EXPECTED_API_ID="$APIM_API_ID" EXPECTED_API_PATH="$APIM_API_PATH" python3 - <<'PY'
+  ACTUAL_JSON="$response" EXPECTED_API_ID="$APIM_API_ID" EXPECTED_API_PATH="$APIM_API_PATH" repo_python - <<'PY'
 import json
 import os
 import sys
@@ -128,7 +142,7 @@ verify_health_route() {
   echo '$ curl -sS "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
   response="$(curl -fsS "$APIM_BASE/$APIM_API_PATH/health")"
 
-  ACTUAL_JSON="$response" python3 - <<'PY'
+  ACTUAL_JSON="$response" repo_python - <<'PY'
 import json
 import os
 import sys
@@ -149,7 +163,7 @@ verify_echo_route() {
   echo '$ curl -sS "'"$APIM_BASE"'/'"$APIM_API_PATH"'/echo"'
   response="$(curl -fsS "$APIM_BASE/$APIM_API_PATH/echo")"
 
-  ACTUAL_JSON="$response" python3 - <<'PY'
+  ACTUAL_JSON="$response" repo_python - <<'PY'
 import json
 import os
 import sys
@@ -255,6 +269,6 @@ OPENAPI_SOURCE="$OPENAPI_SOURCE" \
 APIM_API_ID="$APIM_API_ID" \
 APIM_API_NAME="$APIM_API_NAME" \
 APIM_API_PATH="$APIM_API_PATH" \
-uv run python "$ROOT_DIR/scripts/import_openapi.py"
+repo_python "$ROOT_DIR/scripts/import_openapi.py"
 echo
 echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial01.sh --verify to validate the imported API."

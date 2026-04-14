@@ -104,12 +104,33 @@ stays on a hardened runtime base.
 | OIDC example | `make up-oidc` | `http://localhost:8000` | You want JWT plus subscription flows |
 | MCP example | `make up-mcp` | `http://localhost:8000/mcp` | You want an MCP server behind APIM |
 | Edge HTTP | `make up-edge` | `http://apim.localtest.me:8088` | You want forwarded-header and reverse-proxy behaviour |
-| Edge TLS | `make up-tls` | `https://apim.localtest.me:8443` | You want local TLS termination behaviour |
-| Operator console | `make up-ui` | `http://localhost:3007` | You want to inspect and edit a running management-enabled stack |
+| Edge TLS | `make up-tls` | `https://apim.localtest.me:9443` | You want local TLS termination behaviour |
+| Private internal stack | `make up-private` | no host gateway port | You want the MCP stack reachable only from the internal compose network |
+| Operator console | `make up-ui` | `http://localhost:3007` | You want the fastest control-room view of a running management-enabled stack |
+| Every compose stack at once | `make up-all` | slot-based; printed during startup | You want the whole repo up simultaneously without port collisions |
 
 ## Quick Start
 
-### Recommended path
+### New To APIM?
+
+If you do not already have an APIM mental model, start with the control room:
+
+```bash
+make up-ui
+```
+
+Then open `http://localhost:3007`, click `Load Local Demo`, and connect.
+
+Use that first pass to answer four basic questions:
+
+- what APIs, routes, products, and backends are loaded
+- which policy scopes exist
+- what a traced request looks like
+- what a replay through the gateway returns
+
+After that, move to the browser-backed todo flow if you want to see a client calling APIM end to end.
+
+### Browser-Backed Teaching Flow
 
 For the most complete end-to-end flow:
 
@@ -134,6 +155,39 @@ curl http://localhost:8000/apim/health
 curl http://localhost:8000/api/echo
 ```
 
+## Run Many Stacks At Once
+
+The default `make up-*` targets keep the repo’s current ports and compose
+project names. Nothing changes unless you opt in.
+
+Use `STACK_SLOT` when you want an isolated copy of a stack with a predictable
+port shift and a unique compose project name:
+
+```bash
+STACK_SLOT=1 make up-otel
+STACK_SLOT=1 make smoke-oidc
+```
+
+Each slot shifts the published host ports by `100`, so slot `1` moves the
+default gateway from `8000` to `8100`, Grafana from `3001` to `3101`, Keycloak
+from `8180` to `8280`, and the todo frontend from `3000` to `3100`.
+
+If you prefer a raw offset, use `PORT_OFFSET` directly:
+
+```bash
+PORT_OFFSET=200 make up-ui
+```
+
+To start every compose stack in one pass with non-conflicting ports:
+
+```bash
+make up-all
+make down-all
+```
+
+`up-all` assigns a distinct slot to each stack automatically, including the
+todo, OIDC, edge, UI, hello, and private variants.
+
 ## Tutorial Mirror
 
 For a simulator-native version of the Microsoft Learn getting-started sequence, see:
@@ -151,7 +205,7 @@ Use the gateway URL that matches where your application is running:
 - from the local machine, use `http://localhost:8000`
 - from another container on the same compose network, use `http://apim-simulator:8000`
 - for the edge HTTP stack, use `http://apim.localtest.me:8088`
-- for the edge TLS stack, use `https://apim.localtest.me:8443`
+- for the edge TLS stack, use `https://apim.localtest.me:9443`
 
 ### Gateway health and startup
 
@@ -192,7 +246,7 @@ The operator console uses the same management surface. Start it with:
 make up-ui
 ```
 
-Then connect to `http://localhost:8000` from `http://localhost:3007`.
+Then open `http://localhost:3007`, use `Load Local Demo`, and connect to `http://localhost:8000`.
 
 ### Request tracing
 
@@ -284,7 +338,7 @@ OPENAPI_SOURCE=examples/mock-backend/openapi.json \
 APIM_API_ID=tutorial-api \
 APIM_API_NAME="Tutorial API" \
 APIM_API_PATH=tutorial-api \
-uv run python scripts/import_openapi.py
+uv run --project . python scripts/import_openapi.py
 ```
 
 Import a running simulator from a `tofu show -json` payload:

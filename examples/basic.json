@@ -1,5 +1,10 @@
 {
-  "allowed_origins": ["http://localhost:3000", "http://localhost:3007", "http://localhost:5173", "http://localhost:8000"],
+  "allowed_origins": [
+    "${APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST}",
+    "${APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE}",
+    "${APIM_ALLOWED_ORIGIN_VITE}",
+    "${APIM_ALLOWED_ORIGIN_GATEWAY}"
+  ],
   "allow_anonymous": true,
   "trace_enabled": true,
   "tenant_access": {

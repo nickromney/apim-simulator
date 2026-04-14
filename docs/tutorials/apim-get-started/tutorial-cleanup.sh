@@ -4,6 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
+# shellcheck source=../../../scripts/stack-env.sh
+source "$ROOT_DIR/scripts/stack-env.sh"
+stack_env_init
+
+if [[ -n "${STACK_INSTANCE_SUFFIX:-}" ]]; then
+  COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-apim-simulator-tutorial-${STACK_INSTANCE_SUFFIX}}"
+  export COMPOSE_PROJECT_NAME
+fi
 
 usage() {
   cat <<EOF
@@ -40,12 +48,12 @@ COMPOSE_FILES=(
 echo "Stopping all tutorial stack variants with docker compose"
 echo "Compose files:"
 for compose_file in "${COMPOSE_FILES[@]}"; do
-  echo "  - $compose_file"
+  echo "  - $(stack_env_display_path "$compose_file")"
 done
 echo "Running:"
 echo "  $DOCKER_BIN compose \\"
 for compose_file in "${COMPOSE_FILES[@]}"; do
-  echo "    -f $compose_file \\"
+  echo "    -f $(stack_env_display_path "$compose_file") \\"
 done
 echo "    down --remove-orphans"
 

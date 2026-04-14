@@ -274,7 +274,7 @@ Good result:
 ### JWT-only
 
 ```bash
-TOKEN=$(uv run python scripts/get_keycloak_token.py)
+TOKEN=$(uv run --project . python scripts/get_keycloak_token.py)
 
 curl \
   -H "Authorization: Bearer $TOKEN" \
@@ -289,7 +289,7 @@ Good result:
 ### Subscription Plus JWT
 
 ```bash
-TOKEN=$(uv run python scripts/get_keycloak_token.py)
+TOKEN=$(uv run --project . python scripts/get_keycloak_token.py)
 
 curl \
   -H "Authorization: Bearer $TOKEN" \

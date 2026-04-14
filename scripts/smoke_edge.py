@@ -6,6 +6,7 @@ import os
 import sys
 import traceback
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 from smoke_mcp import make_async_client, resolve_tls_verify
@@ -21,9 +22,10 @@ VERIFY_TLS = resolve_tls_verify(
     insecure_env="SMOKE_EDGE_INSECURE_SKIP_VERIFY",
 )
 EXPECTED_PROTO = os.getenv("SMOKE_EDGE_EXPECT_PROTO", "https" if BASE_URL.startswith("https://") else "http")
+DEFAULT_EXPECTED_HOST = urlparse(BASE_URL).netloc
 EXPECTED_HOST = os.getenv(
     "SMOKE_EDGE_EXPECT_HOST",
-    "apim.localtest.me:8443" if BASE_URL.startswith("https://") else "apim.localtest.me:8088",
+    DEFAULT_EXPECTED_HOST,
 )
 RETRY_ATTEMPTS = int(os.getenv("SMOKE_EDGE_ATTEMPTS", "20"))
 RETRY_DELAY_SECONDS = float(os.getenv("SMOKE_EDGE_RETRY_DELAY_SECONDS", "1"))

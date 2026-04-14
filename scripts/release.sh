@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${1:-${VERSION:-}}"
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_CHECKS="${SKIP_CHECKS:-0}"
+UV_BIN="${UV_BIN:-uv}"
 
 usage() {
   cat <<'EOF'
@@ -29,7 +30,7 @@ fi
 
 CURRENT_VERSION="$(
   cd "${ROOT_DIR}"
-  python3 - <<'PY'
+  "${UV_BIN}" run --project "${ROOT_DIR}" python - <<'PY'
 import tomllib
 from pathlib import Path
 
@@ -76,7 +77,7 @@ run_in_dir() {
 
 cd "${ROOT_DIR}"
 
-run python3 scripts/bump_version.py "${VERSION}"
+run "${UV_BIN}" run --project "${ROOT_DIR}" python scripts/bump_version.py "${VERSION}"
 run uv lock
 run_in_dir "${ROOT_DIR}/ui" npm version "${VERSION}" --no-git-tag-version
 run_in_dir "${ROOT_DIR}/examples/todo-app/frontend-astro" npm version "${VERSION}" --no-git-tag-version

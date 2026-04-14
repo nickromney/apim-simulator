@@ -1,5 +1,5 @@
 {
-  "allowed_origins": ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:4321"],
+  "allowed_origins": ["${TODO_FRONTEND_ORIGIN_LOCALHOST}", "${TODO_FRONTEND_ORIGIN_LOOPBACK}", "http://localhost:4321"],
   "allow_anonymous": true,
   "products": {
     "todo-demo": {

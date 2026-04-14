@@ -75,7 +75,12 @@ From the repo root:
 make test-todo-bruno
 ```
 
-That runs the checked-in collection with the local environment.
+That runs the checked-in collection with a generated environment file. If the
+todo stack is running on a slotted ingress, pass the same slot:
+
+```bash
+make test-todo-bruno STACK_SLOT=2
+```
 
 ### What The Collection Verifies
 
@@ -138,6 +143,12 @@ From the repo root:
 
 ```bash
 make test-todo-postman
+```
+
+For a slotted stack, use the same slot override:
+
+```bash
+make test-todo-postman STACK_SLOT=2
 ```
 
 ### What The Collection Verifies

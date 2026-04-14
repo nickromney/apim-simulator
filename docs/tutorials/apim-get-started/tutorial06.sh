@@ -29,7 +29,7 @@ verify_tutorial() {
 
   echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/traces"'
   traces_response="$(management_get "/apim/management/traces")"
-  TRACE_ID="$(ACTUAL_JSON="$traces_response" TRACE_CORRELATION_ID="$TRACE_CORRELATION_ID" python3 - <<'PY'
+  TRACE_ID="$(ACTUAL_JSON="$traces_response" TRACE_CORRELATION_ID="$TRACE_CORRELATION_ID" tutorial_python - <<'PY'
 import json
 import os
 
@@ -138,7 +138,7 @@ captured_expect_summary \
   "{\"correlation_id\":\"$TRACE_CORRELATION_ID\",\"status_code\":200,\"trace_id_present\":true}" \
   'summary = {"correlation_id": headers.get("x-correlation-id"), "status_code": status, "trace_id_present": bool(headers.get("x-apim-trace-id"))}'
 
-TRACE_ID="$(CAPTURE_HEADERS="$CAPTURE_HEADERS" python3 - <<'PY'
+TRACE_ID="$(CAPTURE_HEADERS="$CAPTURE_HEADERS" tutorial_python - <<'PY'
 import os
 
 for line in os.environ["CAPTURE_HEADERS"].splitlines():

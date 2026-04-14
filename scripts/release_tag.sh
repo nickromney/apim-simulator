@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-}"
 DRY_RUN="${DRY_RUN:-0}"
 TAG_BRANCH="${TAG_BRANCH:-main}"
+UV_BIN="${UV_BIN:-uv}"
 
 usage() {
   cat <<'EOF'
@@ -93,7 +94,7 @@ fi
 
 CURRENT_VERSION="$(
   cd "${ROOT_DIR}"
-  python3 - <<'PY'
+  "${UV_BIN}" run --project "${ROOT_DIR}" python - <<'PY'
 import tomllib
 from pathlib import Path
 
