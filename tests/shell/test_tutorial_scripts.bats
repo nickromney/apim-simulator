@@ -26,6 +26,20 @@ EOF
   cat >"$TEST_BIN/uv" <<'EOF'
 #!/usr/bin/env bash
 printf 'uv %s\n' "$*" >>"$CALL_LOG"
+if [[ "${1:-}" == "run" ]]; then
+  shift
+  if [[ "${1:-}" == "--project" ]]; then
+    shift 2
+  fi
+  if [[ "${1:-}" == "python" && "${2:-}" == "-" ]]; then
+    shift
+    exec python3 "$@"
+  fi
+  if [[ "${1:-}" == "python" && "${2:-}" == *"/scripts/import_openapi.py" ]]; then
+    printf '{"api_id":"tutorial-api","path":"tutorial-api","operations":["echo","health"],"import":{"diagnostics":[],"format":"openapi+json","operation_count":2,"upstream_base_url":"http://mock-backend:8080/api"}}\n'
+    exit 0
+  fi
+fi
 printf '{"api_id":"tutorial-api","path":"tutorial-api","operations":["echo","health"],"import":{"diagnostics":[],"format":"openapi+json","operation_count":2,"upstream_base_url":"http://mock-backend:8080/api"}}\n'
 EOF
   chmod +x "$TEST_BIN/uv"

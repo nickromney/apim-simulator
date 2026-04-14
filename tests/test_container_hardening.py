@@ -213,7 +213,7 @@ def test_ui_is_built_as_a_static_hardened_container() -> None:
     service = _service("compose.ui.yml", "ui")
     assert service["read_only"] is True
     assert service["build"]["context"] == "./ui"
-    assert service["ports"] == ["3007:8080"]
+    assert service["ports"] == ["${OPERATOR_CONSOLE_PORT:-3007}:8080"]
 
     makefile = (REPO_ROOT / "Makefile").read_text()
     assert "$(COMPOSE_UI) up --build -d" in makefile
@@ -271,8 +271,9 @@ def test_mcp_build_and_smokes_use_repo_locked_dependency_flow() -> None:
     assert mcp_service["build"]["dockerfile"] == "examples/mcp-server/Dockerfile"
 
     makefile = (REPO_ROOT / "Makefile").read_text()
-    assert "uv run --extra mcp python scripts/smoke_mcp.py" in makefile
-    assert "uv run --extra mcp python scripts/smoke_edge.py" in makefile
+    assert "UV_RUN := uv run --project $(CURDIR)" in makefile
+    assert "$(UV_RUN) --extra mcp python scripts/smoke_mcp.py" in makefile
+    assert "$(UV_RUN) --extra mcp python scripts/smoke_edge.py" in makefile
     assert "uv run --with mcp" not in makefile
 
     private_smoke_runner = (REPO_ROOT / "scripts" / "run_smoke_private.py").read_text()

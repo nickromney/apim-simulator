@@ -16,6 +16,7 @@ APIM_API_NAME="${APIM_API_NAME:-Tutorial API}"
 APIM_API_PATH="${APIM_API_PATH:-tutorial-api}"
 APIM_HEALTH_ATTEMPTS="${APIM_HEALTH_ATTEMPTS:-30}"
 APIM_HEALTH_DELAY_SECONDS="${APIM_HEALTH_DELAY_SECONDS:-1}"
+UV_BIN="${UV_BIN:-uv}"
 EXECUTE=0
 VERIFY=0
 
@@ -50,6 +51,10 @@ Examples:
   ./docs/tutorials/apim-get-started/tutorial01.sh --setup
   ./docs/tutorials/apim-get-started/tutorial01.sh --verify
 EOF
+}
+
+repo_python() {
+  "$UV_BIN" run --project "$ROOT_DIR" python "$@"
 }
 
 wait_for_gateway() {
@@ -104,7 +109,7 @@ verify_api_metadata() {
   echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/apis/'"$APIM_API_ID"'"'
   response="$(curl -fsS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" "$APIM_BASE/apim/management/apis/$APIM_API_ID")"
 
-  ACTUAL_JSON="$response" EXPECTED_API_ID="$APIM_API_ID" EXPECTED_API_PATH="$APIM_API_PATH" python3 - <<'PY'
+  ACTUAL_JSON="$response" EXPECTED_API_ID="$APIM_API_ID" EXPECTED_API_PATH="$APIM_API_PATH" repo_python - <<'PY'
 import json
 import os
 import sys
@@ -136,7 +141,7 @@ verify_health_route() {
   echo '$ curl -sS "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
   response="$(curl -fsS "$APIM_BASE/$APIM_API_PATH/health")"
 
-  ACTUAL_JSON="$response" python3 - <<'PY'
+  ACTUAL_JSON="$response" repo_python - <<'PY'
 import json
 import os
 import sys
@@ -157,7 +162,7 @@ verify_echo_route() {
   echo '$ curl -sS "'"$APIM_BASE"'/'"$APIM_API_PATH"'/echo"'
   response="$(curl -fsS "$APIM_BASE/$APIM_API_PATH/echo")"
 
-  ACTUAL_JSON="$response" python3 - <<'PY'
+  ACTUAL_JSON="$response" repo_python - <<'PY'
 import json
 import os
 import sys
@@ -263,6 +268,6 @@ OPENAPI_SOURCE="$OPENAPI_SOURCE" \
 APIM_API_ID="$APIM_API_ID" \
 APIM_API_NAME="$APIM_API_NAME" \
 APIM_API_PATH="$APIM_API_PATH" \
-uv run python "$ROOT_DIR/scripts/import_openapi.py"
+repo_python "$ROOT_DIR/scripts/import_openapi.py"
 echo
 echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial01.sh --verify to validate the imported API."

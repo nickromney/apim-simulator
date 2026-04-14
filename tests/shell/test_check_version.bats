@@ -9,7 +9,7 @@ setup() {
   export DOCKER_FIXTURES="$MOCK_ROOT/docker"
   mkdir -p "$GITHUB_FIXTURES" "$DOCKER_FIXTURES"
 
-  python3 - "$REPO_ROOT" "$GITHUB_FIXTURES" "$DOCKER_FIXTURES" <<'PY'
+  uv run --project "$REPO_ROOT" python - "$REPO_ROOT" "$GITHUB_FIXTURES" "$DOCKER_FIXTURES" <<'PY'
 import json
 import re
 import sys

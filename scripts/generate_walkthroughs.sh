@@ -180,6 +180,7 @@ cleanup_doc() {
 }
 
 cleanup_stacks() {
+  (cd "$ROOT_DIR" && make down-all >/dev/null 2>&1) || true
   (cd "$ROOT_DIR" && make down >/dev/null 2>&1) || true
 }
 
@@ -215,7 +216,7 @@ split_doc_by_h2() {
   local source="$1"
   shift
 
-  python3 - "$source" "$DOCS_DIR" "$@" <<'PY'
+  uv run --project "$ROOT_DIR" python - "$source" "$DOCS_DIR" "$@" <<'PY'
 from pathlib import Path
 import sys
 
@@ -675,7 +676,7 @@ EOF
 
   sb_exec "$DOC_EXAMPLES" <<'EOF'
 set -euo pipefail
-uv run python - <<'PY'
+uv run --project . python - <<'PY'
 import json
 import httpx
 
@@ -842,7 +843,7 @@ EOF
 
   sb_exec "$DOC_EXAMPLES" <<'EOF'
 set -euo pipefail
-uv run python - <<'PY'
+uv run --project . python - <<'PY'
 import json
 import os
 import time

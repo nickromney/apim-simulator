@@ -34,6 +34,10 @@ init_tutorial_env() {
   fi
 }
 
+tutorial_python() {
+  "$UV_BIN" run --project "$ROOT_DIR" python "$@"
+}
+
 start_compose_stack() {
   local compose_log
   local -a compose_files
@@ -224,7 +228,7 @@ capture_http_request() {
 
 pretty_json() {
   local actual_json="$1"
-  ACTUAL_JSON="$actual_json" python3 - <<'PY'
+  ACTUAL_JSON="$actual_json" tutorial_python - <<'PY'
 import json
 import os
 
@@ -236,7 +240,7 @@ json_expect_summary() {
   local actual_json="$1"
   local expected_json="$2"
   local summary_script="$3"
-  ACTUAL_JSON="$actual_json" EXPECTED_JSON="$expected_json" SUMMARY_SCRIPT="$summary_script" python3 - <<'PY'
+  ACTUAL_JSON="$actual_json" EXPECTED_JSON="$expected_json" SUMMARY_SCRIPT="$summary_script" tutorial_python - <<'PY'
 import json
 import os
 import sys
@@ -264,7 +268,7 @@ captured_expect_summary() {
   CAPTURE_BODY="$CAPTURE_BODY" \
   EXPECTED_JSON="$expected_json" \
   SUMMARY_SCRIPT="$summary_script" \
-  python3 - <<'PY'
+  tutorial_python - <<'PY'
 import json
 import os
 import sys
@@ -310,7 +314,7 @@ import_tutorial_api() {
   APIM_API_ID="$APIM_API_ID" \
   APIM_API_NAME="$APIM_API_NAME" \
   APIM_API_PATH="$APIM_API_PATH" \
-  "$UV_BIN" run python "$ROOT_DIR/scripts/import_openapi.py"
+  tutorial_python "$ROOT_DIR/scripts/import_openapi.py"
 }
 
 ensure_subscription_absent() {

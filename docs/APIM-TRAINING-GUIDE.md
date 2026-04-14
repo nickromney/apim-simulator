@@ -292,7 +292,7 @@ The default local users are:
 Fetch a token for the demo user:
 
 ```bash
-TOKEN=$(uv run python scripts/get_keycloak_token.py)
+TOKEN=$(uv run --project . python scripts/get_keycloak_token.py)
 ```
 
 Call the normal API route:
@@ -326,7 +326,7 @@ Why?
 Now fetch an admin token and try again:
 
 ```bash
-ADMIN_TOKEN=$(uv run python scripts/get_keycloak_token.py \
+ADMIN_TOKEN=$(uv run --project . python scripts/get_keycloak_token.py \
   --username demo@admin.test \
   --password demo-password)
 
@@ -589,7 +589,7 @@ curl \
 ```
 
 ```bash
-TOKEN=$(uv run python scripts/get_keycloak_token.py)
+TOKEN=$(uv run --project . python scripts/get_keycloak_token.py)
 
 curl \
   -H "Authorization: Bearer $TOKEN" \

@@ -338,7 +338,7 @@ OPENAPI_SOURCE=examples/mock-backend/openapi.json \
 APIM_API_ID=tutorial-api \
 APIM_API_NAME="Tutorial API" \
 APIM_API_PATH=tutorial-api \
-uv run python scripts/import_openapi.py
+uv run --project . python scripts/import_openapi.py
 ```
 
 Import a running simulator from a `tofu show -json` payload:

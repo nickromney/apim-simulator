@@ -78,6 +78,7 @@ COMPOSE_TODO_OTEL := $(call compose_stack,todo-otel) -f compose.todo.yml -f comp
 COMPOSE_ALL := $(call compose_stack,all) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 HELP_FMT := "  %-34s %s\n"
+UV_RUN := uv run --project $(CURDIR)
 
 .PHONY: help ensure-certs install-hooks fmt lint lint-check frontend-check check-version release release-dry-run release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
@@ -326,57 +327,57 @@ release-tag-dry-run:
 test: test-python test-shell
 
 test-python:
-	uv run --extra dev pytest -q --cov=app --cov-branch --cov-report=term-missing --cov-report=xml
+	$(UV_RUN) --extra dev pytest -q --cov=app --cov-branch --cov-report=term-missing --cov-report=xml
 
 test-shell:
 	@command -v bats >/dev/null 2>&1 || { echo "bats is required for shell tests"; exit 1; }
 	bats tests/shell
 
 compat:
-	uv run python scripts/check_sample_compat.py
+	$(UV_RUN) python scripts/check_sample_compat.py
 
 compat-report:
-	uv run python scripts/compat_report.py
+	$(UV_RUN) python scripts/compat_report.py
 
 import-tofu:
-	uv run python scripts/import_tofu.py
+	$(UV_RUN) python scripts/import_tofu.py
 
 verify-azure:
-	uv run python scripts/verify_azure.py
+	$(UV_RUN) python scripts/verify_azure.py
 
 verify-otel:
-	uv run python scripts/verify_otel.py
+	$(UV_RUN) python scripts/verify_otel.py
 
 verify-hello-otel:
-	uv run python scripts/verify_hello_otel.py
+	$(UV_RUN) python scripts/verify_hello_otel.py
 
 verify-todo-otel:
-	VERIFY_OTEL_TODO=true uv run python scripts/verify_otel.py
+	VERIFY_OTEL_TODO=true $(UV_RUN) python scripts/verify_otel.py
 
 smoke-oidc:
-	uv run python scripts/smoke_oidc.py
+	$(UV_RUN) python scripts/smoke_oidc.py
 
 smoke-mcp:
-	SMOKE_MCP_URL="$(SMOKE_MCP_URL)" uv run --extra mcp python scripts/smoke_mcp.py
+	SMOKE_MCP_URL="$(SMOKE_MCP_URL)" $(UV_RUN) --extra mcp python scripts/smoke_mcp.py
 
 smoke-edge:
-	SMOKE_EDGE_BASE_URL="$(SMOKE_EDGE_BASE_URL)" uv run --extra mcp python scripts/smoke_edge.py
+	SMOKE_EDGE_BASE_URL="$(SMOKE_EDGE_BASE_URL)" $(UV_RUN) --extra mcp python scripts/smoke_edge.py
 
 smoke-tls:
-	SMOKE_EDGE_BASE_URL="$(EDGE_TLS_BASE_URL)" uv run --extra mcp python scripts/smoke_edge.py
+	SMOKE_EDGE_BASE_URL="$(EDGE_TLS_BASE_URL)" $(UV_RUN) --extra mcp python scripts/smoke_edge.py
 
 check-private-port-clear:
-	uv run python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', $(APIM_GATEWAY_PORT))); sock.close(); print('Host port $(APIM_GATEWAY_PORT) is unavailable, as required for private mode.') if code else (_ for _ in ()).throw(SystemExit('localhost:$(APIM_GATEWAY_PORT) is already reachable before private-mode launch; stop the conflicting listener before continuing'))"
+	$(UV_RUN) python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', $(APIM_GATEWAY_PORT))); sock.close(); print('Host port $(APIM_GATEWAY_PORT) is unavailable, as required for private mode.') if code else (_ for _ in ()).throw(SystemExit('localhost:$(APIM_GATEWAY_PORT) is already reachable before private-mode launch; stop the conflicting listener before continuing'))"
 
 smoke-private:
 	$(MAKE) check-private-port-clear
 	$(COMPOSE_PRIVATE) run --rm --entrypoint python3 smoke-runner scripts/run_smoke_private.py
 
 smoke-hello:
-	uv run python scripts/smoke_hello.py
+	$(UV_RUN) python scripts/smoke_hello.py
 
 smoke-todo:
-	uv run python scripts/smoke_todo.py
+	$(UV_RUN) python scripts/smoke_todo.py
 
 smoke-tutorials-live:
 	APIM_BASE="$(APIM_BASE_URL)" GRAFANA_BASE="$(GRAFANA_BASE_URL)" OPERATOR_CONSOLE_BASE="$(OPERATOR_CONSOLE_URL)" ./scripts/run_tutorial_smoke.sh
@@ -403,7 +404,7 @@ test-todo-postman:
 	&& npm exec --yes --package=newman -- newman run examples/todo-app/api-clients/postman/todo-through-apim.postman_collection.json --environment "$$tmp_env"
 
 export-todo-har:
-	TODO_HAR_APIM_BASE_URL="$(TODO_APIM_BASE_URL)" TODO_HAR_FRONTEND_BASE_URL="$(TODO_FRONTEND_BASE_URL)" uv run python scripts/export_todo_har.py
+	TODO_HAR_APIM_BASE_URL="$(TODO_APIM_BASE_URL)" TODO_HAR_FRONTEND_BASE_URL="$(TODO_FRONTEND_BASE_URL)" $(UV_RUN) python scripts/export_todo_har.py
 
 compose-config:
 	$(COMPOSE_CORE) config

@@ -66,6 +66,7 @@ CHECK_VERSION_GITHUB_API_BASE="${CHECK_VERSION_GITHUB_API_BASE:-https://api.gith
 CHECK_VERSION_DOCKER_HUB_BASE="${CHECK_VERSION_DOCKER_HUB_BASE:-https://hub.docker.com/v2}"
 CHECK_VERSION_TIMEOUT_SECONDS="${CHECK_VERSION_TIMEOUT_SECONDS:-15}"
 FAILURES=0
+UV_BIN="${UV_BIN:-uv}"
 
 require() {
   local bin="$1"
@@ -75,10 +76,10 @@ require() {
   }
 }
 
-require python3
+require "${UV_BIN}"
 
 github_commit_sha() {
-  python3 - "$CHECK_VERSION_GITHUB_API_BASE" "$1" "$2" "$CHECK_VERSION_TIMEOUT_SECONDS" <<'PY'
+  "${UV_BIN}" run --project "${ROOT_DIR}" python - "$CHECK_VERSION_GITHUB_API_BASE" "$1" "$2" "$CHECK_VERSION_TIMEOUT_SECONDS" <<'PY'
 import json
 import sys
 import urllib.parse
@@ -100,7 +101,7 @@ PY
 }
 
 docker_tag_digest() {
-  python3 - "$CHECK_VERSION_DOCKER_HUB_BASE" "$1" "$2" "$CHECK_VERSION_TIMEOUT_SECONDS" <<'PY'
+  "${UV_BIN}" run --project "${ROOT_DIR}" python - "$CHECK_VERSION_DOCKER_HUB_BASE" "$1" "$2" "$CHECK_VERSION_TIMEOUT_SECONDS" <<'PY'
 import json
 import sys
 import urllib.parse
@@ -124,7 +125,7 @@ PY
 check_release_version_sync() {
   local output
   if ! output="$(
-    python3 - "$ROOT_DIR" <<'PY'
+    "${UV_BIN}" run --project "${ROOT_DIR}" python - "$ROOT_DIR" <<'PY'
 import json
 import re
 import sys
@@ -181,7 +182,7 @@ PY
 check_action_pins() {
   local pins
   pins="$(
-    python3 - "$WORKFLOW_FILE" <<'PY'
+    "${UV_BIN}" run --project "${ROOT_DIR}" python - "$WORKFLOW_FILE" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -231,7 +232,7 @@ PY
 check_docker_digest_pins() {
   local pins
   pins="$(
-    python3 - ${COMPOSE_FILES} <<'PY'
+    "${UV_BIN}" run --project "${ROOT_DIR}" python - ${COMPOSE_FILES} <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -276,7 +277,7 @@ PY
 check_uv_builder_version() {
   local pins
   pins="$(
-    python3 - ${DOCKERFILES} <<'PY'
+    "${UV_BIN}" run --project "${ROOT_DIR}" python - ${DOCKERFILES} <<'PY'
 import re
 import sys
 from pathlib import Path

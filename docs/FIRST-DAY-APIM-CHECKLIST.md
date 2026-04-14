@@ -110,7 +110,7 @@ make smoke-oidc
 Get a user token:
 
 ```bash
-TOKEN=$(uv run python scripts/get_keycloak_token.py)
+TOKEN=$(uv run --project . python scripts/get_keycloak_token.py)
 ```
 
 Call the normal route:
