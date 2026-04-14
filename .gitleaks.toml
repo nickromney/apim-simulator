@@ -27,3 +27,11 @@ regexTarget = "line"
 regexes = [
   '''(?i)(?:edge\.)?(?:\*\.)?apim\.127\.0\.0\.1\.sslip\.io''',
 ]
+
+[[allowlists]]
+description = "Intentional local-only APIM edge host env vars"
+regexTarget = "line"
+regexes = [
+  '''(?i)\bAPIM_EDGE_(?:ROOT_)?HOST\b''',
+  '''(?i)\bAPIM_EDGE_WILDCARD_HOST\b''',
+]

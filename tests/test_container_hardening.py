@@ -232,6 +232,13 @@ def test_gitleaks_allows_local_apim_hostnames() -> None:
     assert "apim\\.127\\.0\\.0\\.1\\.sslip\\.io" in regexes
     assert "(?:edge\\.)?(?:\\*\\.)?apim\\.127\\.0\\.0\\.1\\.sslip\\.io" in regexes
 
+    host_env_allowlist = next(
+        entry for entry in allowlists if entry["description"] == "Intentional local-only APIM edge host env vars"
+    )
+    host_env_regexes = "\n".join(host_env_allowlist["regexes"])
+    assert "APIM_EDGE_(?:ROOT_)?HOST" in host_env_regexes
+    assert "APIM_EDGE_WILDCARD_HOST" in host_env_regexes
+
 
 def test_local_smoke_clients_bypass_proxy_environment() -> None:
     smoke_mcp = (REPO_ROOT / "scripts" / "smoke_mcp.py").read_text()
