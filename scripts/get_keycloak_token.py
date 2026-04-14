@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import httpx
@@ -10,7 +11,10 @@ import httpx
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fetch a Keycloak access token for the local APIM simulator example.")
-    parser.add_argument("--base-url", default="http://localhost:8180")
+    parser.add_argument(
+        "--base-url",
+        default=os.getenv("KEYCLOAK_BASE_URL", os.getenv("SMOKE_OIDC_KEYCLOAK_BASE_URL", "http://localhost:8180")),
+    )
     parser.add_argument("--realm", default="subnet-calculator")
     parser.add_argument("--client-id", default="frontend-app")
     parser.add_argument("--username", default="demo@dev.test")

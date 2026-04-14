@@ -99,6 +99,15 @@ const defaultHeaders = `{
   "x-apim-trace": "true"
 }`;
 
+const localDemoDefaults = {
+  baseUrl: "http://localhost:8000",
+  tenantKey: "local-dev-tenant-key",
+  replayMethod: "GET",
+  replayPath: "/api/health",
+  replayHeaders: defaultHeaders,
+  replayBody: "",
+} as const;
+
 function scopeId(scope: PolicyScope): string {
   return `${scope.scope_type}:${scope.scope_name}`;
 }
@@ -161,6 +170,25 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, tenantKey }));
   }, [baseUrl, tenantKey]);
+
+  function loadLocalDemo() {
+    startTransition(() => {
+      setBaseUrl(localDemoDefaults.baseUrl);
+      setTenantKey(localDemoDefaults.tenantKey);
+      setSummary(null);
+      setTraces([]);
+      setSelectedTraceId("");
+      setSelectedScopeId("");
+      setPolicyXml("");
+      setPolicyMessage("");
+      setReplayMethod(localDemoDefaults.replayMethod);
+      setReplayPath(localDemoDefaults.replayPath);
+      setReplayHeaders(localDemoDefaults.replayHeaders);
+      setReplayBody(localDemoDefaults.replayBody);
+      setReplayResult(null);
+      setStatusMessage("Loaded the default local demo values. Press Connect to sync with the simulator.");
+    });
+  }
 
   async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     const headers = new Headers(init?.headers);
@@ -343,9 +371,17 @@ function App() {
             <span className="field-label">Tenant key</span>
             <input value={tenantKey} onChange={(event) => setTenantKey(event.target.value)} />
           </label>
-          <button type="submit" disabled={busy}>
-            {busy ? "Working..." : "Connect"}
-          </button>
+          <div className="connection-actions">
+            <button type="button" className="secondary-button" onClick={loadLocalDemo} disabled={busy}>
+              Load Local Demo
+            </button>
+            <button type="submit" disabled={busy}>
+              {busy ? "Working..." : "Connect"}
+            </button>
+          </div>
+          <p className="connection-hint">
+            The demo preset targets the default management-enabled stack on <code>localhost:8000</code>.
+          </p>
         </form>
       </header>
 

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:8000";
+
 test("creates a todo through APIM, toggles it complete, and survives reload", async ({ page }) => {
   const title = `Gateway todo ${Date.now()}`;
 
@@ -10,8 +12,8 @@ test("creates a todo through APIM, toggles it complete, and survives reload", as
   await expect(page.getByTestId("network-path")).toContainText("APIM simulator");
   await expect(page.getByTestId("network-path")).toContainText("Configured upstream route /api -> /api");
   await expect(page.getByTestId("api-call-log")).toContainText("GET");
-  await expect(page.getByTestId("api-call-log")).toContainText("http://localhost:8000/api/health");
-  await expect(page.getByTestId("api-call-log")).toContainText("http://localhost:8000/api/todos");
+  await expect(page.getByTestId("api-call-log")).toContainText(`${apiBaseUrl}/api/health`);
+  await expect(page.getByTestId("api-call-log")).toContainText(`${apiBaseUrl}/api/todos`);
 
   await page.getByLabel("Add a new task").fill(title);
   await page.getByRole("button", { name: "Create" }).click();
@@ -38,7 +40,7 @@ test("renders a visible error when the APIM subscription key is invalid", async 
     await route.fulfill({
       contentType: "application/javascript",
       body: `window.RUNTIME_CONFIG = {
-        API_BASE_URL: "http://localhost:8000",
+        API_BASE_URL: "${apiBaseUrl}",
         APIM_SUBSCRIPTION_KEY: "bad-subscription-key"
       };`,
     });
@@ -49,5 +51,5 @@ test("renders a visible error when the APIM subscription key is invalid", async 
   await expect(page.getByTestId("gateway-status")).toContainText("Gateway error");
   await expect(page.getByTestId("error-banner")).toContainText("Invalid subscription key");
   await expect(page.getByTestId("api-call-log")).toContainText("401");
-  await expect(page.getByTestId("api-call-log")).toContainText("http://localhost:8000/api/health");
+  await expect(page.getByTestId("api-call-log")).toContainText(`${apiBaseUrl}/api/health`);
 });

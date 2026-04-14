@@ -9,10 +9,10 @@ from collections.abc import Callable
 
 import httpx
 
-KEYCLOAK_BASE_URL = "http://localhost:8180"
+KEYCLOAK_BASE_URL = os.getenv("SMOKE_OIDC_KEYCLOAK_BASE_URL", os.getenv("KEYCLOAK_BASE_URL", "http://localhost:8180"))
 REALM = "subnet-calculator"
 CLIENT_ID = "frontend-app"
-GATEWAY_BASE_URL = "http://localhost:8000"
+GATEWAY_BASE_URL = os.getenv("SMOKE_OIDC_BASE_URL", os.getenv("APIM_BASE_URL", "http://127.0.0.1:8000"))
 DEFAULT_ATTEMPTS = int(os.getenv("SMOKE_OIDC_ATTEMPTS", "20"))
 DEFAULT_DELAY_SECONDS = float(os.getenv("SMOKE_OIDC_RETRY_DELAY_SECONDS", "1"))
 

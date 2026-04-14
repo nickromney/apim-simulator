@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import os
 import time
 import uuid
 
 import httpx
 
-APIM_BASE_URL = "http://127.0.0.1:8000"
-FRONTEND_BASE_URL = "http://127.0.0.1:3000"
-SUBSCRIPTION_KEY = "todo-demo-key"
-INVALID_SUBSCRIPTION_KEY = "todo-demo-key-invalid"
+APIM_BASE_URL = os.environ.get("TODO_APIM_BASE_URL", "http://127.0.0.1:8000")
+FRONTEND_BASE_URL = os.environ.get("TODO_FRONTEND_BASE_URL", "http://127.0.0.1:3000")
+SUBSCRIPTION_KEY = os.environ.get("TODO_SUBSCRIPTION_KEY", "todo-demo-key")
+INVALID_SUBSCRIPTION_KEY = os.environ.get("TODO_INVALID_SUBSCRIPTION_KEY", "todo-demo-key-invalid")
 
 
 def wait_for(url: str, label: str, timeout_seconds: float = 60.0) -> None:

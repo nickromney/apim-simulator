@@ -1,5 +1,5 @@
 services:
   edge-proxy:
     ports:
-      - "8080:8080"
-      - "8443:8443"
+      - "${EDGE_TLS_HTTP_PORT:-8080}:8080"
+      - "${EDGE_TLS_PORT:-9443}:8443"

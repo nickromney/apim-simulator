@@ -151,8 +151,8 @@ def main() -> None:
                 "APIM route tags in Tempo",
                 lambda: _tempo_tag_values(client, tempo_id, "apim.route.name"),
             )
-            if "todo-api" not in apim_route_values:
-                raise RuntimeError("Tempo does not include apim.route.name=todo-api")
+            if not any(value.startswith("Todo API:") for value in apim_route_values):
+                raise RuntimeError("Tempo does not include Todo API route tags")
 
             print(f"Todo metrics visible: {len(todo_metrics)} series")
             print(f"Tempo APIM route tags: {', '.join(sorted(apim_route_values))}")

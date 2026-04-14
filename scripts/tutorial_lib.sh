@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 
+SCRIPT_DIR_TUTORIAL_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./stack-env.sh
+source "$SCRIPT_DIR_TUTORIAL_LIB/stack-env.sh"
+
 init_tutorial_env() {
+  stack_env_init
+
   DOCKER_BIN="${DOCKER_BIN:-docker}"
   UV_BIN="${UV_BIN:-uv}"
-  APIM_BASE="${APIM_BASE:-http://localhost:8000}"
+  APIM_BASE="${APIM_BASE:-$APIM_BASE_URL}"
   APIM_TENANT_KEY="${APIM_TENANT_KEY:-local-dev-tenant-key}"
-  GRAFANA_BASE="${GRAFANA_BASE:-http://localhost:3001}"
-  OPERATOR_CONSOLE_BASE="${OPERATOR_CONSOLE_BASE:-http://localhost:3007}"
+  GRAFANA_BASE="${GRAFANA_BASE:-$GRAFANA_BASE_URL}"
+  OPERATOR_CONSOLE_BASE="${OPERATOR_CONSOLE_BASE:-$OPERATOR_CONSOLE_URL}"
   OPENAPI_SOURCE="${OPENAPI_SOURCE:-$ROOT_DIR/examples/mock-backend/openapi.json}"
   APIM_API_ID="${APIM_API_ID:-tutorial-api}"
   APIM_API_NAME="${APIM_API_NAME:-Tutorial API}"
@@ -21,6 +27,11 @@ init_tutorial_env() {
   APIM_HEALTH_DELAY_SECONDS="${APIM_HEALTH_DELAY_SECONDS:-1}"
   APIM_EXPORT_DIR="${APIM_EXPORT_DIR:-/tmp/apim-simulator-tutorial11}"
   TUTORIAL10_REST_FILE="${TUTORIAL10_REST_FILE:-$ROOT_DIR/docs/tutorials/apim-get-started/tutorial10.rest.http}"
+
+  if [[ -n "${STACK_INSTANCE_SUFFIX:-}" ]]; then
+    COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-apim-simulator-tutorial-${STACK_INSTANCE_SUFFIX}}"
+    export COMPOSE_PROJECT_NAME
+  fi
 }
 
 start_compose_stack() {

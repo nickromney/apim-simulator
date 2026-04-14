@@ -45,6 +45,7 @@ services:
     environment:
       APIM_CONFIG_PATH: /tmp/hello-apim-config.json
       APIM_CONFIG_SOURCE_PATH: ${HELLO_APIM_CONFIG_PATH:-/app/examples/hello-api/apim.anonymous.json}
+      OIDC_ISSUER_EXTERNAL: ${OIDC_ISSUER_EXTERNAL:-http://localhost:8180/realms/subnet-calculator}
       OTEL_SERVICE_NAME: apim-simulator
     depends_on:
       hello-api:

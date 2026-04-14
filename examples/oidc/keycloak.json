@@ -1,5 +1,9 @@
 {
-  "allowed_origins": ["http://localhost:3007", "http://localhost:5173", "http://localhost:8000"],
+  "allowed_origins": [
+    "${APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE}",
+    "${APIM_ALLOWED_ORIGIN_VITE}",
+    "${APIM_ALLOWED_ORIGIN_GATEWAY}"
+  ],
   "allow_anonymous": false,
   "tenant_access": {
     "enabled": true,
@@ -7,7 +11,7 @@
     "secondary_key": "local-dev-tenant-key-secondary"
   },
   "oidc": {
-    "issuer": "http://localhost:8180/realms/subnet-calculator",
+    "issuer": "${OIDC_ISSUER_EXTERNAL}",
     "audience": "api-app",
     "jwks_uri": "http://keycloak:8080/realms/subnet-calculator/protocol/openid-connect/certs"
   },

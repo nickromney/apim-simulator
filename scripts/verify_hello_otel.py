@@ -152,8 +152,8 @@ def main() -> None:
             "APIM route tags in Tempo",
             lambda: _tempo_tag_values(client, tempo_id, "apim.route.name"),
         )
-        if "hello-api" not in apim_route_values:
-            raise RuntimeError("Tempo does not include apim.route.name=hello-api")
+        if not any(value.startswith("Hello API:") for value in apim_route_values):
+            raise RuntimeError("Tempo does not include Hello API route tags")
 
         print(f"Tempo services: {', '.join(sorted(tempo_services))}")
         print(f"Tempo APIM route tags: {', '.join(sorted(apim_route_values))}")

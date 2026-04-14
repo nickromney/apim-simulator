@@ -16,6 +16,19 @@ Source sequence, verified on 2026-04-08 from the API Management TOC:
 10. Manage APIs in Visual Studio Code
 11. Link to an API Center
 
+## Orient Yourself First
+
+If you are new to APIM, use the operator console before you start tutorial 1:
+
+```bash
+make up-ui
+```
+
+Then open `http://localhost:3007`, click `Load Local Demo`, and connect.
+
+That gives you a low-context view of the simulator’s current APIs, routes,
+policies, traces, and subscriptions before you begin modifying anything.
+
 ## Common Setup
 
 Run the direct public stack from the repo root:

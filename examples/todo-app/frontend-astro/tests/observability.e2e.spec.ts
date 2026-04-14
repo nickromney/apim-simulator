@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const grafanaBaseUrl = process.env.GRAFANA_BASE_URL || "http://localhost:3001";
+
 test("lets a user jump from the todo flow into the Grafana OTEL dashboard", async ({ context, page }) => {
   const title = `Observability todo ${Date.now()}`;
 
@@ -20,7 +22,7 @@ test("lets a user jump from the todo flow into the Grafana OTEL dashboard", asyn
   ]);
 
   await dashboard.waitForLoadState("domcontentloaded");
-  await expect(dashboard).toHaveURL(/localhost:3001\/d\/apim-simulator-overview\/apim-simulator-overview/);
+  await expect(dashboard).toHaveURL(`${grafanaBaseUrl}/d/apim-simulator-overview/apim-simulator-overview`);
   await expect(dashboard).not.toHaveURL(/\/login/);
   await expect(dashboard.getByText("APIM Simulator Overview")).toBeVisible();
   await expect(dashboard.getByText("Gateway Request Rate")).toBeVisible();

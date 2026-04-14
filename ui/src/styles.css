@@ -173,6 +173,12 @@ pre {
   padding: 1.25rem;
 }
 
+.connection-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
 .connection-panel button,
 .policy-actions button,
 .replay-form button,
@@ -182,6 +188,23 @@ pre {
   background: linear-gradient(135deg, #17120e, #3b2415);
   color: #f8f2e8;
   padding: 0.9rem 1.1rem;
+}
+
+.connection-panel .secondary-button {
+  border: 1px solid var(--line);
+  background: rgba(255, 252, 247, 0.94);
+  color: var(--ink);
+}
+
+.connection-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.connection-hint code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.9em;
 }
 
 .status-bar {
@@ -446,5 +469,9 @@ label {
   .status-bar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .connection-actions {
+    grid-template-columns: 1fr;
   }
 }

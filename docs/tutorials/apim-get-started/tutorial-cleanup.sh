@@ -4,6 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
+# shellcheck source=../../../scripts/stack-env.sh
+source "$ROOT_DIR/scripts/stack-env.sh"
+stack_env_init
+
+if [[ -n "${STACK_INSTANCE_SUFFIX:-}" ]]; then
+  COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-apim-simulator-tutorial-${STACK_INSTANCE_SUFFIX}}"
+  export COMPOSE_PROJECT_NAME
+fi
 
 usage() {
   cat <<EOF

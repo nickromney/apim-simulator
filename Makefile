@@ -1,24 +1,85 @@
 .DEFAULT_GOAL := help
 
 COMPOSE ?= docker compose
-COMPOSE_CORE := $(COMPOSE) -f compose.yml -f compose.public.yml
-COMPOSE_CORE_OTEL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.otel.yml
-COMPOSE_OIDC := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.oidc.yml
-COMPOSE_MCP := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.mcp.yml
-COMPOSE_EDGE := $(COMPOSE) -f compose.yml -f compose.edge.yml -f compose.mcp.yml
-COMPOSE_TLS := $(COMPOSE) -f compose.yml -f compose.edge.yml -f compose.tls.yml -f compose.mcp.yml
-COMPOSE_PRIVATE := $(COMPOSE) -f compose.yml -f compose.private.yml -f compose.mcp.yml
-COMPOSE_UI := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.ui.yml
-COMPOSE_HELLO := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.hello.yml
-COMPOSE_HELLO_OTEL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.hello.yml -f compose.otel.yml -f compose.hello.otel.yml
-COMPOSE_HELLO_OIDC := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.hello.yml
-COMPOSE_TODO := $(COMPOSE) -f compose.todo.yml
-COMPOSE_TODO_OTEL := $(COMPOSE) -f compose.todo.yml -f compose.todo.otel.yml
-COMPOSE_ALL := $(COMPOSE) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
+STACK_SLOT_WIDTH ?= 100
+PORT_OFFSET ?= 0
+ifneq ($(strip $(STACK_SLOT)),)
+PORT_OFFSET := $(shell expr $(STACK_SLOT) \* $(STACK_SLOT_WIDTH))
+endif
+
+calc_port = $(shell expr $(1) + $(PORT_OFFSET))
+STACK_INSTANCE_SUFFIX := $(strip $(if $(STACK_SLOT),s$(STACK_SLOT),$(if $(filter-out 0,$(PORT_OFFSET)),o$(PORT_OFFSET),)))
+compose_project_args = $(if $(STACK_INSTANCE_SUFFIX),--project-name apim-simulator-$(1)-$(STACK_INSTANCE_SUFFIX))
+compose_stack = $(COMPOSE) $(call compose_project_args,$(1))
+
+APIM_GATEWAY_PORT ?= $(call calc_port,8000)
+GRAFANA_PORT ?= $(call calc_port,3001)
+OTEL_GRPC_PORT ?= $(call calc_port,4317)
+OTEL_HTTP_PORT ?= $(call calc_port,4318)
+KEYCLOAK_PORT ?= $(call calc_port,8180)
+OPERATOR_CONSOLE_PORT ?= $(call calc_port,3007)
+EDGE_HTTP_PORT ?= $(call calc_port,8088)
+EDGE_TLS_HTTP_PORT ?= $(call calc_port,8080)
+EDGE_TLS_PORT ?= $(call calc_port,9443)
+TODO_FRONTEND_PORT ?= $(call calc_port,3000)
+VITE_DEV_PORT ?= 5173
+
+APIM_BASE_URL ?= http://localhost:$(APIM_GATEWAY_PORT)
+APIM_LOOPBACK_BASE_URL ?= http://127.0.0.1:$(APIM_GATEWAY_PORT)
+GRAFANA_BASE_URL ?= http://localhost:$(GRAFANA_PORT)
+KEYCLOAK_BASE_URL ?= http://localhost:$(KEYCLOAK_PORT)
+OIDC_ISSUER_EXTERNAL ?= $(KEYCLOAK_BASE_URL)/realms/subnet-calculator
+OPERATOR_CONSOLE_URL ?= http://localhost:$(OPERATOR_CONSOLE_PORT)
+TODO_FRONTEND_BASE_URL ?= http://127.0.0.1:$(TODO_FRONTEND_PORT)
+TODO_FRONTEND_BROWSER_URL ?= http://localhost:$(TODO_FRONTEND_PORT)
+TODO_FRONTEND_ORIGIN_LOCALHOST ?= http://localhost:$(TODO_FRONTEND_PORT)
+TODO_FRONTEND_ORIGIN_LOOPBACK ?= http://127.0.0.1:$(TODO_FRONTEND_PORT)
+TODO_APIM_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
+TODO_APIM_PUBLIC_BASE_URL ?= $(APIM_BASE_URL)
+TODO_GRAFANA_BASE_URL ?= $(GRAFANA_BASE_URL)
+TODO_OBSERVABILITY_DASHBOARD_URL ?= $(GRAFANA_BASE_URL)/d/apim-simulator-overview/apim-simulator-overview
+APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST ?= $(TODO_FRONTEND_ORIGIN_LOCALHOST)
+APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE ?= $(OPERATOR_CONSOLE_URL)
+APIM_ALLOWED_ORIGIN_VITE ?= http://localhost:$(VITE_DEV_PORT)
+APIM_ALLOWED_ORIGIN_GATEWAY ?= $(APIM_BASE_URL)
+EDGE_HTTP_BASE_URL ?= http://apim.localtest.me:$(EDGE_HTTP_PORT)
+EDGE_TLS_BASE_URL ?= https://apim.localtest.me:$(EDGE_TLS_PORT)
+SMOKE_HELLO_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
+SMOKE_HELLO_KEYCLOAK_BASE_URL ?= $(KEYCLOAK_BASE_URL)
+SMOKE_OIDC_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
+SMOKE_OIDC_KEYCLOAK_BASE_URL ?= $(KEYCLOAK_BASE_URL)
+SMOKE_MCP_URL ?= $(APIM_BASE_URL)/mcp
+SMOKE_EDGE_BASE_URL ?= $(EDGE_HTTP_BASE_URL)
+PORTS ?= $(TODO_FRONTEND_PORT) $(GRAFANA_PORT) $(OTEL_GRPC_PORT) $(OTEL_HTTP_PORT) $(APIM_GATEWAY_PORT) $(EDGE_HTTP_PORT) $(EDGE_TLS_HTTP_PORT) $(EDGE_TLS_PORT) $(OPERATOR_CONSOLE_PORT) $(KEYCLOAK_PORT)
+UP_ALL_SLOT_BASE ?= 0
+UP_ALL_STACKS := up up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel
+
+export STACK_SLOT STACK_SLOT_WIDTH PORT_OFFSET
+export APIM_GATEWAY_PORT GRAFANA_PORT OTEL_GRPC_PORT OTEL_HTTP_PORT KEYCLOAK_PORT OPERATOR_CONSOLE_PORT EDGE_HTTP_PORT EDGE_TLS_HTTP_PORT EDGE_TLS_PORT TODO_FRONTEND_PORT VITE_DEV_PORT
+export APIM_BASE_URL APIM_LOOPBACK_BASE_URL GRAFANA_BASE_URL KEYCLOAK_BASE_URL OIDC_ISSUER_EXTERNAL OPERATOR_CONSOLE_URL
+export TODO_FRONTEND_BASE_URL TODO_FRONTEND_BROWSER_URL TODO_FRONTEND_ORIGIN_LOCALHOST TODO_FRONTEND_ORIGIN_LOOPBACK TODO_APIM_BASE_URL TODO_APIM_PUBLIC_BASE_URL TODO_GRAFANA_BASE_URL TODO_OBSERVABILITY_DASHBOARD_URL
+export APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE APIM_ALLOWED_ORIGIN_VITE APIM_ALLOWED_ORIGIN_GATEWAY
+export EDGE_HTTP_BASE_URL EDGE_TLS_BASE_URL
+export SMOKE_HELLO_BASE_URL SMOKE_HELLO_KEYCLOAK_BASE_URL SMOKE_OIDC_BASE_URL SMOKE_OIDC_KEYCLOAK_BASE_URL SMOKE_MCP_URL SMOKE_EDGE_BASE_URL
+
+COMPOSE_CORE := $(call compose_stack,core) -f compose.yml -f compose.public.yml
+COMPOSE_CORE_OTEL := $(call compose_stack,core-otel) -f compose.yml -f compose.public.yml -f compose.otel.yml
+COMPOSE_OIDC := $(call compose_stack,oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml
+COMPOSE_MCP := $(call compose_stack,mcp) -f compose.yml -f compose.public.yml -f compose.mcp.yml
+COMPOSE_EDGE := $(call compose_stack,edge) -f compose.yml -f compose.edge.yml -f compose.mcp.yml
+COMPOSE_TLS := $(call compose_stack,tls) -f compose.yml -f compose.edge.yml -f compose.tls.yml -f compose.mcp.yml
+COMPOSE_PRIVATE := $(call compose_stack,private) -f compose.yml -f compose.private.yml -f compose.mcp.yml
+COMPOSE_UI := $(call compose_stack,ui) -f compose.yml -f compose.public.yml -f compose.ui.yml
+COMPOSE_HELLO := $(call compose_stack,hello) -f compose.yml -f compose.public.yml -f compose.hello.yml
+COMPOSE_HELLO_OTEL := $(call compose_stack,hello-otel) -f compose.yml -f compose.public.yml -f compose.hello.yml -f compose.otel.yml -f compose.hello.otel.yml
+COMPOSE_HELLO_OIDC := $(call compose_stack,hello-oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.hello.yml
+COMPOSE_TODO := $(call compose_stack,todo) -f compose.todo.yml
+COMPOSE_TODO_OTEL := $(call compose_stack,todo-otel) -f compose.todo.yml -f compose.todo.otel.yml
+COMPOSE_ALL := $(call compose_stack,all) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
 HELP_FMT := "  %-34s %s\n"
 
-.PHONY: help ensure-certs install-hooks fmt lint lint-check frontend-check check-version release release-dry-run release-tag release-tag-dry-run up up-otel up-oidc up-mcp up-edge up-tls up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down logs logs-otel logs-oidc logs-mcp logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help ensure-certs install-hooks fmt lint lint-check frontend-check check-version release release-dry-run release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
@@ -34,10 +95,16 @@ help:
 	@printf $(HELP_FMT) "up-mcp" "Start the simulator with the MCP example overlay"
 	@printf $(HELP_FMT) "up-oidc" "Start the simulator with the Keycloak overlay"
 	@printf $(HELP_FMT) "up-otel" "Start the direct public simulator stack with LGTM"
-	@printf $(HELP_FMT) "up-tls" "Start the edge TLS MCP stack on apim.localtest.me:8443"
+	@printf $(HELP_FMT) "up-private" "Start the private MCP stack without publishing the gateway host port"
+	@printf $(HELP_FMT) "up-tls" "Start the edge TLS MCP stack on apim.localtest.me:9443"
 	@printf $(HELP_FMT) "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
 	@printf $(HELP_FMT) "up-todo-otel" "Start the todo demo stack with LGTM on localhost:3001"
 	@printf $(HELP_FMT) "up-ui" "Start the operator console on localhost:3007"
+	@printf $(HELP_FMT) "up-all" "Start every compose stack at once using isolated slots"
+	@printf $(HELP_FMT) "down-all" "Stop every stack launched by up-all"
+	@printf "\nStack Isolation:\n"
+	@printf $(HELP_FMT) "STACK_SLOT=1 make up-otel" "Shift published ports by a slot and isolate compose project names"
+	@printf $(HELP_FMT) "PORT_OFFSET=100 make up-ui" "Shift published ports by a fixed offset without changing defaults"
 	@printf "\nLogs:\n"
 	@printf $(HELP_FMT) "logs" "Tail core stack logs"
 	@printf $(HELP_FMT) "logs-hello" "Tail hello API example stack logs"
@@ -50,6 +117,7 @@ help:
 	@printf $(HELP_FMT) "logs-todo-otel" "Tail todo demo stack logs with LGTM"
 	@printf "\nCode Quality and Tooling:\n"
 	@printf $(HELP_FMT) "check-version" "Check synchronized release versions and pinned upstream refs"
+	@printf $(HELP_FMT) "check-host-ports" "Check common local host ports before starting stacks"
 	@printf $(HELP_FMT) "compat" "Run the curated APIM sample compatibility harness"
 	@printf $(HELP_FMT) "compat-report" "Run static Terraform/APIM compatibility analysis (requires TOFU_SHOW=...)"
 	@printf $(HELP_FMT) "fmt" "Format Python code with Ruff"
@@ -122,6 +190,9 @@ up-edge: ensure-certs
 up-tls: ensure-certs
 	$(COMPOSE_TLS) up --build -d
 
+up-private:
+	$(COMPOSE_PRIVATE) up --build -d
+
 up-ui:
 	$(COMPOSE_UI) up --build -d
 
@@ -146,14 +217,38 @@ up-todo:
 up-todo-otel:
 	$(COMPOSE_TODO_OTEL) up --build -d
 
+up-all:
+	@set -e; \
+	slot="$(UP_ALL_SLOT_BASE)"; \
+	for target in $(UP_ALL_STACKS); do \
+	  echo "==> $$target (STACK_SLOT=$$slot)"; \
+	  ./scripts/run-stacked-make.sh "$$slot" "$$target"; \
+	  slot=$$((slot + 1)); \
+	done
+
 down:
-	$(COMPOSE_ALL) down --remove-orphans
+	$(COMPOSE_CORE) down --remove-orphans
 	$(COMPOSE_CORE_OTEL) down --remove-orphans
+	$(COMPOSE_OIDC) down --remove-orphans
+	$(COMPOSE_MCP) down --remove-orphans
+	$(COMPOSE_EDGE) down --remove-orphans
+	$(COMPOSE_TLS) down --remove-orphans
+	$(COMPOSE_PRIVATE) down --remove-orphans
+	$(COMPOSE_UI) down --remove-orphans
 	$(COMPOSE_HELLO) down --remove-orphans
 	$(COMPOSE_HELLO_OTEL) down --remove-orphans
 	$(COMPOSE_HELLO_OIDC) down --remove-orphans
 	$(COMPOSE_TODO) down --remove-orphans
 	$(COMPOSE_TODO_OTEL) down --remove-orphans
+
+down-all:
+	@set -e; \
+	slot="$(UP_ALL_SLOT_BASE)"; \
+	for _target in $(UP_ALL_STACKS); do \
+	  echo "==> down (STACK_SLOT=$$slot)"; \
+	  ./scripts/run-stacked-make.sh "$$slot" down; \
+	  slot=$$((slot + 1)); \
+	done
 
 logs:
 	$(COMPOSE_CORE) logs -f apim-simulator mock-backend
@@ -166,6 +261,9 @@ logs-oidc:
 
 logs-mcp:
 	$(COMPOSE_MCP) logs -f apim-simulator mcp-server
+
+logs-private:
+	$(COMPOSE_PRIVATE) logs -f apim-simulator mcp-server smoke-runner
 
 logs-hello:
 	$(COMPOSE_HELLO) logs -f apim-simulator hello-api
@@ -205,6 +303,9 @@ frontend-check:
 
 check-version:
 	./scripts/check-version.sh
+
+check-host-ports:
+	./scripts/check-host-ports.sh $(PORTS)
 
 release:
 	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release VERSION=0.2.0"; exit 1; }
@@ -256,16 +357,16 @@ smoke-oidc:
 	uv run python scripts/smoke_oidc.py
 
 smoke-mcp:
-	uv run --extra mcp python scripts/smoke_mcp.py
+	SMOKE_MCP_URL="$(SMOKE_MCP_URL)" uv run --extra mcp python scripts/smoke_mcp.py
 
 smoke-edge:
-	uv run --extra mcp python scripts/smoke_edge.py
+	SMOKE_EDGE_BASE_URL="$(SMOKE_EDGE_BASE_URL)" uv run --extra mcp python scripts/smoke_edge.py
 
 smoke-tls:
-	SMOKE_EDGE_BASE_URL=https://apim.localtest.me:8443 uv run --extra mcp python scripts/smoke_edge.py
+	SMOKE_EDGE_BASE_URL="$(EDGE_TLS_BASE_URL)" uv run --extra mcp python scripts/smoke_edge.py
 
 check-private-port-clear:
-	uv run python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', 8000)); sock.close(); print('Host port 8000 is unavailable, as required for private mode.') if code else (_ for _ in ()).throw(SystemExit('localhost:8000 is already reachable before private-mode launch; stop the conflicting listener before continuing'))"
+	uv run python -c "import socket; sock = socket.socket(); sock.settimeout(1); code = sock.connect_ex(('127.0.0.1', $(APIM_GATEWAY_PORT))); sock.close(); print('Host port $(APIM_GATEWAY_PORT) is unavailable, as required for private mode.') if code else (_ for _ in ()).throw(SystemExit('localhost:$(APIM_GATEWAY_PORT) is already reachable before private-mode launch; stop the conflicting listener before continuing'))"
 
 smoke-private:
 	$(MAKE) check-private-port-clear
@@ -278,21 +379,31 @@ smoke-todo:
 	uv run python scripts/smoke_todo.py
 
 smoke-tutorials-live:
-	./scripts/run_tutorial_smoke.sh
+	APIM_BASE="$(APIM_BASE_URL)" GRAFANA_BASE="$(GRAFANA_BASE_URL)" OPERATOR_CONSOLE_BASE="$(OPERATOR_CONSOLE_URL)" ./scripts/run_tutorial_smoke.sh
 
 test-todo-e2e:
 	npm --prefix examples/todo-app/frontend-astro ci
 	npm --prefix examples/todo-app/frontend-astro exec playwright install chromium
-	npm --prefix examples/todo-app/frontend-astro run test:e2e
+	BASE_URL="$(TODO_FRONTEND_BASE_URL)" API_BASE_URL="$(TODO_APIM_PUBLIC_BASE_URL)" GRAFANA_BASE_URL="$(TODO_GRAFANA_BASE_URL)" npm --prefix examples/todo-app/frontend-astro run test:e2e
 
 test-todo-bruno:
-	cd examples/todo-app/api-clients/bruno && npm exec --yes --package=@usebruno/cli -- bru run --env-file ./environments/local.bru .
+	@tmp_env="$$(mktemp)"; \
+	trap 'rm -f "$$tmp_env"' EXIT; \
+	printf 'vars {\n  apimBaseUrl: %s\n  frontendOrigin: %s\n  subscriptionKey: todo-demo-key\n  invalidSubscriptionKey: bad-subscription-key\n}\n' "$(TODO_APIM_BASE_URL)" "$(TODO_FRONTEND_BASE_URL)" >"$$tmp_env" \
+	&& cd examples/todo-app/api-clients/bruno \
+	&& npm exec --yes --package=@usebruno/cli -- bru run --env-file "$$tmp_env" .
 
 test-todo-postman:
-	npm exec --yes --package=newman -- newman run examples/todo-app/api-clients/postman/todo-through-apim.postman_collection.json --environment examples/todo-app/api-clients/postman/local.postman_environment.json
+	@tmp_env="$$(mktemp)"; \
+	trap 'rm -f "$$tmp_env"' EXIT; \
+	jq -n \
+	  --arg apimBaseUrl "$(TODO_APIM_BASE_URL)" \
+	  --arg frontendOrigin "$(TODO_FRONTEND_BASE_URL)" \
+	  '{"id":"apim-simulator-local","name":"Local","values":[{"key":"apimBaseUrl","value":$$apimBaseUrl,"enabled":true},{"key":"frontendOrigin","value":$$frontendOrigin,"enabled":true},{"key":"subscriptionKey","value":"todo-demo-key","enabled":true},{"key":"invalidSubscriptionKey","value":"bad-subscription-key","enabled":true}]}' >"$$tmp_env" \
+	&& npm exec --yes --package=newman -- newman run examples/todo-app/api-clients/postman/todo-through-apim.postman_collection.json --environment "$$tmp_env"
 
 export-todo-har:
-	uv run python scripts/export_todo_har.py
+	TODO_HAR_APIM_BASE_URL="$(TODO_APIM_BASE_URL)" TODO_HAR_FRONTEND_BASE_URL="$(TODO_FRONTEND_BASE_URL)" uv run python scripts/export_todo_har.py
 
 compose-config:
 	$(COMPOSE_CORE) config

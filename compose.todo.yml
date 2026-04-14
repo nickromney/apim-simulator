@@ -65,10 +65,13 @@ services:
       args: *python-build-args
     image: apim-simulator:latest
     ports:
-      - "8000:8000"
+      - "${APIM_GATEWAY_PORT:-8000}:8000"
     environment:
       APIM_CONFIG_PATH: /tmp/todo-apim-config.json
       APIM_CONFIG_SOURCE_PATH: /app/examples/todo-app/apim.json
+      APIM_CONFIG_TEMPLATE_SUBSTITUTE: "true"
+      TODO_FRONTEND_ORIGIN_LOCALHOST: ${TODO_FRONTEND_ORIGIN_LOCALHOST:-http://localhost:3000}
+      TODO_FRONTEND_ORIGIN_LOOPBACK: ${TODO_FRONTEND_ORIGIN_LOOPBACK:-http://127.0.0.1:3000}
       OTEL_SERVICE_NAME: apim-simulator
     depends_on:
       todo-api:
@@ -99,11 +102,12 @@ services:
         NGINX_GID: ${NGINX_GID:-101}
     image: apim-simulator-todo-frontend:latest
     ports:
-      - "3000:8080"
+      - "${TODO_FRONTEND_PORT:-3000}:8080"
     environment:
-      API_BASE_URL: http://localhost:8000
+      API_BASE_URL: ${TODO_APIM_PUBLIC_BASE_URL:-http://localhost:8000}
       APIM_SUBSCRIPTION_KEY: todo-demo-key
-      GRAFANA_BASE_URL: http://localhost:3001
+      GRAFANA_BASE_URL: ${TODO_GRAFANA_BASE_URL:-http://localhost:3001}
+      OBSERVABILITY_DASHBOARD_URL: ${TODO_OBSERVABILITY_DASHBOARD_URL:-http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview}
     depends_on:
       apim-simulator:
         condition: service_healthy

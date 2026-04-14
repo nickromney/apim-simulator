@@ -3,9 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# shellcheck source=../../../scripts/stack-env.sh
+source "$ROOT_DIR/scripts/stack-env.sh"
+stack_env_init
 
 DOCKER_BIN="${DOCKER_BIN:-docker}"
-APIM_BASE="${APIM_BASE:-http://localhost:8000}"
+APIM_BASE="${APIM_BASE:-$APIM_BASE_URL}"
 APIM_TENANT_KEY="${APIM_TENANT_KEY:-local-dev-tenant-key}"
 OPENAPI_SOURCE="${OPENAPI_SOURCE:-$ROOT_DIR/examples/mock-backend/openapi.json}"
 APIM_API_ID="${APIM_API_ID:-tutorial-api}"
@@ -15,6 +18,11 @@ APIM_HEALTH_ATTEMPTS="${APIM_HEALTH_ATTEMPTS:-30}"
 APIM_HEALTH_DELAY_SECONDS="${APIM_HEALTH_DELAY_SECONDS:-1}"
 EXECUTE=0
 VERIFY=0
+
+if [[ -n "${STACK_INSTANCE_SUFFIX:-}" ]]; then
+  COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-apim-simulator-tutorial-${STACK_INSTANCE_SUFFIX}}"
+  export COMPOSE_PROJECT_NAME
+fi
 
 usage() {
   cat <<EOF

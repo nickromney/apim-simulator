@@ -28,4 +28,4 @@ services:
       apim-simulator:
         condition: service_started
     ports:
-      - "3007:8080"
+      - "${OPERATOR_CONSOLE_PORT:-3007}:8080"
