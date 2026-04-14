@@ -240,6 +240,12 @@ def test_gitleaks_allows_local_apim_hostnames() -> None:
     assert "APIM_EDGE_WILDCARD_HOST" in host_env_regexes
 
 
+def test_gitleaks_ignore_lists_known_false_positives() -> None:
+    ignored = (REPO_ROOT / ".gitleaksignore").read_text().splitlines()
+    assert "a24e4570800e3f62adf31d44b7c83d0d77fa342f:Makefile:generic-api-key:27" in ignored
+    assert "a24e4570800e3f62adf31d44b7c83d0d77fa342f:scripts/smoke_edge.py:generic-api-key:16" in ignored
+
+
 def test_local_smoke_clients_bypass_proxy_environment() -> None:
     smoke_mcp = (REPO_ROOT / "scripts" / "smoke_mcp.py").read_text()
     smoke_edge = (REPO_ROOT / "scripts" / "smoke_edge.py").read_text()
