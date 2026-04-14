@@ -2,7 +2,7 @@
 
 Generated from a live run against the local repository.
 
-`make up-edge` terminates through the nginx edge proxy on `apim.localtest.me:8088` and verifies forwarded-host behavior before the request reaches APIM and the MCP backend.
+`make up-edge` terminates through the nginx edge proxy on [edge.apim.127.0.0.1.sslip.io:8088](http://edge.apim.127.0.0.1.sslip.io:8088) and verifies forwarded-host behavior before the request reaches APIM and the MCP backend.
 
 ```bash
 set -euo pipefail
@@ -10,7 +10,7 @@ make down >/dev/null 2>&1 || true
 log="$(mktemp)"
 make up-edge >"$log" 2>&1 || { cat "$log"; exit 1; }
 for _ in $(seq 1 90); do
-  curl -fsS http://apim.localtest.me:8088/apim/health >/dev/null 2>&1 && break
+  curl -fsS http://edge.apim.127.0.0.1.sslip.io:8088/apim/health >/dev/null 2>&1 && break
   sleep 1
 done
 docker compose -f compose.yml -f compose.edge.yml -f compose.mcp.yml ps --format json | jq -sS .
@@ -149,7 +149,7 @@ rm -f "$log"
 set -euo pipefail
 smoke_log="$(mktemp)"
 make smoke-edge >"$smoke_log" 2>&1 || { cat "$smoke_log"; exit 1; }
-edge_echo="$(curl -fsS -H 'Ocp-Apim-Subscription-Key: mcp-demo-key' -H 'x-apim-trace: true' http://apim.localtest.me:8088/__edge/echo)"
+edge_echo="$(curl -fsS -H 'Ocp-Apim-Subscription-Key: mcp-demo-key' -H 'x-apim-trace: true' http://edge.apim.127.0.0.1.sslip.io:8088/__edge/echo)"
 jq -n \
   --argjson edge_echo "$edge_echo" \
   --arg smoke_log "$(cat "$smoke_log")" \
@@ -171,13 +171,13 @@ rm -f "$smoke_log"
 {
   "edge_echo": {
     "path": "/api/echo",
-    "host": "apim.localtest.me:8088",
-    "forwarded_host": "apim.localtest.me:8088",
+    "host": "edge.apim.127.0.0.1.sslip.io:8088",
+    "forwarded_host": "edge.apim.127.0.0.1.sslip.io:8088",
     "forwarded_proto": "http"
   },
   "smoke_edge": "passed",
   "smoke_output": [
-    "SMOKE_EDGE_BASE_URL=\"http://apim.localtest.me:8088\" uv run --project . --extra mcp python scripts/smoke_edge.py",
+    "SMOKE_EDGE_BASE_URL=\"http://edge.apim.127.0.0.1.sslip.io:8088\" uv run --project . --extra mcp python scripts/smoke_edge.py",
     "MCP smoke passed",
     "- server: APIM Simulator Demo MCP Server",
     "- tools: add_numbers, uppercase",
@@ -185,8 +185,8 @@ rm -f "$smoke_log"
     "  \"sum\": 5",
     "}",
     "Edge smoke passed",
-    "- base_url: http://apim.localtest.me:8088",
-    "- forwarded_host: apim.localtest.me:8088",
+    "- base_url: http://edge.apim.127.0.0.1.sslip.io:8088",
+    "- forwarded_host: edge.apim.127.0.0.1.sslip.io:8088",
     "- forwarded_proto: http"
   ]
 }

@@ -18,6 +18,5 @@ regexes = [
 [[allowlists]]
 description = "Generated local development TLS private keys"
 paths = [
-  '''examples/edge/certs/apim\.localtest\.me\.key''',
-  '''examples/edge/certs/dev-root-ca\.key''',
+  '''examples/edge/certs/edge\.apim\.127\.0\.0\.1\.sslip\.io\.key''',
 ]

@@ -31,6 +31,7 @@ from app.config import (
     load_config,
 )
 from app.resource_projection import project_summary
+from app.urls import http_url
 
 
 @pytest.mark.contract("PROJECTION-SUMMARY")
@@ -99,7 +100,7 @@ def test_project_summary_uses_service_scoped_ids_and_masks_secrets() -> None:
             "hello": ApiConfig(
                 name="hello",
                 path="hello",
-                upstream_base_url="http://upstream",
+                upstream_base_url=http_url("upstream"),
                 products=["starter"],
                 revision="2",
                 revision_description="Current revision",
@@ -231,7 +232,7 @@ def test_load_config_accepts_api_and_route_authored_files(tmp_path, monkeypatch)
                     "sample": {
                         "name": "sample",
                         "path": "sample",
-                        "upstream_base_url": "http://upstream",
+                        "upstream_base_url": http_url("upstream"),
                         "operations": {"health": {"name": "health", "method": "GET", "url_template": "/health"}},
                     }
                 },
@@ -256,7 +257,7 @@ def test_load_config_accepts_api_and_route_authored_files(tmp_path, monkeypatch)
                     {
                         "name": "legacy",
                         "path_prefix": "/api",
-                        "upstream_base_url": "http://upstream",
+                        "upstream_base_url": http_url("upstream"),
                         "upstream_path_prefix": "/api",
                     }
                 ],

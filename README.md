@@ -37,7 +37,7 @@ This repository carries repo-local dependency age gates so local installs and
 container builds do not rely on host dotfiles.
 
 - Python resolution via `uv` uses a seven-day cutoff in [`pyproject.toml`](pyproject.toml)
-- npm package roots ship local `.npmrc` with `min-release-age=7`
+- npm package roots ship local `.npmrc` with `min-release-age=7`, and individual example roots can temporarily override it when we intentionally roll a fresh release forward
 - frontend Dockerfiles copy `.npmrc` before `npm ci` so image builds keep the
   same cooldown policy
 
@@ -97,14 +97,14 @@ stays on a hardened runtime base.
 
 | Scenario | Start command | Entry point | Use when |
 | --- | --- | --- | --- |
-| Direct public gateway | `make up` | `http://localhost:8000` | You want the smallest APIM-shaped gateway path |
-| Direct public gateway with OTEL | `make up-otel` | `http://localhost:8000`, `http://localhost:3001` | You want logs, metrics, and traces immediately |
-| Todo demo with OTEL | `make up-todo-otel` | `http://localhost:3000` | You want the richest browser-backed teaching flow |
-| Hello starter | `make up-hello` | `http://localhost:8000/api/hello` | You want the smallest backend scaffold behind APIM |
-| OIDC example | `make up-oidc` | `http://localhost:8000` | You want JWT plus subscription flows |
-| MCP example | `make up-mcp` | `http://localhost:8000/mcp` | You want an MCP server behind APIM |
-| Edge HTTP | `make up-edge` | `http://apim.localtest.me:8088` | You want forwarded-header and reverse-proxy behaviour |
-| Edge TLS | `make up-tls` | `https://apim.localtest.me:9443` | You want local TLS termination behaviour |
+| Direct public gateway | `make up` | [http://localhost:8000](http://localhost:8000) | You want the smallest APIM-shaped gateway path |
+| Direct public gateway with OTEL | `make up-otel` | [http://localhost:8000](http://localhost:8000), [http://localhost:3001](http://localhost:3001) | You want logs, metrics, and traces immediately |
+| Todo demo with OTEL | `make up-todo-otel` | [http://localhost:3000](http://localhost:3000) | You want the richest browser-backed teaching flow |
+| Hello starter | `make up-hello` | [http://localhost:8000/api/hello](http://localhost:8000/api/hello) | You want the smallest backend scaffold behind APIM |
+| OIDC example | `make up-oidc` | [http://localhost:8000](http://localhost:8000) | You want JWT plus subscription flows |
+| MCP example | `make up-mcp` | [http://localhost:8000/mcp](http://localhost:8000/mcp) | You want an MCP server behind APIM |
+| Edge HTTP | `make up-edge` | [http://edge.apim.127.0.0.1.sslip.io:8088](http://edge.apim.127.0.0.1.sslip.io:8088) | You want forwarded-header and reverse-proxy behaviour |
+| Edge TLS | `make up-tls` | [https://edge.apim.127.0.0.1.sslip.io:9443](https://edge.apim.127.0.0.1.sslip.io:9443) | You want local TLS termination behaviour |
 | Private internal stack | `make up-private` | no host gateway port | You want the MCP stack reachable only from the internal compose network |
 | Operator console | `make up-ui` | `http://localhost:3007` | You want the fastest control-room view of a running management-enabled stack |
 | Every compose stack at once | `make up-all` | slot-based; printed during startup | You want the whole repo up simultaneously without port collisions |
@@ -119,7 +119,7 @@ If you do not already have an APIM mental model, start with the control room:
 make up-ui
 ```
 
-Then open `http://localhost:3007`, click `Load Local Demo`, and connect.
+Then open [http://localhost:3007](http://localhost:3007), click `Load Local Demo`, and connect.
 
 Use that first pass to answer four basic questions:
 
@@ -142,8 +142,8 @@ make verify-todo-otel
 
 Then open:
 
-- `http://localhost:3000`
-- `http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview`
+- [http://localhost:3000](http://localhost:3000)
+- [http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview](http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview)
 
 ### Smallest path
 
@@ -202,10 +202,10 @@ For a simulator-native version of the Microsoft Learn getting-started sequence, 
 
 Use the gateway URL that matches where your application is running:
 
-- from the local machine, use `http://localhost:8000`
-- from another container on the same compose network, use `http://apim-simulator:8000`
-- for the edge HTTP stack, use `http://apim.localtest.me:8088`
-- for the edge TLS stack, use `https://apim.localtest.me:9443`
+- from the local machine, use [http://localhost:8000](http://localhost:8000)
+- from another container on the same compose network, use [http://apim-simulator:8000](http://apim-simulator:8000)
+- for the edge HTTP stack, use [http://edge.apim.127.0.0.1.sslip.io:8088](http://edge.apim.127.0.0.1.sslip.io:8088)
+- for the edge TLS stack, use [https://edge.apim.127.0.0.1.sslip.io:9443](https://edge.apim.127.0.0.1.sslip.io:9443)
 
 ### Gateway health and startup
 

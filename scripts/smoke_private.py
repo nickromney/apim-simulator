@@ -9,7 +9,10 @@ import traceback
 from smoke_mcp import make_async_client
 from smoke_mcp import run as run_mcp
 
-BASE_URL = os.getenv("SMOKE_PRIVATE_BASE_URL", "http://apim-simulator:8000").rstrip("/")
+from app.urls import http_url
+
+DEFAULT_PRIVATE_HOST = "apim-simulator:8000"
+BASE_URL = os.getenv("SMOKE_PRIVATE_BASE_URL", http_url(DEFAULT_PRIVATE_HOST)).rstrip("/")
 SUBSCRIPTION_KEY = os.getenv("SMOKE_MCP_SUBSCRIPTION_KEY", "mcp-demo-key")
 
 
@@ -31,7 +34,7 @@ async def main_async() -> None:
         payload = debug.json()
         echoed_headers = {key.lower(): value for key, value in payload["headers"].items()}
 
-        require(echoed_headers.get("host") == "apim-simulator:8000", f"unexpected upstream host: {echoed_headers}")
+        require(echoed_headers.get("host") == DEFAULT_PRIVATE_HOST, f"unexpected upstream host: {echoed_headers}")
 
         trace_id = debug.headers.get("x-apim-trace-id")
         require(bool(trace_id), "trace id missing from private debug response")
@@ -39,7 +42,7 @@ async def main_async() -> None:
         trace.raise_for_status()
         trace_payload = trace.json()
 
-        require(trace_payload["incoming_host"] == "apim-simulator:8000", f"unexpected trace host: {trace_payload}")
+        require(trace_payload["incoming_host"] == DEFAULT_PRIVATE_HOST, f"unexpected trace host: {trace_payload}")
         require(trace_payload["upstream_url"].endswith("/api/echo"), f"unexpected upstream url: {trace_payload}")
 
     await run_mcp(url=f"{BASE_URL}/mcp", subscription_key=SUBSCRIPTION_KEY, verify=True)

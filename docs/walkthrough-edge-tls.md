@@ -2,7 +2,7 @@
 
 Generated from a live run against the local repository.
 
-`make up-tls` uses the generated development certificate and the same forwarded-header path, but on `https://apim.localtest.me:9443`.
+`make up-tls` uses the generated development certificate and the same forwarded-header path, but on [https://edge.apim.127.0.0.1.sslip.io:9443](https://edge.apim.127.0.0.1.sslip.io:9443).
 
 ```bash
 set -euo pipefail
@@ -10,7 +10,7 @@ make down >/dev/null 2>&1 || true
 log="$(mktemp)"
 make up-tls >"$log" 2>&1 || { cat "$log"; exit 1; }
 for _ in $(seq 1 90); do
-  curl --cacert examples/edge/certs/dev-root-ca.crt -fsS https://apim.localtest.me:9443/apim/health >/dev/null 2>&1 && break
+  curl --cacert examples/edge/certs/dev-root-ca.crt -fsS https://edge.apim.127.0.0.1.sslip.io:9443/apim/health >/dev/null 2>&1 && break
   sleep 1
 done
 docker compose -f compose.yml -f compose.edge.yml -f compose.tls.yml -f compose.mcp.yml ps --format json | jq -sS .
@@ -173,7 +173,7 @@ rm -f "$log"
 set -euo pipefail
 smoke_log="$(mktemp)"
 make smoke-tls >"$smoke_log" 2>&1 || { cat "$smoke_log"; exit 1; }
-edge_echo="$(curl --cacert examples/edge/certs/dev-root-ca.crt -fsS -H 'Ocp-Apim-Subscription-Key: mcp-demo-key' -H 'x-apim-trace: true' https://apim.localtest.me:9443/__edge/echo)"
+edge_echo="$(curl --cacert examples/edge/certs/dev-root-ca.crt -fsS -H 'Ocp-Apim-Subscription-Key: mcp-demo-key' -H 'x-apim-trace: true' https://edge.apim.127.0.0.1.sslip.io:9443/__edge/echo)"
 jq -n \
   --argjson edge_echo "$edge_echo" \
   --arg smoke_log "$(cat "$smoke_log")" \
@@ -195,13 +195,13 @@ rm -f "$smoke_log"
 {
   "edge_echo": {
     "path": "/api/echo",
-    "host": "apim.localtest.me:9443",
-    "forwarded_host": "apim.localtest.me:9443",
+    "host": "edge.apim.127.0.0.1.sslip.io:9443",
+    "forwarded_host": "edge.apim.127.0.0.1.sslip.io:9443",
     "forwarded_proto": "https"
   },
   "smoke_tls": "passed",
   "smoke_output": [
-    "SMOKE_EDGE_BASE_URL=\"https://apim.localtest.me:9443\" uv run --project . --extra mcp python scripts/smoke_edge.py",
+    "SMOKE_EDGE_BASE_URL=\"https://edge.apim.127.0.0.1.sslip.io:9443\" uv run --project . --extra mcp python scripts/smoke_edge.py",
     "MCP smoke passed",
     "- server: APIM Simulator Demo MCP Server",
     "- tools: add_numbers, uppercase",
@@ -209,8 +209,8 @@ rm -f "$smoke_log"
     "  \"sum\": 5",
     "}",
     "Edge smoke passed",
-    "- base_url: https://apim.localtest.me:9443",
-    "- forwarded_host: apim.localtest.me:9443",
+    "- base_url: https://edge.apim.127.0.0.1.sslip.io:9443",
+    "- forwarded_host: edge.apim.127.0.0.1.sslip.io:9443",
     "- forwarded_proto: https"
   ]
 }

@@ -75,6 +75,29 @@ def test_non_dhi_opt_out_is_documented() -> None:
     assert "NGINX_RUNTIME_IMAGE=nginx:1.27-alpine" in env_example
 
 
+def test_prereqs_requires_mkcert() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    assert ".PHONY: prereqs" in makefile
+    assert "prereqs:" in makefile
+    assert "check-mkcert-prerequisites" in makefile
+    assert "mkcert" in makefile
+
+
+def test_edge_stack_uses_apim_namespaced_dns() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    stack_env = (REPO_ROOT / "scripts" / "stack-env.sh").read_text()
+    edge_conf = (REPO_ROOT / "examples" / "edge" / "nginx.conf").read_text()
+    smoke_edge = (REPO_ROOT / "scripts" / "smoke_edge.py").read_text()
+
+    for contents in (makefile, stack_env, edge_conf, smoke_edge):
+        assert "apim.localtest.me" not in contents
+
+    assert "edge.apim.127.0.0.1.sslip.io" in makefile
+    assert "edge.apim.127.0.0.1.sslip.io" in stack_env
+    assert "edge.apim.127.0.0.1.sslip.io" in edge_conf
+    assert "edge.apim.127.0.0.1.sslip.io" in smoke_edge
+
+
 def test_python_dockerfiles_accept_base_image_overrides() -> None:
     for relative_path in (
         "Dockerfile",
@@ -194,13 +217,14 @@ def test_generated_edge_certs_keep_server_key_readable_for_rootless_nginx(tmp_pa
     )
 
     cert_dir = tmp_path / "examples" / "edge" / "certs"
-    server_cert_mode = stat.S_IMODE((cert_dir / "apim.localtest.me.crt").stat().st_mode)
-    server_key_mode = stat.S_IMODE((cert_dir / "apim.localtest.me.key").stat().st_mode)
-    ca_key_mode = stat.S_IMODE((cert_dir / "dev-root-ca.key").stat().st_mode)
+    server_cert_mode = stat.S_IMODE((cert_dir / "edge.apim.127.0.0.1.sslip.io.crt").stat().st_mode)
+    server_key_mode = stat.S_IMODE((cert_dir / "edge.apim.127.0.0.1.sslip.io.key").stat().st_mode)
+    ca_cert_mode = stat.S_IMODE((cert_dir / "dev-root-ca.crt").stat().st_mode)
 
     assert server_cert_mode == 0o644
     assert server_key_mode == 0o644
-    assert ca_key_mode == 0o600
+    assert ca_cert_mode == 0o644
+    assert not (cert_dir / "dev-root-ca.key").exists()
 
 
 def test_todo_frontend_supports_runtime_image_override() -> None:
@@ -294,7 +318,7 @@ def test_gitleaks_config_allows_known_demo_credentials() -> None:
     assert "useDefault = true" in config
     for marker in ("local-dev-tenant-key", "todo-demo-key", "mcp-demo-key", "tutorial-key", "demo-password"):
         assert marker in config
-    assert "examples/edge/certs/apim\\.localtest\\.me\\.key" in config
+    assert "examples/edge/certs/edge\\.apim\\.127\\.0\\.0\\.1\\.sslip\\.io\\.key" in config
 
 
 def test_keycloak_persists_data_on_a_named_volume() -> None:

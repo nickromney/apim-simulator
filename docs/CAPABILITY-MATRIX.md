@@ -34,8 +34,8 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
 | Direct public compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.public.yml`](../compose.public.yml) on `localhost:8000` |
-| Edge HTTP compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.edge.yml`](../compose.edge.yml) on `apim.localtest.me:8088` |
-| Edge TLS compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.edge.yml`](../compose.edge.yml) + [`compose.tls.yml`](../compose.tls.yml) on `apim.localtest.me:9443` |
+| Edge HTTP compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.edge.yml`](../compose.edge.yml) on `edge.apim.127.0.0.1.sslip.io:8088` |
+| Edge TLS compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.edge.yml`](../compose.edge.yml) + [`compose.tls.yml`](../compose.tls.yml) on `edge.apim.127.0.0.1.sslip.io:9443` |
 | Private internal compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.private.yml`](../compose.private.yml); smoke uses internal probe container |
 
 ## APIs and Operations

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.config import GatewayConfig, OIDCConfig, RouteConfig, Subscription, SubscriptionConfig, SubscriptionKeyPair
 from app.main import create_app
+from app.urls import http_url
 
 
 @pytest.mark.integration
@@ -15,7 +16,7 @@ def test_keycloak_password_grant_token_validates_via_jwks_uri() -> None:
     if os.getenv("RUN_INTEGRATION") != "1":
         pytest.skip("Set RUN_INTEGRATION=1 to run Keycloak integration tests")
 
-    base_url = os.getenv("APIM_SIM_KEYCLOAK_BASE_URL", "http://localhost:8180")
+    base_url = os.getenv("APIM_SIM_KEYCLOAK_BASE_URL", http_url("localhost:8180"))
     realm = os.getenv("APIM_SIM_KEYCLOAK_REALM", "subnet-calculator")
     client_id = os.getenv("APIM_SIM_KEYCLOAK_CLIENT_ID", "frontend-app")
     audience = os.getenv("APIM_SIM_KEYCLOAK_AUDIENCE", "api-app")
@@ -62,7 +63,9 @@ def test_keycloak_password_grant_token_validates_via_jwks_uri() -> None:
             },
         ),
         routes=[
-            RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api")
+            RouteConfig(
+                name="r1", path_prefix="/api", upstream_base_url=http_url("upstream"), upstream_path_prefix="/api"
+            )
         ],
     )
 

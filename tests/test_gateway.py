@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlunsplit
 
 import httpx
 import jwt
@@ -77,6 +78,12 @@ def _make_token(
     return jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": "test-kid"})
 
 
+def _http_url(target: str) -> str:
+    host, _, remainder = target.partition("/")
+    path, _, query = remainder.partition("?")
+    return urlunsplit(("http", host, f"/{path}" if path else "", query, ""))
+
+
 @pytest.mark.contract("GW-HEALTH")
 def test_health() -> None:
     app = create_app(
@@ -84,7 +91,7 @@ def test_health() -> None:
             allow_anonymous=True,
             routes=[
                 RouteConfig(
-                    name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api"
+                    name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
                 )
             ],
         )
@@ -103,7 +110,7 @@ def test_root_hint_lists_builtin_entrypoints() -> None:
             tenant_access=TenantAccessConfig(enabled=True, primary_key="local-dev-tenant-key"),
             routes=[
                 RouteConfig(
-                    name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api"
+                    name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
                 )
             ],
         )
@@ -124,7 +131,7 @@ def test_root_hint_lists_builtin_entrypoints() -> None:
             "required_header": "X-Apim-Tenant-Key",
         },
         "operator_console": {
-            "url": "http://localhost:3007",
+            "url": _http_url("localhost:3007"),
             "note": "Run make up-ui to start the operator console.",
         },
     }
@@ -145,15 +152,15 @@ def test_route_host_match_selects_expected_upstream() -> None:
                 RouteConfig(
                     name="dev",
                     path_prefix="/api",
-                    host_match=["subnetcalc.dev.127.0.0.1.sslip.io"],
-                    upstream_base_url="http://upstream-dev",
+                    host_match=["dev.apim.127.0.0.1.sslip.io"],
+                    upstream_base_url=_http_url("upstream-dev"),
                     upstream_path_prefix="/api",
                 ),
                 RouteConfig(
                     name="uat",
                     path_prefix="/api",
-                    host_match=["subnetcalc.uat.127.0.0.1.sslip.io"],
-                    upstream_base_url="http://upstream-uat",
+                    host_match=["uat.apim.127.0.0.1.sslip.io"],
+                    upstream_base_url=_http_url("upstream-uat"),
                     upstream_path_prefix="/api",
                 ),
             ],
@@ -162,10 +169,10 @@ def test_route_host_match_selects_expected_upstream() -> None:
     )
 
     with TestClient(app) as client:
-        resp = client.get("/api/v1/health", headers={"Host": "subnetcalc.uat.127.0.0.1.sslip.io:443"})
+        resp = client.get("/api/v1/health", headers={"Host": "uat.apim.127.0.0.1.sslip.io:443"})
 
     assert resp.status_code == 200
-    assert seen_urls == ["http://upstream-uat/api/v1/health"]
+    assert seen_urls == [_http_url("upstream-uat/api/v1/health")]
 
 
 def test_route_host_match_prefers_x_forwarded_host() -> None:
@@ -182,15 +189,15 @@ def test_route_host_match_prefers_x_forwarded_host() -> None:
                 RouteConfig(
                     name="dev",
                     path_prefix="/api",
-                    host_match=["subnetcalc.dev.127.0.0.1.sslip.io"],
-                    upstream_base_url="http://upstream-dev",
+                    host_match=["dev.apim.127.0.0.1.sslip.io"],
+                    upstream_base_url=_http_url("upstream-dev"),
                     upstream_path_prefix="/api",
                 ),
                 RouteConfig(
                     name="uat",
                     path_prefix="/api",
-                    host_match=["subnetcalc.uat.127.0.0.1.sslip.io"],
-                    upstream_base_url="http://upstream-uat",
+                    host_match=["uat.apim.127.0.0.1.sslip.io"],
+                    upstream_base_url=_http_url("upstream-uat"),
                     upstream_path_prefix="/api",
                 ),
             ],
@@ -202,13 +209,13 @@ def test_route_host_match_prefers_x_forwarded_host() -> None:
         resp = client.get(
             "/api/v1/health",
             headers={
-                "Host": "subnetcalc.dev.127.0.0.1.sslip.io",
-                "X-Forwarded-Host": "subnetcalc.uat.127.0.0.1.sslip.io",
+                "Host": "dev.apim.127.0.0.1.sslip.io",
+                "X-Forwarded-Host": "uat.apim.127.0.0.1.sslip.io",
             },
         )
 
     assert resp.status_code == 200
-    assert seen_urls == ["http://upstream-uat/api/v1/health"]
+    assert seen_urls == [_http_url("upstream-uat/api/v1/health")]
 
 
 @pytest.mark.contract("TRACE-LOOKUP")
@@ -218,7 +225,9 @@ def test_trace_headers_and_trace_lookup_work() -> None:
         trace_enabled=True,
         proxy_streaming=False,
         routes=[
-            RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api")
+            RouteConfig(
+                name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
+            )
         ],
     )
 
@@ -244,7 +253,7 @@ def test_trace_headers_and_trace_lookup_work() -> None:
 
 @pytest.mark.contract("AUTH-SUBSCRIPTION-REQUIRED")
 def test_missing_subscription_key_returns_401() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -261,7 +270,9 @@ def test_missing_subscription_key_returns_401() -> None:
             },
         ),
         routes=[
-            RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api")
+            RouteConfig(
+                name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
+            )
         ],
     )
     app = create_app(
@@ -275,7 +286,7 @@ def test_missing_subscription_key_returns_401() -> None:
 
 
 def test_bearer_only_mode_works_when_subscriptions_are_disabled() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "frontend-app"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -289,7 +300,7 @@ def test_bearer_only_mode_works_when_subscriptions_are_disabled() -> None:
                 RouteConfig(
                     name="r1",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                     upstream_path_prefix="/api",
                 )
             ],
@@ -323,7 +334,7 @@ def test_anonymous_mode_can_still_require_subscription_key_for_product() -> None
                 RouteConfig(
                     name="r1",
                     path_prefix="/mcp",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                     upstream_path_prefix="/mcp",
                     product="p1",
                 )
@@ -342,9 +353,9 @@ def test_anonymous_mode_can_still_require_subscription_key_for_product() -> None
 
 
 def test_multi_oidc_provider_selection_by_issuer() -> None:
-    issuer1 = "http://issuer1.example"
+    issuer1 = _http_url("issuer1.example")
     audience1 = "api1"
-    issuer2 = "http://issuer2.example"
+    issuer2 = _http_url("issuer2.example")
     audience2 = "api2"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer2, audience=audience2)
@@ -366,7 +377,9 @@ def test_multi_oidc_provider_selection_by_issuer() -> None:
             },
         ),
         routes=[
-            RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api")
+            RouteConfig(
+                name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
+            )
         ],
     )
 
@@ -386,7 +399,7 @@ def test_multi_oidc_provider_selection_by_issuer() -> None:
 
 
 def test_subscription_bypass_allows_missing_key() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -413,7 +426,7 @@ def test_subscription_bypass_allows_missing_key() -> None:
                 {
                     "name": "r1",
                     "path_prefix": "/api",
-                    "upstream_base_url": "http://upstream",
+                    "upstream_base_url": _http_url("upstream"),
                     "upstream_path_prefix": "/api",
                     "product": "p1",
                 }
@@ -422,7 +435,7 @@ def test_subscription_bypass_allows_missing_key() -> None:
     )
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream/api/v1/health")
+        assert req.url == httpx.URL(_http_url("upstream/api/v1/health"))
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
@@ -435,7 +448,7 @@ def test_subscription_bypass_allows_missing_key() -> None:
 
 
 def test_subscription_key_query_param_works() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -457,7 +470,9 @@ def test_subscription_key_query_param_works() -> None:
             },
         ),
         routes=[
-            RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api")
+            RouteConfig(
+                name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
+            )
         ],
     )
 
@@ -471,7 +486,7 @@ def test_subscription_key_query_param_works() -> None:
 
 
 def test_suspended_subscription_returns_403() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -491,7 +506,9 @@ def test_suspended_subscription_returns_403() -> None:
             },
         ),
         routes=[
-            RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api")
+            RouteConfig(
+                name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
+            )
         ],
     )
     app = create_app(config=config)
@@ -514,7 +531,7 @@ def test_backend_basic_auth_is_applied_and_url_is_used() -> None:
         allow_anonymous=True,
         backends={
             "b1": BackendConfig(
-                url="http://upstream",
+                url=_http_url("upstream"),
                 auth_type="basic",
                 basic_username="u",
                 basic_password="p",
@@ -524,7 +541,7 @@ def test_backend_basic_auth_is_applied_and_url_is_used() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://ignored",
+                upstream_base_url=_http_url("ignored"),
                 upstream_path_prefix="/api",
                 backend="b1",
             )
@@ -532,7 +549,7 @@ def test_backend_basic_auth_is_applied_and_url_is_used() -> None:
     )
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream/api/health")
+        assert req.url == httpx.URL(_http_url("upstream/api/health"))
         assert req.headers.get("authorization") == f"Basic {encoded}"
         return httpx.Response(200, json={"ok": True})
 
@@ -566,7 +583,7 @@ def test_rate_limit_policy_returns_429_on_second_call() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 policies_xml=policy,
             )
@@ -591,7 +608,7 @@ def test_rate_limit_policy_returns_429_on_second_call() -> None:
 
 
 def test_proxy_injects_identity_headers_and_filters_hop_by_hop() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -615,7 +632,7 @@ def test_proxy_injects_identity_headers_and_filters_hop_by_hop() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
             )
@@ -669,7 +686,7 @@ def test_api_version_set_header_routes_to_correct_version() -> None:
             RouteConfig(
                 name="api-v1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream-v1",
+                upstream_base_url=_http_url("upstream-v1"),
                 upstream_path_prefix="/api",
                 api_version_set="vset",
                 api_version="v1",
@@ -677,7 +694,7 @@ def test_api_version_set_header_routes_to_correct_version() -> None:
             RouteConfig(
                 name="api-v2",
                 path_prefix="/api",
-                upstream_base_url="http://upstream-v2",
+                upstream_base_url=_http_url("upstream-v2"),
                 upstream_path_prefix="/api",
                 api_version_set="vset",
                 api_version="v2",
@@ -686,7 +703,7 @@ def test_api_version_set_header_routes_to_correct_version() -> None:
     )
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream-v2/api/health")
+        assert req.url == httpx.URL(_http_url("upstream-v2/api/health"))
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
@@ -711,7 +728,7 @@ def test_api_version_set_query_routes_to_correct_version() -> None:
             RouteConfig(
                 name="api-v1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream-v1",
+                upstream_base_url=_http_url("upstream-v1"),
                 upstream_path_prefix="/api",
                 api_version_set="vset",
                 api_version="v1",
@@ -719,7 +736,7 @@ def test_api_version_set_query_routes_to_correct_version() -> None:
             RouteConfig(
                 name="api-v2",
                 path_prefix="/api",
-                upstream_base_url="http://upstream-v2",
+                upstream_base_url=_http_url("upstream-v2"),
                 upstream_path_prefix="/api",
                 api_version_set="vset",
                 api_version="v2",
@@ -728,7 +745,7 @@ def test_api_version_set_query_routes_to_correct_version() -> None:
     )
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream-v1/api/health?api-version=v1")
+        assert req.url == httpx.URL(_http_url("upstream-v1/api/health?api-version=v1"))
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
@@ -752,7 +769,7 @@ def test_api_version_set_segment_routes_and_strips_version_segment_for_upstream(
             RouteConfig(
                 name="api-v1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream-v1",
+                upstream_base_url=_http_url("upstream-v1"),
                 upstream_path_prefix="/api",
                 api_version_set="vset",
                 api_version="v1",
@@ -760,7 +777,7 @@ def test_api_version_set_segment_routes_and_strips_version_segment_for_upstream(
             RouteConfig(
                 name="api-v2",
                 path_prefix="/api",
-                upstream_base_url="http://upstream-v2",
+                upstream_base_url=_http_url("upstream-v2"),
                 upstream_path_prefix="/api",
                 api_version_set="vset",
                 api_version="v2",
@@ -770,7 +787,7 @@ def test_api_version_set_segment_routes_and_strips_version_segment_for_upstream(
 
     def handler(req: httpx.Request) -> httpx.Response:
         # External path includes version segment; simulator strips it for upstream stability.
-        assert req.url == httpx.URL("http://upstream-v2/api/health")
+        assert req.url == httpx.URL(_http_url("upstream-v2/api/health"))
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
@@ -800,7 +817,7 @@ def test_policy_inbound_set_header_modifies_upstream_request() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 policies_xml=policy_xml,
             )
@@ -835,7 +852,7 @@ def test_policy_inbound_rewrite_uri_modifies_upstream_path() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 policies_xml=policy_xml,
             )
@@ -843,7 +860,7 @@ def test_policy_inbound_rewrite_uri_modifies_upstream_path() -> None:
     )
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream/api/v1/other")
+        assert req.url == httpx.URL(_http_url("upstream/api/v1/other"))
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
@@ -877,7 +894,7 @@ def test_policy_choose_when_selects_branch() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 policies_xml=policy_xml,
             )
@@ -916,7 +933,7 @@ def test_policy_return_response_short_circuits_upstream() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 policies_xml=policy_xml,
             )
@@ -933,6 +950,47 @@ def test_policy_return_response_short_circuits_upstream() -> None:
     assert resp.text == "nope"
 
 
+def test_policy_backend_return_response_short_circuits_upstream() -> None:
+    policy_xml = """\
+<policies>
+  <inbound />
+  <backend>
+    <return-response>
+      <set-status code="503" reason="backend-down" />
+      <set-header name="content-type" exists-action="override"><value>text/plain</value></set-header>
+      <body>backend nope</body>
+    </return-response>
+  </backend>
+  <outbound />
+  <on-error />
+</policies>
+"""
+
+    config = GatewayConfig(
+        allow_anonymous=True,
+        trace_enabled=True,
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                upstream_base_url=_http_url("upstream"),
+                upstream_path_prefix="/api",
+                policies_xml=policy_xml,
+            )
+        ],
+    )
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        raise AssertionError("Upstream should not be called when backend return-response triggers")
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        resp = client.get("/api/health", headers={"x-apim-trace": "true"})
+
+    assert resp.status_code == 503
+    assert resp.text == "backend nope"
+
+
 def test_full_model_operation_method_routing() -> None:
     config = GatewayConfig(
         allow_anonymous=True,
@@ -940,19 +998,19 @@ def test_full_model_operation_method_routing() -> None:
             "api": ApiConfig(
                 name="api",
                 path="api",
-                upstream_base_url="http://unused",
+                upstream_base_url=_http_url("unused"),
                 operations={
                     "get": OperationConfig(
                         name="get-health",
                         method="GET",
                         url_template="/health",
-                        upstream_base_url="http://upstream-get",
+                        upstream_base_url=_http_url("upstream-get"),
                     ),
                     "post": OperationConfig(
                         name="post-health",
                         method="POST",
                         url_template="/health",
-                        upstream_base_url="http://upstream-post",
+                        upstream_base_url=_http_url("upstream-post"),
                     ),
                 },
             )
@@ -1004,7 +1062,7 @@ def test_full_model_api_and_operation_policies_stack() -> None:
             "api": ApiConfig(
                 name="api",
                 path="api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 policies_xml=api_policy,
                 operations={
                     "get": OperationConfig(
@@ -1030,7 +1088,7 @@ def test_full_model_api_and_operation_policies_stack() -> None:
 
 
 def test_route_authz_requires_scope() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience, extra_claims={"scope": "read"})
@@ -1054,7 +1112,7 @@ def test_route_authz_requires_scope() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
                 authz=RouteAuthzConfig(required_scopes=["read"]),
@@ -1078,7 +1136,7 @@ def test_route_authz_requires_scope() -> None:
 
 
 def test_route_authz_missing_scope_returns_403() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience, extra_claims={"scope": "write"})
@@ -1102,7 +1160,7 @@ def test_route_authz_missing_scope_returns_403() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
                 authz=RouteAuthzConfig(required_scopes=["read"]),
@@ -1127,7 +1185,7 @@ def test_route_authz_missing_scope_returns_403() -> None:
 
 
 def test_route_authz_requires_claim() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(
@@ -1156,7 +1214,7 @@ def test_route_authz_requires_claim() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
                 authz=RouteAuthzConfig(required_claims={"tenant": "t1"}),
@@ -1180,7 +1238,7 @@ def test_route_authz_requires_claim() -> None:
 
 
 def test_route_authz_missing_claim_returns_403() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -1204,7 +1262,7 @@ def test_route_authz_missing_claim_returns_403() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
                 authz=RouteAuthzConfig(required_claims={"tenant": "t1"}),
@@ -1229,7 +1287,7 @@ def test_route_authz_missing_claim_returns_403() -> None:
 
 
 def test_route_authz_requires_role() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(
@@ -1258,7 +1316,7 @@ def test_route_authz_requires_role() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
                 authz=RouteAuthzConfig(required_roles=["admin"]),
@@ -1282,7 +1340,7 @@ def test_route_authz_requires_role() -> None:
 
 
 def test_route_authz_missing_role_returns_403() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -1306,7 +1364,7 @@ def test_route_authz_missing_role_returns_403() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
                 authz=RouteAuthzConfig(required_roles=["admin"]),
@@ -1331,7 +1389,7 @@ def test_route_authz_missing_role_returns_403() -> None:
 
 
 def test_secondary_subscription_key_works() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -1355,7 +1413,7 @@ def test_secondary_subscription_key_works() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
             )
@@ -1378,7 +1436,7 @@ def test_secondary_subscription_key_works() -> None:
 
 @pytest.mark.contract("AUTH-PRODUCT-GRANT")
 def test_product_access_denied_without_product_grant() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -1402,7 +1460,7 @@ def test_product_access_denied_without_product_grant() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
             )
@@ -1425,7 +1483,7 @@ def test_product_access_denied_without_product_grant() -> None:
 
 
 def test_rotate_subscription_key_updates_gateway_lookup() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -1453,7 +1511,7 @@ def test_rotate_subscription_key_updates_gateway_lookup() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
             )
@@ -1488,7 +1546,7 @@ def test_management_plane_requires_tenant_key() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
             )
         ],
@@ -1519,7 +1577,7 @@ def test_shipped_example_configs_enable_management_plane() -> None:
 
 
 def test_management_plane_rotate_subscription_key_updates_gateway_lookup() -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
@@ -1547,7 +1605,7 @@ def test_management_plane_rotate_subscription_key_updates_gateway_lookup() -> No
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 product="p1",
             )
@@ -1579,7 +1637,9 @@ def test_trace_payload_captures_forwarded_headers() -> None:
         trace_enabled=True,
         proxy_streaming=False,
         routes=[
-            RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", upstream_path_prefix="/api")
+            RouteConfig(
+                name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
+            )
         ],
     )
 
@@ -1608,7 +1668,7 @@ def test_trace_payload_captures_forwarded_headers() -> None:
     assert payload["forwarded_proto"] == "https"
     assert payload["forwarded_for"] == "203.0.113.10, 10.0.0.5"
     assert payload["client_ip"] == "203.0.113.10"
-    assert payload["upstream_url"] == "http://upstream/api/health"
+    assert payload["upstream_url"] == _http_url("upstream/api/health")
 
 
 @pytest.mark.contract("MGMT-SUMMARY")
@@ -1621,7 +1681,7 @@ def test_management_summary_lists_routes_and_gateway_scope() -> None:
                 RouteConfig(
                     name="r1",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                     upstream_path_prefix="/api",
                 )
             ],
@@ -1686,7 +1746,7 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
                     ),
                 )
             },
-            backends={"hello-backend": BackendConfig(url="http://upstream")},
+            backends={"hello-backend": BackendConfig(url=_http_url("upstream"))},
             api_version_sets={
                 "public": ApiVersionSetConfig(
                     display_name="Public",
@@ -1704,7 +1764,7 @@ def test_management_resource_collections_expose_service_scoped_ids() -> None:
                 "hello": ApiConfig(
                     name="hello",
                     path="hello",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                     products=["starter"],
                     api_version_set="public",
                     revision="2",
@@ -1921,7 +1981,7 @@ def test_management_api_schema_endpoints_and_put_preserve_imported_metadata() ->
                 "weather": ApiConfig(
                     name="weather",
                     path="weather",
-                    upstream_base_url="http://weather-upstream",
+                    upstream_base_url=_http_url("weather-upstream"),
                     operations={
                         "current": OperationConfig(
                             name="current",
@@ -1983,7 +2043,7 @@ def test_management_api_schema_endpoints_and_put_preserve_imported_metadata() ->
             json={
                 "name": "weather",
                 "path": "weather-v2",
-                "upstream_base_url": "http://weather-upstream-v2",
+                "upstream_base_url": _http_url("weather-upstream-v2"),
             },
         )
         update_operation = client.put(
@@ -2027,7 +2087,7 @@ def test_management_operation_mock_response_flow_uses_authored_response_example(
                 "test-api": ApiConfig(
                     name="test-api",
                     path="test-api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             },
         ),
@@ -2052,9 +2112,13 @@ def test_management_operation_mock_response_flow_uses_authored_response_example(
                         "status_code": 200,
                         "representations": [
                             {
+                                "content_type": "text/plain",
+                                "examples": [{"name": "plain", "value": "not-json"}],
+                            },
+                            {
                                 "content_type": "application/json",
                                 "examples": [{"name": "ok", "value": {"sampleField": "test"}}],
-                            }
+                            },
                         ],
                     }
                 ],
@@ -2070,9 +2134,8 @@ def test_management_operation_mock_response_flow_uses_authored_response_example(
         mocked = client.get("/test-api/test")
 
     assert upsert_operation.status_code == 200
-    assert upsert_operation.json()["responses"][0]["representations"][0]["examples"][0]["value"] == {
-        "sampleField": "test"
-    }
+    assert upsert_operation.json()["responses"][0]["representations"][0]["examples"][0]["value"] == "not-json"
+    assert upsert_operation.json()["responses"][0]["representations"][1]["content_type"] == "application/json"
     assert update_policy.status_code == 200
     assert mocked.status_code == 200
     assert mocked.json() == {"sampleField": "test"}
@@ -2088,7 +2151,7 @@ def test_management_api_revision_and_release_endpoints_and_put_preserve_metadata
                 "weather": ApiConfig(
                     name="weather",
                     path="weather",
-                    upstream_base_url="http://weather-upstream",
+                    upstream_base_url=_http_url("weather-upstream"),
                     revision="2",
                     revision_description="Current revision",
                     source_api_id="service/team-sim/apis/weather;rev=1",
@@ -2132,7 +2195,7 @@ def test_management_api_revision_and_release_endpoints_and_put_preserve_metadata
             json={
                 "name": "weather",
                 "path": "weather-v2",
-                "upstream_base_url": "http://weather-upstream-v2",
+                "upstream_base_url": _http_url("weather-upstream-v2"),
             },
         )
         get_api = client.get("/apim/management/apis/weather", headers=headers)
@@ -2170,7 +2233,7 @@ def test_management_api_import_openapi_endpoint_creates_routable_api() -> None:
         {
             "openapi": "3.0.1",
             "info": {"title": "Petstore", "version": "1.0.0"},
-            "servers": [{"url": "http://upstream/api"}],
+            "servers": [{"url": _http_url("upstream/api")}],
             "paths": {
                 "/pets": {
                     "get": {
@@ -2209,7 +2272,7 @@ def test_management_api_import_openapi_endpoint_creates_routable_api() -> None:
     assert imported.json()["api"]["operations"][0]["id"] == "listPets"
     assert routed.status_code == 200
     assert routed.json() == {"ok": True}
-    assert upstream_urls == ["http://upstream/api/pets"]
+    assert upstream_urls == [_http_url("upstream/api/pets")]
 
 
 def test_management_api_version_set_crud_endpoints_work_for_api_authored_configs() -> None:
@@ -2254,7 +2317,7 @@ def test_management_api_revision_and_release_crud_endpoints_work() -> None:
                 "weather": ApiConfig(
                     name="weather",
                     path="weather",
-                    upstream_base_url="http://weather-upstream",
+                    upstream_base_url=_http_url("weather-upstream"),
                 )
             },
         )
@@ -2315,7 +2378,7 @@ def test_management_tag_crud_and_links_persist_without_parent_put_wiping_assignm
                     "weather": {
                         "name": "weather",
                         "path": "weather",
-                        "upstream_base_url": "http://weather-upstream",
+                        "upstream_base_url": _http_url("weather-upstream"),
                         "operations": {"current": {"name": "current", "method": "GET", "url_template": "/current"}},
                     }
                 },
@@ -2337,7 +2400,7 @@ def test_management_tag_crud_and_links_persist_without_parent_put_wiping_assignm
         api_update = client.put(
             "/apim/management/apis/weather",
             headers=headers,
-            json={"name": "weather", "path": "weather-v2", "upstream_base_url": "http://weather-upstream-v2"},
+            json={"name": "weather", "path": "weather-v2", "upstream_base_url": _http_url("weather-upstream-v2")},
         )
         product_update = client.put(
             "/apim/management/products/starter",
@@ -2582,7 +2645,7 @@ def test_management_crud_persists_api_authored_resources(tmp_path: Path, monkeyp
         backend = client.put(
             "/apim/management/backends/weather-backend",
             headers=headers,
-            json={"url": "http://weather-backend", "description": "Weather backend"},
+            json={"url": _http_url("weather-backend"), "description": "Weather backend"},
         )
         named_value = client.put(
             "/apim/management/named-values/upstream-key",
@@ -2600,7 +2663,7 @@ def test_management_crud_persists_api_authored_resources(tmp_path: Path, monkeyp
             json={
                 "name": "weather",
                 "path": "weather",
-                "upstream_base_url": "http://weather-backend",
+                "upstream_base_url": _http_url("weather-backend"),
                 "backend": "weather-backend",
                 "products": ["starter"],
                 "policies_xml": "<policies><inbound><base /></inbound><backend /><outbound /><on-error /></policies>",
@@ -2727,7 +2790,7 @@ def test_management_subscription_crud_endpoints_delegate_through_management_plan
 
 
 def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monkeypatch) -> None:
-    issuer = "http://issuer.example"
+    issuer = _http_url("issuer.example")
     audience = "api-app"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(
@@ -2765,7 +2828,7 @@ def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monke
                     {
                         "name": "subnet-calculator-api",
                         "path_prefix": "/api",
-                        "upstream_base_url": "http://upstream",
+                        "upstream_base_url": _http_url("upstream"),
                         "upstream_path_prefix": "/api",
                         "product": "subnet-calculator",
                         "authz": {"required_roles": ["user"]},
@@ -2778,7 +2841,7 @@ def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monke
     monkeypatch.setenv("APIM_CONFIG_PATH", str(config_path))
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream/api/health")
+        assert req.url == httpx.URL(_http_url("upstream/api/health"))
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
@@ -2818,7 +2881,7 @@ def test_management_policy_get_put_updates_route_policy_in_memory() -> None:
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://upstream",
+                upstream_base_url=_http_url("upstream"),
                 upstream_path_prefix="/api",
                 policies_xml=policy_xml,
             )
@@ -2860,7 +2923,7 @@ def test_management_policy_get_put_updates_route_policy_in_memory() -> None:
 
 def test_management_replay_returns_response_and_trace() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream/api/health?mode=debug")
+        assert req.url == httpx.URL(_http_url("upstream/api/health?mode=debug"))
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(
@@ -2873,7 +2936,7 @@ def test_management_replay_returns_response_and_trace() -> None:
                 RouteConfig(
                     name="r1",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                     upstream_path_prefix="/api",
                 )
             ],
@@ -2895,6 +2958,57 @@ def test_management_replay_returns_response_and_trace() -> None:
     assert payload["trace"]["route"] == "r1"
 
 
+def test_management_replay_uses_https_replay_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_base_urls: list[str | None] = []
+    real_async_client = httpx.AsyncClient
+
+    class RecordingAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            created_base_urls.append(kwargs.get("base_url"))
+            self._client = real_async_client(*args, **kwargs)
+
+        async def __aenter__(self) -> httpx.AsyncClient:
+            await self._client.__aenter__()
+            return self._client
+
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool | None:
+            return await self._client.__aexit__(exc_type, exc, tb)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url == httpx.URL("https://upstream/api/health?mode=debug")
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", RecordingAsyncClient)
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            trace_enabled=True,
+            proxy_streaming=False,
+            routes=[
+                RouteConfig(
+                    name="r1",
+                    path_prefix="/api",
+                    upstream_base_url="https://upstream",
+                    upstream_path_prefix="/api",
+                )
+            ],
+        ),
+        http_client=real_async_client(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        replay = client.post(
+            "/apim/management/replay",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={"method": "GET", "path": "/api/health", "query": {"mode": "debug"}},
+        )
+
+    assert replay.status_code == 200
+    assert created_base_urls == ["https://apim-replay.local"]
+
+
 def test_mtls_mode_disabled_allows_requests_without_cert() -> None:
     """When client_certificate mode is disabled, requests without certs succeed."""
     app = create_app(
@@ -2905,7 +3019,7 @@ def test_mtls_mode_disabled_allows_requests_without_cert() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -2926,7 +3040,7 @@ def test_mtls_mode_required_rejects_request_without_cert() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -2948,7 +3062,7 @@ def test_mtls_mode_required_accepts_request_with_cert() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -2975,7 +3089,7 @@ def test_mtls_mode_optional_allows_requests_without_cert() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -3004,7 +3118,7 @@ def test_mtls_trusted_cert_by_thumbprint() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -3045,7 +3159,7 @@ def test_mtls_trusted_cert_by_subject() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -3085,7 +3199,7 @@ def test_mtls_trusted_cert_by_issuer() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -3122,7 +3236,7 @@ def test_mtls_custom_header_names() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -3154,7 +3268,7 @@ def test_startup_probe_returns_200_when_ready() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -3176,7 +3290,7 @@ def test_reload_endpoint_reloads_config() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -3199,7 +3313,7 @@ def test_reload_requires_admin_token_when_configured() -> None:
                 RouteConfig(
                     name="default",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                 )
             ],
         ),
@@ -3238,7 +3352,7 @@ def test_named_values_resolve_in_backend_credentials_and_are_masked_in_trace() -
             RouteConfig(
                 name="r1",
                 path_prefix="/api",
-                upstream_base_url="http://ignored",
+                upstream_base_url=_http_url("ignored"),
                 upstream_path_prefix="/api",
                 backend="b1",
             )
@@ -3261,6 +3375,62 @@ def test_named_values_resolve_in_backend_credentials_and_are_masked_in_trace() -
     payload = trace.json()
     assert payload["selected_backend"]["backend_id"] == "b1"
     assert "super-secret-token" not in json.dumps(payload)
+
+
+def test_backend_managed_identity_and_client_certificate_headers_are_applied() -> None:
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append((str(req.url), dict(req.headers)))
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            backends={
+                "managed-identity": BackendConfig(
+                    url=_http_url("managed-identity-upstream"),
+                    auth_type="managed_identity",
+                    managed_identity_resource="https://resource.example",
+                ),
+                "client-certificate": BackendConfig(
+                    url=_http_url("client-certificate-upstream"),
+                    auth_type="client_certificate",
+                    client_certificate_thumbprints=["thumb-a", "thumb-b"],
+                ),
+            },
+            routes=[
+                RouteConfig(
+                    name="managed-identity",
+                    path_prefix="/mi",
+                    upstream_base_url=_http_url("ignored"),
+                    upstream_path_prefix="/api",
+                    backend="managed-identity",
+                ),
+                RouteConfig(
+                    name="client-certificate",
+                    path_prefix="/cc",
+                    upstream_base_url=_http_url("ignored"),
+                    upstream_path_prefix="/api",
+                    backend="client-certificate",
+                ),
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        mi = client.get("/mi/health")
+        cc = client.get("/cc/health")
+
+    assert mi.status_code == 200
+    assert cc.status_code == 200
+    assert seen[0][0] == _http_url("managed-identity-upstream/api/health")
+    assert seen[0][1]["x-apim-managed-identity"] == "true"
+    assert seen[0][1]["x-apim-managed-identity-resource"] == "https://resource.example"
+    assert seen[1][0] == _http_url("client-certificate-upstream/api/health")
+    assert seen[1][1]["x-apim-client-certificate"] == "present"
+    assert seen[1][1]["x-apim-client-certificate-thumbprints"] == "thumb-a,thumb-b"
 
 
 def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> None:
@@ -3295,7 +3465,7 @@ def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> N
             return httpx.Response(200, json={"issuer": issuer, "jwks_uri": "https://issuer.example/jwks"})
         if req.url == httpx.URL("https://issuer.example/jwks"):
             return httpx.Response(200, json=jwks)
-        assert req.url == httpx.URL("http://upstream/api/health")
+        assert req.url == httpx.URL(_http_url("upstream/api/health"))
         assert req.headers["x-apim-user-object-id"] == "user-123"
         assert req.headers["x-ms-client-principal-name"] == "demo@dev.test"
         return httpx.Response(200, json={"ok": True})
@@ -3309,7 +3479,7 @@ def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> N
                 RouteConfig(
                     name="r1",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                     upstream_path_prefix="/api",
                     policies_xml=policy,
                 )
@@ -3375,7 +3545,7 @@ def test_send_request_policy_can_branch_on_response_body() -> None:
                 RouteConfig(
                     name="r1",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream",
+                    upstream_base_url=_http_url("upstream"),
                     upstream_path_prefix="/api",
                     policies_xml=policy,
                 )
@@ -3420,7 +3590,7 @@ def test_set_backend_service_policy_switches_backend_by_query() -> None:
                 RouteConfig(
                     name="r1",
                     path_prefix="/api",
-                    upstream_base_url="http://upstream-default/api/10.4",
+                    upstream_base_url=_http_url("upstream-default/api/10.4"),
                     policies_xml=policy,
                 )
             ],
@@ -3432,7 +3602,7 @@ def test_set_backend_service_policy_switches_backend_by_query() -> None:
         resp = client.get("/api/partners/15", params={"version": "2013-05"})
 
     assert resp.status_code == 200
-    assert seen_urls == ["http://upstream-v1/api/8.2/partners/15?version=2013-05"]
+    assert seen_urls == [_http_url("upstream-v1/api/8.2/partners/15?version=2013-05")]
 
 
 def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> None:
@@ -3468,7 +3638,7 @@ def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> N
             trace_enabled=True,
             proxy_streaming=False,
             routes=[
-                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
             ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
@@ -3485,7 +3655,7 @@ def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> N
     assert first.headers["x-total"] == "1"
     assert second.status_code == 429
     assert second.headers["x-retry"]
-    assert seen_urls == ["http://upstream/items"]
+    assert seen_urls == [_http_url("upstream/items")]
     assert first_trace.json()["policy_variable_writes"][-1]["name"] == "remaining_calls"
     assert second_trace.json()["policy_variable_writes"][-1]["name"] == "retry_after"
 
@@ -3533,7 +3703,7 @@ def test_rate_limit_by_key_supports_context_subscription_id_expression() -> None
                 "tutorial-api": ApiConfig(
                     name="Tutorial API",
                     path="tutorial-api",
-                    upstream_base_url="http://mock-backend:8080/api",
+                    upstream_base_url=_http_url("mock-backend:8080/api"),
                     products=["tutorial-product"],
                     policies_xml=policy,
                     operations={
@@ -3553,7 +3723,7 @@ def test_rate_limit_by_key_supports_context_subscription_id_expression() -> None
     assert first.headers["custom"] == "My custom value"
     assert first.json() == {"status": "ok", "path": "/api/health"}
     assert second.status_code == 429
-    assert seen_urls == ["http://mock-backend:8080/api/health"]
+    assert seen_urls == [_http_url("mock-backend:8080/api/health")]
 
 
 def test_quota_by_key_respects_first_period_start(monkeypatch: Any) -> None:
@@ -3587,7 +3757,7 @@ def test_quota_by_key_respects_first_period_start(monkeypatch: Any) -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             routes=[
-                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
             ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
@@ -3600,7 +3770,7 @@ def test_quota_by_key_respects_first_period_start(monkeypatch: Any) -> None:
     assert first.status_code == 200
     assert second.status_code == 403
     assert second.headers["retry-after"] == "240"
-    assert seen_urls == ["http://upstream/health"]
+    assert seen_urls == [_http_url("upstream/health")]
 
 
 def test_cache_lookup_and_store_hit_and_vary_by_query_parameter() -> None:
@@ -3635,7 +3805,7 @@ def test_cache_lookup_and_store_hit_and_vary_by_query_parameter() -> None:
             allow_anonymous=True,
             proxy_streaming=True,
             routes=[
-                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
             ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
@@ -3693,7 +3863,7 @@ def test_cache_lookup_varies_by_developer_subscription() -> None:
                 },
             ),
             routes=[
-                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
             ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
@@ -3709,6 +3879,36 @@ def test_cache_lookup_varies_by_developer_subscription() -> None:
     assert third.json() == {"call": 2}
     assert call_count["value"] == 2
     assert second.headers["cache-control"] == "private, must-revalidate"
+
+
+def test_gateway_response_cache_hit_with_trace_headers() -> None:
+    call_count = {"value": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            cache_enabled=True,
+            proxy_streaming=False,
+            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"))],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/catalog", params={"version": "v1"}, headers={"x-apim-trace": "true"})
+        second = client.get("/api/catalog", params={"version": "v1"}, headers={"x-apim-trace": "true"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.headers["x-apim-cache"] == "miss"
+    assert second.headers["x-apim-cache"] == "hit"
+    assert first.json() == {"call": 1}
+    assert second.json() == {"call": 1}
+    assert call_count["value"] == 1
 
 
 def test_cache_lookup_value_store_and_remove_value() -> None:
@@ -3753,7 +3953,7 @@ def test_cache_lookup_value_store_and_remove_value() -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             routes=[
-                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
             ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
@@ -3788,7 +3988,7 @@ def test_external_cache_policy_is_unsupported_at_runtime() -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             routes=[
-                RouteConfig(name="r1", path_prefix="/api", upstream_base_url="http://upstream", policies_xml=policy)
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
             ],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"ok": True}))),
