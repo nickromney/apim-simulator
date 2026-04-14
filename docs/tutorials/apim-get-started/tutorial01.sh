@@ -11,6 +11,7 @@ DOCKER_BIN="${DOCKER_BIN:-docker}"
 APIM_BASE="${APIM_BASE:-$APIM_BASE_URL}"
 APIM_TENANT_KEY="${APIM_TENANT_KEY:-local-dev-tenant-key}"
 OPENAPI_SOURCE="${OPENAPI_SOURCE:-$ROOT_DIR/examples/mock-backend/openapi.json}"
+OPENAPI_SOURCE_DISPLAY="${OPENAPI_SOURCE_DISPLAY:-$(stack_env_display_path "$OPENAPI_SOURCE")}"
 APIM_API_ID="${APIM_API_ID:-tutorial-api}"
 APIM_API_NAME="${APIM_API_NAME:-Tutorial API}"
 APIM_API_PATH="${APIM_API_PATH:-tutorial-api}"
@@ -40,7 +41,7 @@ Environment overrides:
   DOCKER_BIN                   Docker CLI binary. Default: $DOCKER_BIN
   APIM_BASE                    Gateway base URL. Default: $APIM_BASE
   APIM_TENANT_KEY              Management tenant key. Default: $APIM_TENANT_KEY
-  OPENAPI_SOURCE               OpenAPI file path or URL. Default: $OPENAPI_SOURCE
+  OPENAPI_SOURCE               OpenAPI file path or URL. Default: $OPENAPI_SOURCE_DISPLAY
   APIM_API_ID                  API identifier to create. Default: $APIM_API_ID
   APIM_API_NAME                API display name. Default: $APIM_API_NAME
   APIM_API_PATH                Public API path. Default: $APIM_API_PATH
@@ -84,12 +85,12 @@ start_stack() {
 
   echo "Compose files:"
   for compose_file in "${compose_files[@]}"; do
-    echo "  - $compose_file"
+    echo "  - $(stack_env_display_path "$compose_file")"
   done
   echo "Running:"
   echo "  $DOCKER_BIN compose \\"
   for compose_file in "${compose_files[@]}"; do
-    echo "    -f $compose_file \\"
+    echo "    -f $(stack_env_display_path "$compose_file") \\"
   done
   echo "    up --build -d"
 

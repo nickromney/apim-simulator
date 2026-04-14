@@ -62,12 +62,12 @@ start_compose_stack() {
   echo "Compose files:"
   local compose_file
   for compose_file in "${compose_files[@]}"; do
-    echo "  - $compose_file"
+    echo "  - $(stack_env_display_path "$compose_file")"
   done
   echo "Running:"
   echo "  $DOCKER_BIN compose \\"
   for compose_file in "${compose_files[@]}"; do
-    echo "    -f $compose_file \\"
+    echo "    -f $(stack_env_display_path "$compose_file") \\"
   done
   echo "    ${remaining_args[*]}"
 

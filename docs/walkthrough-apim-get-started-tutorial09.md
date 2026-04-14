@@ -2,7 +2,7 @@
 
 Generated from a live run against the local repository.
 
-Companion script: `./docs/tutorials/apim-get-started/tutorial09.sh`
+Companion script: [tutorial09.sh](tutorials/apim-get-started/tutorial09.sh)
 
 ```bash
 set -euo pipefail
@@ -15,14 +15,14 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 09 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.ui.yml
+  - ./compose.yml
+  - ./compose.public.yml
+  - ./compose.ui.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.ui.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
+    -f ./compose.ui.yml \
     up -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Waiting for operator console at http://localhost:3007

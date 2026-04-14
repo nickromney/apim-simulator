@@ -179,6 +179,13 @@ cleanup_doc() {
   rm -f "$doc"
 }
 
+sanitize_walkthrough_doc() {
+  local doc="$1"
+  [[ -f "$doc" ]] || return
+
+  perl -0pi -e "s|\Q$ROOT_DIR\E|.|g" "$doc"
+}
+
 cleanup_stacks() {
   (cd "$ROOT_DIR" && make down-all >/dev/null 2>&1) || true
   (cd "$ROOT_DIR" && make down >/dev/null 2>&1) || true
@@ -602,6 +609,8 @@ rodney waitstable >/dev/null
 rodney sleep 2 >/dev/null
 rodney screenshot walkthrough-core-operator-console.png
 EOF
+
+  sanitize_walkthrough_doc "$DOC_CORE"
 
   split_doc_by_h2 "$DOC_CORE" \
     'direct-public-gateway::Direct Public Gateway' \
@@ -1036,6 +1045,8 @@ jq -n \
 rm -f "$verify_log"
 EOF
 
+  sanitize_walkthrough_doc "$DOC_EXAMPLES"
+
   split_doc_by_h2 "$DOC_EXAMPLES" \
     'hello-starter::Hello Starter' \
     'hello-starter-subscription::Hello Starter With Subscription' \
@@ -1058,7 +1069,7 @@ EOF
   for tutorial in $(seq -w 1 11); do
     sb_note "$DOC_TUTORIALS" <<EOF
 ## Tutorial ${tutorial}
-Companion script: \`./docs/tutorials/apim-get-started/tutorial${tutorial}.sh\`
+Companion script: [tutorial${tutorial}.sh](tutorials/apim-get-started/tutorial${tutorial}.sh)
 EOF
 
     sb_exec "$DOC_TUTORIALS" <<EOF
@@ -1069,6 +1080,8 @@ tutorial_cleanup_and_wait
 EOF
 
   done
+
+  sanitize_walkthrough_doc "$DOC_TUTORIALS"
 
   split_doc_by_h2 "$DOC_TUTORIALS" \
     'apim-get-started-tutorial01::Tutorial 01' \

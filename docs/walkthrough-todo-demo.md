@@ -33,12 +33,12 @@ rm -f "$log"
 [
   {
     "Command": "\"/app/.venv/bin/pyth…\"",
-    "CreatedAt": "2026-04-14 10:06:11 +0100 BST",
+    "CreatedAt": "2026-04-14 10:46:27 +0100 BST",
     "ExitCode": 0,
     "Health": "healthy",
-    "ID": "f538fb3585f8",
+    "ID": "e1be1b4ca20a",
     "Image": "apim-simulator:latest",
-    "Labels": "desktop.docker.io/ports.scheme=v2,desktop.docker.io/ports/8000/tcp=:8000,com.docker.compose.project.config_files=/Users/nickromney/Developer/personal/apim-simulator/compose.todo.yml,com.docker.compose.version=5.1.1,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.flavor=,com.docker.dhi.shell=,com.docker.dhi.title=Python 3.13.x,com.docker.compose.config-hash=8738a60af0dac1614affc8c687225bbb78a4cd601d4a974a65ff5a44515d3ae8,com.docker.compose.container-number=1,com.docker.compose.depends_on=todo-api:service_healthy:false,com.docker.compose.oneoff=False,com.docker.compose.project=apim-simulator-todo,com.docker.compose.project.working_dir=/Users/nickromney/Developer/personal/apim-simulator,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.compose.image=sha256:00338093e0ee132be543cde3e17e9aa9aabd8987f3567c15038adafbe603424d,com.docker.compose.service=apim-simulator,com.docker.dhi.compliance=cis,com.docker.dhi.distro=debian-13,com.docker.dhi.entitlement=public,com.docker.dhi.package-manager=,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.variant=runtime,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.name=dhi/python,com.docker.dhi.version=3.13.13-debian13",
+    "Labels": "com.docker.compose.config-hash=8738a60af0dac1614affc8c687225bbb78a4cd601d4a974a65ff5a44515d3ae8,com.docker.compose.project=apim-simulator-todo,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.distro=debian-13,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.version=3.13.13-debian13,desktop.docker.io/ports/8000/tcp=:8000,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.compose.container-number=1,com.docker.compose.image=sha256:54a3eb6673318b679adb4bdd5b76883e4315055750ae58af399bf45ad37c88c9,com.docker.compose.version=5.1.1,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.flavor=,com.docker.dhi.package-manager=,com.docker.dhi.shell=,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=./compose.todo.yml,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.entitlement=public,com.docker.dhi.name=dhi/python,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.variant=runtime,desktop.docker.io/ports.scheme=v2,com.docker.compose.depends_on=todo-api:service_healthy:false,com.docker.compose.project.working_dir=.,com.docker.compose.service=apim-simulator,com.docker.dhi.compliance=cis,com.docker.dhi.created=2026-04-11T22:45:39Z",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-todo-apim-simulator-1",
@@ -64,16 +64,16 @@ rm -f "$log"
     "Service": "apim-simulator",
     "Size": "0B",
     "State": "running",
-    "Status": "Up 5 seconds (healthy)"
+    "Status": "Up 6 seconds (healthy)"
   },
   {
     "Command": "\"/app/.venv/bin/uvic…\"",
-    "CreatedAt": "2026-04-14 10:06:11 +0100 BST",
+    "CreatedAt": "2026-04-14 10:46:27 +0100 BST",
     "ExitCode": 0,
     "Health": "healthy",
-    "ID": "459a943f3586",
+    "ID": "74702b39a6e3",
     "Image": "apim-simulator-todo-api:latest",
-    "Labels": "com.docker.compose.project=apim-simulator-todo,com.docker.compose.project.working_dir=/Users/nickromney/Developer/personal/apim-simulator,com.docker.compose.version=5.1.1,com.docker.dhi.compliance=cis,com.docker.dhi.package-manager=,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.variant=runtime,com.docker.compose.depends_on=,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.name=dhi/python,com.docker.dhi.version=3.13.13-debian13,desktop.docker.io/ports.scheme=v2,com.docker.compose.config-hash=c9c986d25726af3f0529b93e15b253c49805c0bdbe242518ab033706ed1ea648,com.docker.compose.container-number=1,com.docker.compose.service=todo-api,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.distro=debian-13,com.docker.dhi.flavor=,com.docker.dhi.shell=,com.docker.compose.image=sha256:c748178cc2974ef52c867a4103539cd6455aa0125878f93cd8b1bd961af2a19b,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=/Users/nickromney/Developer/personal/apim-simulator/compose.todo.yml,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.entitlement=public",
+    "Labels": "com.docker.compose.project.working_dir=.,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.flavor=,com.docker.dhi.name=dhi/python,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.version=3.13.13-debian13,com.docker.compose.config-hash=c9c986d25726af3f0529b93e15b253c49805c0bdbe242518ab033706ed1ea648,com.docker.compose.depends_on=,com.docker.compose.service=todo-api,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.compliance=cis,com.docker.dhi.distro=debian-13,desktop.docker.io/ports.scheme=v2,com.docker.compose.project.config_files=./compose.todo.yml,com.docker.compose.version=5.1.1,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.package-manager=,com.docker.compose.container-number=1,com.docker.compose.image=sha256:1856562c59571c694e49a618bf71d7d0f72b45f95ebd53a5a58a52ce097f9b81,com.docker.compose.oneoff=False,com.docker.dhi.entitlement=public,com.docker.dhi.shell=,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.variant=runtime,com.docker.compose.project=apim-simulator-todo",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-todo-todo-api-1",
@@ -97,12 +97,12 @@ rm -f "$log"
   },
   {
     "Command": "\"/usr/local/bin/runt…\"",
-    "CreatedAt": "2026-04-14 10:06:11 +0100 BST",
+    "CreatedAt": "2026-04-14 10:46:27 +0100 BST",
     "ExitCode": 0,
     "Health": "",
-    "ID": "cfc98cb7b125",
+    "ID": "e28b821accb8",
     "Image": "apim-simulator-todo-frontend:latest",
-    "Labels": "desktop.docker.io/ports/8080/tcp=:3000,com.docker.compose.config-hash=17d5e64e34e45171dbdf666aae54d0494904d7a7e0362c22269dd8301d868ce1,com.docker.dhi.chain-id=sha256:12d6f6bfdcac60cd53148007d8b5ee2c5a827f82ad0a8568232264eb95b6f5e2,com.docker.dhi.flavor=,com.docker.compose.container-number=1,com.docker.compose.depends_on=apim-simulator:service_healthy:false,com.docker.compose.project=apim-simulator-todo,com.docker.compose.project.working_dir=/Users/nickromney/Developer/personal/apim-simulator,com.docker.compose.version=5.1.1,com.docker.dhi.compliance=cis,com.docker.dhi.date.release=2025-06-24,com.docker.dhi.distro=debian-13,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=/Users/nickromney/Developer/personal/apim-simulator/compose.todo.yml,com.docker.compose.service=todo-frontend,com.docker.dhi.definition=image/nginx/debian-13/mainline,com.docker.dhi.name=dhi/nginx,com.docker.dhi.url=https://dhi.io/catalog/nginx,com.docker.dhi.variant=runtime,com.docker.compose.image=sha256:9c357ca2ccb9ecf27da39f9adfdcd88a583a6c17b2a36129509095b20719bc41,com.docker.dhi.created=2026-02-05T05:17:44Z,com.docker.dhi.package-manager=,com.docker.dhi.shell=,com.docker.dhi.title=Nginx mainline,com.docker.dhi.version=1.29.5-debian13,desktop.docker.io/ports.scheme=v2",
+    "Labels": "com.docker.compose.container-number=1,com.docker.compose.project.working_dir=.,com.docker.compose.service=todo-frontend,com.docker.compose.version=5.1.1,com.docker.dhi.date.release=2025-06-24,desktop.docker.io/ports.scheme=v2,com.docker.compose.oneoff=False,com.docker.dhi.chain-id=sha256:12d6f6bfdcac60cd53148007d8b5ee2c5a827f82ad0a8568232264eb95b6f5e2,com.docker.dhi.flavor=,com.docker.dhi.name=dhi/nginx,com.docker.dhi.package-manager=,com.docker.dhi.shell=,com.docker.dhi.url=https://dhi.io/catalog/nginx,desktop.docker.io/ports/8080/tcp=:3000,com.docker.compose.image=sha256:a434a760ae3871c55206133dd4758ac7786bb4d71fc617d590ed73e2f37c7f7e,com.docker.compose.project=apim-simulator-todo,com.docker.dhi.created=2026-02-05T05:17:44Z,com.docker.dhi.distro=debian-13,com.docker.dhi.title=Nginx mainline,com.docker.dhi.version=1.29.5-debian13,com.docker.compose.depends_on=apim-simulator:service_healthy:false,com.docker.compose.project.config_files=./compose.todo.yml,com.docker.dhi.compliance=cis,com.docker.dhi.definition=image/nginx/debian-13/mainline,com.docker.dhi.variant=runtime,com.docker.compose.config-hash=17d5e64e34e45171dbdf666aae54d0494904d7a7e0362c22269dd8301d868ce1",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-todo-todo-frontend-1",
@@ -228,7 +228,7 @@ PY
   "created_todo": {
     "completed": false,
     "id": 1,
-    "title": "walkthrough-d1172358"
+    "title": "walkthrough-1df810a9"
   },
   "frontend_base_url": "http://127.0.0.1:3000",
   "frontend_title_present": true,
@@ -256,7 +256,7 @@ PY
   "updated_todo": {
     "completed": true,
     "id": 1,
-    "title": "walkthrough-d1172358"
+    "title": "walkthrough-1df810a9"
   }
 }
 ```
@@ -275,4 +275,4 @@ rodney screenshot walkthrough-example-todo.png
 
 ```
 
-![02baca24-2026-04-14](02baca24-2026-04-14.png)
+![728e4d08-2026-04-14](728e4d08-2026-04-14.png)

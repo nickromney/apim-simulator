@@ -62,6 +62,29 @@ stack_env_init() {
   export SMOKE_HELLO_BASE_URL SMOKE_HELLO_KEYCLOAK_BASE_URL SMOKE_OIDC_BASE_URL SMOKE_OIDC_KEYCLOAK_BASE_URL EDGE_HTTP_BASE_URL EDGE_TLS_BASE_URL
 }
 
+stack_env_display_path() {
+  local path="$1"
+  local root_prefix
+
+  if [[ -z "${ROOT_DIR:-}" ]]; then
+    printf '%s' "$path"
+    return 0
+  fi
+
+  if [[ "$path" == "$ROOT_DIR" ]]; then
+    printf '.'
+    return 0
+  fi
+
+  root_prefix="$ROOT_DIR/"
+  if [[ "$path" == "$root_prefix"* ]]; then
+    printf './%s' "${path#"$root_prefix"}"
+    return 0
+  fi
+
+  printf '%s' "$path"
+}
+
 stack_env_print_exports() {
   local name
   for name in \

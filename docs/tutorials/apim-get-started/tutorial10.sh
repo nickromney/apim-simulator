@@ -87,7 +87,7 @@ wait_for_gateway
 import_tutorial_api
 echo
 
-echo "REST Client example: $TUTORIAL10_REST_FILE"
+echo "REST Client example: $(stack_env_display_path "$TUTORIAL10_REST_FILE")"
 echo "Applying the REST Client policy update to '$APIM_API_ID'"
 policy_response="$(management_put "/apim/management/policies/api/$APIM_API_ID" "$(cat <<JSON
 {"xml":"<policies><inbound /><backend /><outbound><set-header name=\"x-from-vscode\" exists-action=\"override\"><value>true</value></set-header></outbound><on-error /></policies>"}

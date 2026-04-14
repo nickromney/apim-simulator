@@ -2,7 +2,7 @@
 
 Generated from a live run against the local repository.
 
-Companion script: `./docs/tutorials/apim-get-started/tutorial05.sh`
+Companion script: [tutorial05.sh](tutorials/apim-get-started/tutorial05.sh)
 
 ```bash
 set -euo pipefail
@@ -15,14 +15,14 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 05 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.otel.yml
+  - ./compose.yml
+  - ./compose.public.yml
+  - ./compose.otel.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.otel.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
+    -f ./compose.otel.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Waiting for Grafana health at http://localhost:3001/api/health

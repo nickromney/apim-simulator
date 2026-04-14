@@ -1,11 +1,11 @@
 # APIM Simulator Walkthrough: APIM Get-Started Tutorial Mirror
 
-*2026-04-14T09:07:17Z*
+*2026-04-14T10:59:15Z*
 
 This walkthrough runs every mirrored tutorial script under `docs/tutorials/apim-get-started/` with both `--setup` and `--verify`. The scripts already emit the closest local equivalent to each Microsoft Learn step, so the captured outputs here are the most direct proof that the tutorial mirror still behaves as documented.
 
 ## Tutorial 01
-Companion script: `./docs/tutorials/apim-get-started/tutorial01.sh`
+Companion script: [tutorial01.sh](tutorials/apim-get-started/tutorial01.sh)
 
 ```bash
 set -euo pipefail
@@ -16,15 +16,14 @@ tutorial_cleanup_and_wait
 ```
 
 ```output
-host port 8000 still busy after 30s; retrying make down once
 Starting tutorial 01 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Importing OpenAPI source into API 'tutorial-api'
@@ -74,7 +73,7 @@ $ curl -sS "http://localhost:8000/tutorial-api/echo"
 ```
 
 ## Tutorial 02
-Companion script: `./docs/tutorials/apim-get-started/tutorial02.sh`
+Companion script: [tutorial02.sh](tutorials/apim-get-started/tutorial02.sh)
 
 ```bash
 set -euo pipefail
@@ -87,12 +86,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 02 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Importing OpenAPI source into API 'tutorial-api'
@@ -173,7 +172,7 @@ $ curl -sS -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/t
 ```
 
 ## Tutorial 03
-Companion script: `./docs/tutorials/apim-get-started/tutorial03.sh`
+Companion script: [tutorial03.sh](tutorials/apim-get-started/tutorial03.sh)
 
 ```bash
 set -euo pipefail
@@ -186,12 +185,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 03 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Creating blank API 'mock-only'
@@ -226,7 +225,7 @@ $ curl -sS "http://localhost:8000/mock-only/test"
 ```
 
 ## Tutorial 04
-Companion script: `./docs/tutorials/apim-get-started/tutorial04.sh`
+Companion script: [tutorial04.sh](tutorials/apim-get-started/tutorial04.sh)
 
 ```bash
 set -euo pipefail
@@ -239,12 +238,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 04 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d --force-recreate apim-simulator mock-backend
 Waiting for gateway health at http://localhost:8000/apim/health
 Importing OpenAPI source into API 'tutorial-api'
@@ -294,7 +293,7 @@ $ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/tu
 ```
 
 ## Tutorial 05
-Companion script: `./docs/tutorials/apim-get-started/tutorial05.sh`
+Companion script: [tutorial05.sh](tutorials/apim-get-started/tutorial05.sh)
 
 ```bash
 set -euo pipefail
@@ -307,14 +306,14 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 05 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.otel.yml
+  - ./compose.yml
+  - ./compose.public.yml
+  - ./compose.otel.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.otel.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
+    -f ./compose.otel.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Waiting for Grafana health at http://localhost:3001/api/health
@@ -376,7 +375,7 @@ $ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/a
 ```
 
 ## Tutorial 06
-Companion script: `./docs/tutorials/apim-get-started/tutorial06.sh`
+Companion script: [tutorial06.sh](tutorials/apim-get-started/tutorial06.sh)
 
 ```bash
 set -euo pipefail
@@ -389,12 +388,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 06 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Importing OpenAPI source into API 'tutorial-api'
@@ -440,7 +439,7 @@ $ curl -sS "http://localhost:8000/apim/trace/<trace-id>"
 ```
 
 ## Tutorial 07
-Companion script: `./docs/tutorials/apim-get-started/tutorial07.sh`
+Companion script: [tutorial07.sh](tutorials/apim-get-started/tutorial07.sh)
 
 ```bash
 set -euo pipefail
@@ -453,12 +452,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 07 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Importing OpenAPI source into API 'tutorial-api'
@@ -541,7 +540,7 @@ $ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/a
 ```
 
 ## Tutorial 08
-Companion script: `./docs/tutorials/apim-get-started/tutorial08.sh`
+Companion script: [tutorial08.sh](tutorials/apim-get-started/tutorial08.sh)
 
 ```bash
 set -euo pipefail
@@ -554,12 +553,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 08 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Creating version set 'public'
@@ -611,7 +610,7 @@ $ curl -i -H "x-api-version: v2" "http://localhost:8000/versioned/echo"
 ```
 
 ## Tutorial 09
-Companion script: `./docs/tutorials/apim-get-started/tutorial09.sh`
+Companion script: [tutorial09.sh](tutorials/apim-get-started/tutorial09.sh)
 
 ```bash
 set -euo pipefail
@@ -624,14 +623,14 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 09 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.ui.yml
+  - ./compose.yml
+  - ./compose.public.yml
+  - ./compose.ui.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.ui.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
+    -f ./compose.ui.yml \
     up -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Waiting for operator console at http://localhost:3007
@@ -654,7 +653,7 @@ $ curl -sS "http://localhost:3007"
 ```
 
 ## Tutorial 10
-Companion script: `./docs/tutorials/apim-get-started/tutorial10.sh`
+Companion script: [tutorial10.sh](tutorials/apim-get-started/tutorial10.sh)
 
 ```bash
 set -euo pipefail
@@ -667,12 +666,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 10 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Importing OpenAPI source into API 'tutorial-api'
@@ -691,7 +690,7 @@ Importing OpenAPI source into API 'tutorial-api'
   }
 }
 
-REST Client example: /Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial10.rest.http
+REST Client example: ./docs/tutorials/apim-get-started/tutorial10.rest.http
 Applying the REST Client policy update to 'tutorial-api'
 {
   "contains_vscode_header": true,
@@ -719,7 +718,7 @@ $ curl -i "http://localhost:8000/tutorial-api/health"
 ```
 
 ## Tutorial 11
-Companion script: `./docs/tutorials/apim-get-started/tutorial11.sh`
+Companion script: [tutorial11.sh](tutorials/apim-get-started/tutorial11.sh)
 
 ```bash
 set -euo pipefail
@@ -732,12 +731,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 11 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Importing OpenAPI source into API 'tutorial-api'

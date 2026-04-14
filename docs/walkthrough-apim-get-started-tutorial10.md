@@ -2,7 +2,7 @@
 
 Generated from a live run against the local repository.
 
-Companion script: `./docs/tutorials/apim-get-started/tutorial10.sh`
+Companion script: [tutorial10.sh](tutorials/apim-get-started/tutorial10.sh)
 
 ```bash
 set -euo pipefail
@@ -15,12 +15,12 @@ tutorial_cleanup_and_wait
 ```output
 Starting tutorial 10 stack with docker compose
 Compose files:
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.yml
-  - /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml
+  - ./compose.yml
+  - ./compose.public.yml
 Running:
   docker compose \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.yml \
-    -f /Users/nickromney/Developer/personal/apim-simulator/compose.public.yml \
+    -f ./compose.yml \
+    -f ./compose.public.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
 Importing OpenAPI source into API 'tutorial-api'
@@ -39,7 +39,7 @@ Importing OpenAPI source into API 'tutorial-api'
   }
 }
 
-REST Client example: /Users/nickromney/Developer/personal/apim-simulator/docs/tutorials/apim-get-started/tutorial10.rest.http
+REST Client example: ./docs/tutorials/apim-get-started/tutorial10.rest.http
 Applying the REST Client policy update to 'tutorial-api'
 {
   "contains_vscode_header": true,

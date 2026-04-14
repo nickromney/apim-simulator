@@ -48,12 +48,12 @@ COMPOSE_FILES=(
 echo "Stopping all tutorial stack variants with docker compose"
 echo "Compose files:"
 for compose_file in "${COMPOSE_FILES[@]}"; do
-  echo "  - $compose_file"
+  echo "  - $(stack_env_display_path "$compose_file")"
 done
 echo "Running:"
 echo "  $DOCKER_BIN compose \\"
 for compose_file in "${COMPOSE_FILES[@]}"; do
-  echo "    -f $compose_file \\"
+  echo "    -f $(stack_env_display_path "$compose_file") \\"
 done
 echo "    down --remove-orphans"
 
