@@ -27,6 +27,7 @@ Local internal caching is supported for the `cache-*` policies. External cache b
 
 Before running the simulator:
 
+- run `make prereqs` to verify Docker, `mkcert`, and the common local host ports are ready
 - make sure Docker Engine or Docker Desktop is running
 - use `uv` if you want to run smoke scripts, import helpers, or tests from the host
 - use `npm` only for the browser-facing demo checks such as Playwright, Bruno, or the UI toolchain
@@ -98,7 +99,7 @@ stays on a hardened runtime base.
 | Scenario | Start command | Entry point | Use when |
 | --- | --- | --- | --- |
 | Direct public gateway | `make up` | [http://localhost:8000](http://localhost:8000) | You want the smallest APIM-shaped gateway path |
-| Direct public gateway with OTEL | `make up-otel` | [http://localhost:8000](http://localhost:8000), [http://localhost:3001](http://localhost:3001) | You want logs, metrics, and traces immediately |
+| Direct public gateway with OTEL | `make up-otel` | [http://localhost:8000](http://localhost:8000), [https://lgtm.apim.127.0.0.1.sslip.io:8443](https://lgtm.apim.127.0.0.1.sslip.io:8443) | You want logs, metrics, and traces immediately |
 | Todo demo with OTEL | `make up-todo-otel` | [http://localhost:3000](http://localhost:3000) | You want the richest browser-backed teaching flow |
 | Hello starter | `make up-hello` | [http://localhost:8000/api/hello](http://localhost:8000/api/hello) | You want the smallest backend scaffold behind APIM |
 | OIDC example | `make up-oidc` | [http://localhost:8000](http://localhost:8000) | You want JWT plus subscription flows |
@@ -143,7 +144,7 @@ make verify-todo-otel
 Then open:
 
 - [http://localhost:3000](http://localhost:3000)
-- [http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview](http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview)
+- [https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview](https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview)
 
 ### Smallest path
 
@@ -169,7 +170,7 @@ STACK_SLOT=1 make smoke-oidc
 ```
 
 Each slot shifts the published host ports by `100`, so slot `1` moves the
-default gateway from `8000` to `8100`, Grafana from `3001` to `3101`, Keycloak
+default gateway from `8000` to `8100`, Grafana from `8443` to `8543`, Keycloak
 from `8180` to `8280`, and the todo frontend from `3000` to `3100`.
 
 If you prefer a raw offset, use `PORT_OFFSET` directly:

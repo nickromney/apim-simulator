@@ -38,11 +38,11 @@ func renderRuntimeConfig(outputPath string) error {
 	fields := []runtimeField{
 		{key: "API_BASE_URL", envNames: []string{"API_BASE_URL"}, defaultVal: "http://localhost:8000"},
 		{key: "APIM_SUBSCRIPTION_KEY", envNames: []string{"APIM_SUBSCRIPTION_KEY"}, defaultVal: "todo-demo-key"},
-		{key: "GRAFANA_BASE_URL", envNames: []string{"GRAFANA_BASE_URL"}, defaultVal: "http://localhost:3001"},
+		{key: "GRAFANA_BASE_URL", envNames: []string{"GRAFANA_BASE_URL"}, defaultVal: "https://lgtm.apim.127.0.0.1.sslip.io:8443"},
 		{
 			key:        "OBSERVABILITY_DASHBOARD_URL",
 			envNames:   []string{"OBSERVABILITY_DASHBOARD_URL"},
-			defaultVal: "http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview",
+			defaultVal: "https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview",
 		},
 	}
 

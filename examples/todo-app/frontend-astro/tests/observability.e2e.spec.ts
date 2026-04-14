@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const grafanaBaseUrl = process.env.GRAFANA_BASE_URL || "http://localhost:3001";
+const grafanaBaseUrl = process.env.GRAFANA_BASE_URL || "https://lgtm.apim.127.0.0.1.sslip.io:8443";
 
 test("lets a user jump from the todo flow into the Grafana OTEL dashboard", async ({ context, page }) => {
   const title = `Observability todo ${Date.now()}`;

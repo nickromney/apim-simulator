@@ -50,6 +50,6 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *'http://localhost:8000'* ]]
   [[ "$output" == *'todo-demo-key'* ]]
-  [[ "$output" == *'http://localhost:3001'* ]]
-  [[ "$output" == *'http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview'* ]]
+  [[ "$output" == *'https://lgtm.apim.127.0.0.1.sslip.io:8443'* ]]
+  [[ "$output" == *'https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview'* ]]
 }

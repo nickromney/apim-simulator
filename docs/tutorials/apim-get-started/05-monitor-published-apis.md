@@ -39,7 +39,7 @@ curl -sS -H "Ocp-Apim-Subscription-Key: tutorial-key" \
 
 Then inspect:
 
-- Grafana dashboards: `http://localhost:3001`
+- Grafana dashboards: [https://lgtm.apim.127.0.0.1.sslip.io:8443](https://lgtm.apim.127.0.0.1.sslip.io:8443)
 - recent APIM traces: `curl -sS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" "$APIM_BASE/apim/management/traces"`
 
 ## What Mapped Cleanly
@@ -62,7 +62,7 @@ Use `--setup` to have [`tutorial05.sh`](tutorial05.sh) perform the local setup f
 Expected key `./docs/tutorials/apim-get-started/tutorial05.sh --verify` output:
 
 ```text
-Waiting for Grafana health at http://localhost:3001/api/health
+Waiting for Grafana health at https://lgtm.apim.127.0.0.1.sslip.io:8443/api/health
 Sending traced sample traffic
 {
   "correlation_id": "tutorial05-health",
@@ -77,7 +77,7 @@ Sending traced sample traffic
 }
 
 Verifying observability surfaces
-$ curl -sS "http://localhost:3001/api/health"
+$ curl -sS "https://lgtm.apim.127.0.0.1.sslip.io:8443/api/health"
 {
   "database": "ok"
 }

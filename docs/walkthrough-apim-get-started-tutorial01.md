@@ -13,6 +13,7 @@ tutorial_cleanup_and_wait
 ```
 
 ```output
+host port 8000 still busy after 30s; retrying make down once
 Starting tutorial 01 stack with docker compose
 Compose files:
   - ./compose.yml

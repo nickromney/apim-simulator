@@ -25,7 +25,7 @@ Running:
     -f ./compose.otel.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
-Waiting for Grafana health at http://localhost:3001/api/health
+Waiting for Grafana health at https://lgtm.apim.127.0.0.1.sslip.io:8443/api/health
 Importing OpenAPI source into API 'tutorial-api'
 {
   "api_id": "tutorial-api",
@@ -60,7 +60,7 @@ Sending traced sample traffic
 
 Setup complete. Run ./docs/tutorials/apim-get-started/tutorial05.sh --verify to validate the observability surfaces.
 Verifying observability surfaces
-$ curl -sS "http://localhost:3001/api/health"
+$ curl -sS "https://lgtm.apim.127.0.0.1.sslip.io:8443/api/health"
 {
   "database": "ok"
 }

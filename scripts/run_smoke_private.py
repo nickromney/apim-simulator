@@ -11,6 +11,7 @@ PINNED_MCP = "mcp==1.26.0"
 
 def main() -> None:
     site_packages_path = Path("/run/smoke/site-packages")
+    repo_root = Path(__file__).resolve().parent.parent
     site_packages_path.mkdir(parents=True, exist_ok=True)
 
     subprocess.run(
@@ -33,12 +34,15 @@ def main() -> None:
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
     env["PYTHONPATH"] = (
-        f"{site_packages_path}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(site_packages_path)
+        f"{repo_root}{os.pathsep}{site_packages_path}{os.pathsep}{existing_pythonpath}"
+        if existing_pythonpath
+        else f"{repo_root}{os.pathsep}{site_packages_path}"
     )
 
     subprocess.run(
         [sys.executable, "scripts/smoke_private.py"],
         check=True,
+        cwd=repo_root,
         env=env,
     )
 

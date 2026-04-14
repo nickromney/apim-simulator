@@ -1,6 +1,6 @@
 # APIM Simulator Walkthrough: APIM Get-Started Tutorial Mirror
 
-*2026-04-14T10:59:15Z*
+*2026-04-14T15:56:36Z*
 
 This walkthrough runs every mirrored tutorial script under `docs/tutorials/apim-get-started/` with both `--setup` and `--verify`. The scripts already emit the closest local equivalent to each Microsoft Learn step, so the captured outputs here are the most direct proof that the tutorial mirror still behaves as documented.
 
@@ -16,6 +16,7 @@ tutorial_cleanup_and_wait
 ```
 
 ```output
+host port 8000 still busy after 30s; retrying make down once
 Starting tutorial 01 stack with docker compose
 Compose files:
   - ./compose.yml
@@ -316,7 +317,7 @@ Running:
     -f ./compose.otel.yml \
     up --build -d
 Waiting for gateway health at http://localhost:8000/apim/health
-Waiting for Grafana health at http://localhost:3001/api/health
+Waiting for Grafana health at https://lgtm.apim.127.0.0.1.sslip.io:8443/api/health
 Importing OpenAPI source into API 'tutorial-api'
 {
   "api_id": "tutorial-api",
@@ -351,7 +352,7 @@ Sending traced sample traffic
 
 Setup complete. Run ./docs/tutorials/apim-get-started/tutorial05.sh --verify to validate the observability surfaces.
 Verifying observability surfaces
-$ curl -sS "http://localhost:3001/api/health"
+$ curl -sS "https://lgtm.apim.127.0.0.1.sslip.io:8443/api/health"
 {
   "database": "ok"
 }

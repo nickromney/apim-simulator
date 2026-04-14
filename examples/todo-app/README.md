@@ -29,7 +29,7 @@ make down
 The browser entrypoint is `http://localhost:3000`. The APIM gateway is
 `http://localhost:8000`.
 
-`make up-todo-otel` adds [LGTM](https://github.com/grafana/docker-otel-lgtm) on `http://localhost:3001` and exports OTEL
+`make up-todo-otel` adds [LGTM](https://github.com/grafana/docker-otel-lgtm) on [https://lgtm.apim.127.0.0.1.sslip.io:8443](https://lgtm.apim.127.0.0.1.sslip.io:8443) and exports OTEL
 telemetry from both the gateway and the toy FastAPI backend over OTLP HTTP.
 The todo UI exposes direct Grafana links so a browser user can move from a
 real task interaction into the OTEL dashboard without leaving the app.

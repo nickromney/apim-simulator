@@ -9,10 +9,9 @@ import traceback
 from smoke_mcp import make_async_client
 from smoke_mcp import run as run_mcp
 
-from app.urls import http_url
-
+DEFAULT_PRIVATE_BASE_URL = "http://apim-simulator:8000"
 DEFAULT_PRIVATE_HOST = "apim-simulator:8000"
-BASE_URL = os.getenv("SMOKE_PRIVATE_BASE_URL", http_url(DEFAULT_PRIVATE_HOST)).rstrip("/")
+BASE_URL = os.getenv("SMOKE_PRIVATE_BASE_URL", DEFAULT_PRIVATE_BASE_URL).rstrip("/")
 SUBSCRIPTION_KEY = os.getenv("SMOKE_MCP_SUBSCRIPTION_KEY", "mcp-demo-key")
 
 

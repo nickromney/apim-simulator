@@ -60,7 +60,7 @@ class TodoFrontendApp {
 
   constructor() {
     const runtimeConfig = window.RUNTIME_CONFIG || {};
-    const grafanaBaseUrl = runtimeConfig.GRAFANA_BASE_URL || "http://localhost:3001";
+    const grafanaBaseUrl = runtimeConfig.GRAFANA_BASE_URL || "https://lgtm.apim.127.0.0.1.sslip.io:8443";
     this.config = {
       API_BASE_URL: runtimeConfig.API_BASE_URL || "http://localhost:8000",
       APIM_SUBSCRIPTION_KEY: runtimeConfig.APIM_SUBSCRIPTION_KEY || "",

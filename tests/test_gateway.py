@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import json
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlunsplit
 
@@ -11,9 +15,12 @@ import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
+from starlette.requests import Request
 
+import app.main as app_main
 from app.config import (
     ApiConfig,
     ApiReleaseConfig,
@@ -51,7 +58,8 @@ from app.config import (
     TrustedClientCertificateConfig,
     UserConfig,
 )
-from app.main import create_app
+from app.main import _cached_gateway_response, create_app
+from app.policy import PolicyRequest, PolicyRuntime
 
 
 def _make_rsa_jwks() -> tuple[dict, rsa.RSAPrivateKey]:
@@ -82,6 +90,31 @@ def _http_url(target: str) -> str:
     host, _, remainder = target.partition("/")
     path, _, query = remainder.partition("?")
     return urlunsplit(("http", host, f"/{path}" if path else "", query, ""))
+
+
+def _lifespan_helpers(app: Any) -> dict[str, Any]:
+    lifespan = app.router.lifespan_context.__wrapped__
+    return {
+        name: cell.cell_contents
+        for name, cell in zip(lifespan.__code__.co_freevars, lifespan.__closure__ or (), strict=False)
+    }
+
+
+def _make_cached_request() -> tuple[SimpleNamespace, Request]:
+    app = SimpleNamespace(state=SimpleNamespace(trace_store={}))
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/catalog",
+        "headers": [],
+        "query_string": b"",
+        "app": app,
+    }
+    return app, Request(scope, receive)
 
 
 @pytest.mark.contract("GW-HEALTH")
@@ -2789,6 +2822,79 @@ def test_management_subscription_crud_endpoints_delegate_through_management_plan
     assert deleted.json() == {"deleted": True, "subscription_id": "demo", "remaining": 0}
 
 
+def test_create_app_requires_management_plane(monkeypatch) -> None:
+    monkeypatch.setattr(app_main, "ManagementService", lambda *args, **kwargs: None)
+    app = create_app()
+    helpers = _lifespan_helpers(app)
+
+    with pytest.raises(HTTPException, match="Management service not initialized") as exc_info:
+        helpers["_require_management_plane"]()
+
+    assert exc_info.value.status_code == 500
+
+
+def test_config_watcher_skips_reload_when_management_service_unavailable(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(app_main, "ManagementService", lambda *args, **kwargs: None)
+    config_path = tmp_path / "apim.json"
+    config_path.write_text("{}", encoding="utf-8")
+    app = create_app()
+    watcher = _lifespan_helpers(app)["_config_watcher"]
+    warning_seen = threading.Event()
+    original_warning = app_main.logger.warning
+
+    def warning(message: str, *args: Any, **kwargs: Any) -> Any:
+        if message == "config watcher skipped reload because management service was unavailable":
+            warning_seen.set()
+        return original_warning(message, *args, **kwargs)
+
+    monkeypatch.setattr(app_main.logger, "warning", warning)
+
+    async def run_watcher() -> None:
+        task = asyncio.create_task(watcher(app, str(config_path), interval=0.01))
+        try:
+            await asyncio.sleep(0)
+            config_path.write_text("updated", encoding="utf-8")
+            assert await asyncio.to_thread(warning_seen.wait, 1.0)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    asyncio.run(run_watcher())
+
+
+def test_config_watcher_reloads_config_when_management_service_is_available(monkeypatch, tmp_path: Path) -> None:
+    class DummyManagementService:
+        def __init__(self) -> None:
+            self.reloaded = threading.Event()
+
+        def apply_runtime_config(self, *_: Any, **__: Any) -> None:
+            pass
+
+        def reload_config(self) -> None:
+            self.reloaded.set()
+
+    dummy = DummyManagementService()
+    monkeypatch.setattr(app_main, "ManagementService", lambda *args, **kwargs: dummy)
+    config_path = tmp_path / "apim.json"
+    config_path.write_text("{}", encoding="utf-8")
+    app = create_app()
+    watcher = _lifespan_helpers(app)["_config_watcher"]
+
+    async def run_watcher() -> None:
+        task = asyncio.create_task(watcher(app, str(config_path), interval=0.01))
+        try:
+            await asyncio.sleep(0)
+            config_path.write_text("updated", encoding="utf-8")
+            assert await asyncio.to_thread(dummy.reloaded.wait, 1.0)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    asyncio.run(run_watcher())
+
+
 def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monkeypatch) -> None:
     issuer = _http_url("issuer.example")
     audience = "api-app"
@@ -3909,6 +4015,90 @@ def test_gateway_response_cache_hit_with_trace_headers() -> None:
     assert first.json() == {"call": 1}
     assert second.json() == {"call": 1}
     assert call_count["value"] == 1
+
+
+@pytest.mark.parametrize("case", ["missing", "expired", "invalid"])
+def test_cached_gateway_response_returns_none_for_missing_expired_and_invalid_entries(case: str) -> None:
+    _, request = _make_cached_request()
+    now = datetime.now(UTC).timestamp()
+    if case == "missing":
+        cached = None
+    elif case == "expired":
+        cached = (now - 60, 200, {}, None, b"cached")
+    else:
+        cached = (now + 60, 700, {}, None, b"cached")
+
+    result = _cached_gateway_response(
+        cached=cached,
+        request=request,
+        route_name="r1",
+        policy_req=PolicyRequest(method="GET", path="/api/catalog", query={}, headers={}, variables={}),
+        policy_runtime=PolicyRuntime(gateway_config=GatewayConfig()),
+        trace_base={"route_name": "r1"},
+        trace_collector=None,
+        cfg=GatewayConfig(),
+        gateway_metrics=SimpleNamespace(cache_events=SimpleNamespace(add=lambda *args, **kwargs: None)),
+        correlation_id="corr-123",
+        trace_id="trace-123",
+    )
+
+    assert result is None
+
+
+def test_cached_gateway_response_populates_trace_headers_and_trace_store() -> None:
+    trace_store_app, request = _make_cached_request()
+    cached = (
+        datetime.now(UTC).timestamp() + 60,
+        200,
+        {"content-type": "application/json"},
+        "application/json",
+        b'{"cached":true}',
+    )
+
+    response = _cached_gateway_response(
+        cached=cached,
+        request=request,
+        route_name="r1",
+        policy_req=PolicyRequest(method="GET", path="/api/catalog", query={}, headers={}, variables={}),
+        policy_runtime=PolicyRuntime(gateway_config=GatewayConfig(trace_enabled=True)),
+        trace_base={"route_name": "r1"},
+        trace_collector=None,
+        cfg=GatewayConfig(trace_enabled=True),
+        gateway_metrics=SimpleNamespace(cache_events=SimpleNamespace(add=lambda *args, **kwargs: None)),
+        correlation_id="corr-123",
+        trace_id="trace-123",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    assert response.body == b'{"cached":true}'
+    assert response.headers["x-apim-cache"] == "hit"
+    assert response.headers["x-correlation-id"] == "corr-123"
+    assert response.headers["x-apim-trace-id"] == "trace-123"
+    assert "x-apim-trace" in response.headers
+    assert request.state.apim_cache_result == "hit"
+    assert request.state.apim_result_reason == "cache_hit"
+    assert request.state.apim_upstream_attempts == 0
+    assert trace_store_app.state.trace_store["trace-123"]["trace_id"] == "trace-123"
+
+
+def test_gateway_rejects_invalid_upstream_status_code() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(700, json={"error": "invalid"})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"))],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/catalog")
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "Backend API returned invalid status code"
 
 
 def test_cache_lookup_value_store_and_remove_value() -> None:
