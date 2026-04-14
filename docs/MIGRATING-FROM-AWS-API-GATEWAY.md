@@ -72,7 +72,7 @@ Use the local tools together:
 
 - `/apim/trace/{id}` for APIM-style per-request detail
 - `/apim/management/traces` for recent trace browsing
-- Grafana on `http://localhost:3001` when [LGTM](https://github.com/grafana/docker-otel-lgtm) is enabled
+- Grafana on [https://lgtm.apim.127.0.0.1.sslip.io:8443](https://lgtm.apim.127.0.0.1.sslip.io:8443) when [LGTM](https://github.com/grafana/docker-otel-lgtm) is enabled
 
 ## Starter Example
 

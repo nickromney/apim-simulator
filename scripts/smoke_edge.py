@@ -6,13 +6,16 @@ import os
 import sys
 import traceback
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunsplit
 
 import httpx
 from smoke_mcp import make_async_client, resolve_tls_verify
 from smoke_mcp import run_with_retry as run_mcp
 
-BASE_URL = os.getenv("SMOKE_EDGE_BASE_URL", "http://apim.localtest.me:8088").rstrip("/")
+EDGE_ROOT_HOST = os.getenv("APIM_EDGE_ROOT_HOST", "apim.127.0.0.1.sslip.io")
+EDGE_HOST = os.getenv("APIM_EDGE_HOST", "edge.apim.127.0.0.1.sslip.io")
+DEFAULT_EDGE_HTTP_BASE_URL = urlunsplit(("http", f"{EDGE_HOST}:8088", "", "", ""))
+BASE_URL = os.getenv("SMOKE_EDGE_BASE_URL", os.getenv("EDGE_HTTP_BASE_URL", DEFAULT_EDGE_HTTP_BASE_URL)).rstrip("/")
 SUBSCRIPTION_KEY = os.getenv("SMOKE_MCP_SUBSCRIPTION_KEY", "mcp-demo-key")
 DEFAULT_CA_CERT = Path(__file__).resolve().parent.parent / "examples" / "edge" / "certs" / "dev-root-ca.crt"
 VERIFY_TLS = resolve_tls_verify(

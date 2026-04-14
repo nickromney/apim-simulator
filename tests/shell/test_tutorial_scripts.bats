@@ -12,7 +12,7 @@ setup() {
 
   export APIM_BASE="http://localhost:8000"
   export APIM_TENANT_KEY="local-dev-tenant-key"
-  export GRAFANA_BASE="http://localhost:3001"
+  export GRAFANA_BASE="https://lgtm.apim.127.0.0.1.sslip.io:8443"
   export OPERATOR_CONSOLE_BASE="http://localhost:3007"
   export OPENAPI_SOURCE="$BATS_TEST_TMPDIR/mock-openapi.json"
   printf '{}\n' >"$OPENAPI_SOURCE"
@@ -133,7 +133,7 @@ case "$url" in
   "http://localhost:8000/apim/health")
     response_body='{"status":"healthy"}'
     ;;
-  "http://localhost:3001/api/health")
+  "https://lgtm.apim.127.0.0.1.sslip.io:8443/api/health")
     response_body='{"database":"ok","version":"11.0.0"}'
     ;;
   "http://localhost:3007"| "http://localhost:3007/")
@@ -333,9 +333,9 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Stopping all tutorial stack variants with docker compose"* ]]
   [[ "$output" == *"Compose files:"* ]]
-  [[ "$output" == *"${ROOT}/compose.public.yml"* ]]
-  [[ "$output" == *"${ROOT}/compose.otel.yml"* ]]
-  [[ "$output" == *"${ROOT}/compose.ui.yml"* ]]
+  [[ "$output" == *"./compose.public.yml"* ]]
+  [[ "$output" == *"./compose.otel.yml"* ]]
+  [[ "$output" == *"./compose.ui.yml"* ]]
   [[ "$output" == *"Running:"* ]]
   [[ "$output" == *"down --remove-orphans"* ]]
 

@@ -21,6 +21,7 @@ from app.config import (
     UserConfig,
 )
 from app.management_service import ManagementService
+from app.urls import http_url
 
 
 class _Counter:
@@ -57,7 +58,7 @@ def test_apply_runtime_config_materializes_routes_and_clears_policy_caches() -> 
             "weather": ApiConfig(
                 name="weather",
                 path="weather",
-                upstream_base_url="http://upstream",
+                upstream_base_url=http_url("upstream"),
                 operations={
                     "current": OperationConfig(name="current", method="GET", url_template="/current"),
                 },
@@ -109,7 +110,7 @@ def test_delete_product_unlinks_legacy_routes_and_subscriptions() -> None:
             "weather": ApiConfig(
                 name="weather",
                 path="weather",
-                upstream_base_url="http://upstream",
+                upstream_base_url=http_url("upstream"),
                 products=["starter"],
                 operations={
                     "current": OperationConfig(
@@ -125,7 +126,7 @@ def test_delete_product_unlinks_legacy_routes_and_subscriptions() -> None:
             RouteConfig(
                 name="legacy",
                 path_prefix="/legacy",
-                upstream_base_url="http://upstream",
+                upstream_base_url=http_url("upstream"),
                 product="starter",
                 products=["starter"],
             )

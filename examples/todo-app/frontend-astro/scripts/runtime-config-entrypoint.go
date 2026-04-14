@@ -34,15 +34,38 @@ func envValue(names []string, fallback string) string {
 	return fallback
 }
 
+func writeRuntimeConfigField(file *os.File, key string, value string, last bool) error {
+	rendered := fmt.Sprintf("  %s: %s", key, strconv.Quote(value))
+	if len(rendered) <= 80 {
+		if !last {
+			rendered += ","
+		}
+		rendered += "\n"
+		_, err := file.WriteString(rendered)
+		return err
+	}
+
+	if _, err := file.WriteString(fmt.Sprintf("  %s:\n    %s", key, strconv.Quote(value))); err != nil {
+		return err
+	}
+	if !last {
+		if _, err := file.WriteString(","); err != nil {
+			return err
+		}
+	}
+	_, err := file.WriteString("\n")
+	return err
+}
+
 func renderRuntimeConfig(outputPath string) error {
 	fields := []runtimeField{
 		{key: "API_BASE_URL", envNames: []string{"API_BASE_URL"}, defaultVal: "http://localhost:8000"},
 		{key: "APIM_SUBSCRIPTION_KEY", envNames: []string{"APIM_SUBSCRIPTION_KEY"}, defaultVal: "todo-demo-key"},
-		{key: "GRAFANA_BASE_URL", envNames: []string{"GRAFANA_BASE_URL"}, defaultVal: "http://localhost:3001"},
+		{key: "GRAFANA_BASE_URL", envNames: []string{"GRAFANA_BASE_URL"}, defaultVal: "https://lgtm.apim.127.0.0.1.sslip.io:8443"},
 		{
 			key:        "OBSERVABILITY_DASHBOARD_URL",
 			envNames:   []string{"OBSERVABILITY_DASHBOARD_URL"},
-			defaultVal: "http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview",
+			defaultVal: "https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview",
 		},
 	}
 
@@ -61,15 +84,7 @@ func renderRuntimeConfig(outputPath string) error {
 	}
 	for index, field := range fields {
 		value := envValue(field.envNames, field.defaultVal)
-		if _, err := file.WriteString(fmt.Sprintf("  %s: %s", field.key, strconv.Quote(value))); err != nil {
-			return err
-		}
-		if index < len(fields)-1 {
-			if _, err := file.WriteString(","); err != nil {
-				return err
-			}
-		}
-		if _, err := file.WriteString("\n"); err != nil {
+		if err := writeRuntimeConfigField(file, field.key, value, index == len(fields)-1); err != nil {
 			return err
 		}
 	}

@@ -20,6 +20,7 @@ from app.config import (
     SubscriptionKeyPair,
 )
 from app.main import create_app
+from app.urls import http_url
 
 
 def _make_rsa_jwks() -> tuple[dict, rsa.RSAPrivateKey]:
@@ -43,7 +44,7 @@ def _make_token(*, private_key: rsa.RSAPrivateKey, issuer: str, audience: str, s
 
 
 def test_scenario_multi_app_products_and_scopes() -> None:
-    issuer = "http://issuer.example"
+    issuer = http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience, scope="read")
@@ -70,7 +71,7 @@ def test_scenario_multi_app_products_and_scopes() -> None:
             "a": ApiConfig(
                 name="a",
                 path="app-a",
-                upstream_base_url="http://upstream-a",
+                upstream_base_url=http_url("upstream-a"),
                 products=["app-a"],
                 operations={
                     "health": OperationConfig(
@@ -84,7 +85,7 @@ def test_scenario_multi_app_products_and_scopes() -> None:
             "b": ApiConfig(
                 name="b",
                 path="app-b",
-                upstream_base_url="http://upstream-b",
+                upstream_base_url=http_url("upstream-b"),
                 products=["app-b"],
                 operations={"health": OperationConfig(name="health", method="GET", url_template="/health")},
             ),

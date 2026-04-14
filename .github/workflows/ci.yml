@@ -16,6 +16,7 @@ concurrency:
 env:
   PYTHON_VERSION: "3.13"
   NODE_VERSION: "22"
+  MKCERT_VERSION: "v1.4.4"
 
 jobs:
   secret-scan:
@@ -86,6 +87,16 @@ jobs:
         with:
           enable-cache: true
           save-cache: "false"
+
+      - name: Install mkcert
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libnss3-tools
+          curl -fsSLo mkcert "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-amd64"
+          chmod +x mkcert
+          sudo install -m 0755 mkcert /usr/local/bin/mkcert
+          mkcert -install
 
       - name: Run test suite
         run: make test-python
@@ -172,6 +183,16 @@ jobs:
             echo "Falling back to upstream images for compose validation"
           fi
 
+      - name: Install mkcert
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libnss3-tools
+          curl -fsSLo mkcert "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-amd64"
+          chmod +x mkcert
+          sudo install -m 0755 mkcert /usr/local/bin/mkcert
+          mkcert -install
+
       - name: Generate dev certs for edge/TLS overlays
         run: ./scripts/gen_dev_certs.sh
 
@@ -224,6 +245,16 @@ jobs:
         with:
           enable-cache: true
           save-cache: "false"
+
+      - name: Install mkcert
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libnss3-tools
+          curl -fsSLo mkcert "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-amd64"
+          chmod +x mkcert
+          sudo install -m 0755 mkcert /usr/local/bin/mkcert
+          mkcert -install
 
       - name: Verify Docker Compose is available
         run: docker compose version

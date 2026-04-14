@@ -27,7 +27,7 @@ make verify-todo-otel
 Then open:
 
 - `http://localhost:3000` for the todo app
-- `http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview` for Grafana
+- [https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview](https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview) for Grafana
 
 Create a todo in the browser, then click `Open OTEL dashboard` in the app. That
 is the shortest path from user action to observable API traffic.
@@ -690,7 +690,7 @@ make up-todo-otel
 
 Then open:
 
-- `http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview`
+- [https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview](https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview)
 
 Use it to answer:
 

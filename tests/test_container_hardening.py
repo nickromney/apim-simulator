@@ -58,6 +58,8 @@ def test_nginx_services_are_read_only_and_non_root() -> None:
     for compose_file, service_name in (
         ("compose.todo.yml", "todo-frontend"),
         ("compose.edge.yml", "edge-proxy"),
+        ("compose.otel.yml", "lgtm-proxy"),
+        ("compose.todo.otel.yml", "lgtm-proxy"),
         ("compose.ui.yml", "ui"),
     ):
         service = _service(compose_file, service_name)
@@ -73,6 +75,31 @@ def test_non_dhi_opt_out_is_documented() -> None:
     assert "PYTHON_BUILD_IMAGE=python:3.13-slim" in env_example
     assert "PYTHON_RUNTIME_IMAGE=python:3.13-slim" in env_example
     assert "NGINX_RUNTIME_IMAGE=nginx:1.27-alpine" in env_example
+
+
+def test_prereqs_requires_mkcert() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    assert ".PHONY: prereqs" in makefile
+    assert "prereqs:" in makefile
+    assert "check-docker-prerequisites" in makefile
+    assert "check-mkcert-prerequisites" in makefile
+    assert "check-host-ports" in makefile
+    assert "mkcert" in makefile
+
+
+def test_edge_stack_uses_apim_namespaced_dns() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    stack_env = (REPO_ROOT / "scripts" / "stack-env.sh").read_text()
+    edge_conf = (REPO_ROOT / "examples" / "edge" / "nginx.conf").read_text()
+    smoke_edge = (REPO_ROOT / "scripts" / "smoke_edge.py").read_text()
+
+    for contents in (makefile, stack_env, edge_conf, smoke_edge):
+        assert "apim.localtest.me" not in contents
+
+    assert "edge.apim.127.0.0.1.sslip.io" in makefile
+    assert "edge.apim.127.0.0.1.sslip.io" in stack_env
+    assert "edge.apim.127.0.0.1.sslip.io" in edge_conf
+    assert "edge.apim.127.0.0.1.sslip.io" in smoke_edge
 
 
 def test_python_dockerfiles_accept_base_image_overrides() -> None:
@@ -174,14 +201,67 @@ def test_ci_runs_frontend_checks() -> None:
     assert run_checks["run"] == "make frontend-check"
 
 
+def test_ci_installs_mkcert_before_tls_sensitive_steps() -> None:
+    ci = _load_yaml(".github/workflows/ci.yml")
+    assert ci["env"]["MKCERT_VERSION"] == "v1.4.4"
+    expected_jobs = {
+        "test": "Run test suite",
+        "compose-config": "Generate dev certs for edge/TLS overlays",
+        "compose-smokes": "Edge HTTP smoke",
+    }
+
+    for job_name, anchor_step_name in expected_jobs.items():
+        steps = ci["jobs"][job_name]["steps"]
+        install_index = next(index for index, step in enumerate(steps) if step["name"] == "Install mkcert")
+        anchor_index = next(index for index, step in enumerate(steps) if step["name"] == anchor_step_name)
+        install_step = steps[install_index]
+
+        assert "${MKCERT_VERSION}" in install_step["run"]
+        assert "mkcert -install" in install_step["run"]
+        assert install_index < anchor_index
+
+
+def test_gitleaks_allows_local_apim_hostnames() -> None:
+    gitleaks = _load_toml(".gitleaks.toml")
+    allowlists = gitleaks["allowlists"]
+    hostname_allowlist = next(
+        entry for entry in allowlists if entry["description"] == "Intentional local-only APIM hostnames"
+    )
+
+    regexes = "\n".join(hostname_allowlist["regexes"])
+    assert "apim\\.127\\.0\\.0\\.1\\.sslip\\.io" in regexes
+    assert "(?:edge\\.)?(?:\\*\\.)?apim\\.127\\.0\\.0\\.1\\.sslip\\.io" in regexes
+
+    host_env_allowlist = next(
+        entry for entry in allowlists if entry["description"] == "Intentional local-only APIM edge host env vars"
+    )
+    host_env_regexes = "\n".join(host_env_allowlist["regexes"])
+    assert "APIM_EDGE_(?:ROOT_)?HOST" in host_env_regexes
+    assert "APIM_EDGE_WILDCARD_HOST" in host_env_regexes
+
+
+def test_gitleaks_ignore_lists_known_false_positives() -> None:
+    ignored = (REPO_ROOT / ".gitleaksignore").read_text().splitlines()
+    assert "a24e4570800e3f62adf31d44b7c83d0d77fa342f:Makefile:generic-api-key:27" in ignored
+    assert "a24e4570800e3f62adf31d44b7c83d0d77fa342f:scripts/smoke_edge.py:generic-api-key:16" in ignored
+
+
 def test_local_smoke_clients_bypass_proxy_environment() -> None:
     smoke_mcp = (REPO_ROOT / "scripts" / "smoke_mcp.py").read_text()
     smoke_edge = (REPO_ROOT / "scripts" / "smoke_edge.py").read_text()
     smoke_private = (REPO_ROOT / "scripts" / "smoke_private.py").read_text()
+    verify_otel = (REPO_ROOT / "scripts" / "verify_otel.py").read_text()
+    verify_hello_otel = (REPO_ROOT / "scripts" / "verify_hello_otel.py").read_text()
 
     assert "trust_env=False" in smoke_mcp
     assert "make_async_client(timeout=20.0, verify=VERIFY_TLS)" in smoke_edge
     assert "make_async_client(timeout=20.0)" in smoke_private
+    assert "from app.urls import http_url" not in smoke_private
+    assert 'DEFAULT_PRIVATE_BASE_URL = "http://apim-simulator:8000"' in smoke_private
+    assert "resolve_tls_verify" in verify_otel
+    assert "resolve_tls_verify" in verify_hello_otel
+    assert "trust_env=False" in verify_otel
+    assert "trust_env=False" in verify_hello_otel
 
 
 def test_generated_edge_certs_keep_server_key_readable_for_rootless_nginx(tmp_path: Path) -> None:
@@ -194,13 +274,14 @@ def test_generated_edge_certs_keep_server_key_readable_for_rootless_nginx(tmp_pa
     )
 
     cert_dir = tmp_path / "examples" / "edge" / "certs"
-    server_cert_mode = stat.S_IMODE((cert_dir / "apim.localtest.me.crt").stat().st_mode)
-    server_key_mode = stat.S_IMODE((cert_dir / "apim.localtest.me.key").stat().st_mode)
-    ca_key_mode = stat.S_IMODE((cert_dir / "dev-root-ca.key").stat().st_mode)
+    server_cert_mode = stat.S_IMODE((cert_dir / "edge.apim.127.0.0.1.sslip.io.crt").stat().st_mode)
+    server_key_mode = stat.S_IMODE((cert_dir / "edge.apim.127.0.0.1.sslip.io.key").stat().st_mode)
+    ca_cert_mode = stat.S_IMODE((cert_dir / "dev-root-ca.crt").stat().st_mode)
 
     assert server_cert_mode == 0o644
     assert server_key_mode == 0o644
-    assert ca_key_mode == 0o600
+    assert ca_cert_mode == 0o644
+    assert not (cert_dir / "dev-root-ca.key").exists()
 
 
 def test_todo_frontend_supports_runtime_image_override() -> None:
@@ -279,6 +360,10 @@ def test_mcp_build_and_smokes_use_repo_locked_dependency_flow() -> None:
     private_smoke_runner = (REPO_ROOT / "scripts" / "run_smoke_private.py").read_text()
     assert 'PINNED_HTTPX = "httpx==0.28.1"' in private_smoke_runner
     assert 'PINNED_MCP = "mcp==1.26.0"' in private_smoke_runner
+    assert "repo_root = Path(__file__).resolve().parent.parent" in private_smoke_runner
+    assert 'env["PYTHONPATH"] = (' in private_smoke_runner
+    assert "repo_root}{os.pathsep}{site_packages_path}" in private_smoke_runner
+    assert "cwd=repo_root" in private_smoke_runner
 
 
 def test_lgtm_runs_with_read_only_root() -> None:
@@ -288,13 +373,37 @@ def test_lgtm_runs_with_read_only_root() -> None:
         assert service["image"] == PINNED_LGTM_IMAGE
 
 
+def test_otel_stack_uses_https_lgtm_host() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    stack_env = (REPO_ROOT / "scripts" / "stack-env.sh").read_text()
+    lgtm_compose = _load_yaml("compose.otel.yml")
+
+    assert "GRAFANA_HOST ?= lgtm.apim.127.0.0.1.sslip.io" in makefile
+    assert "GRAFANA_PORT ?= $(call calc_port,8443)" in makefile
+    assert "GRAFANA_BASE_URL ?= https://$(GRAFANA_HOST)" in makefile
+
+    assert 'GRAFANA_HOST="${GRAFANA_HOST:-lgtm.apim.127.0.0.1.sslip.io}"' in stack_env
+    assert 'GRAFANA_PORT="${GRAFANA_PORT:-$((8443 + PORT_OFFSET))}"' in stack_env
+    assert 'GRAFANA_BASE_URL="${GRAFANA_BASE_URL:-https://${GRAFANA_HOST}' in stack_env
+
+    lgtm_service = lgtm_compose["services"]["lgtm"]
+    assert all("3001" not in port for port in lgtm_service.get("ports", []))
+    assert (
+        lgtm_service["environment"]["GF_SERVER_ROOT_URL"]
+        == "${GRAFANA_BASE_URL:-https://lgtm.apim.127.0.0.1.sslip.io:8443}"
+    )
+
+    proxy_service = lgtm_compose["services"]["lgtm-proxy"]
+    assert proxy_service["ports"] == ["${GRAFANA_PORT:-8443}:8443"]
+
+
 def test_gitleaks_config_allows_known_demo_credentials() -> None:
     config = (REPO_ROOT / ".gitleaks.toml").read_text()
     assert "[extend]" in config
     assert "useDefault = true" in config
     for marker in ("local-dev-tenant-key", "todo-demo-key", "mcp-demo-key", "tutorial-key", "demo-password"):
         assert marker in config
-    assert "examples/edge/certs/apim\\.localtest\\.me\\.key" in config
+    assert "examples/edge/certs/edge\\.apim\\.127\\.0\\.0\\.1\\.sslip\\.io\\.key" in config
 
 
 def test_keycloak_persists_data_on_a_named_volume() -> None:

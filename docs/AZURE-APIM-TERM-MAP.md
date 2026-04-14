@@ -206,7 +206,7 @@ In this repo, the practical observability stack is:
 
 - OTEL instrumentation in the gateway and backend
 - [Grafana LGTM](https://github.com/grafana/docker-otel-lgtm) for logs, metrics, and traces
-- the dashboard at `http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview`
+- the dashboard at [https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview](https://lgtm.apim.127.0.0.1.sslip.io:8443/d/apim-simulator-overview/apim-simulator-overview)
 
 Use these words precisely:
 

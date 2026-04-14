@@ -77,7 +77,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Starting tutorial 01 stack with docker compose"* ]]
   [[ "$output" == *"Compose files:"* ]]
-  [[ "$output" == *"${REPO_ROOT}/compose.public.yml"* ]]
+  [[ "$output" == *"./compose.public.yml"* ]]
   [[ "$output" == *"Running:"* ]]
   [[ "$output" == *"up --build -d"* ]]
   [[ "$output" == *"Importing OpenAPI source into API 'tutorial-api'"* ]]

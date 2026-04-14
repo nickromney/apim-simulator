@@ -11,6 +11,7 @@ from app.compat_report import build_compat_report
 from app.config import ClientCertificateMode, GatewayConfig, RouteConfig, TenantAccessConfig
 from app.main import create_app
 from app.terraform_import import config_from_tofu_show_json, import_from_tofu_show_json
+from app.urls import http_url
 
 
 def _tf_json(resources: list[dict]) -> dict:
@@ -31,7 +32,7 @@ def test_config_from_tofu_show_json_mvp() -> None:
                 "address": "azurerm_api_management_api.app_a",
                 "type": "azurerm_api_management_api",
                 "name": "app_a",
-                "values": {"name": "api", "path": "app-a", "service_url": "http://upstream"},
+                "values": {"name": "api", "path": "app-a", "service_url": http_url("upstream")},
             },
             {
                 "address": "azurerm_api_management_api_operation.health",
@@ -81,7 +82,7 @@ def test_config_from_tofu_show_json_mvp() -> None:
 
     cfg = config_from_tofu_show_json(tf)
     assert cfg.apis["api"].path == "app-a"
-    assert cfg.apis["api"].upstream_base_url == "http://upstream"
+    assert cfg.apis["api"].upstream_base_url == http_url("upstream")
     assert cfg.apis["api"].products == ["app-a"]
     assert "health" in cfg.apis["api"].operations
     assert cfg.subscription.subscriptions["sub1"].keys.primary == "good"
@@ -101,7 +102,7 @@ def test_management_import_applies_routes() -> None:
                 "address": "azurerm_api_management_api.app_a",
                 "type": "azurerm_api_management_api",
                 "name": "app_a",
-                "values": {"name": "api", "path": "app-a", "service_url": "http://upstream"},
+                "values": {"name": "api", "path": "app-a", "service_url": http_url("upstream")},
             },
             {
                 "address": "azurerm_api_management_api_operation.health",
@@ -131,14 +132,14 @@ def test_management_import_applies_routes() -> None:
     )
 
     def handler(req: httpx.Request) -> httpx.Response:
-        assert req.url == httpx.URL("http://upstream/health")
+        assert req.url == httpx.URL(http_url("upstream/health"))
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
             tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
-            routes=[RouteConfig(name="bootstrap", path_prefix="/", upstream_base_url="http://bootstrap")],
+            routes=[RouteConfig(name="bootstrap", path_prefix="/", upstream_base_url=http_url("bootstrap"))],
         ),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
@@ -223,7 +224,7 @@ def test_config_from_tofu_show_json_imports_api_schemas_and_operation_metadata()
                 "address": "azurerm_api_management_api.weather",
                 "type": "azurerm_api_management_api",
                 "name": "weather",
-                "values": {"name": "weather", "path": "weather", "service_url": "http://weather-upstream"},
+                "values": {"name": "weather", "path": "weather", "service_url": http_url("weather-upstream")},
             },
             {
                 "address": "azurerm_api_management_api_schema.weather_response",
@@ -324,7 +325,7 @@ def test_config_from_tofu_show_json_imports_tags_and_tag_links() -> None:
                 "address": "azurerm_api_management_api.weather",
                 "type": "azurerm_api_management_api",
                 "name": "weather",
-                "values": {"name": "weather", "path": "weather", "service_url": "http://weather-upstream"},
+                "values": {"name": "weather", "path": "weather", "service_url": http_url("weather-upstream")},
             },
             {
                 "address": "azurerm_api_management_api_operation.current",
@@ -439,7 +440,7 @@ def test_config_from_tofu_show_json_imports_api_revisions_and_releases_metadata(
                     "name": "weather",
                     "revision": "1",
                     "path": "weather-v1",
-                    "service_url": "http://weather-upstream-v1",
+                    "service_url": http_url("weather-upstream-v1"),
                     "revision_description": "Initial revision",
                     "is_current": False,
                     "is_online": False,
@@ -453,7 +454,7 @@ def test_config_from_tofu_show_json_imports_api_revisions_and_releases_metadata(
                     "name": "weather",
                     "revision": "2",
                     "path": "weather",
-                    "service_url": "http://weather-upstream-v2",
+                    "service_url": http_url("weather-upstream-v2"),
                     "revision_description": "Current revision",
                     "source_api_id": "/subscriptions/test/apis/weather;rev=1",
                     "is_current": True,
@@ -478,7 +479,7 @@ def test_config_from_tofu_show_json_imports_api_revisions_and_releases_metadata(
     api = cfg.apis["weather"]
 
     assert api.path == "weather"
-    assert api.upstream_base_url == "http://weather-upstream-v2"
+    assert api.upstream_base_url == http_url("weather-upstream-v2")
     assert api.revision == "2"
     assert api.is_current is True
     assert api.is_online is True
@@ -757,7 +758,7 @@ def test_management_import_keeps_imported_service_metadata() -> None:
             service={"name": "current-sim", "display_name": "Current Simulator"},
             allow_anonymous=True,
             tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
-            routes=[RouteConfig(name="bootstrap", path_prefix="/", upstream_base_url="http://bootstrap")],
+            routes=[RouteConfig(name="bootstrap", path_prefix="/", upstream_base_url=http_url("bootstrap"))],
         )
     )
 

@@ -8,12 +8,14 @@ PORT_OFFSET := $(shell expr $(STACK_SLOT) \* $(STACK_SLOT_WIDTH))
 endif
 
 calc_port = $(shell expr $(1) + $(PORT_OFFSET))
+url_port_suffix = $(if $(filter 80 443,$(1)),,:$(1))
 STACK_INSTANCE_SUFFIX := $(strip $(if $(STACK_SLOT),s$(STACK_SLOT),$(if $(filter-out 0,$(PORT_OFFSET)),o$(PORT_OFFSET),)))
 compose_project_args = $(if $(STACK_INSTANCE_SUFFIX),--project-name apim-simulator-$(1)-$(STACK_INSTANCE_SUFFIX))
 compose_stack = $(COMPOSE) $(call compose_project_args,$(1))
 
 APIM_GATEWAY_PORT ?= $(call calc_port,8000)
-GRAFANA_PORT ?= $(call calc_port,3001)
+GRAFANA_HOST ?= lgtm.apim.127.0.0.1.sslip.io
+GRAFANA_PORT ?= $(call calc_port,8443)
 OTEL_GRPC_PORT ?= $(call calc_port,4317)
 OTEL_HTTP_PORT ?= $(call calc_port,4318)
 KEYCLOAK_PORT ?= $(call calc_port,8180)
@@ -23,10 +25,13 @@ EDGE_TLS_HTTP_PORT ?= $(call calc_port,8080)
 EDGE_TLS_PORT ?= $(call calc_port,9443)
 TODO_FRONTEND_PORT ?= $(call calc_port,3000)
 VITE_DEV_PORT ?= 5173
+APIM_EDGE_ROOT_HOST ?= apim.127.0.0.1.sslip.io
+APIM_EDGE_HOST ?= edge.apim.127.0.0.1.sslip.io
+APIM_EDGE_WILDCARD_HOST ?= *.apim.127.0.0.1.sslip.io
 
 APIM_BASE_URL ?= http://localhost:$(APIM_GATEWAY_PORT)
 APIM_LOOPBACK_BASE_URL ?= http://127.0.0.1:$(APIM_GATEWAY_PORT)
-GRAFANA_BASE_URL ?= http://localhost:$(GRAFANA_PORT)
+GRAFANA_BASE_URL ?= https://$(GRAFANA_HOST)$(call url_port_suffix,$(GRAFANA_PORT))
 KEYCLOAK_BASE_URL ?= http://localhost:$(KEYCLOAK_PORT)
 OIDC_ISSUER_EXTERNAL ?= $(KEYCLOAK_BASE_URL)/realms/subnet-calculator
 OPERATOR_CONSOLE_URL ?= http://localhost:$(OPERATOR_CONSOLE_PORT)
@@ -42,8 +47,8 @@ APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST ?= $(TODO_FRONTEND_ORIGIN_LOCALHOST)
 APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE ?= $(OPERATOR_CONSOLE_URL)
 APIM_ALLOWED_ORIGIN_VITE ?= http://localhost:$(VITE_DEV_PORT)
 APIM_ALLOWED_ORIGIN_GATEWAY ?= $(APIM_BASE_URL)
-EDGE_HTTP_BASE_URL ?= http://apim.localtest.me:$(EDGE_HTTP_PORT)
-EDGE_TLS_BASE_URL ?= https://apim.localtest.me:$(EDGE_TLS_PORT)
+EDGE_HTTP_BASE_URL ?= http://$(APIM_EDGE_HOST):$(EDGE_HTTP_PORT)
+EDGE_TLS_BASE_URL ?= https://$(APIM_EDGE_HOST):$(EDGE_TLS_PORT)
 SMOKE_HELLO_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
 SMOKE_HELLO_KEYCLOAK_BASE_URL ?= $(KEYCLOAK_BASE_URL)
 SMOKE_OIDC_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
@@ -56,6 +61,7 @@ UP_ALL_STACKS := up up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-he
 
 export STACK_SLOT STACK_SLOT_WIDTH PORT_OFFSET
 export APIM_GATEWAY_PORT GRAFANA_PORT OTEL_GRPC_PORT OTEL_HTTP_PORT KEYCLOAK_PORT OPERATOR_CONSOLE_PORT EDGE_HTTP_PORT EDGE_TLS_HTTP_PORT EDGE_TLS_PORT TODO_FRONTEND_PORT VITE_DEV_PORT
+export APIM_EDGE_ROOT_HOST APIM_EDGE_HOST APIM_EDGE_WILDCARD_HOST GRAFANA_HOST
 export APIM_BASE_URL APIM_LOOPBACK_BASE_URL GRAFANA_BASE_URL KEYCLOAK_BASE_URL OIDC_ISSUER_EXTERNAL OPERATOR_CONSOLE_URL
 export TODO_FRONTEND_BASE_URL TODO_FRONTEND_BROWSER_URL TODO_FRONTEND_ORIGIN_LOCALHOST TODO_FRONTEND_ORIGIN_LOOPBACK TODO_APIM_BASE_URL TODO_APIM_PUBLIC_BASE_URL TODO_GRAFANA_BASE_URL TODO_OBSERVABILITY_DASHBOARD_URL
 export APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE APIM_ALLOWED_ORIGIN_VITE APIM_ALLOWED_ORIGIN_GATEWAY
@@ -76,18 +82,18 @@ COMPOSE_HELLO_OIDC := $(call compose_stack,hello-oidc) -f compose.yml -f compose
 COMPOSE_TODO := $(call compose_stack,todo) -f compose.todo.yml
 COMPOSE_TODO_OTEL := $(call compose_stack,todo-otel) -f compose.todo.yml -f compose.todo.otel.yml
 COMPOSE_ALL := $(call compose_stack,all) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
-DEV_CERTS := examples/edge/certs/apim.localtest.me.crt examples/edge/certs/apim.localtest.me.key
+DEV_CERTS := examples/edge/certs/$(APIM_EDGE_HOST).crt examples/edge/certs/$(APIM_EDGE_HOST).key
 HELP_FMT := "  %-34s %s\n"
 UV_RUN := uv run --project $(CURDIR)
 
-.PHONY: help ensure-certs install-hooks fmt lint lint-check frontend-check check-version release release-dry-run release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs install-hooks fmt lint lint-check frontend-check check-version release release-dry-run release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
 	@printf "\nStack Lifecycle:\n"
 	@printf $(HELP_FMT) "down" "Stop all compose services defined by this repo"
 	@printf $(HELP_FMT) "up" "Start the direct public simulator stack"
-	@printf $(HELP_FMT) "up-edge" "Start the edge HTTP MCP stack on apim.localtest.me:8088"
+	@printf $(HELP_FMT) "up-edge" "Start the edge HTTP MCP stack on $(APIM_EDGE_HOST):8088"
 	@printf $(HELP_FMT) "up-hello" "Start the anonymous hello API example behind APIM"
 	@printf $(HELP_FMT) "up-hello-oidc" "Start the JWT-only hello API example with Keycloak"
 	@printf $(HELP_FMT) "up-hello-oidc-subscription" "Start the subscription-plus-JWT hello API example with Keycloak"
@@ -95,11 +101,11 @@ help:
 	@printf $(HELP_FMT) "up-hello-subscription" "Start the subscription-protected hello API example behind APIM"
 	@printf $(HELP_FMT) "up-mcp" "Start the simulator with the MCP example overlay"
 	@printf $(HELP_FMT) "up-oidc" "Start the simulator with the Keycloak overlay"
-	@printf $(HELP_FMT) "up-otel" "Start the direct public simulator stack with LGTM"
+	@printf $(HELP_FMT) "up-otel" "Start the direct public simulator stack with LGTM at $(GRAFANA_BASE_URL)"
 	@printf $(HELP_FMT) "up-private" "Start the private MCP stack without publishing the gateway host port"
-	@printf $(HELP_FMT) "up-tls" "Start the edge TLS MCP stack on apim.localtest.me:9443"
+	@printf $(HELP_FMT) "up-tls" "Start the edge TLS MCP stack on $(APIM_EDGE_HOST):9443"
 	@printf $(HELP_FMT) "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
-	@printf $(HELP_FMT) "up-todo-otel" "Start the todo demo stack with LGTM on localhost:3001"
+	@printf $(HELP_FMT) "up-todo-otel" "Start the todo demo stack with LGTM at $(GRAFANA_BASE_URL)"
 	@printf $(HELP_FMT) "up-ui" "Start the operator console on localhost:3007"
 	@printf $(HELP_FMT) "up-all" "Start every compose stack at once using isolated slots"
 	@printf $(HELP_FMT) "down-all" "Stop every stack launched by up-all"
@@ -119,6 +125,7 @@ help:
 	@printf "\nCode Quality and Tooling:\n"
 	@printf $(HELP_FMT) "check-version" "Check synchronized release versions and pinned upstream refs"
 	@printf $(HELP_FMT) "check-host-ports" "Check common local host ports before starting stacks"
+	@printf $(HELP_FMT) "prereqs" "Check Docker, mkcert, and local host ports before starting stacks"
 	@printf $(HELP_FMT) "compat" "Run the curated APIM sample compatibility harness"
 	@printf $(HELP_FMT) "compat-report" "Run static Terraform/APIM compatibility analysis (requires TOFU_SHOW=...)"
 	@printf $(HELP_FMT) "fmt" "Format Python code with Ruff"
@@ -167,10 +174,41 @@ help:
 	@printf $(HELP_FMT) "compose-config-todo-otel" "Render docker compose config for the todo demo LGTM stack"
 	@printf $(HELP_FMT) "compose-config-ui" "Render docker compose config for the console stack"
 
-ensure-certs:
+prereqs: check-docker-prerequisites check-mkcert-prerequisites check-host-ports
+
+.PHONY: prereqs check-docker-prerequisites check-mkcert-prerequisites
+
+check-docker-prerequisites:
+	@if ! command -v docker >/dev/null 2>&1; then \
+		echo "docker is required but was not found in PATH." >&2; \
+		exit 1; \
+	fi
+	@if ! docker compose version >/dev/null 2>&1; then \
+		echo "'docker compose' is required but not available." >&2; \
+		exit 1; \
+	fi
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "Docker is not running. Start Docker Desktop and try again." >&2; \
+		exit 1; \
+	fi
+
+check-mkcert-prerequisites:
+	@if ! command -v mkcert >/dev/null 2>&1; then \
+		echo "mkcert is required but was not found in PATH." >&2; \
+		echo "Install it, then run 'mkcert -install'." >&2; \
+		exit 1; \
+	fi
+	@CAROOT="$$(mkcert -CAROOT 2>/dev/null || true)"; \
+	if [ -z "$$CAROOT" ] || [ ! -f "$$CAROOT/rootCA.pem" ] || [ ! -f "$$CAROOT/rootCA-key.pem" ]; then \
+		echo "mkcert is installed but its local CA is not ready." >&2; \
+		echo "Run 'mkcert -install' and try again." >&2; \
+		exit 1; \
+	fi
+
+ensure-certs: check-mkcert-prerequisites
 	./scripts/gen_dev_certs.sh
 
-$(DEV_CERTS):
+$(DEV_CERTS): check-mkcert-prerequisites
 	./scripts/gen_dev_certs.sh
 
 up:
@@ -255,7 +293,7 @@ logs:
 	$(COMPOSE_CORE) logs -f apim-simulator mock-backend
 
 logs-otel:
-	$(COMPOSE_CORE_OTEL) logs -f apim-simulator mock-backend lgtm
+	$(COMPOSE_CORE_OTEL) logs -f apim-simulator mock-backend lgtm lgtm-proxy
 
 logs-oidc:
 	$(COMPOSE_OIDC) logs -f apim-simulator mock-backend keycloak
@@ -270,7 +308,7 @@ logs-hello:
 	$(COMPOSE_HELLO) logs -f apim-simulator hello-api
 
 logs-hello-otel:
-	$(COMPOSE_HELLO_OTEL) logs -f apim-simulator hello-api lgtm
+	$(COMPOSE_HELLO_OTEL) logs -f apim-simulator hello-api lgtm lgtm-proxy
 
 logs-hello-oidc:
 	$(COMPOSE_HELLO_OIDC) logs -f apim-simulator hello-api keycloak
@@ -279,7 +317,7 @@ logs-todo:
 	$(COMPOSE_TODO) logs -f todo-frontend apim-simulator todo-api
 
 logs-todo-otel:
-	$(COMPOSE_TODO_OTEL) logs -f todo-frontend apim-simulator todo-api lgtm
+	$(COMPOSE_TODO_OTEL) logs -f todo-frontend apim-simulator todo-api lgtm lgtm-proxy
 
 install-hooks:
 	git config core.hooksPath .githooks
@@ -328,6 +366,8 @@ test: test-python test-shell
 
 test-python:
 	$(UV_RUN) --extra dev pytest -q --cov=app --cov-branch --cov-report=term-missing --cov-report=xml
+	mkdir -p coverage-reports
+	cp coverage.xml coverage-reports/python-coverage-report.xml
 
 test-shell:
 	@command -v bats >/dev/null 2>&1 || { echo "bats is required for shell tests"; exit 1; }

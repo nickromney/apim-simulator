@@ -125,7 +125,7 @@ wait_for_port_release() {
 after_down_wait() {
   local ports=(
     "${APIM_GATEWAY_PORT:-8000}"
-    "${GRAFANA_PORT:-3001}"
+    "${GRAFANA_PORT:-8443}"
     "${OTEL_GRPC_PORT:-4317}"
     "${OTEL_HTTP_PORT:-4318}"
     "${OPERATOR_CONSOLE_PORT:-3007}"
@@ -321,9 +321,9 @@ jq -n \
   }'
 EOF
 
-  sb_note "$DOC_CORE" <<'EOF'
+  sb_note "$DOC_CORE" <<EOF
 ## Direct Public Gateway With OTEL
-`make up-otel` adds the LGTM stack on `localhost:3001` so APIM traffic is visible in Grafana, Loki, Tempo, and Prometheus.
+`make up-otel` adds the LGTM stack on [$GRAFANA_BASE_URL]($GRAFANA_BASE_URL) so APIM traffic is visible in Grafana, Loki, Tempo, and Prometheus.
 EOF
 
   sb_exec "$DOC_CORE" <<'EOF'
@@ -332,7 +332,7 @@ make down >/dev/null 2>&1 || true
 log="$(mktemp)"
 make up-otel >"$log" 2>&1 || { cat "$log"; exit 1; }
 for _ in $(seq 1 90); do
-  curl -fsS http://localhost:8000/apim/health >/dev/null 2>&1 && curl -fsS http://localhost:3001/api/health >/dev/null 2>&1 && break
+  curl -fsS http://localhost:8000/apim/health >/dev/null 2>&1 && curl -fsS "$GRAFANA_BASE_URL/api/health" >/dev/null 2>&1 && break
   sleep 1
 done
 docker compose -f compose.yml -f compose.public.yml -f compose.otel.yml ps --format json | jq -sS .
@@ -344,7 +344,7 @@ set -euo pipefail
 verify_log="$(mktemp)"
 make verify-otel >"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
 apim_health="$(curl -fsS http://localhost:8000/apim/health)"
-grafana_health="$(curl -fsS http://localhost:3001/api/health)"
+grafana_health="$(curl -fsS "$GRAFANA_BASE_URL/api/health")"
 jq -n \
   --argjson apim_health "$apim_health" \
   --argjson grafana_health "$grafana_health" \
@@ -364,7 +364,7 @@ rodney stop >/dev/null 2>&1 || true
 rm -f "$HOME/.rodney/chrome-data/SingletonLock"
 rodney start >/tmp/rodney-start.log 2>&1 || true
 sleep 2
-rodney open http://localhost:3001/d/apim-simulator-overview/apim-simulator-overview >/dev/null
+rodney open "$GRAFANA_BASE_URL/d/apim-simulator-overview/apim-simulator-overview" >/dev/null
 rodney waitload >/dev/null
 rodney waitstable >/dev/null
 rodney sleep 2 >/dev/null
@@ -448,7 +448,7 @@ EOF
 
   sb_note "$DOC_CORE" <<'EOF'
 ## Edge HTTP
-`make up-edge` terminates through the nginx edge proxy on `apim.localtest.me:8088` and verifies forwarded-host behavior before the request reaches APIM and the MCP backend.
+`make up-edge` terminates through the nginx edge proxy on `edge.apim.127.0.0.1.sslip.io:8088` and verifies forwarded-host behavior before the request reaches APIM and the MCP backend.
 EOF
 
   sb_exec "$DOC_CORE" <<'EOF'
@@ -457,7 +457,7 @@ make down >/dev/null 2>&1 || true
 log="$(mktemp)"
 make up-edge >"$log" 2>&1 || { cat "$log"; exit 1; }
 for _ in $(seq 1 90); do
-  curl -fsS http://apim.localtest.me:8088/apim/health >/dev/null 2>&1 && break
+  curl -fsS http://edge.apim.127.0.0.1.sslip.io:8088/apim/health >/dev/null 2>&1 && break
   sleep 1
 done
 docker compose -f compose.yml -f compose.edge.yml -f compose.mcp.yml ps --format json | jq -sS .
@@ -468,7 +468,7 @@ EOF
 set -euo pipefail
 smoke_log="$(mktemp)"
 make smoke-edge >"$smoke_log" 2>&1 || { cat "$smoke_log"; exit 1; }
-edge_echo="$(curl -fsS -H 'Ocp-Apim-Subscription-Key: mcp-demo-key' -H 'x-apim-trace: true' http://apim.localtest.me:8088/__edge/echo)"
+edge_echo="$(curl -fsS -H 'Ocp-Apim-Subscription-Key: mcp-demo-key' -H 'x-apim-trace: true' http://edge.apim.127.0.0.1.sslip.io:8088/__edge/echo)"
 jq -n \
   --argjson edge_echo "$edge_echo" \
   --arg smoke_log "$(cat "$smoke_log")" \
@@ -487,7 +487,7 @@ EOF
 
   sb_note "$DOC_CORE" <<'EOF'
 ## Edge TLS
-`make up-tls` uses the generated development certificate and the same forwarded-header path, but on `https://apim.localtest.me:9443`.
+`make up-tls` uses the generated development certificate and the same forwarded-header path, but on `https://edge.apim.127.0.0.1.sslip.io:9443`.
 EOF
 
   sb_exec "$DOC_CORE" <<'EOF'
@@ -496,7 +496,7 @@ make down >/dev/null 2>&1 || true
 log="$(mktemp)"
 make up-tls >"$log" 2>&1 || { cat "$log"; exit 1; }
 for _ in $(seq 1 90); do
-  curl --cacert examples/edge/certs/dev-root-ca.crt -fsS https://apim.localtest.me:9443/apim/health >/dev/null 2>&1 && break
+  curl --cacert examples/edge/certs/dev-root-ca.crt -fsS https://edge.apim.127.0.0.1.sslip.io:9443/apim/health >/dev/null 2>&1 && break
   sleep 1
 done
 docker compose -f compose.yml -f compose.edge.yml -f compose.tls.yml -f compose.mcp.yml ps --format json | jq -sS .
@@ -507,7 +507,7 @@ EOF
 set -euo pipefail
 smoke_log="$(mktemp)"
 make smoke-tls >"$smoke_log" 2>&1 || { cat "$smoke_log"; exit 1; }
-edge_echo="$(curl --cacert examples/edge/certs/dev-root-ca.crt -fsS -H 'Ocp-Apim-Subscription-Key: mcp-demo-key' -H 'x-apim-trace: true' https://apim.localtest.me:9443/__edge/echo)"
+edge_echo="$(curl --cacert examples/edge/certs/dev-root-ca.crt -fsS -H 'Ocp-Apim-Subscription-Key: mcp-demo-key' -H 'x-apim-trace: true' https://edge.apim.127.0.0.1.sslip.io:9443/__edge/echo)"
 jq -n \
   --argjson edge_echo "$edge_echo" \
   --arg smoke_log "$(cat "$smoke_log")" \
@@ -798,7 +798,7 @@ make down >/dev/null 2>&1 || true
 log="$(mktemp)"
 make up-hello-otel >"$log" 2>&1 || { cat "$log"; exit 1; }
 for _ in $(seq 1 90); do
-  curl -fsS http://localhost:8000/api/health >/dev/null 2>&1 && curl -fsS http://localhost:3001/api/health >/dev/null 2>&1 && break
+  curl -fsS http://localhost:8000/api/health >/dev/null 2>&1 && curl -fsS "$GRAFANA_BASE_URL/api/health" >/dev/null 2>&1 && break
   sleep 1
 done
 docker compose -f compose.yml -f compose.public.yml -f compose.hello.yml -f compose.otel.yml -f compose.hello.otel.yml ps --format json | jq -sS .
@@ -809,7 +809,7 @@ EOF
 set -euo pipefail
 verify_log="$(mktemp)"
 make verify-hello-otel >"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
-grafana_health="$(curl -fsS http://localhost:3001/api/health)"
+grafana_health="$(curl -fsS "$GRAFANA_BASE_URL/api/health")"
 jq -n \
   --argjson grafana_health "$grafana_health" \
   --arg verify_log "$(cat "$verify_log")" \
@@ -1013,7 +1013,7 @@ make up-todo-otel >"$log" 2>&1 || { cat "$log"; exit 1; }
 ready=false
 for _ in $(seq 1 120); do
   if curl -fsS "$TODO_FRONTEND_BASE_URL" 2>/dev/null | rg -q 'Gateway-Proof Todo' \
-    && curl -fsS http://localhost:3001/api/health >/dev/null 2>&1; then
+    && curl -fsS "$GRAFANA_BASE_URL/api/health" >/dev/null 2>&1; then
     ready=true
     break
   fi
@@ -1033,7 +1033,7 @@ EOF
 set -euo pipefail
 verify_log="$(mktemp)"
 make verify-todo-otel >"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
-grafana_health="$(curl -fsS http://localhost:3001/api/health)"
+grafana_health="$(curl -fsS "$GRAFANA_BASE_URL/api/health")"
 jq -n \
   --argjson grafana_health "$grafana_health" \
   --arg verify_log "$(cat "$verify_log")" \

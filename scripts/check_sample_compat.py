@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.config import GatewayConfig, RouteConfig
 from app.main import create_app
+from app.urls import http_url
 
 FIXTURE_ROOT = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "apim_samples"
 
@@ -118,7 +119,7 @@ def _run_fixture(entry: FixtureEntry) -> None:
     config_overrides = dict(request_spec.get("config", {}))
     path_prefix = config_overrides.pop("path_prefix", "/sample")
     upstream_path_prefix = config_overrides.pop("upstream_path_prefix", "")
-    upstream_base_url = config_overrides.pop("upstream_base_url", "http://upstream")
+    upstream_base_url = config_overrides.pop("upstream_base_url", http_url("upstream"))
     allow_anonymous = config_overrides.pop("allow_anonymous", True)
     policy_fragments = config_overrides.pop("policy_fragments", {})
 

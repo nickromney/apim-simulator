@@ -84,7 +84,7 @@ Then open:
 
 - `http://localhost:8000/apim/health`
 - `http://localhost:8000/api/hello?name=team`
-- `http://localhost:3001`
+- [https://lgtm.apim.127.0.0.1.sslip.io:8443](https://lgtm.apim.127.0.0.1.sslip.io:8443)
 
 ## What Each File Does
 

@@ -3,9 +3,13 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
+from smoke_mcp import resolve_tls_verify
+
+DEFAULT_CA_CERT = Path(__file__).resolve().parent.parent / "examples" / "edge" / "certs" / "dev-root-ca.crt"
 
 
 def _wait_for(
@@ -88,10 +92,16 @@ def _exercise_traffic(apim_base_url: str) -> None:
 
 
 def main() -> None:
-    grafana_base_url = os.getenv("GRAFANA_BASE_URL", "http://localhost:3001")
+    grafana_base_url = os.getenv("GRAFANA_BASE_URL", "https://lgtm.apim.127.0.0.1.sslip.io:8443")
     grafana_user = os.getenv("GRAFANA_USER", "admin")
     grafana_password = os.getenv("GRAFANA_PASSWORD", "admin")
     apim_base_url = os.getenv("APIM_BASE_URL", "http://localhost:8000")
+    verify_tls = resolve_tls_verify(
+        default_ca=DEFAULT_CA_CERT if grafana_base_url.startswith("https://") else None,
+        ca_env="VERIFY_HELLO_OTEL_CA_CERT",
+        verify_env="VERIFY_HELLO_OTEL_VERIFY_TLS",
+        insecure_env="VERIFY_HELLO_OTEL_INSECURE_SKIP_VERIFY",
+    )
 
     _exercise_traffic(apim_base_url)
 
@@ -99,6 +109,8 @@ def main() -> None:
         base_url=grafana_base_url,
         auth=(grafana_user, grafana_password),
         timeout=15.0,
+        verify=verify_tls,
+        trust_env=False,
     ) as client:
         health = _wait_for("Grafana health", lambda: client.get("/api/health").json())
         print(f"Grafana healthy: version={health['version']}")
