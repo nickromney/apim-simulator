@@ -77,6 +77,35 @@ If you refresh a downstream mirror:
 3. Do not hand-edit the vendored subtree and assume those edits will survive the
    next sync. Land source changes here first, then re-vendor.
 
+## Release Workflow
+
+Use this when changes in `main` should become a published release and you want
+the release commit and tag to stay immutable.
+
+- `git checkout -b chore/release-X.Y.Z` - keep the bump reviewable before it lands.
+- `make release VERSION=X.Y.Z` - synchronize the version markers and run the release gate.
+- `git push -u origin chore/release-X.Y.Z` - open the release branch for review.
+- `# merge the PR` - only tag the commit that actually landed on `main`.
+- `git checkout main && git pull` - move to the merged release commit.
+- `make release-tag VERSION=X.Y.Z` - create the immutable `vX.Y.Z` tag from `main`.
+- `git push origin vX.Y.Z` - publish the tag so downstream mirrors can pin it.
+- `gh release create vX.Y.Z --title vX.Y.Z --generate-notes` - create the GitHub release from the tag.
+
+## Release Lookup
+
+When a downstream repo only knows the vendored commit SHA, use the source
+checkout plus the recorded metadata to resolve the release version
+deterministically.
+
+```bash
+./scripts/release_version.sh \
+  --source ~/Developer/personal/apim-simulator \
+  --metadata ~/Developer/personal/platform/apps/subnet-calculator/apim-simulator.vendor.json
+```
+
+Use this when you need to answer "what release is this vendored snapshot?" or
+when you are comparing a downstream mirror to a known tag before refreshing it.
+
 ## AI Usage
 
 AI-assisted contributions are allowed, but disclosure and human understanding
