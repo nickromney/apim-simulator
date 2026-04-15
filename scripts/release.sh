@@ -39,12 +39,22 @@ with Path("pyproject.toml").open("rb") as handle:
 PY
 )"
 
+TAG="v${VERSION}"
+RELEASE_COMMIT_SUBJECT="chore(release): bump version to ${VERSION}"
+
 if [[ "${CURRENT_VERSION}" == "${VERSION}" ]]; then
+  RELEASE_COMMIT_PRESENT="$(
+    git -C "${ROOT_DIR}" log -F --grep="${RELEASE_COMMIT_SUBJECT}" --format=%s -n 1 2>/dev/null || true
+  )"
+  if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null || \
+      [[ -n "${RELEASE_COMMIT_PRESENT}" ]]; then
+    echo "release ${VERSION} is already complete"
+    exit 0
+  fi
+
   echo "version ${VERSION} is already current" >&2
   exit 1
 fi
-
-TAG="v${VERSION}"
 
 if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
   echo "tag ${TAG} already exists" >&2
