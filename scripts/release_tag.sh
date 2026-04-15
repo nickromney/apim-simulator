@@ -58,12 +58,13 @@ while [[ $# -gt 0 ]]; do
       exit 1
       ;;
     *)
-      if [[ -n "${VERSION}" ]]; then
+      if [[ -z "${VERSION}" ]]; then
+        VERSION="$1"
+      elif [[ "${VERSION}" != "$1" ]]; then
         echo "${script_name}: unexpected argument: $1" >&2
         usage >&2
         exit 1
       fi
-      VERSION="$1"
       shift
       ;;
   esac
@@ -80,17 +81,6 @@ if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 TAG="v${VERSION}"
-CURRENT_BRANCH="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)"
-
-if [[ "${DRY_RUN}" != "1" && "${CURRENT_BRANCH}" != "${TAG_BRANCH}" ]]; then
-  echo "release tags must be created from ${TAG_BRANCH}; current branch is ${CURRENT_BRANCH}" >&2
-  exit 1
-fi
-
-if [[ "${DRY_RUN}" != "1" && -n "$(git -C "${ROOT_DIR}" status --short)" ]]; then
-  echo "git worktree must be clean before creating a release tag" >&2
-  exit 1
-fi
 
 CURRENT_VERSION="$(
   cd "${ROOT_DIR}"
@@ -109,7 +99,19 @@ if [[ "${CURRENT_VERSION}" != "${VERSION}" ]]; then
 fi
 
 if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-  echo "tag ${TAG} already exists" >&2
+  echo "tag ${TAG} already exists; release is already complete"
+  exit 0
+fi
+
+CURRENT_BRANCH="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)"
+
+if [[ "${DRY_RUN}" != "1" && "${CURRENT_BRANCH}" != "${TAG_BRANCH}" ]]; then
+  echo "release tags must be created from ${TAG_BRANCH}; current branch is ${CURRENT_BRANCH}" >&2
+  exit 1
+fi
+
+if [[ "${DRY_RUN}" != "1" && -n "$(git -C "${ROOT_DIR}" status --short)" ]]; then
+  echo "git worktree must be clean before creating a release tag" >&2
   exit 1
 fi
 
