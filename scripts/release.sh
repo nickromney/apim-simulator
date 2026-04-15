@@ -11,6 +11,18 @@ DRY_RUN="${DRY_RUN:-0}"
 EXECUTE=0
 SKIP_CHECKS="${SKIP_CHECKS:-0}"
 UV_BIN="${UV_BIN:-uv}"
+RELEASE_FILES=(
+  pyproject.toml
+  uv.lock
+  app/main.py
+  examples/hello-api/main.py
+  examples/todo-app/api-fastapi-container-app/main.py
+  examples/todo-app/api-clients/proxyman/todo-through-apim.har
+  ui/package.json
+  ui/package-lock.json
+  examples/todo-app/frontend-astro/package.json
+  examples/todo-app/frontend-astro/package-lock.json
+)
 
 usage() {
   cat <<'EOF'
@@ -103,6 +115,49 @@ PY
 
 TAG="v${VERSION}"
 RELEASE_COMMIT_SUBJECT="chore(release): bump version to ${VERSION}"
+VERSION_ALREADY_CURRENT=0
+
+release_file_matches() {
+  local path="$1"
+  local release_file
+
+  for release_file in "${RELEASE_FILES[@]}"; do
+    if [[ "${path}" == "${release_file}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+first_non_release_dirty_path() {
+  local path
+
+  while IFS= read -r path; do
+    path="${path#???}"
+    [[ -n "${path}" ]] || continue
+    if [[ "${path}" == *" -> "* ]]; then
+      path="${path##* -> }"
+    fi
+    if ! release_file_matches "${path}"; then
+      printf '%s\n' "${path}"
+      return 0
+    fi
+  done < <(git -C "${ROOT_DIR}" status --short)
+
+  return 1
+}
+
+release_files_have_changes() {
+  if ! git -C "${ROOT_DIR}" diff --quiet -- "${RELEASE_FILES[@]}"; then
+    return 0
+  fi
+  if ! git -C "${ROOT_DIR}" diff --cached --quiet -- "${RELEASE_FILES[@]}"; then
+    return 0
+  fi
+
+  return 1
+}
 
 if [[ "${CURRENT_VERSION}" == "${VERSION}" ]]; then
   RELEASE_COMMIT_PRESENT="$(
@@ -114,18 +169,29 @@ if [[ "${CURRENT_VERSION}" == "${VERSION}" ]]; then
     exit 0
   fi
 
-  echo "version ${VERSION} is already current" >&2
-  exit 1
+  VERSION_ALREADY_CURRENT=1
+  if [[ "${DRY_RUN}" != "1" ]]; then
+    if non_release_dirty_path="$(first_non_release_dirty_path)"; then
+      echo "git worktree has non-release changes (${non_release_dirty_path}); commit or stash them before resuming release ${VERSION}" >&2
+      exit 1
+    fi
+    if ! release_files_have_changes; then
+      echo "version ${VERSION} is already current, but no release commit or tag exists" >&2
+      exit 1
+    fi
+  fi
 fi
 
-if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-  echo "tag ${TAG} already exists" >&2
-  exit 1
-fi
+if [[ "${VERSION_ALREADY_CURRENT}" != "1" ]]; then
+  if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+    echo "tag ${TAG} already exists" >&2
+    exit 1
+  fi
 
-if [[ "${DRY_RUN}" != "1" && -n "$(git -C "${ROOT_DIR}" status --short)" ]]; then
-  echo "git worktree must be clean before a real release" >&2
-  exit 1
+  if [[ "${DRY_RUN}" != "1" && -n "$(git -C "${ROOT_DIR}" status --short)" ]]; then
+    echo "git worktree must be clean before a real release" >&2
+    exit 1
+  fi
 fi
 
 run() {
@@ -149,10 +215,14 @@ run_in_dir() {
 
 cd "${ROOT_DIR}"
 
-run "${UV_BIN}" run --project "${ROOT_DIR}" python scripts/bump_version.py "${VERSION}"
-run uv lock
-run_in_dir "${ROOT_DIR}/ui" npm version "${VERSION}" --no-git-tag-version
-run_in_dir "${ROOT_DIR}/examples/todo-app/frontend-astro" npm version "${VERSION}" --no-git-tag-version
+if [[ "${VERSION_ALREADY_CURRENT}" == "1" ]]; then
+  echo "version ${VERSION} is already current; resuming release checks and commit"
+else
+  run "${UV_BIN}" run --project "${ROOT_DIR}" python scripts/bump_version.py "${VERSION}"
+  run uv lock
+  run_in_dir "${ROOT_DIR}/ui" npm version "${VERSION}" --no-git-tag-version
+  run_in_dir "${ROOT_DIR}/examples/todo-app/frontend-astro" npm version "${VERSION}" --no-git-tag-version
+fi
 
 if [[ "${SKIP_CHECKS}" != "1" ]]; then
   run make check-version
@@ -161,12 +231,7 @@ if [[ "${SKIP_CHECKS}" != "1" ]]; then
   run make frontend-check
 fi
 
-run git add pyproject.toml uv.lock app/main.py examples/hello-api/main.py \
-  examples/todo-app/api-fastapi-container-app/main.py \
-  examples/todo-app/api-clients/proxyman/todo-through-apim.har \
-  ui/package.json ui/package-lock.json \
-  examples/todo-app/frontend-astro/package.json \
-  examples/todo-app/frontend-astro/package-lock.json
+run git add "${RELEASE_FILES[@]}"
 
 run git commit -m "chore(release): bump version to ${VERSION}"
 

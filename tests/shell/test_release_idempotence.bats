@@ -24,7 +24,16 @@ teardown() {
   fi
 }
 
+ensure_release_tag() {
+  if ! git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+    git -C "$REPO_ROOT" tag -a "$RELEASE_TAG" -m "Release ${RELEASE_TAG}"
+    TAG_CREATED=1
+  fi
+}
+
 @test "make release is idempotent when the version is already current" {
+  ensure_release_tag
+
   run make -C "$REPO_ROOT" release VERSION="$RELEASE_VERSION"
 
   [ "$status" -eq 0 ]
@@ -32,10 +41,7 @@ teardown() {
 }
 
 @test "make release-tag is idempotent when the tag already exists" {
-  if ! git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
-    git -C "$REPO_ROOT" tag -a "$RELEASE_TAG" -m "Release ${RELEASE_TAG}"
-    TAG_CREATED=1
-  fi
+  ensure_release_tag
 
   run make -C "$REPO_ROOT" release-tag VERSION="$RELEASE_VERSION"
 
