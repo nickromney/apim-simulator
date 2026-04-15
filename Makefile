@@ -347,19 +347,19 @@ check-host-ports:
 	./scripts/check-host-ports.sh $(PORTS)
 
 release:
-	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release VERSION=0.2.0"; exit 1; }
+	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release VERSION=X.Y.Z"; exit 1; }
 	./scripts/release.sh "$(VERSION)"
 
 release-dry-run:
-	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-dry-run VERSION=0.2.0"; exit 1; }
+	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-dry-run VERSION=X.Y.Z"; exit 1; }
 	DRY_RUN=1 ./scripts/release.sh "$(VERSION)"
 
 release-tag:
-	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-tag VERSION=0.2.0"; exit 1; }
+	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-tag VERSION=X.Y.Z"; exit 1; }
 	./scripts/release_tag.sh "$(VERSION)"
 
 release-tag-dry-run:
-	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-tag-dry-run VERSION=0.2.0"; exit 1; }
+	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-tag-dry-run VERSION=X.Y.Z"; exit 1; }
 	DRY_RUN=1 ./scripts/release_tag.sh "$(VERSION)"
 
 test: test-python test-shell

@@ -55,16 +55,26 @@ for dockerfile in (
         fixture.parent.mkdir(parents=True, exist_ok=True)
         fixture.write_text(json.dumps({"sha": "079e3fd059c3d073151a6ac3b39eb129d66b517d"}), encoding="utf-8")
 PY
+
+  export EXPECTED_VERSION
+  EXPECTED_VERSION="$(
+    uv run --project "$REPO_ROOT" python - <<'PY'
+import tomllib
+from pathlib import Path
+
+print(tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])
+PY
+  )"
 }
 
 @test "check-version passes with matching upstream fixtures" {
   run env \
     CHECK_VERSION_GITHUB_API_BASE="file://$GITHUB_FIXTURES" \
     CHECK_VERSION_DOCKER_HUB_BASE="file://$DOCKER_FIXTURES" \
-    "$SCRIPT"
+  "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Release version declarations are synchronized at 0.2.0"* ]]
+  [[ "$output" == *"Release version declarations are synchronized at $EXPECTED_VERSION"* ]]
   [[ "$output" == *"actions/checkout v6.0.2 resolves to the pinned SHA"* ]]
   [[ "$output" == *"grafana/otel-lgtm:0.24.0 matches the pinned digest"* ]]
   [[ "$output" == *"All uv-backed Dockerfiles use ghcr.io/astral-sh/uv:0.10.4"* ]]
