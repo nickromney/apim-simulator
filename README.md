@@ -89,6 +89,32 @@ Keycloak is still the main exception. The shipped `start-dev` path rebuilds
 Quarkus artifacts on startup, so it cannot use a read-only root without moving
 to a custom optimized image.
 
+## Release Artifacts
+
+Tagged releases publish two downstream-friendly artifacts:
+
+- `apim-simulator-runtime-vX.Y.Z.zip`, a narrow source context containing only
+  `.dockerignore`, `Dockerfile`, `LICENSE.md`, `app/`, `contracts/`,
+  `pyproject.toml`, and `uv.lock`
+- `ghcr.io/<owner>/apim-simulator`, built from that same runtime context with
+  the Dockerfile's Docker Hardened Image defaults, BuildKit provenance, SBOM,
+  and GitHub artifact attestations
+
+The runtime zip deliberately excludes examples, docs, tests, compose overlays,
+and the UI. Its Dockerfile is patched during packaging so Gitea can build the
+zip as a standalone container context.
+
+Build the same artifact locally with:
+
+```bash
+make runtime-artifact
+```
+
+Manual release workflow runs can also build the image without publishing it,
+choose `dhi` or `public` base images for that manual build, and optionally push
+the resulting image to GHCR. Tag releases always use the Docker Hardened Image
+profile and push the image.
+
 The current Docker Hardened `node` image is also not a drop-in npm builder for
 this repo. It ships `node`, but not `npm`, so the Node build stages still stay
 on the upstream Node builder images for now while the final shipped nginx image
@@ -194,8 +220,8 @@ todo, OIDC, edge, UI, hello, and private variants.
 For a simulator-native version of the Microsoft Learn getting-started sequence, see:
 
 - [apim-get-started](docs/tutorials/apim-get-started/README.md)
-- [tutorial01.sh](docs/tutorials/apim-get-started/tutorial01.sh) through [tutorial11.sh](docs/tutorials/apim-get-started/tutorial11.sh) for self-contained mirrored tutorial shortcuts kept alongside the matching markdown guides; use `--setup` to apply a step and `--verify` to validate it
-- [tutorial-cleanup.sh](docs/tutorials/apim-get-started/tutorial-cleanup.sh) to stop the tutorial compose stacks
+- [tutorial01.sh](docs/tutorials/apim-get-started/tutorial01.sh) through [tutorial11.sh](docs/tutorials/apim-get-started/tutorial11.sh) for self-contained mirrored tutorial shortcuts kept alongside the matching markdown guides; use `--dry-run` to preview, `--setup`/`--execute` to apply a step, and `--verify` to validate it
+- [tutorial-cleanup.sh](docs/tutorials/apim-get-started/tutorial-cleanup.sh) to preview with `--dry-run` or stop the tutorial compose stacks with `--execute`
 
 ## Interacting with the Simulator
 

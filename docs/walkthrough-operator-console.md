@@ -32,12 +32,12 @@ rm -f "$log"
 [
   {
     "Command": "\"/app/.venv/bin/pyth…\"",
-    "CreatedAt": "2026-04-14 16:52:52 +0100 BST",
+    "CreatedAt": "2026-04-15 18:50:51 +0100 BST",
     "ExitCode": 0,
     "Health": "",
-    "ID": "7bb8a09cf534",
+    "ID": "1280a3b819e6",
     "Image": "apim-simulator:latest",
-    "Labels": "desktop.docker.io/ports.scheme=v2,desktop.docker.io/ports/8000/tcp=:8000,com.docker.compose.oneoff=False,com.docker.compose.project=apim-simulator,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.distro=debian-13,com.docker.compose.image=sha256:0baf4cc45555c4d7d464f5bc882d15ae6b9b6a270d7bc23e3f9d7f5201bda737,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.ui.yml,com.docker.compose.project.working_dir=.,com.docker.compose.version=5.1.1,com.docker.dhi.compliance=cis,com.docker.dhi.entitlement=public,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.version=3.13.13-debian13,com.docker.compose.container-number=1,com.docker.compose.depends_on=mock-backend:service_started:false,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.flavor=,com.docker.dhi.name=dhi/python,com.docker.dhi.package-manager=,com.docker.compose.config-hash=fc84d85a61e7fa831fc9d291714e609bd24f49a8843adc65ce9964da0a37f3f3,com.docker.compose.service=apim-simulator,com.docker.dhi.shell=,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.variant=runtime",
+    "Labels": "com.docker.compose.project.working_dir=.,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.name=dhi/python,com.docker.dhi.package-manager=,com.docker.dhi.shell=,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.variant=runtime,com.docker.compose.depends_on=mock-backend:service_started:false,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.ui.yml,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.flavor=,com.docker.dhi.url=https://dhi.io/catalog/python,desktop.docker.io/ports/8000/tcp=:8000,com.docker.compose.config-hash=fc84d85a61e7fa831fc9d291714e609bd24f49a8843adc65ce9964da0a37f3f3,com.docker.compose.oneoff=False,com.docker.compose.service=apim-simulator,com.docker.compose.version=5.1.1,com.docker.dhi.version=3.13.13-debian13,desktop.docker.io/ports.scheme=v2,com.docker.compose.container-number=1,com.docker.compose.project=apim-simulator,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.compliance=cis,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.distro=debian-13,com.docker.dhi.entitlement=public,com.docker.compose.image=sha256:f65ba8be51f0e631503f526d607f5c5ff3e30cea709178f13a87f0f74f1bb6cf",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-apim-simulator-1",
@@ -59,7 +59,7 @@ rm -f "$log"
         "URL": "::"
       }
     ],
-    "RunningFor": "3 seconds ago",
+    "RunningFor": "4 seconds ago",
     "Service": "apim-simulator",
     "Size": "0B",
     "State": "running",
@@ -67,12 +67,12 @@ rm -f "$log"
   },
   {
     "Command": "\"python server.py\"",
-    "CreatedAt": "2026-04-14 16:52:52 +0100 BST",
+    "CreatedAt": "2026-04-15 18:50:51 +0100 BST",
     "ExitCode": 0,
     "Health": "",
-    "ID": "808df76a66e6",
+    "ID": "ca77955d09b0",
     "Image": "apim-simulator-mock-backend:latest",
-    "Labels": "com.docker.compose.service=mock-backend,com.docker.dhi.created=2026-04-08T03:14:50Z,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.entitlement=public,com.docker.dhi.flavor=,com.docker.compose.image=sha256:bb522ce1384621d4f66154d4d822318bebee2c4515de3eed5d36f13eb851235f,com.docker.compose.oneoff=False,com.docker.compose.project.working_dir=.,com.docker.dhi.compliance=cis,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.distro=debian-13,com.docker.dhi.name=dhi/python,com.docker.dhi.package-manager=,com.docker.compose.container-number=1,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.ui.yml,com.docker.compose.version=5.1.1,com.docker.dhi.chain-id=sha256:e68172a1b009e121980466426bb3c0b7a6184cc9d5a4200b57ee2dc4292779da,com.docker.dhi.shell=,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.variant=runtime,com.docker.compose.depends_on=,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.version=3.13.12-debian13,desktop.docker.io/ports.scheme=v2,com.docker.compose.config-hash=815e10da41b3af6176108902ed23ffc47edfaf9c27a33e160094fa0330e92164,com.docker.compose.project=apim-simulator",
+    "Labels": "com.docker.compose.version=5.1.1,com.docker.dhi.created=2026-04-08T03:14:50Z,com.docker.dhi.date.release=2024-10-07,desktop.docker.io/ports.scheme=v2,com.docker.compose.config-hash=815e10da41b3af6176108902ed23ffc47edfaf9c27a33e160094fa0330e92164,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.ui.yml,com.docker.dhi.name=dhi/python,com.docker.dhi.shell=,com.docker.compose.image=sha256:b308e4f7a9c37bd58e039daecd8cdf5f6fedcc2c271ba807dc863127f197b8cf,com.docker.compose.project=apim-simulator,com.docker.dhi.chain-id=sha256:e68172a1b009e121980466426bb3c0b7a6184cc9d5a4200b57ee2dc4292779da,com.docker.dhi.compliance=cis,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.flavor=,com.docker.dhi.package-manager=,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.compose.container-number=1,com.docker.compose.oneoff=False,com.docker.compose.project.working_dir=.,com.docker.dhi.distro=debian-13,com.docker.dhi.entitlement=public,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.variant=runtime,com.docker.dhi.version=3.13.12-debian13,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.compose.depends_on=,com.docker.compose.service=mock-backend",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-mock-backend-1",
@@ -88,20 +88,20 @@ rm -f "$log"
         "URL": ""
       }
     ],
-    "RunningFor": "3 seconds ago",
+    "RunningFor": "4 seconds ago",
     "Service": "mock-backend",
     "Size": "0B",
     "State": "running",
-    "Status": "Up 2 seconds"
+    "Status": "Up 3 seconds"
   },
   {
     "Command": "\"nginx -g 'daemon of…\"",
-    "CreatedAt": "2026-04-14 16:52:52 +0100 BST",
+    "CreatedAt": "2026-04-15 18:50:52 +0100 BST",
     "ExitCode": 0,
     "Health": "",
-    "ID": "969a3a9e7ecc",
+    "ID": "716ec0d5d1dc",
     "Image": "apim-simulator-ui:latest",
-    "Labels": "com.docker.compose.container-number=1,com.docker.compose.depends_on=apim-simulator:service_started:false,com.docker.dhi.compliance=cis,com.docker.dhi.date.release=2025-06-24,com.docker.dhi.shell=,com.docker.dhi.title=Nginx mainline,com.docker.dhi.variant=runtime,com.docker.compose.config-hash=9185a0c60a1b363b2fe8eaaf4805b0cd9ac3603d36bd3beb210ac23d3b6e871b,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.ui.yml,com.docker.dhi.created=2026-02-05T05:17:44Z,com.docker.dhi.distro=debian-13,com.docker.dhi.url=https://dhi.io/catalog/nginx,com.docker.compose.project.working_dir=.,com.docker.dhi.chain-id=sha256:12d6f6bfdcac60cd53148007d8b5ee2c5a827f82ad0a8568232264eb95b6f5e2,com.docker.dhi.definition=image/nginx/debian-13/mainline,com.docker.dhi.package-manager=,com.docker.dhi.version=1.29.5-debian13,com.docker.compose.image=sha256:3aab029f587ae268e277e40fae1f134ef5317e1d1704aebf666fb95cf7529903,com.docker.compose.project=apim-simulator,com.docker.compose.service=ui,com.docker.compose.version=5.1.1,com.docker.dhi.flavor=,com.docker.dhi.name=dhi/nginx,desktop.docker.io/ports.scheme=v2,desktop.docker.io/ports/8080/tcp=:3007",
+    "Labels": "com.docker.compose.config-hash=9185a0c60a1b363b2fe8eaaf4805b0cd9ac3603d36bd3beb210ac23d3b6e871b,com.docker.compose.container-number=1,com.docker.compose.image=sha256:6cd11070c5da8ef6cb33bcaaa317f04d8eb42f791d27f38472eb2eb5be55619b,com.docker.compose.project=apim-simulator,com.docker.compose.project.working_dir=.,com.docker.dhi.shell=,com.docker.dhi.title=Nginx mainline,com.docker.dhi.url=https://dhi.io/catalog/nginx,com.docker.compose.depends_on=apim-simulator:service_started:false,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.ui.yml,com.docker.compose.service=ui,com.docker.dhi.flavor=,com.docker.dhi.package-manager=,com.docker.dhi.variant=runtime,com.docker.dhi.version=1.29.5-debian13,desktop.docker.io/ports.scheme=v2,com.docker.dhi.compliance=cis,com.docker.dhi.created=2026-02-05T05:17:44Z,com.docker.compose.oneoff=False,com.docker.compose.version=5.1.1,com.docker.dhi.chain-id=sha256:12d6f6bfdcac60cd53148007d8b5ee2c5a827f82ad0a8568232264eb95b6f5e2,com.docker.dhi.distro=debian-13,desktop.docker.io/ports/8080/tcp=:3007,com.docker.dhi.date.release=2025-06-24,com.docker.dhi.definition=image/nginx/debian-13/mainline,com.docker.dhi.name=dhi/nginx",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-ui-1",
@@ -199,4 +199,4 @@ rodney screenshot walkthrough-core-operator-console.png
 
 ```
 
-![6daec2a4-2026-04-14](6daec2a4-2026-04-14.png)
+![cbc2ccf4-2026-04-15](cbc2ccf4-2026-04-15.png)

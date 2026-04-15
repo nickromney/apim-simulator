@@ -29,7 +29,7 @@ EOF
 }
 
 @test "run_tutorial_smoke.sh runs discovered tutorials without mapfile" {
-  run "$SCRIPT"
+  run "$SCRIPT" --execute
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running live tutorial smoke sequence"* ]]
@@ -47,7 +47,7 @@ EOF
 }
 
 @test "run_tutorial_smoke.sh resolves requested selectors" {
-  run "$SCRIPT" 03
+  run "$SCRIPT" --execute 03
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"$TUTORIAL_DIR/tutorial03.sh"* ]]

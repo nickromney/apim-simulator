@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="${ROOT_DIR}/scripts"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/shell-cli.sh"
+
 SOURCE_REPO="${ROOT_DIR}"
 COMMIT=""
 METADATA_FILE=""
@@ -9,7 +13,7 @@ METADATA_FILE=""
 usage() {
   cat <<'EOF'
 Usage:
-  release_version.sh [--source PATH] [--commit SHA] [--metadata PATH]
+  release_version.sh [--dry-run] [--execute] [--source PATH] [--commit SHA] [--metadata PATH]
 
 Resolve the release version for a source checkout, commit SHA, or vendored
 metadata file.
@@ -19,11 +23,19 @@ Options:
   --commit SHA     Commit to inspect (default: HEAD of --source)
   --metadata PATH  Vendored apim-simulator metadata JSON; uses the recorded
                    upstream.resolved_commit
+  --dry-run        Show the resolution target without reading git metadata
+  --execute        Resolve the release version
   -h, --help       Show this help.
 EOF
 }
 
+shell_cli_init_standard_flags
 while [[ $# -gt 0 ]]; do
+  if shell_cli_handle_standard_flag usage "$1"; then
+    shift
+    continue
+  fi
+
   case "$1" in
     --source)
       [[ $# -ge 2 ]] || { echo "release_version.sh: missing value for $1" >&2; exit 1; }
@@ -40,10 +52,6 @@ while [[ $# -gt 0 ]]; do
       METADATA_FILE="$2"
       shift 2
       ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
     -*)
       echo "release_version.sh: unknown flag: $1" >&2
       usage >&2
@@ -56,6 +64,9 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+shell_cli_maybe_execute_or_preview_summary usage \
+  "would resolve APIM simulator release version from source ${SOURCE_REPO}"
 
 if [[ ! -d "${SOURCE_REPO}/.git" ]]; then
   echo "release_version.sh: source is not a git checkout: ${SOURCE_REPO}" >&2

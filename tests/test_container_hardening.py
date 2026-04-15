@@ -266,7 +266,7 @@ def test_local_smoke_clients_bypass_proxy_environment() -> None:
 
 def test_generated_edge_certs_keep_server_key_readable_for_rootless_nginx(tmp_path: Path) -> None:
     subprocess.run(
-        ["sh", str(REPO_ROOT / "scripts" / "gen_dev_certs.sh")],
+        [str(REPO_ROOT / "scripts" / "gen_dev_certs.sh"), "--execute"],
         check=True,
         env={**os.environ, "APIM_SIMULATOR_ROOT_DIR": str(tmp_path)},
         capture_output=True,

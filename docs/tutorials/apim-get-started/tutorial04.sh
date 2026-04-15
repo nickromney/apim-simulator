@@ -8,16 +8,18 @@ source "$ROOT_DIR/scripts/tutorial_lib.sh"
 init_tutorial_env
 EXECUTE=0
 VERIFY=0
+DRY_RUN=0
 
 usage() {
   cat <<EOF
-Usage: ./docs/tutorials/apim-get-started/tutorial04.sh [--setup|--execute|--verify]
+Usage: ./docs/tutorials/apim-get-started/tutorial04.sh [--setup|--execute|--verify|--dry-run]
 
 Runs tutorial step 4 for the APIM simulator.
 
 Flags:
   --setup, --execute  Start the local stack and apply the tutorial protection policy.
   --verify            Verify the existing tutorial state without restarting it.
+  --dry-run           Show this help and preview the setup action without side effects.
   --help, -h          Show this help text.
 EOF
 }
@@ -51,6 +53,9 @@ while (($# > 0)); do
     --verify)
       VERIFY=1
       ;;
+    --dry-run)
+      DRY_RUN=1
+      ;;
     --help|-h)
       usage
       exit 0
@@ -70,8 +75,15 @@ if [[ "$EXECUTE" -eq 1 && "$VERIFY" -eq 1 ]]; then
   exit 2
 fi
 
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  usage
+  echo "INFO dry-run: would run $(basename "$0") setup; use --verify for read-only validation"
+  exit 0
+fi
+
 if [[ "$EXECUTE" -eq 0 && "$VERIFY" -eq 0 ]]; then
   usage
+  echo "INFO dry-run: would run $(basename "$0") setup; use --verify for read-only validation"
   exit 0
 fi
 

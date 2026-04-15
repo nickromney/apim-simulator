@@ -77,6 +77,18 @@ If you refresh a downstream mirror:
 3. Do not hand-edit the vendored subtree and assume those edits will survive the
    next sync. Land source changes here first, then re-vendor.
 
+For downstream builders that want a smaller context, use the runtime source
+archive instead of the full repository:
+
+```bash
+make runtime-artifact
+```
+
+That writes `dist/apim-simulator-runtime-vX.Y.Z.zip` plus a `.sha256` file. The
+archive contains only `.dockerignore`, `Dockerfile`, `LICENSE.md`, `app/`,
+`contracts/`, `pyproject.toml`, and `uv.lock`, with the example-copying
+Dockerfile line removed so platform Gitea can build it directly.
+
 ## Release Workflow
 
 Use this when changes in `main` should become a published release and you want
@@ -88,8 +100,20 @@ the release commit and tag to stay immutable.
 - `# merge the PR` - only tag the commit that actually landed on `main`.
 - `git checkout main && git pull` - move to the merged release commit.
 - `make release-tag VERSION=X.Y.Z` - create the immutable `vX.Y.Z` tag from `main`.
-- `git push origin vX.Y.Z` - publish the tag so downstream mirrors can pin it.
-- `gh release create vX.Y.Z --title vX.Y.Z --generate-notes` - create the GitHub release from the tag.
+- `git push origin vX.Y.Z` - publish the tag so downstream mirrors can pin it
+  and start the release workflow.
+
+The release workflow verifies the tag matches `pyproject.toml`, publishes the
+runtime source zip to the GitHub release, uploads the checksum, pushes
+`ghcr.io/<owner>/apim-simulator`, and creates provenance attestations for both
+the zip and image. Release image builds use the Dockerfile's Docker Hardened
+Image defaults, so configure the `DHI_USERNAME` and `DHI_TOKEN` repository
+secrets first. `DHI_PASSWORD` is accepted as a fallback secret name.
+
+Manual `workflow_dispatch` runs can skip the image job, build an image without
+pushing it, choose the `dhi` or `public` base-image profile, and optionally push
+the manual image build to GHCR. Published tag releases ignore those manual
+knobs: they always build from the Docker Hardened Image profile and push.
 
 ## Release Lookup
 
@@ -99,6 +123,7 @@ deterministically.
 
 ```bash
 ./scripts/release_version.sh \
+  --execute \
   --source ~/Developer/personal/apim-simulator \
   --metadata ~/Developer/personal/platform/apps/subnet-calculator/apim-simulator.vendor.json
 ```

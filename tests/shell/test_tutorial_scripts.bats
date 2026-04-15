@@ -323,12 +323,13 @@ EOF
   for script in "$TUTORIAL_DIR"/tutorial{02,03,04,05,06,07,08,09,10,11}.sh; do
     run "$script"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"[--setup|--execute|--verify]"* ]]
+    [[ "$output" == *"[--setup|--execute|--verify|--dry-run]"* ]]
+    [[ "$output" == *"INFO dry-run:"* ]]
   done
 }
 
 @test "tutorial-cleanup.sh stops the tutorial compose stacks" {
-  run "$TUTORIAL_CLEANUP"
+  run "$TUTORIAL_CLEANUP" --execute
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Stopping all tutorial stack variants with docker compose"* ]]

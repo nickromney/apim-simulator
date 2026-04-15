@@ -22,12 +22,12 @@ rm -f "$log"
 [
   {
     "Command": "\"/app/.venv/bin/pyth…\"",
-    "CreatedAt": "2026-04-14 16:54:11 +0100 BST",
+    "CreatedAt": "2026-04-15 18:52:09 +0100 BST",
     "ExitCode": 0,
     "Health": "",
-    "ID": "219a57d68c2e",
+    "ID": "a907f3b7f489",
     "Image": "apim-simulator:latest",
-    "Labels": "com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.version=3.13.13-debian13,com.docker.compose.depends_on=keycloak:service_healthy:false,hello-api:service_healthy:false,mock-backend:service_started:false,com.docker.compose.project=apim-simulator,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.oidc.yml,./compose.hello.yml,com.docker.compose.version=5.1.1,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.flavor=,com.docker.compose.image=sha256:cfb7fe5f8c00d55621354b09fb435ffdec92016851ce96fd296c61ed90726653,com.docker.compose.service=apim-simulator,com.docker.dhi.compliance=cis,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.shell=,com.docker.dhi.variant=runtime,desktop.docker.io/ports.scheme=v2,com.docker.compose.project.working_dir=.,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.distro=debian-13,com.docker.dhi.package-manager=,com.docker.dhi.title=Python 3.13.x,desktop.docker.io/ports/8000/tcp=:8000,com.docker.compose.config-hash=182bceddcd030d4fbd1463d617d6b52c9273c2e4eb75b8aa7363001625553890,com.docker.compose.container-number=1,com.docker.compose.oneoff=False,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.entitlement=public,com.docker.dhi.name=dhi/python",
+    "Labels": "com.docker.compose.version=5.1.1,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.name=dhi/python,com.docker.dhi.package-manager=,com.docker.dhi.version=3.13.13-debian13,desktop.docker.io/ports/8000/tcp=:8000,com.docker.compose.config-hash=182bceddcd030d4fbd1463d617d6b52c9273c2e4eb75b8aa7363001625553890,com.docker.compose.service=apim-simulator,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.flavor=,com.docker.dhi.variant=runtime,com.docker.compose.container-number=1,com.docker.compose.image=sha256:32593056f7827797d0c6667d5f52b3851c7eeb6d2fb91da2fb2bac71811cf9a9,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.oidc.yml,./compose.hello.yml,com.docker.compose.project.working_dir=.,com.docker.dhi.compliance=cis,com.docker.dhi.entitlement=public,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.compose.depends_on=keycloak:service_healthy:false,hello-api:service_healthy:false,mock-backend:service_started:false,com.docker.compose.project=apim-simulator,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.distro=debian-13,com.docker.dhi.shell=,com.docker.dhi.title=Python 3.13.x,desktop.docker.io/ports.scheme=v2,com.docker.compose.oneoff=False",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-apim-simulator-1",
@@ -49,20 +49,20 @@ rm -f "$log"
         "URL": "::"
       }
     ],
-    "RunningFor": "24 seconds ago",
+    "RunningFor": "25 seconds ago",
     "Service": "apim-simulator",
     "Size": "0B",
     "State": "running",
-    "Status": "Up 2 seconds"
+    "Status": "Up 3 seconds"
   },
   {
     "Command": "\"/app/.venv/bin/uvic…\"",
-    "CreatedAt": "2026-04-14 16:54:11 +0100 BST",
+    "CreatedAt": "2026-04-15 18:52:08 +0100 BST",
     "ExitCode": 0,
     "Health": "healthy",
-    "ID": "6b063203eb9d",
+    "ID": "0a49c74a3892",
     "Image": "apim-simulator-hello-api:latest",
-    "Labels": "com.docker.dhi.name=dhi/python,com.docker.dhi.package-manager=,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.variant=runtime,com.docker.compose.config-hash=67f3fb3e730931d9496f989084f451727082e3f09840e8df8a4194d43f2b4014,com.docker.compose.container-number=1,com.docker.compose.oneoff=False,com.docker.compose.service=hello-api,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.compose.project=apim-simulator,com.docker.dhi.compliance=cis,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.distro=debian-13,com.docker.dhi.shell=,desktop.docker.io/ports.scheme=v2,com.docker.compose.depends_on=,com.docker.compose.image=sha256:8c5abdde98b09598ff15ba1d6a6204c9282aad5bfd8ed8710ebc50f9c97658c5,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.entitlement=public,com.docker.dhi.flavor=,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.version=3.13.13-debian13,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.oidc.yml,./compose.hello.yml,com.docker.compose.project.working_dir=.,com.docker.compose.version=5.1.1,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83",
+    "Labels": "com.docker.compose.config-hash=67f3fb3e730931d9496f989084f451727082e3f09840e8df8a4194d43f2b4014,com.docker.compose.version=5.1.1,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.shell=,desktop.docker.io/ports.scheme=v2,com.docker.compose.container-number=1,com.docker.compose.image=sha256:50d6d978121c1a1343a8f951170837c4ec874d56d5c17d2e4575c2d5e25db30b,com.docker.compose.project=apim-simulator,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.oidc.yml,./compose.hello.yml,com.docker.compose.service=hello-api,com.docker.dhi.chain-id=sha256:b9e7c6e6bf9a389eaa805f1244eea298c7ecd133127518ede00ede39add3df83,com.docker.dhi.flavor=,com.docker.dhi.name=dhi/python,com.docker.compose.oneoff=False,com.docker.compose.project.working_dir=.,com.docker.dhi.compliance=cis,com.docker.dhi.created=2026-04-11T22:45:39Z,com.docker.dhi.distro=debian-13,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.variant=runtime,com.docker.compose.depends_on=,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.entitlement=public,com.docker.dhi.package-manager=,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.version=3.13.13-debian13",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-hello-api-1",
@@ -78,20 +78,20 @@ rm -f "$log"
         "URL": ""
       }
     ],
-    "RunningFor": "24 seconds ago",
+    "RunningFor": "26 seconds ago",
     "Service": "hello-api",
     "Size": "0B",
     "State": "running",
-    "Status": "Up 23 seconds (healthy)"
+    "Status": "Up 25 seconds (healthy)"
   },
   {
     "Command": "\"/opt/keycloak/bin/k…\"",
-    "CreatedAt": "2026-04-14 16:54:11 +0100 BST",
+    "CreatedAt": "2026-04-15 18:52:08 +0100 BST",
     "ExitCode": 0,
     "Health": "healthy",
-    "ID": "3bd22a075b0e",
+    "ID": "c6c2b04c463b",
     "Image": "quay.io/keycloak/keycloak:26.4.7",
-    "Labels": "com.docker.compose.service=keycloak,desktop.docker.io/binds/0/SourceKind=hostFile,desktop.docker.io/binds/0/Target=/opt/keycloak/data/import/realm-export.json,org.opencontainers.image.url=https://github.com/keycloak-rel/keycloak-rel,version=26.4.7,com.docker.compose.container-number=1,desktop.docker.io/ports/8080/tcp=:8180,io.buildah.version=1.41.4,org.opencontainers.image.revision=aa3baec457ee0cdfdff6de1ce256319180a76ee6,vendor=https://www.keycloak.org/,build-date=2025-11-12T17:00:10Z,com.docker.compose.depends_on=,com.redhat.component=,io.k8s.display-name=Keycloak Server,release=,architecture=aarch64,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.oidc.yml,./compose.hello.yml,com.redhat.license_terms=,desktop.docker.io/binds/0/Source=./examples/subnet-calculator/keycloak/realm-export.json,desktop.docker.io/ports.scheme=v2,distribution-scope=public,io.k8s.description=Keycloak Server Image,name=keycloak,com.redhat.build-host=,cpe=cpe:/a:redhat:enterprise_linux:9::appstream,org.opencontainers.image.created=2025-12-01T08:14:24.495Z,org.opencontainers.image.description=,org.opencontainers.image.title=keycloak-rel,summary=Keycloak Server Image,url=https://www.keycloak.org/,vcs-ref=,com.docker.compose.project=apim-simulator,maintainer=https://www.keycloak.org/,vcs-type=git,io.openshift.expose-services=,io.openshift.tags=keycloak security identity,com.docker.compose.image=sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007,com.docker.compose.oneoff=False,com.docker.compose.project.working_dir=.,description=Keycloak Server Image,org.opencontainers.image.source=https://github.com/keycloak-rel/keycloak-rel,org.opencontainers.image.version=26.4.7,com.docker.compose.config-hash=ef29ccb00803353c0b6c2627c8f8c5c5b4c07338465efad85e1e1df4aad6ff6c,com.docker.compose.version=5.1.1,org.opencontainers.image.documentation=https://www.keycloak.org/documentation,org.opencontainers.image.licenses=Apache-2.0",
+    "Labels": "com.docker.compose.version=5.1.1,distribution-scope=public,io.openshift.expose-services=,version=26.4.7,build-date=2025-11-12T17:00:10Z,com.docker.compose.container-number=1,com.docker.compose.oneoff=False,com.redhat.license_terms=,desktop.docker.io/binds/1/SourceKind=hostFile,desktop.docker.io/binds/1/Target=/opt/keycloak/data/import/realm-export.json,summary=Keycloak Server Image,com.docker.compose.config-hash=ef29ccb00803353c0b6c2627c8f8c5c5b4c07338465efad85e1e1df4aad6ff6c,com.docker.compose.image=sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007,com.docker.compose.project=apim-simulator,com.docker.compose.project.working_dir=.,name=keycloak,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.oidc.yml,./compose.hello.yml,description=Keycloak Server Image,desktop.docker.io/binds/1/Source=./examples/subnet-calculator/keycloak/realm-export.json,io.buildah.version=1.41.4,io.k8s.description=Keycloak Server Image,maintainer=https://www.keycloak.org/,org.opencontainers.image.created=2025-12-01T08:14:24.495Z,org.opencontainers.image.description=,com.docker.compose.service=keycloak,desktop.docker.io/ports/8080/tcp=:8180,io.k8s.display-name=Keycloak Server,org.opencontainers.image.documentation=https://www.keycloak.org/documentation,org.opencontainers.image.source=https://github.com/keycloak-rel/keycloak-rel,org.opencontainers.image.url=https://github.com/keycloak-rel/keycloak-rel,org.opencontainers.image.version=26.4.7,vcs-ref=,com.docker.compose.depends_on=,com.redhat.component=,cpe=cpe:/a:redhat:enterprise_linux:9::appstream,release=,url=https://www.keycloak.org/,io.openshift.tags=keycloak security identity,org.opencontainers.image.revision=aa3baec457ee0cdfdff6de1ce256319180a76ee6,vcs-type=git,vendor=https://www.keycloak.org/,architecture=aarch64,com.redhat.build-host=,desktop.docker.io/ports.scheme=v2,org.opencontainers.image.licenses=Apache-2.0,org.opencontainers.image.title=keycloak-rel",
     "LocalVolumes": "1",
     "Mounts": "apim-simulator…,/host_mnt/User…",
     "Name": "apim-simulator-keycloak-1",
@@ -113,20 +113,20 @@ rm -f "$log"
         "URL": "::"
       }
     ],
-    "RunningFor": "24 seconds ago",
+    "RunningFor": "26 seconds ago",
     "Service": "keycloak",
     "Size": "0B",
     "State": "running",
-    "Status": "Up 23 seconds (healthy)"
+    "Status": "Up 25 seconds (healthy)"
   },
   {
     "Command": "\"python server.py\"",
-    "CreatedAt": "2026-04-14 16:54:11 +0100 BST",
+    "CreatedAt": "2026-04-15 18:52:08 +0100 BST",
     "ExitCode": 0,
     "Health": "",
-    "ID": "60981d7defae",
+    "ID": "06e7aaeab954",
     "Image": "apim-simulator-mock-backend:latest",
-    "Labels": "com.docker.compose.config-hash=815e10da41b3af6176108902ed23ffc47edfaf9c27a33e160094fa0330e92164,com.docker.compose.container-number=1,com.docker.compose.oneoff=False,com.docker.compose.project.working_dir=.,com.docker.compose.service=mock-backend,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.title=Python 3.13.x,com.docker.compose.depends_on=,com.docker.compose.version=5.1.1,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.flavor=,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.variant=runtime,desktop.docker.io/ports.scheme=v2,com.docker.compose.image=sha256:f0f23447f81c9d0f4c0ba76abe8df70c2ce4bda96c58c01ead48dde06c6bea9a,com.docker.compose.project=apim-simulator,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.oidc.yml,./compose.hello.yml,com.docker.dhi.chain-id=sha256:e68172a1b009e121980466426bb3c0b7a6184cc9d5a4200b57ee2dc4292779da,com.docker.dhi.created=2026-04-08T03:14:50Z,com.docker.dhi.distro=debian-13,com.docker.dhi.entitlement=public,com.docker.dhi.name=dhi/python,com.docker.dhi.compliance=cis,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.package-manager=,com.docker.dhi.shell=,com.docker.dhi.version=3.13.12-debian13",
+    "Labels": "desktop.docker.io/ports.scheme=v2,com.docker.compose.project.config_files=./compose.yml,./compose.public.yml,./compose.oidc.yml,./compose.hello.yml,com.docker.dhi.created=2026-04-08T03:14:50Z,com.docker.dhi.entitlement=public,com.docker.dhi.flavor=,com.docker.dhi.name=dhi/python,com.docker.compose.project=apim-simulator,com.docker.compose.project.working_dir=.,com.docker.compose.version=5.1.1,com.docker.dhi.chain-id=sha256:e68172a1b009e121980466426bb3c0b7a6184cc9d5a4200b57ee2dc4292779da,com.docker.dhi.compliance=cis,com.docker.dhi.date.end-of-life=2029-10-31,com.docker.dhi.title=Python 3.13.x,com.docker.dhi.variant=runtime,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:307c7e7c0b0c0983f8a893a60101dce400ca0e57d9515fbc97c55e1f3593c488,com.docker.compose.oneoff=False,com.docker.compose.service=mock-backend,com.docker.dhi.date.release=2024-10-07,com.docker.dhi.package-manager=,com.docker.dhi.shell=,com.docker.compose.config-hash=815e10da41b3af6176108902ed23ffc47edfaf9c27a33e160094fa0330e92164,com.docker.dhi.definition=image/python/debian-13/3.13,com.docker.dhi.distro=debian-13,com.docker.dhi.url=https://dhi.io/catalog/python,com.docker.dhi.version=3.13.12-debian13",
     "LocalVolumes": "0",
     "Mounts": "",
     "Name": "apim-simulator-mock-backend-1",
@@ -142,11 +142,11 @@ rm -f "$log"
         "URL": ""
       }
     ],
-    "RunningFor": "24 seconds ago",
+    "RunningFor": "26 seconds ago",
     "Service": "mock-backend",
     "Size": "0B",
     "State": "running",
-    "Status": "Up 23 seconds"
+    "Status": "Up 25 seconds"
   }
 ]
 ```

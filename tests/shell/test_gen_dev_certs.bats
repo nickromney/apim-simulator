@@ -9,7 +9,7 @@ setup() {
 }
 
 @test "gen_dev_certs.sh writes the certificate bundle under an override root" {
-  run env APIM_SIMULATOR_ROOT_DIR="$APIM_ROOT" "$SCRIPT"
+  run env APIM_SIMULATOR_ROOT_DIR="$APIM_ROOT" "$SCRIPT" --execute
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Generated $CERT_DIR/edge.apim.127.0.0.1.sslip.io.crt and $CERT_DIR/edge.apim.127.0.0.1.sslip.io.key"* ]]
@@ -36,12 +36,12 @@ setup() {
 }
 
 @test "gen_dev_certs.sh keeps an existing valid CA on rerun" {
-  run env APIM_SIMULATOR_ROOT_DIR="$APIM_ROOT" "$SCRIPT"
+  run env APIM_SIMULATOR_ROOT_DIR="$APIM_ROOT" "$SCRIPT" --execute
   [ "$status" -eq 0 ]
 
   before_ca_fingerprint="$(openssl x509 -in "$CERT_DIR/dev-root-ca.crt" -noout -fingerprint -sha256)"
 
-  run env APIM_SIMULATOR_ROOT_DIR="$APIM_ROOT" "$SCRIPT"
+  run env APIM_SIMULATOR_ROOT_DIR="$APIM_ROOT" "$SCRIPT" --execute
   [ "$status" -eq 0 ]
 
   after_ca_fingerprint="$(openssl x509 -in "$CERT_DIR/dev-root-ca.crt" -noout -fingerprint -sha256)"

@@ -19,16 +19,17 @@ repo_root = Path(sys.argv[1])
 github_root = Path(sys.argv[2])
 docker_root = Path(sys.argv[3])
 
-workflow = (repo_root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 action_pattern = re.compile(
     r'uses:\s*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([0-9a-f]{40})(?:\s*#\s*(v[^\s]+))?'
 )
-for repo, sha, selector in action_pattern.findall(workflow):
-    if not selector:
-        continue
-    fixture = github_root / "repos" / repo / "commits" / selector
-    fixture.parent.mkdir(parents=True, exist_ok=True)
-    fixture.write_text(json.dumps({"sha": sha}), encoding="utf-8")
+for workflow_path in sorted((repo_root / ".github/workflows").glob("*.yml")):
+    workflow = workflow_path.read_text(encoding="utf-8")
+    for repo, sha, selector in action_pattern.findall(workflow):
+        if not selector:
+            continue
+        fixture = github_root / "repos" / repo / "commits" / selector
+        fixture.parent.mkdir(parents=True, exist_ok=True)
+        fixture.write_text(json.dumps({"sha": sha}), encoding="utf-8")
 
 docker_pattern = re.compile(r'image:\s*([A-Za-z0-9._/-]+):([^@\s]+)@(sha256:[0-9a-f]{64})')
 for compose_name in ("compose.otel.yml", "compose.todo.otel.yml"):
@@ -71,13 +72,15 @@ PY
   run env \
     CHECK_VERSION_GITHUB_API_BASE="file://$GITHUB_FIXTURES" \
     CHECK_VERSION_DOCKER_HUB_BASE="file://$DOCKER_FIXTURES" \
-  "$SCRIPT"
+    "$SCRIPT" --execute
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Release version declarations are synchronized at $EXPECTED_VERSION"* ]]
   [[ "$output" == *"actions/checkout v6.0.2 resolves to the pinned SHA"* ]]
   [[ "$output" == *"grafana/otel-lgtm:0.24.0 matches the pinned digest"* ]]
   [[ "$output" == *"All uv-backed Dockerfiles use ghcr.io/astral-sh/uv:0.10.4"* ]]
+  [[ "$output" == *"All .npmrc files set min-release-age=7"* ]]
+  [[ "$output" == *"All uv-managed pyproject.toml files set exclude-newer='7 days'"* ]]
   [[ "$output" == *"All version checks passed."* ]]
 }
 
@@ -87,7 +90,7 @@ PY
   run env \
     CHECK_VERSION_GITHUB_API_BASE="file://$GITHUB_FIXTURES" \
     CHECK_VERSION_DOCKER_HUB_BASE="file://$DOCKER_FIXTURES" \
-    "$SCRIPT"
+    "$SCRIPT" --execute
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"actions/checkout v6.0.2 resolves to"* ]]

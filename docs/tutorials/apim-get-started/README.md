@@ -49,10 +49,12 @@ These tutorials assume the API you import in step 1 uses:
 
 Each mirrored step also has a companion `tutorialNN.sh` script in this
 directory. Run `--setup` or `--execute` to apply a step. Run `--verify` to
-validate the existing tutorial state without restarting the stack.
+validate the existing tutorial state without restarting the stack. Run
+`--dry-run` to preview the setup path without side effects.
 
-Use [`./docs/tutorials/apim-get-started/tutorial-cleanup.sh`](tutorial-cleanup.sh) to stop the
-tutorial compose stacks and remove orphaned containers.
+Use [`./docs/tutorials/apim-get-started/tutorial-cleanup.sh`](tutorial-cleanup.sh)
+with `--dry-run` to preview or `--execute` to stop the tutorial compose stacks
+and remove orphaned containers.
 
 ## Status Matrix
 

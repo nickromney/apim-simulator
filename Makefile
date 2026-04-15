@@ -85,8 +85,15 @@ COMPOSE_ALL := $(call compose_stack,all) -f compose.yml -f compose.public.yml -f
 DEV_CERTS := examples/edge/certs/$(APIM_EDGE_HOST).crt examples/edge/certs/$(APIM_EDGE_HOST).key
 HELP_FMT := "  %-34s %s\n"
 UV_RUN := uv run --project $(CURDIR)
+LINT_YAML_SCRIPT ?= scripts/lint-yaml.sh
+LINT_MARKDOWN_SCRIPT ?= scripts/lint-markdown.sh
+LINT_BASH32_SCRIPT ?= scripts/check-bash32-compat.sh
+AUDIT_SHELL_SCRIPTS_SCRIPT ?= scripts/audit-shell-scripts.sh
+CHECK_VERSION_SCRIPT ?= scripts/check-version.sh
+RELEASE_SCRIPT ?= scripts/release.sh
+RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 
-.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs install-hooks fmt lint lint-check frontend-check check-version release release-dry-run release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs install-hooks fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
@@ -132,8 +139,12 @@ help:
 	@printf $(HELP_FMT) "frontend-check" "Run Biome, TypeScript, and Astro checks for repo frontends"
 	@printf $(HELP_FMT) "import-tofu" "Import a tofu show JSON file into a running simulator (requires TOFU_SHOW=...)"
 	@printf $(HELP_FMT) "install-hooks" "Enable the repo-managed git pre-commit hook"
-	@printf $(HELP_FMT) "lint" "Format Python code with Ruff and run lint checks"
+	@printf $(HELP_FMT) "lint" "Run repo-level lint checks without modifying files"
+	@printf $(HELP_FMT) "lint-bash32" "Check tracked shell scripts for Bash 3.2 compatibility"
 	@printf $(HELP_FMT) "lint-check" "Check Python formatting and lint with Ruff without modifying files"
+	@printf $(HELP_FMT) "lint-markdown" "Lint tracked Markdown files"
+	@printf $(HELP_FMT) "lint-shell" "Audit executable shell script interfaces and hygiene"
+	@printf $(HELP_FMT) "lint-yaml" "Lint tracked YAML files"
 	@printf $(HELP_FMT) "test" "Run Python and shell tests"
 	@printf $(HELP_FMT) "test-python" "Run the Python test suite"
 	@printf $(HELP_FMT) "test-shell" "Run the shell script test suite with BATS"
@@ -155,8 +166,10 @@ help:
 	@printf $(HELP_FMT) "verify-otel" "Verify Grafana, Loki, Tempo, and Prometheus for the OTEL stack"
 	@printf $(HELP_FMT) "verify-todo-otel" "Verify OTEL signals for the LGTM-backed todo demo stack"
 	@printf "\nRelease:\n"
+	@printf $(HELP_FMT) "runtime-artifact" "Build the narrow runtime source zip under dist/"
 	@printf $(HELP_FMT) "release" "Bump to VERSION, run checks, and create a release commit"
 	@printf $(HELP_FMT) "release-dry-run" "Preview the release-commit flow for VERSION without changing files"
+	@printf $(HELP_FMT) "release-preview" "Alias for release-dry-run"
 	@printf $(HELP_FMT) "release-tag" "Create an annotated vVERSION tag from the current main commit"
 	@printf $(HELP_FMT) "release-tag-dry-run" "Preview tag creation for VERSION without changing git state"
 	@printf "\nCompose Config:\n"
@@ -206,10 +219,10 @@ check-mkcert-prerequisites:
 	fi
 
 ensure-certs: check-mkcert-prerequisites
-	./scripts/gen_dev_certs.sh
+	./scripts/gen_dev_certs.sh --execute
 
 $(DEV_CERTS): check-mkcert-prerequisites
-	./scripts/gen_dev_certs.sh
+	./scripts/gen_dev_certs.sh --execute
 
 up:
 	$(COMPOSE_CORE) up --build -d
@@ -261,7 +274,7 @@ up-all:
 	slot="$(UP_ALL_SLOT_BASE)"; \
 	for target in $(UP_ALL_STACKS); do \
 	  echo "==> $$target (STACK_SLOT=$$slot)"; \
-	  ./scripts/run-stacked-make.sh "$$slot" "$$target"; \
+	  ./scripts/run-stacked-make.sh --execute "$$slot" "$$target"; \
 	  slot=$$((slot + 1)); \
 	done
 
@@ -285,7 +298,7 @@ down-all:
 	slot="$(UP_ALL_SLOT_BASE)"; \
 	for _target in $(UP_ALL_STACKS); do \
 	  echo "==> down (STACK_SLOT=$$slot)"; \
-	  ./scripts/run-stacked-make.sh "$$slot" down; \
+	  ./scripts/run-stacked-make.sh --execute "$$slot" down; \
 	  slot=$$((slot + 1)); \
 	done
 
@@ -327,12 +340,27 @@ fmt:
 	uv run --extra dev ruff format .
 
 lint:
-	uv run --extra dev ruff format .
-	uv run --extra dev ruff check .
+	@$(MAKE) --no-print-directory lint-check
+	@$(MAKE) --no-print-directory lint-yaml
+	@$(MAKE) --no-print-directory lint-markdown
+	@$(MAKE) --no-print-directory lint-bash32
+	@$(MAKE) --no-print-directory lint-shell
 
 lint-check:
 	uv run --extra dev ruff format --check .
 	uv run --extra dev ruff check .
+
+lint-yaml:
+	@"$(LINT_YAML_SCRIPT)" --execute
+
+lint-markdown:
+	@"$(LINT_MARKDOWN_SCRIPT)" --execute
+
+lint-bash32:
+	@/bin/bash "$(LINT_BASH32_SCRIPT)" --execute
+
+lint-shell:
+	@"$(AUDIT_SHELL_SCRIPTS_SCRIPT)" --execute
 
 frontend-check:
 	npm --prefix ui ci
@@ -341,26 +369,31 @@ frontend-check:
 	npm --prefix examples/todo-app/frontend-astro run check
 
 check-version:
-	./scripts/check-version.sh
+	@"$(CHECK_VERSION_SCRIPT)" --execute
 
 check-host-ports:
-	./scripts/check-host-ports.sh $(PORTS)
+	./scripts/check-host-ports.sh --execute $(PORTS)
+
+runtime-artifact:
+	$(UV_RUN) python scripts/build_runtime_artifact.py
 
 release:
 	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release VERSION=X.Y.Z"; exit 1; }
-	./scripts/release.sh "$(VERSION)"
+	@"$(RELEASE_SCRIPT)" --execute "$(VERSION)"
 
 release-dry-run:
 	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-dry-run VERSION=X.Y.Z"; exit 1; }
-	DRY_RUN=1 ./scripts/release.sh "$(VERSION)"
+	@"$(RELEASE_SCRIPT)" --dry-run "$(VERSION)"
+
+release-preview: release-dry-run
 
 release-tag:
 	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-tag VERSION=X.Y.Z"; exit 1; }
-	./scripts/release_tag.sh "$(VERSION)"
+	@"$(RELEASE_TAG_SCRIPT)" --execute "$(VERSION)"
 
 release-tag-dry-run:
 	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-tag-dry-run VERSION=X.Y.Z"; exit 1; }
-	DRY_RUN=1 ./scripts/release_tag.sh "$(VERSION)"
+	@"$(RELEASE_TAG_SCRIPT)" --dry-run "$(VERSION)"
 
 test: test-python test-shell
 
@@ -420,7 +453,7 @@ smoke-todo:
 	$(UV_RUN) python scripts/smoke_todo.py
 
 smoke-tutorials-live:
-	APIM_BASE="$(APIM_BASE_URL)" GRAFANA_BASE="$(GRAFANA_BASE_URL)" OPERATOR_CONSOLE_BASE="$(OPERATOR_CONSOLE_URL)" ./scripts/run_tutorial_smoke.sh
+	APIM_BASE="$(APIM_BASE_URL)" GRAFANA_BASE="$(GRAFANA_BASE_URL)" OPERATOR_CONSOLE_BASE="$(OPERATOR_CONSOLE_URL)" ./scripts/run_tutorial_smoke.sh --execute
 
 test-todo-e2e:
 	npm --prefix examples/todo-app/frontend-astro ci
