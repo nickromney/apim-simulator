@@ -96,9 +96,10 @@ EOF
   run "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Usage: ./docs/tutorials/apim-get-started/tutorial01.sh [--setup|--execute|--verify]"* ]]
+  [[ "$output" == *"Usage: ./docs/tutorials/apim-get-started/tutorial01.sh [--setup|--execute|--verify|--dry-run]"* ]]
   [[ "$output" == *"--setup, --execute"* ]]
   [[ "$output" == *"--verify"* ]]
+  [[ "$output" == *"INFO dry-run:"* ]]
 }
 
 @test "tutorial01.sh --verify runs the tutorial curl checks" {

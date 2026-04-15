@@ -5,12 +5,25 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCS_DIR="$ROOT_DIR/docs"
 # shellcheck source=./stack-env.sh
 source "$ROOT_DIR/scripts/stack-env.sh"
+# shellcheck source=/dev/null
+source "$ROOT_DIR/scripts/lib/shell-cli.sh"
 stack_env_init
 
 DOC_CORE="$DOCS_DIR/walkthrough-core-stacks.md"
 DOC_EXAMPLES="$DOCS_DIR/walkthrough-example-stacks.md"
 DOC_TUTORIALS="$DOCS_DIR/walkthrough-apim-get-started.md"
 SHOWBOAT_BASH_ENV=""
+
+usage() {
+  cat <<EOF
+Usage: generate_walkthroughs.sh [--dry-run] [--execute] [core|examples|tutorials|all ...]
+
+Generate captured walkthrough Markdown using showboat, Docker Compose, and the
+local APIM tutorial scripts.
+
+$(shell_cli_standard_options)
+EOF
+}
 
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -157,7 +170,7 @@ make() {
 }
 
 tutorial_cleanup_and_wait() {
-  ./docs/tutorials/apim-get-started/tutorial-cleanup.sh >/dev/null 2>&1 || true
+  ./docs/tutorials/apim-get-started/tutorial-cleanup.sh --execute >/dev/null 2>&1 || true
   after_down_wait
 }
 EOF
@@ -1099,6 +1112,44 @@ EOF
 
 main() {
   local section
+  local -a sections
+
+  shell_cli_init_standard_flags
+  sections=()
+  while [[ $# -gt 0 ]]; do
+    if shell_cli_handle_standard_flag usage "$1"; then
+      shift
+      continue
+    fi
+
+    case "$1" in
+      --)
+        shift
+        sections+=("$@")
+        break
+        ;;
+      -*)
+        shell_cli_unknown_flag "$(shell_cli_script_name)" "$1"
+        usage >&2
+        exit 1
+        ;;
+      *)
+        sections+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "${#sections[@]}" -eq 0 ]]; then
+    sections=(core examples tutorials)
+  fi
+
+  if [[ "${SHELL_CLI_DRY_RUN}" -eq 1 || "${SHELL_CLI_EXECUTE}" -ne 1 ]]; then
+    usage
+    echo "INFO dry-run: would generate walkthrough docs for sections: ${sections[*]}"
+    exit 0
+  fi
+
   trap 'cleanup_stacks; cleanup_stage_images; rodney stop >/dev/null 2>&1 || true; [[ -n "$SHOWBOAT_BASH_ENV" ]] && rm -f "$SHOWBOAT_BASH_ENV"' EXIT
   cleanup_stacks
   configure_walkthrough_ports
@@ -1106,11 +1157,7 @@ main() {
   ensure_rodney
   cleanup_stage_images
 
-  if [[ "$#" -eq 0 ]]; then
-    set -- core examples tutorials
-  fi
-
-  for section in "$@"; do
+  for section in "${sections[@]}"; do
     case "$section" in
       core)
         generate_core_doc

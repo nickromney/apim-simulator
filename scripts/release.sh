@@ -2,23 +2,79 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${1:-${VERSION:-}}"
+SCRIPT_DIR="${ROOT_DIR}/scripts"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/shell-cli.sh"
+
+VERSION="${VERSION:-}"
 DRY_RUN="${DRY_RUN:-0}"
+EXECUTE=0
 SKIP_CHECKS="${SKIP_CHECKS:-0}"
 UV_BIN="${UV_BIN:-uv}"
 
 usage() {
   cat <<'EOF'
 Usage:
+  release.sh [--dry-run] [--execute] [--version X.Y.Z]
+  release.sh [--dry-run] [--execute] X.Y.Z
   make release VERSION=X.Y.Z
 
+Options:
+  --version X.Y.Z  Release version to prepare.
+  --dry-run        Print the release plan without changing files.
+  --execute        Execute the release preparation.
+  -h, --help       Show this help.
+
 Environment:
-  DRY_RUN=1           Print the release plan without changing files.
-  SKIP_CHECKS=1       Skip lint, test, and frontend checks.
+  VERSION=...      Release version to prepare.
+  DRY_RUN=1        Print the release plan without changing files.
+  SKIP_CHECKS=1    Skip lint, test, and frontend checks.
 EOF
 }
 
+script_name="$(basename "$0")"
+while [[ $# -gt 0 ]]; do
+  if shell_cli_handle_standard_flag usage "$1"; then
+    if [[ "$1" == "--dry-run" ]]; then
+      DRY_RUN=1
+    elif [[ "$1" == "--execute" ]]; then
+      EXECUTE=1
+    fi
+    shift
+    continue
+  fi
+
+  case "$1" in
+    --version)
+      [[ $# -ge 2 ]] || { shell_cli_missing_value "${script_name}" "$1"; exit 1; }
+      VERSION="$2"
+      shift 2
+      ;;
+    -*)
+      shell_cli_unknown_flag "${script_name}" "$1"
+      usage >&2
+      exit 1
+      ;;
+    *)
+      if [[ -z "${VERSION}" ]]; then
+        VERSION="$1"
+      elif [[ "${VERSION}" != "$1" ]]; then
+        shell_cli_unexpected_arg "${script_name}" "$1"
+        usage >&2
+        exit 1
+      fi
+      shift
+      ;;
+  esac
+done
+
 if [[ -z "${VERSION}" ]]; then
+  if [[ "${EXECUTE}" != "1" ]]; then
+    usage
+    echo "INFO dry-run: would prepare a release after VERSION is provided"
+    exit 0
+  fi
+
   usage >&2
   exit 1
 fi
@@ -26,6 +82,12 @@ fi
 if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "VERSION must match X.Y.Z" >&2
   exit 1
+fi
+
+if [[ "${DRY_RUN}" != "1" && "${EXECUTE}" != "1" ]]; then
+  usage
+  echo "INFO dry-run: would prepare release ${VERSION}"
+  exit 0
 fi
 
 CURRENT_VERSION="$(
@@ -93,7 +155,8 @@ run_in_dir "${ROOT_DIR}/ui" npm version "${VERSION}" --no-git-tag-version
 run_in_dir "${ROOT_DIR}/examples/todo-app/frontend-astro" npm version "${VERSION}" --no-git-tag-version
 
 if [[ "${SKIP_CHECKS}" != "1" ]]; then
-  run make lint-check
+  run make check-version
+  run make lint
   run make test
   run make frontend-check
 fi

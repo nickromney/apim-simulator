@@ -1,8 +1,12 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-DEFAULT_ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 ROOT_DIR="${APIM_SIMULATOR_ROOT_DIR:-$DEFAULT_ROOT_DIR}"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/shell-cli.sh"
+
 CERT_DIR="$ROOT_DIR/examples/edge/certs"
 APIM_EDGE_ROOT_HOST="${APIM_EDGE_ROOT_HOST:-apim.127.0.0.1.sslip.io}"
 APIM_EDGE_HOST="${APIM_EDGE_HOST:-edge.apim.127.0.0.1.sslip.io}"
@@ -16,6 +20,25 @@ LEGACY_CERT_PATH="$CERT_DIR/apim.localtest.me.crt"
 LEGACY_KEY_PATH="$CERT_DIR/apim.localtest.me.key"
 LEGACY_CSR_PATH="$CERT_DIR/apim.localtest.me.csr"
 CERT_CSR_PATH="$CERT_DIR/$APIM_EDGE_HOST.csr"
+
+usage() {
+  cat <<EOF
+Usage: gen_dev_certs.sh [--dry-run] [--execute]
+
+Generate local mkcert certificates for the APIM edge/TLS compose stacks.
+
+$(shell_cli_standard_options)
+
+Environment:
+  APIM_SIMULATOR_ROOT_DIR      Repository root override. Default: $ROOT_DIR
+  APIM_EDGE_ROOT_HOST          Root edge host. Default: $APIM_EDGE_ROOT_HOST
+  APIM_EDGE_HOST               Edge host. Default: $APIM_EDGE_HOST
+  APIM_EDGE_WILDCARD_HOST      Wildcard edge host. Default: $APIM_EDGE_WILDCARD_HOST
+EOF
+}
+
+shell_cli_handle_standard_no_args usage \
+  "would generate edge certificates under $CERT_DIR for $APIM_EDGE_HOST" "$@"
 
 mkdir -p "$CERT_DIR"
 

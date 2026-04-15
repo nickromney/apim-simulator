@@ -25,14 +25,14 @@ EOF
 }
 
 @test "release_version resolves the current checkout" {
-  run "$SCRIPT" --source "$REPO_ROOT" --commit "$RELEASE_COMMIT"
+  run "$SCRIPT" --execute --source "$REPO_ROOT" --commit "$RELEASE_COMMIT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == "v${RELEASE_VERSION}" ]]
 }
 
 @test "release_version resolves vendored metadata" {
-  run "$SCRIPT" --source "$REPO_ROOT" --metadata "$METADATA_FILE"
+  run "$SCRIPT" --execute --source "$REPO_ROOT" --metadata "$METADATA_FILE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == "v${RELEASE_VERSION}" ]]

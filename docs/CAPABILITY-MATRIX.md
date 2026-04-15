@@ -142,7 +142,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `cache-store-value` | Partial | - | Stores to local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
 | `cache-remove-value` | Partial | - | Removes from local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
 | `mock-response` | Partial | - | Supports `status-code` and `content-type`, returning the first matching authored response example for the current operation |
-| `send-request` | Yes | - | Supports `new|copy`, headers/body, timeout, ignore-error, managed identity, certificate placeholder |
+| `send-request` | Yes | - | Supports `new\|copy`, headers/body, timeout, ignore-error, managed identity, certificate placeholder |
 | `log-to-eventhub` | No | - | Use observability stack |
 
 ## Backends

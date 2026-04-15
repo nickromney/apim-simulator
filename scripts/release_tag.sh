@@ -2,16 +2,21 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="${ROOT_DIR}/scripts"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/shell-cli.sh"
+
 VERSION="${VERSION:-}"
 DRY_RUN="${DRY_RUN:-0}"
+EXECUTE=0
 TAG_BRANCH="${TAG_BRANCH:-main}"
 UV_BIN="${UV_BIN:-uv}"
 
 usage() {
   cat <<'EOF'
 Usage:
-  release_tag.sh [--dry-run] [--branch NAME] [--version X.Y.Z]
-  release_tag.sh [--dry-run] [--branch NAME] X.Y.Z
+  release_tag.sh [--dry-run] [--execute] [--branch NAME] [--version X.Y.Z]
+  release_tag.sh [--dry-run] [--execute] [--branch NAME] X.Y.Z
   make release-tag VERSION=X.Y.Z
 
 Options:
@@ -46,6 +51,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --execute)
+      EXECUTE=1
       shift
       ;;
     -h|--help)
@@ -71,6 +77,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${VERSION}" ]]; then
+  if [[ "${EXECUTE}" != "1" ]]; then
+    usage
+    echo "INFO dry-run: would create a release tag after VERSION is provided"
+    exit 0
+  fi
+
   usage >&2
   exit 1
 fi
@@ -78,6 +90,12 @@ fi
 if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "VERSION must match X.Y.Z" >&2
   exit 1
+fi
+
+if [[ "${DRY_RUN}" != "1" && "${EXECUTE}" != "1" ]]; then
+  usage
+  echo "INFO dry-run: would create annotated tag v${VERSION} from ${TAG_BRANCH}"
+  exit 0
 fi
 
 TAG="v${VERSION}"

@@ -1,6 +1,6 @@
 # APIM Simulator Walkthrough: APIM Get-Started Tutorial Mirror
 
-*2026-04-14T15:56:36Z*
+*2026-04-15T17:55:04Z*
 
 This walkthrough runs every mirrored tutorial script under `docs/tutorials/apim-get-started/` with both `--setup` and `--verify`. The scripts already emit the closest local equivalent to each Microsoft Learn step, so the captured outputs here are the most direct proof that the tutorial mirror still behaves as documented.
 
