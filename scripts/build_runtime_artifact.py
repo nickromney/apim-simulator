@@ -11,6 +11,7 @@ from pathlib import Path
 
 RUNTIME_INCLUDE_PATHS = (
     ".dockerignore",
+    "catalog-info.yaml",
     "Dockerfile",
     "LICENSE.md",
     "app",
@@ -68,7 +69,12 @@ def tracked_runtime_files(source_root: Path) -> list[Path]:
         check=True,
         stdout=subprocess.PIPE,
     )
-    return sorted(Path(item.decode()) for item in result.stdout.split(b"\0") if item)
+    files = {Path(item.decode()) for item in result.stdout.split(b"\0") if item}
+    for include_path in RUNTIME_INCLUDE_PATHS:
+        path = Path(include_path)
+        if (source_root / path).is_file():
+            files.add(path)
+    return sorted(files)
 
 
 def patched_file_bytes(source_root: Path, relative_path: Path) -> bytes:

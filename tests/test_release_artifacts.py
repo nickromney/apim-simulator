@@ -57,6 +57,7 @@ def test_runtime_artifact_contains_only_gitea_build_inputs(tmp_path: Path) -> No
         dockerfile = archive.read("Dockerfile").decode("utf-8")
 
     assert ".dockerignore" in names
+    assert "catalog-info.yaml" in names
     assert "Dockerfile" in names
     assert "LICENSE.md" in names
     assert "pyproject.toml" in names
@@ -68,7 +69,17 @@ def test_runtime_artifact_contains_only_gitea_build_inputs(tmp_path: Path) -> No
     assert "COPY --chown=${APP_UID}:${APP_GID} app ./app" in dockerfile
     assert "examples ./examples" not in dockerfile
 
-    excluded_prefixes = (".github/", ".githooks/", "docs/", "examples/", "observability/", "scripts/", "tests/", "ui/")
+    excluded_prefixes = (
+        ".github/",
+        ".githooks/",
+        "backstage/",
+        "docs/",
+        "examples/",
+        "observability/",
+        "scripts/",
+        "tests/",
+        "ui/",
+    )
     assert not any(name.startswith(excluded_prefixes) for name in names)
     assert checksum_path.read_text(encoding="utf-8").endswith("  apim-simulator-runtime-test.zip\n")
 

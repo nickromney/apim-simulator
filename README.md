@@ -134,6 +134,7 @@ stays on a hardened runtime base.
 | Edge TLS | `make up-tls` | [https://edge.apim.127.0.0.1.sslip.io:9443](https://edge.apim.127.0.0.1.sslip.io:9443) | You want local TLS termination behaviour |
 | Private internal stack | `make up-private` | no host gateway port | You want the MCP stack reachable only from the internal compose network |
 | Operator console | `make up-ui` | `http://localhost:3007` | You want the fastest control-room view of a running management-enabled stack |
+| Backstage API catalog | `make up-backstage` | `http://localhost:7007` | You want an optional API-aware developer portal over the simulator catalog |
 | Every compose stack at once | `make up-all` | slot-based; printed during startup | You want the whole repo up simultaneously without port collisions |
 
 ## Quick Start
@@ -274,6 +275,34 @@ make up-ui
 ```
 
 Then open `http://localhost:3007`, use `Load Local Demo`, and connect to `http://localhost:8000`.
+
+### Optional Backstage Portal
+
+The simulator publishes [Backstage catalog metadata](catalog-info.yaml) for the
+gateway and management APIs. The repository also carries a minimal catalog/API
+docs Backstage app under [backstage/app](backstage/app), so a fresh clone can
+start the portal without cloning a platform repo.
+
+This starts Backstage beside the direct public APIM stack:
+
+```bash
+make up-backstage
+make smoke-backstage
+```
+
+You can also opt the portal into the smallest stack:
+
+```bash
+BACKSTAGE_ENABLED=true make up
+```
+
+The Backstage app itself is not part of the narrow runtime artifact intended for
+downstream vendoring. Consumers such as `platform` should vendor
+`catalog-info.yaml`, not a second Backstage application.
+
+The app follows Backstage's current Yarn 4 workspace layout. The committed
+`yarn.lock` and vendored Yarn release are marked as generated review artifacts
+with `.gitattributes`.
 
 ### Request tracing
 
