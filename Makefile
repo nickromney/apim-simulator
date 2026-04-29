@@ -20,6 +20,9 @@ OTEL_GRPC_PORT ?= $(call calc_port,4317)
 OTEL_HTTP_PORT ?= $(call calc_port,4318)
 KEYCLOAK_PORT ?= $(call calc_port,8180)
 OPERATOR_CONSOLE_PORT ?= $(call calc_port,3007)
+BACKSTAGE_ENABLED ?= false
+BACKSTAGE_BUILD_ENABLED ?= true
+BACKSTAGE_PORT ?= $(call calc_port,7007)
 EDGE_HTTP_PORT ?= $(call calc_port,8088)
 EDGE_TLS_HTTP_PORT ?= $(call calc_port,8080)
 EDGE_TLS_PORT ?= $(call calc_port,9443)
@@ -35,6 +38,10 @@ GRAFANA_BASE_URL ?= https://$(GRAFANA_HOST)$(call url_port_suffix,$(GRAFANA_PORT
 KEYCLOAK_BASE_URL ?= http://localhost:$(KEYCLOAK_PORT)
 OIDC_ISSUER_EXTERNAL ?= $(KEYCLOAK_BASE_URL)/realms/subnet-calculator
 OPERATOR_CONSOLE_URL ?= http://localhost:$(OPERATOR_CONSOLE_PORT)
+BACKSTAGE_BASE_URL ?= http://localhost:$(BACKSTAGE_PORT)
+BACKSTAGE_IMAGE ?= apim-simulator-backstage:local
+BACKSTAGE_BUILD_CONTEXT ?= ./backstage/app
+BACKSTAGE_DOCKERFILE ?= Dockerfile
 TODO_FRONTEND_BASE_URL ?= http://127.0.0.1:$(TODO_FRONTEND_PORT)
 TODO_FRONTEND_BROWSER_URL ?= http://localhost:$(TODO_FRONTEND_PORT)
 TODO_FRONTEND_ORIGIN_LOCALHOST ?= http://localhost:$(TODO_FRONTEND_PORT)
@@ -55,20 +62,21 @@ SMOKE_OIDC_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
 SMOKE_OIDC_KEYCLOAK_BASE_URL ?= $(KEYCLOAK_BASE_URL)
 SMOKE_MCP_URL ?= $(APIM_BASE_URL)/mcp
 SMOKE_EDGE_BASE_URL ?= $(EDGE_HTTP_BASE_URL)
-PORTS ?= $(TODO_FRONTEND_PORT) $(GRAFANA_PORT) $(OTEL_GRPC_PORT) $(OTEL_HTTP_PORT) $(APIM_GATEWAY_PORT) $(EDGE_HTTP_PORT) $(EDGE_TLS_HTTP_PORT) $(EDGE_TLS_PORT) $(OPERATOR_CONSOLE_PORT) $(KEYCLOAK_PORT)
+PORTS ?= $(TODO_FRONTEND_PORT) $(GRAFANA_PORT) $(OTEL_GRPC_PORT) $(OTEL_HTTP_PORT) $(APIM_GATEWAY_PORT) $(EDGE_HTTP_PORT) $(EDGE_TLS_HTTP_PORT) $(EDGE_TLS_PORT) $(OPERATOR_CONSOLE_PORT) $(KEYCLOAK_PORT) $(if $(filter true,$(BACKSTAGE_ENABLED)),$(BACKSTAGE_PORT))
 UP_ALL_SLOT_BASE ?= 0
 UP_ALL_STACKS := up up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel
 
 export STACK_SLOT STACK_SLOT_WIDTH PORT_OFFSET
-export APIM_GATEWAY_PORT GRAFANA_PORT OTEL_GRPC_PORT OTEL_HTTP_PORT KEYCLOAK_PORT OPERATOR_CONSOLE_PORT EDGE_HTTP_PORT EDGE_TLS_HTTP_PORT EDGE_TLS_PORT TODO_FRONTEND_PORT VITE_DEV_PORT
+export APIM_GATEWAY_PORT GRAFANA_PORT OTEL_GRPC_PORT OTEL_HTTP_PORT KEYCLOAK_PORT OPERATOR_CONSOLE_PORT BACKSTAGE_PORT EDGE_HTTP_PORT EDGE_TLS_HTTP_PORT EDGE_TLS_PORT TODO_FRONTEND_PORT VITE_DEV_PORT
 export APIM_EDGE_ROOT_HOST APIM_EDGE_HOST APIM_EDGE_WILDCARD_HOST GRAFANA_HOST
-export APIM_BASE_URL APIM_LOOPBACK_BASE_URL GRAFANA_BASE_URL KEYCLOAK_BASE_URL OIDC_ISSUER_EXTERNAL OPERATOR_CONSOLE_URL
+export APIM_BASE_URL APIM_LOOPBACK_BASE_URL GRAFANA_BASE_URL KEYCLOAK_BASE_URL OIDC_ISSUER_EXTERNAL OPERATOR_CONSOLE_URL BACKSTAGE_BASE_URL BACKSTAGE_IMAGE BACKSTAGE_BUILD_CONTEXT BACKSTAGE_DOCKERFILE
 export TODO_FRONTEND_BASE_URL TODO_FRONTEND_BROWSER_URL TODO_FRONTEND_ORIGIN_LOCALHOST TODO_FRONTEND_ORIGIN_LOOPBACK TODO_APIM_BASE_URL TODO_APIM_PUBLIC_BASE_URL TODO_GRAFANA_BASE_URL TODO_OBSERVABILITY_DASHBOARD_URL
 export APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE APIM_ALLOWED_ORIGIN_VITE APIM_ALLOWED_ORIGIN_GATEWAY
 export EDGE_HTTP_BASE_URL EDGE_TLS_BASE_URL
 export SMOKE_HELLO_BASE_URL SMOKE_HELLO_KEYCLOAK_BASE_URL SMOKE_OIDC_BASE_URL SMOKE_OIDC_KEYCLOAK_BASE_URL SMOKE_MCP_URL SMOKE_EDGE_BASE_URL
 
-COMPOSE_CORE := $(call compose_stack,core) -f compose.yml -f compose.public.yml
+COMPOSE_BACKSTAGE_OVERLAY := $(if $(filter true,$(BACKSTAGE_ENABLED)),-f compose.backstage.yml --profile backstage)
+COMPOSE_CORE := $(call compose_stack,core) -f compose.yml -f compose.public.yml $(COMPOSE_BACKSTAGE_OVERLAY)
 COMPOSE_CORE_OTEL := $(call compose_stack,core-otel) -f compose.yml -f compose.public.yml -f compose.otel.yml
 COMPOSE_OIDC := $(call compose_stack,oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml
 COMPOSE_MCP := $(call compose_stack,mcp) -f compose.yml -f compose.public.yml -f compose.mcp.yml
@@ -81,6 +89,7 @@ COMPOSE_HELLO_OTEL := $(call compose_stack,hello-otel) -f compose.yml -f compose
 COMPOSE_HELLO_OIDC := $(call compose_stack,hello-oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.hello.yml
 COMPOSE_TODO := $(call compose_stack,todo) -f compose.todo.yml
 COMPOSE_TODO_OTEL := $(call compose_stack,todo-otel) -f compose.todo.yml -f compose.todo.otel.yml
+COMPOSE_BACKSTAGE := $(call compose_stack,backstage) -f compose.yml -f compose.public.yml -f compose.backstage.yml --profile backstage
 COMPOSE_ALL := $(call compose_stack,all) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
 DEV_CERTS := examples/edge/certs/$(APIM_EDGE_HOST).crt examples/edge/certs/$(APIM_EDGE_HOST).key
 HELP_FMT := "  %-34s %s\n"
@@ -93,7 +102,7 @@ CHECK_VERSION_SCRIPT ?= scripts/check-version.sh
 RELEASE_SCRIPT ?= scripts/release.sh
 RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 
-.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs install-hooks fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs install-hooks fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run build-backstage up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-backstage up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel logs-backstage test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-backstage smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-backstage compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
@@ -114,6 +123,8 @@ help:
 	@printf $(HELP_FMT) "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
 	@printf $(HELP_FMT) "up-todo-otel" "Start the todo demo stack with LGTM at $(GRAFANA_BASE_URL)"
 	@printf $(HELP_FMT) "up-ui" "Start the operator console on localhost:3007"
+	@printf $(HELP_FMT) "up-backstage" "Start the optional Backstage API catalog portal on $(BACKSTAGE_BASE_URL)"
+	@printf $(HELP_FMT) "BACKSTAGE_ENABLED=true make up" "Start the direct public stack with the Backstage overlay"
 	@printf $(HELP_FMT) "up-all" "Start every compose stack at once using isolated slots"
 	@printf $(HELP_FMT) "down-all" "Stop every stack launched by up-all"
 	@printf "\nStack Isolation:\n"
@@ -129,6 +140,7 @@ help:
 	@printf $(HELP_FMT) "logs-otel" "Tail core stack logs with LGTM"
 	@printf $(HELP_FMT) "logs-todo" "Tail todo demo stack logs"
 	@printf $(HELP_FMT) "logs-todo-otel" "Tail todo demo stack logs with LGTM"
+	@printf $(HELP_FMT) "logs-backstage" "Tail the optional Backstage portal stack logs"
 	@printf "\nCode Quality and Tooling:\n"
 	@printf $(HELP_FMT) "check-version" "Check synchronized release versions and pinned upstream refs"
 	@printf $(HELP_FMT) "check-host-ports" "Check common local host ports before starting stacks"
@@ -157,6 +169,7 @@ help:
 	@printf $(HELP_FMT) "smoke-private" "Run the private-mode smoke test and internal probe"
 	@printf $(HELP_FMT) "smoke-tls" "Run the TLS edge smoke test using the generated local CA"
 	@printf $(HELP_FMT) "smoke-todo" "Run the APIM-backed todo demo smoke test"
+	@printf $(HELP_FMT) "smoke-backstage" "Check optional Backstage health and catalog import"
 	@printf $(HELP_FMT) "smoke-tutorials-live" "Run all numbered tutorial scripts against live local stacks"
 	@printf $(HELP_FMT) "test-todo-bruno" "Run the Bruno collection against the running todo demo stack"
 	@printf $(HELP_FMT) "test-todo-e2e" "Run Playwright against the running todo demo stack"
@@ -186,6 +199,7 @@ help:
 	@printf $(HELP_FMT) "compose-config-todo" "Render docker compose config for the todo demo stack"
 	@printf $(HELP_FMT) "compose-config-todo-otel" "Render docker compose config for the todo demo LGTM stack"
 	@printf $(HELP_FMT) "compose-config-ui" "Render docker compose config for the console stack"
+	@printf $(HELP_FMT) "compose-config-backstage" "Render docker compose config for the Backstage portal overlay"
 
 prereqs: check-docker-prerequisites check-mkcert-prerequisites check-host-ports
 
@@ -224,6 +238,22 @@ ensure-certs: check-mkcert-prerequisites
 $(DEV_CERTS): check-mkcert-prerequisites
 	./scripts/gen_dev_certs.sh --execute
 
+build-backstage: check-docker-prerequisites
+	@if [ "$(BACKSTAGE_BUILD_ENABLED)" != "true" ]; then \
+		echo "Skipping Backstage image build because BACKSTAGE_BUILD_ENABLED=$(BACKSTAGE_BUILD_ENABLED)."; \
+		exit 0; \
+	fi
+	@if [ ! -d "$(BACKSTAGE_BUILD_CONTEXT)" ]; then \
+		echo "Backstage build context not found: $(BACKSTAGE_BUILD_CONTEXT)" >&2; \
+		echo "Set BACKSTAGE_BUILD_CONTEXT to a compatible Backstage app, or set BACKSTAGE_BUILD_ENABLED=false and provide BACKSTAGE_IMAGE." >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(BACKSTAGE_BUILD_CONTEXT)/$(BACKSTAGE_DOCKERFILE)" ]; then \
+		echo "Backstage Dockerfile not found: $(BACKSTAGE_BUILD_CONTEXT)/$(BACKSTAGE_DOCKERFILE)" >&2; \
+		exit 1; \
+	fi
+	$(COMPOSE_BACKSTAGE) build backstage
+
 up:
 	$(COMPOSE_CORE) up --build -d
 
@@ -247,6 +277,9 @@ up-private:
 
 up-ui:
 	$(COMPOSE_UI) up --build -d
+
+up-backstage: build-backstage
+	$(COMPOSE_BACKSTAGE) up --build -d
 
 up-hello:
 	$(COMPOSE_HELLO) up --build -d
@@ -287,6 +320,7 @@ down:
 	$(COMPOSE_TLS) down --remove-orphans
 	$(COMPOSE_PRIVATE) down --remove-orphans
 	$(COMPOSE_UI) down --remove-orphans
+	$(COMPOSE_BACKSTAGE) down --remove-orphans
 	$(COMPOSE_HELLO) down --remove-orphans
 	$(COMPOSE_HELLO_OTEL) down --remove-orphans
 	$(COMPOSE_HELLO_OIDC) down --remove-orphans
@@ -331,6 +365,9 @@ logs-todo:
 
 logs-todo-otel:
 	$(COMPOSE_TODO_OTEL) logs -f todo-frontend apim-simulator todo-api lgtm lgtm-proxy
+
+logs-backstage:
+	$(COMPOSE_BACKSTAGE) logs -f apim-simulator mock-backend backstage
 
 install-hooks:
 	git config core.hooksPath .githooks
@@ -452,6 +489,9 @@ smoke-hello:
 smoke-todo:
 	$(UV_RUN) python scripts/smoke_todo.py
 
+smoke-backstage:
+	BACKSTAGE_BASE_URL="$(BACKSTAGE_BASE_URL)" $(UV_RUN) python scripts/check_backstage.py
+
 smoke-tutorials-live:
 	APIM_BASE="$(APIM_BASE_URL)" GRAFANA_BASE="$(GRAFANA_BASE_URL)" OPERATOR_CONSOLE_BASE="$(OPERATOR_CONSOLE_URL)" ./scripts/run_tutorial_smoke.sh --execute
 
@@ -502,6 +542,9 @@ compose-config-private:
 
 compose-config-ui:
 	$(COMPOSE_UI) config
+
+compose-config-backstage:
+	$(COMPOSE_BACKSTAGE) config
 
 compose-config-hello:
 	$(COMPOSE_HELLO) config
