@@ -102,7 +102,7 @@ CHECK_VERSION_SCRIPT ?= scripts/check-version.sh
 RELEASE_SCRIPT ?= scripts/release.sh
 RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 
-.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs install-hooks fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run build-backstage up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-backstage up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel logs-backstage test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-backstage smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-backstage compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
+.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run build-backstage up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-backstage up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-todo logs-todo-otel logs-backstage test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-todo smoke-backstage smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-backstage compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
@@ -150,7 +150,8 @@ help:
 	@printf $(HELP_FMT) "fmt" "Format Python code with Ruff"
 	@printf $(HELP_FMT) "frontend-check" "Run Biome, TypeScript, and Astro checks for repo frontends"
 	@printf $(HELP_FMT) "import-tofu" "Import a tofu show JSON file into a running simulator (requires TOFU_SHOW=...)"
-	@printf $(HELP_FMT) "install-hooks" "Enable the repo-managed git pre-commit hook"
+	@printf $(HELP_FMT) "hooks" "Install lefthook-managed local validation hooks"
+	@printf $(HELP_FMT) "install-hooks" "Install lefthook-managed local validation hooks"
 	@printf $(HELP_FMT) "lint" "Run repo-level lint checks without modifying files"
 	@printf $(HELP_FMT) "lint-bash32" "Check tracked shell scripts for Bash 3.2 compatibility"
 	@printf $(HELP_FMT) "lint-check" "Check Python formatting and lint with Ruff without modifying files"
@@ -369,9 +370,31 @@ logs-todo-otel:
 logs-backstage:
 	$(COMPOSE_BACKSTAGE) logs -f apim-simulator mock-backend backstage
 
+hooks: install-hooks
+
 install-hooks:
-	git config core.hooksPath .githooks
-	chmod +x .githooks/pre-commit
+	lefthook install
+
+local-ci:
+	@command -v gitleaks >/dev/null 2>&1 || { echo "gitleaks is required for local CI"; exit 1; }
+	gitleaks detect --source . --config .gitleaks.toml --redact
+	@$(MAKE) --no-print-directory lint
+	@$(MAKE) --no-print-directory test-python
+	@$(MAKE) --no-print-directory compat
+	@TOFU_SHOW=tests/fixtures/tofu_show/sample.json $(MAKE) --no-print-directory compat-report
+	@$(MAKE) --no-print-directory frontend-check
+	@$(MAKE) --no-print-directory compose-config-ci
+
+compose-config-ci:
+	./scripts/gen_dev_certs.sh --execute
+	docker compose version
+	@$(MAKE) --no-print-directory compose-config
+	@$(MAKE) --no-print-directory compose-config-mcp
+	@$(MAKE) --no-print-directory compose-config-oidc
+	@$(MAKE) --no-print-directory compose-config-edge
+	@$(MAKE) --no-print-directory compose-config-tls
+	@$(MAKE) --no-print-directory compose-config-private
+	@$(MAKE) --no-print-directory compose-config-ui
 
 fmt:
 	uv run --extra dev ruff format .
