@@ -18,6 +18,7 @@ import httpx
 from defusedxml import ElementTree
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
@@ -41,6 +42,7 @@ from app.config import (
     OperationRequestMetadataConfig,
     OperationResponseMetadataConfig,
     ProductConfig,
+    ProductState,
     RouteAuthzConfig,
     Subscription,
     SubscriptionState,
@@ -61,6 +63,15 @@ from app.policy import (
     apply_outbound_async,
     finalize_deferred_actions,
     parse_policies_xml,
+)
+from app.portal import (
+    PORTAL_HTML,
+    create_portal_subscription,
+    portal_catalog,
+    portal_subscriptions,
+    portal_users,
+    project_portal_subscription,
+    require_portal_user,
 )
 from app.proxy import build_upstream_headers, build_user_payload, filter_response_headers, resolve_route
 from app.resource_projection import (
@@ -433,6 +444,13 @@ def _access_log_fields(request: Request, *, status_code: int, duration_seconds: 
     }
 
 
+def _product_is_published(cfg: GatewayConfig, product_id: str) -> bool:
+    product = cfg.products.get(product_id)
+    if product is None:
+        return True
+    return product.state == ProductState.Published
+
+
 class SubscriptionUpsert(BaseModel):
     id: str
     name: str
@@ -525,7 +543,14 @@ class ApiReleaseUpsert(BaseModel):
 class ProductUpsert(BaseModel):
     name: str
     description: str | None = None
+    state: ProductState = ProductState.Published
     require_subscription: bool = True
+    approval_required: bool = False
+
+
+class PortalSubscriptionRequest(BaseModel):
+    product_id: str
+    name: str | None = None
 
 
 class GroupUpsert(BaseModel):
@@ -1894,6 +1919,50 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             "subscription": _masked(updated, project_subscription(updated, config_key, subscription)),
         }
 
+    def _require_portal_enabled(cfg: GatewayConfig) -> None:
+        if not cfg.portal.enabled:
+            raise HTTPException(status_code=404, detail="Portal is not enabled")
+
+    def _portal_user_id(request: Request, cfg: GatewayConfig) -> str:
+        user = require_portal_user(cfg, request.headers.get(cfg.portal.user_header))
+        return user.id
+
+    @app.get("/apim/portal", response_class=HTMLResponse)
+    async def portal_page(request: Request) -> HTMLResponse:
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _require_portal_enabled(cfg)
+        return HTMLResponse(PORTAL_HTML)
+
+    @app.get("/apim/portal/users")
+    async def portal_list_users(request: Request) -> dict[str, Any]:
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _require_portal_enabled(cfg)
+        return portal_users(cfg)
+
+    @app.get("/apim/portal/catalog")
+    async def portal_get_catalog(request: Request) -> dict[str, Any]:
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _require_portal_enabled(cfg)
+        return portal_catalog(cfg, _portal_user_id(request, cfg))
+
+    @app.get("/apim/portal/subscriptions")
+    async def portal_list_subscriptions(request: Request) -> dict[str, Any]:
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _require_portal_enabled(cfg)
+        return portal_subscriptions(cfg, _portal_user_id(request, cfg))
+
+    @app.post("/apim/portal/subscriptions", status_code=201)
+    async def portal_request_subscription(request: Request, body: PortalSubscriptionRequest) -> dict[str, Any]:
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _require_portal_enabled(cfg)
+        user_id = _portal_user_id(request, cfg)
+        subscription = create_portal_subscription(cfg, user_id, body.product_id, body.name)
+        updated = _require_management_plane().persist_or_apply_config(cfg)
+        persisted = updated.subscription.subscriptions.get(subscription.id)
+        if persisted is None:
+            raise HTTPException(status_code=500, detail="Subscription persistence failed")
+        return project_portal_subscription(persisted)
+
     @app.get("/apim/management/backends")
     async def list_backends(request: Request) -> list[dict[str, Any]]:
         _require_tenant_access(request)
@@ -2262,8 +2331,14 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             allowed_products = list(route.products)
 
         if allowed_products:
+            # Only published products participate in authorization. Products
+            # missing from config are treated as published for back-compat.
+            published_products = [p for p in allowed_products if _product_is_published(cfg, p)]
+            if not published_products:
+                request.state.apim_result_reason = "product_not_published"
+                raise HTTPException(status_code=403, detail="Product is not published")
             require_sub = any(
-                (cfg.products.get(p).require_subscription if cfg.products.get(p) else True) for p in allowed_products
+                (cfg.products.get(p).require_subscription if cfg.products.get(p) else True) for p in published_products
             )
             if require_sub and subscription_bypassed(request, cfg):
                 require_sub = False
@@ -2271,7 +2346,11 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 if auth.subscription is None:
                     request.state.apim_result_reason = "missing_subscription"
                     raise HTTPException(status_code=401, detail="Missing subscription key")
-                if not set(allowed_products).intersection(set(auth.subscription_products)):
+                granted = set(auth.subscription_products)
+                if not set(published_products).intersection(granted):
+                    if set(allowed_products).intersection(granted):
+                        request.state.apim_result_reason = "product_not_published"
+                        raise HTTPException(status_code=403, detail="Product is not published")
                     request.state.apim_result_reason = "subscription_not_authorized"
                     raise HTTPException(status_code=403, detail="Subscription not authorized for product")
 

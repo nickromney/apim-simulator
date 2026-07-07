@@ -2,13 +2,20 @@
 
 Source: [Tutorial: Access and customise the developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize)
 
-Simulator status: Not appropriate
+Simulator status: Adapted
 
-## Why This Does Not Map Directly
+## What Maps And What Does Not
 
-The Microsoft developer portal is a managed CMS and public API-consumer website. `apim-simulator` is a local gateway and operator tool, not a CMS clone.
+The Microsoft developer portal is two things wearing one name: a managed CMS
+(page editing, theming, sign-up emails) and a set of consumer workflows
+(browse published products, request a subscription, try an API call).
 
-## Closest Local Equivalent
+The simulator ships the consumer workflows at `/apim/portal` and leaves the
+CMS out of scope. Identity is simulator-grade: the acting user is a
+config-defined user passed in the `X-Apim-Portal-User` header, not a
+signed-in account.
+
+## Local Equivalent
 
 From the repo root:
 
@@ -17,23 +24,66 @@ export APIM_BASE=http://localhost:8000
 export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
-Use the operator console instead:
+Start the operator console stack:
 
 ```bash
 make up-ui
 ```
 
-Open:
+Open the two portals side by side:
 
-- gateway: `http://localhost:8000`
+- consumer developer portal: `http://localhost:8000/apim/portal`
 - operator console: `http://localhost:3007`
 
-The operator console is the supported local surface for:
+Then walk the publish-and-approve loop:
 
-- policy editing
-- trace browsing
-- replaying requests
-- inspecting and rotating subscriptions
+1. Create an approval-gated product as the operator:
+
+   ```bash
+   curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
+     -H "Content-Type: application/json" \
+     "$APIM_BASE/apim/management/products/portal-premium" \
+     --data '{"name":"Portal Premium","require_subscription":true,"approval_required":true}'
+   ```
+
+2. Attach an API to the product:
+
+   ```bash
+   curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
+     -H "Content-Type: application/json" \
+     "$APIM_BASE/apim/management/apis/portal-hello" \
+     --data '{"name":"Portal Hello","path":"portal-hello","upstream_base_url":"http://mock-backend:8080","upstream_path_prefix":"/api","products":["portal-premium"]}'
+   ```
+
+3. Request a subscription as the portal user (or click "Request subscription"
+   on the portal page):
+
+   ```bash
+   curl -sS -X POST -H "X-Apim-Portal-User: demo-dev" \
+     -H "Content-Type: application/json" \
+     "$APIM_BASE/apim/portal/subscriptions" \
+     --data '{"product_id":"portal-premium"}'
+   ```
+
+   The subscription lands in `submitted` state, and its key returns `403`
+   until it is approved.
+
+4. Approve it as the operator (or click "Approve" in the console's
+   Subscriptions panel):
+
+   ```bash
+   curl -sS -X PATCH -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
+     -H "Content-Type: application/json" \
+     "$APIM_BASE/apim/management/subscriptions/demo-dev-portal-premium" \
+     --data '{"state":"active"}'
+   ```
+
+5. Call the API with the approved key:
+
+   ```bash
+   curl -sS -H "Ocp-Apim-Subscription-Key: sub-demo-dev-portal-premium-primary" \
+     "$APIM_BASE/portal-hello/health"
+   ```
 
 ## Shortcut
 
@@ -49,20 +99,35 @@ Use `--setup` to have [`tutorial09.sh`](tutorial09.sh) perform the local setup f
 Expected key `./docs/tutorials/apim-get-started/tutorial09.sh --verify` output:
 
 ```text
-Verifying the closest local equivalent
-$ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/status"
-{
-  "gateway_scope": "gateway",
-  "service_name": "apim-simulator"
-}
-
-$ curl -sS "http://localhost:3007"
+Verifying the consumer developer portal
+$ curl -i "http://localhost:8000/apim/portal"
 {
   "status_code": 200
+}
+
+$ curl -sS -H "X-Apim-Portal-User: demo-dev" "http://localhost:8000/apim/portal/catalog"
+{
+  "api_ids": [
+    "portal-hello"
+  ],
+  "approval_required": true,
+  "product_id": "portal-premium"
+}
+
+$ curl -sS -H "X-Apim-Portal-User: demo-dev" "http://localhost:8000/apim/portal/subscriptions"
+{
+  "id": "demo-dev-portal-premium",
+  "state": "active"
+}
+
+$ curl -sS -H "Ocp-Apim-Subscription-Key: sub-demo-dev-portal-premium-primary" "http://localhost:8000/portal-hello/health"
+{
+  "path": "/api/health",
+  "status": "ok"
 }
 ```
 
 ## Guidance
 
-If you need to rehearse developer-portal workflows, use real Azure APIM.
-If you need to rehearse gateway behaviour, policies, traces, and management edits locally, stay in the simulator.
+If you need to rehearse portal CMS customisation, theming, or sign-up emails, use real Azure APIM.
+If you need to rehearse the consumer loop — publish, discover, request, approve, call — the simulator covers it locally.

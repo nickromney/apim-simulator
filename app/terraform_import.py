@@ -32,10 +32,12 @@ from app.config import (
     OperationRequestMetadataConfig,
     OperationResponseMetadataConfig,
     ProductConfig,
+    ProductState,
     ServiceHostnameConfiguration,
     ServiceMetadataConfig,
     Subscription,
     SubscriptionKeyPair,
+    SubscriptionState,
     TagConfig,
     UserConfig,
 )
@@ -689,7 +691,25 @@ def import_from_tofu_show_json(
             display_name = str(res.values.get("display_name") or product_id)
             subscription_required = res.values.get("subscription_required")
             require_subscription = bool(subscription_required) if subscription_required is not None else True
-            products[product_id] = ProductConfig(name=display_name, require_subscription=require_subscription)
+            published = res.values.get("published")
+            state = ProductState.Published if (published is None or bool(published)) else ProductState.NotPublished
+            approval_required = bool(res.values.get("approval_required"))
+            if approval_required and not require_subscription:
+                diagnostics.append(
+                    ImportDiagnostic(
+                        status="adapted",
+                        scope=f"product:{product_id}",
+                        feature="approval_required",
+                        detail="approval_required needs subscription_required; imported without approval.",
+                    )
+                )
+                approval_required = False
+            products[product_id] = ProductConfig(
+                name=display_name,
+                state=state,
+                require_subscription=require_subscription,
+                approval_required=approval_required,
+            )
 
         if res.type == "azurerm_api_management_group":
             group_name = str(res.values.get("name") or res.name).strip()
@@ -769,10 +789,24 @@ def import_from_tofu_show_json(
             display_name = str(res.values.get("display_name") or res.values.get("name") or sub_id)
             primary = str(res.values.get("primary_key") or "")
             secondary = str(res.values.get("secondary_key") or "")
+            raw_state = str(res.values.get("state") or "").strip().lower()
+            try:
+                sub_state = SubscriptionState(raw_state) if raw_state else SubscriptionState.Active
+            except ValueError:
+                diagnostics.append(
+                    ImportDiagnostic(
+                        status="adapted",
+                        scope=f"subscription:{sub_id}",
+                        feature="state",
+                        detail=f"Unknown subscription state {raw_state!r}; imported as active.",
+                    )
+                )
+                sub_state = SubscriptionState.Active
             subscriptions[sub_id] = Subscription(
                 id=sub_id,
                 name=display_name,
                 keys=SubscriptionKeyPair(primary=primary, secondary=secondary),
+                state=sub_state,
             )
 
         if res.type == "azurerm_api_management_named_value":

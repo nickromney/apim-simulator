@@ -213,6 +213,23 @@ gateway_get_with_headers() {
   curl -fsS "$@" "$APIM_BASE$path"
 }
 
+portal_get() {
+  local path="$1"
+  local user="$2"
+  curl -fsS -H "X-Apim-Portal-User: $user" "$APIM_BASE$path"
+}
+
+portal_post() {
+  local path="$1"
+  local user="$2"
+  local payload="$3"
+  curl -fsS -X POST \
+    -H "X-Apim-Portal-User: $user" \
+    -H "Content-Type: application/json" \
+    "$APIM_BASE$path" \
+    --data "$payload"
+}
+
 capture_http_request() {
   local body_file
   local headers_file

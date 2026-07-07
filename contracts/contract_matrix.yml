@@ -110,6 +110,57 @@ contracts:
     fixture_or_golden: null
     assertion_kind: http-json
 
+  - id: AUTH-PRODUCT-PUBLISH-STATE
+    status: supported
+    surface: auth
+    module: app/main.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#products-and-subscriptions
+    owner_tests:
+      - tests/test_gateway.py::test_unpublished_product_denies_access_even_with_grant
+      - tests/test_gateway.py::test_grant_on_unpublished_product_does_not_authorize_published_route
+      - tests/test_gateway.py::test_published_product_still_authorizes_when_sibling_is_unpublished
+    fixture_or_golden: null
+    assertion_kind: http-json
+
+  - id: AUTH-SUBSCRIPTION-LIFECYCLE
+    status: supported
+    surface: auth
+    module: app/security.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#products-and-subscriptions
+    owner_tests:
+      - tests/test_gateway.py::test_submitted_subscription_key_is_rejected_until_approved_via_management_plane
+    fixture_or_golden: null
+    assertion_kind: http-json
+
+  - id: PORTAL-CATALOG-VISIBILITY
+    status: adapted
+    surface: portal
+    module: app/portal.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#developer-portal
+    owner_tests:
+      - tests/test_portal.py::test_catalog_filters_unpublished_and_group_restricted_products
+    fixture_or_golden: null
+    assertion_kind: http-json
+
+  - id: PORTAL-SUBSCRIPTION-SIGNUP
+    status: adapted
+    surface: portal
+    module: app/portal.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#developer-portal
+    owner_tests:
+      - tests/test_portal.py::test_subscription_signup_approval_loop_end_to_end
+      - tests/test_portal.py::test_subscription_signup_is_active_immediately_without_approval
+    fixture_or_golden: null
+    assertion_kind: http-json
+
   - id: TRACE-LOOKUP
     status: supported
     surface: observability

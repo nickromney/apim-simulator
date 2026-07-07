@@ -428,6 +428,11 @@ pre {
   background: var(--accent-soft);
 }
 
+.state-pill-pending {
+  background: rgba(190, 93, 38, 0.28);
+  font-weight: 600;
+}
+
 label {
   display: grid;
   gap: 0.45rem;
