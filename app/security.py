@@ -169,7 +169,7 @@ def _require_active_subscription(config: GatewayConfig, provided_key: str) -> No
     if sub is None:
         return
     if sub.state != SubscriptionState.Active:
-        raise HTTPException(status_code=403, detail="Subscription is not active")
+        raise HTTPException(status_code=403, detail=f"Subscription is not active (state: {sub.state.value})")
 
 
 def validate_subscription_key(

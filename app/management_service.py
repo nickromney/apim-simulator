@@ -79,7 +79,9 @@ class ManagementService:
         cfg.products[product_id] = ProductConfig(
             name=body.name,
             description=body.description,
+            state=body.state,
             require_subscription=body.require_subscription,
+            approval_required=body.approval_required,
             groups=existing.groups if existing is not None else [],
             tags=existing.tags if existing is not None else [],
         )

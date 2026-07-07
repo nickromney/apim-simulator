@@ -484,7 +484,7 @@ EOF
   [[ "$output" == *'"x_version": "v2"'* ]]
 }
 
-@test "tutorial09.sh --verify checks the operator console" {
+@test "tutorial09.sh --verify checks the consumer portal loop" {
   run "$TUTORIAL_DIR/tutorial09.sh" --setup
   [ "$status" -eq 0 ]
 
@@ -492,8 +492,11 @@ EOF
 
   [ "$status" -eq 0 ]
   [[ "$output" != *"Starting tutorial 09 stack with docker compose"* ]]
-  [[ "$output" == *'"service_name": "apim-simulator"'* ]]
   [[ "$output" == *'"status_code": 200'* ]]
+  [[ "$output" == *'"product_id": "portal-premium"'* ]]
+  [[ "$output" == *'"approval_required": true'* ]]
+  [[ "$output" == *'"state": "active"'* ]]
+  [[ "$output" == *'"status": "ok"'* ]]
 }
 
 @test "tutorial10.sh --verify applies the VS Code policy example" {

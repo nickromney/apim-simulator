@@ -12,6 +12,24 @@
     "primary_key": "local-dev-tenant-key",
     "secondary_key": "local-dev-tenant-key-secondary"
   },
+  "portal": {
+    "enabled": true
+  },
+  "users": {
+    "demo-dev": {
+      "id": "demo-dev",
+      "name": "Demo Developer",
+      "email": "demo-dev@dev.test",
+      "state": "active"
+    }
+  },
+  "groups": {
+    "developers": {
+      "id": "developers",
+      "name": "Developers",
+      "users": ["demo-dev"]
+    }
+  },
   "products": {
     "default": {
       "name": "Default",

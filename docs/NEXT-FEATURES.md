@@ -43,7 +43,7 @@ Prefer new examples that exercise shipped capabilities rather than speculative p
 - External cache backends
 - Full APIM expression-engine compatibility
 - `quota-by-key` bandwidth enforcement
-- Developer portal, CMS, email, and notification features
+- Developer portal CMS, theming, email, and notification features (the adapted consumer workflows ship at `/apim/portal`)
 - Full ARM or SDK wire compatibility
 
 ## Bar For New Work
