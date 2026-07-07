@@ -32,6 +32,37 @@ Before running the simulator:
 - use `uv` if you want to run smoke scripts, import helpers, or tests from the host
 - use `npm` only for the browser-facing demo checks such as Playwright, Bruno, or the UI toolchain
 
+## Local Validation
+
+Install the local lefthook gates once after cloning:
+
+```bash
+make hooks
+```
+
+This runs `lefthook install`. You can also run it directly if you prefer.
+
+Pre-commit checks run fast staged-file validation for Python, shell, and YAML
+files. Pre-push runs the repo local CI gate:
+
+```bash
+make local-ci
+```
+
+Skip hooks only when you have a reason:
+
+```bash
+LEFTHOOK=0 git push
+git push --no-verify
+```
+
+GitHub CI no longer runs automatically on pushes or pull requests. Run the
+preserved workflow on demand with:
+
+```bash
+gh workflow run ci.yml
+```
+
 ## Dependency Cooldown
 
 This repository carries repo-local dependency age gates so local installs and
