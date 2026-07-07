@@ -8,7 +8,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.compat_report import build_compat_report
-from app.config import ClientCertificateMode, GatewayConfig, RouteConfig, TenantAccessConfig
+from app.config import (
+    ClientCertificateMode,
+    GatewayConfig,
+    ProductState,
+    RouteConfig,
+    SubscriptionState,
+    TenantAccessConfig,
+)
 from app.main import create_app
 from app.terraform_import import config_from_tofu_show_json, import_from_tofu_show_json
 from app.urls import http_url
@@ -87,6 +94,67 @@ def test_config_from_tofu_show_json_mvp() -> None:
     assert "health" in cfg.apis["api"].operations
     assert cfg.subscription.subscriptions["sub1"].keys.primary == "good"
     assert cfg.subscription.subscriptions["sub1"].products == ["app-a"]
+
+
+def test_import_maps_product_publish_state_approval_and_subscription_state() -> None:
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_product.hidden",
+                "type": "azurerm_api_management_product",
+                "name": "hidden",
+                "values": {
+                    "product_id": "hidden",
+                    "display_name": "Hidden",
+                    "subscription_required": True,
+                    "approval_required": True,
+                    "published": False,
+                },
+            },
+            {
+                "address": "azurerm_api_management_subscription.pending",
+                "type": "azurerm_api_management_subscription",
+                "name": "pending",
+                "values": {
+                    "subscription_id": "pending",
+                    "display_name": "pending",
+                    "primary_key": "pk",
+                    "secondary_key": "sk",
+                    "state": "submitted",
+                },
+            },
+        ]
+    )
+
+    cfg = config_from_tofu_show_json(tf)
+    assert cfg.products["hidden"].state == ProductState.NotPublished
+    assert cfg.products["hidden"].approval_required is True
+    assert cfg.subscription.subscriptions["pending"].state == SubscriptionState.Submitted
+
+
+def test_import_drops_approval_required_without_subscription_required() -> None:
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_product.open",
+                "type": "azurerm_api_management_product",
+                "name": "open",
+                "values": {
+                    "product_id": "open",
+                    "display_name": "Open",
+                    "subscription_required": False,
+                    "approval_required": True,
+                },
+            },
+        ]
+    )
+
+    result = import_from_tofu_show_json(tf)
+    assert result.config.products["open"].approval_required is False
+    assert result.config.products["open"].state == ProductState.Published
+    adapted = [d for d in result.diagnostics if d.scope == "product:open" and d.feature == "approval_required"]
+    assert len(adapted) == 1
+    assert adapted[0].status == "adapted"
 
 
 def test_management_import_applies_routes() -> None:

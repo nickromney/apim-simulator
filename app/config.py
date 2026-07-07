@@ -5,7 +5,7 @@ import os
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.urls import http_url
 
@@ -78,6 +78,9 @@ class SubscriptionState(StrEnum):
     Active = "active"
     Suspended = "suspended"
     Cancelled = "cancelled"
+    Submitted = "submitted"
+    Rejected = "rejected"
+    Expired = "expired"
 
 
 class Subscription(BaseModel):
@@ -123,6 +126,11 @@ class OIDCConfig(BaseModel):
     audience: str
     jwks_uri: str | None = None
     jwks: dict[str, Any] | None = None
+
+
+class PortalConfig(BaseModel):
+    enabled: bool = False
+    user_header: str = "X-Apim-Portal-User"
 
 
 class TenantAccessConfig(BaseModel):
@@ -336,12 +344,27 @@ class TagConfig(BaseModel):
     display_name: str
 
 
+class ProductState(StrEnum):
+    Published = "published"
+    NotPublished = "not_published"
+
+
 class ProductConfig(BaseModel):
     name: str
     description: str | None = None
+    # Azure defaults new products to notPublished; config-authored products
+    # default to published so existing configs keep working unchanged.
+    state: ProductState = ProductState.Published
     require_subscription: bool = True
+    approval_required: bool = False
     groups: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _approval_requires_subscription(self) -> ProductConfig:
+        if self.approval_required and not self.require_subscription:
+            raise ValueError("approval_required is only valid when require_subscription is true")
+        return self
 
 
 class BackendConfig(BaseModel):
@@ -424,6 +447,7 @@ class GatewayConfig(BaseModel):
     subscription: SubscriptionConfig = Field(default_factory=SubscriptionConfig)
     admin_token: str | None = None
     tenant_access: TenantAccessConfig = Field(default_factory=TenantAccessConfig)
+    portal: PortalConfig = Field(default_factory=PortalConfig)
     proxy_timeout_seconds: float = 30.0
     proxy_max_attempts: int = 1
     proxy_retry_statuses: list[int] = Field(default_factory=lambda: [502, 503, 504])

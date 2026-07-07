@@ -64,13 +64,14 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Products | Yes | `azurerm_api_management_product` | `products` map |
 | Product-API association | Yes | `azurerm_api_management_product_api` | `products` list on route/API |
 | Product-group association | Yes | `azurerm_api_management_product_group` | Descriptive link resources under `/apim/management/products/{product_id}/groups` |
+| Product publish state | Yes | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; only published products authorize gateway traffic. Adapted: config-authored products default to `published` (Azure portal defaults new products to not published) |
 | Subscriptions | Yes | `azurerm_api_management_subscription` | `subscription.subscriptions` |
 | Primary/secondary keys | Yes | - | `keys.primary`, `keys.secondary` |
-| Subscription state | Yes | - | `active`, `suspended`, `cancelled` |
+| Subscription state | Yes | `azurerm_api_management_subscription.state` | `active`, `suspended`, `cancelled`, `submitted`, `rejected`, `expired`; only `active` keys authenticate |
 | Key rotation | Yes | - | `/apim/management/subscriptions/{id}/rotate` |
 | Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle |
 | Subscription bypass | Yes | - | Header conditions |
-| Approval required | No | `azurerm_api_management_product.approval_required` | Auto-approved |
+| Approval required | Yes | `azurerm_api_management_product.approval_required` | `approval_required` on products; pending subscriptions stay `submitted` until approved |
 | Subscription limits | No | `azurerm_api_management_product.subscriptions_limit` | Not enforced |
 
 ## Tags
@@ -220,7 +221,18 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Trace viewer | Yes | N/A | Uses trace lookup and trace summary endpoints |
 | Replay console | Yes | N/A | Uses management replay endpoint |
 | Subscription key inspection/rotation | Yes | N/A | Uses management subscription endpoints |
-| Developer portal | No | `azurerm_api_management_portal_*` | Explicitly out of scope |
+| Subscription approval queue | Yes | N/A | Approve/reject submitted subscriptions from the console |
+
+## Developer Portal
+
+| Feature | Simulator | Terraform Resource | Notes |
+|---------|-----------|-------------------|-------|
+| Consumer catalog | Adapted | N/A | `/apim/portal` static page plus JSON endpoints; enable with `portal.enabled` |
+| Product visibility by group | Adapted | `azurerm_api_management_product_group` | Products with no group links are visible to all portal users |
+| Subscription sign-up | Adapted | N/A | `POST /apim/portal/subscriptions`; lands `submitted` when the product requires approval |
+| Try-it console | Adapted | N/A | Calls the gateway with a chosen subscription key; no parameter substitution UI |
+| Portal identity | Adapted | N/A | Acting user is a config-defined user in `X-Apim-Portal-User`; there is no sign-in |
+| Portal CMS, theming, email | No | `azurerm_api_management_portal_*` | Explicitly out of scope |
 
 ## Certificates
 
@@ -234,7 +246,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 
 These features are explicitly out of scope for the simulator:
 
-- Developer Portal (`azurerm_api_management_portal_*`)
+- Developer Portal CMS, theming, and content management (`azurerm_api_management_portal_*`); the adapted consumer workflows live at `/apim/portal`
 - Email templates (`azurerm_api_management_email_template`)
 - Notifications (`azurerm_api_management_notification_*`)
 - Self-hosted gateway (`azurerm_api_management_gateway`)

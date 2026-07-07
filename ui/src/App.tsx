@@ -38,7 +38,9 @@ type ProductSummary = {
   id: string;
   name: string;
   description?: string | null;
+  state?: string;
   require_subscription: boolean;
+  approval_required?: boolean;
 };
 
 type SubscriptionSummary = {
@@ -304,6 +306,21 @@ function App() {
     }
   }
 
+  async function setSubscriptionState(subscriptionId: string, state: "active" | "rejected") {
+    setBusy(true);
+    setStatusMessage(state === "active" ? `Approving ${subscriptionId}.` : `Rejecting ${subscriptionId}.`);
+    try {
+      await apiFetch(`/apim/management/subscriptions/${subscriptionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ state }),
+      });
+      await refreshDashboard(selectedScopeId);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Unable to update subscription state.");
+      setBusy(false);
+    }
+  }
+
   async function runReplay(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -452,7 +469,12 @@ function App() {
                   <li key={product.id}>
                     <strong>{product.id}</strong>
                     <span>{product.name}</span>
-                    <small>{product.require_subscription ? "Subscription required" : "Open access"}</small>
+                    <small>
+                      {product.state === "not_published" ? "Not published" : "Published"}
+                      {" · "}
+                      {product.require_subscription ? "Subscription required" : "Open access"}
+                      {product.approval_required ? " · Approval required" : ""}
+                    </small>
                   </li>
                 )) ?? <li className="empty">No products loaded.</li>}
               </ul>
@@ -594,7 +616,7 @@ function App() {
         <section className="panel subscription-panel">
           <div className="panel-head">
             <h2>Subscriptions</h2>
-            <p>Inspect keys and rotate primary or secondary values without leaving the console.</p>
+            <p>Inspect keys, approve or reject pending requests, and rotate keys without leaving the console.</p>
           </div>
 
           <div className="subscription-grid">
@@ -605,7 +627,9 @@ function App() {
                     <h3>{subscription.name}</h3>
                     <p>{subscription.id}</p>
                   </div>
-                  <span className="state-pill">{subscription.state}</span>
+                  <span className={subscription.state === "submitted" ? "state-pill state-pill-pending" : "state-pill"}>
+                    {subscription.state}
+                  </span>
                 </header>
 
                 <dl>
@@ -624,6 +648,25 @@ function App() {
                 </dl>
 
                 <div className="subscription-actions">
+                  {subscription.state === "submitted" ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void setSubscriptionState(subscription.id, "active")}
+                        disabled={busy}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => void setSubscriptionState(subscription.id, "rejected")}
+                        disabled={busy}
+                      >
+                        Reject
+                      </button>
+                    </>
+                  ) : null}
                   <button type="button" onClick={() => void rotateKey(subscription.id, "primary")} disabled={busy}>
                     Rotate Primary
                   </button>

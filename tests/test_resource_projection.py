@@ -46,7 +46,11 @@ def test_project_summary_uses_service_scoped_ids_and_masks_secrets() -> None:
         },
         allow_anonymous=True,
         groups={"admins": GroupConfig(id="admins", name="Admins", users=["dev-1"])},
-        products={"starter": ProductConfig(name="Starter", require_subscription=True, groups=["admins"])},
+        products={
+            "starter": ProductConfig(
+                name="Starter", require_subscription=True, approval_required=True, groups=["admins"]
+            )
+        },
         tags={"starter": TagConfig(display_name="Starter")},
         users={
             "dev-1": {
@@ -209,6 +213,8 @@ def test_project_summary_uses_service_scoped_ids_and_masks_secrets() -> None:
     assert payload["apis"][0]["releases"][0]["resource_id"] == "service/lab-sim/apis/hello/releases/public"
     assert payload["tags"][0]["resource_id"] == "service/lab-sim/tags/starter"
     assert payload["products"][0]["groups"] == ["admins"]
+    assert payload["products"][0]["state"] == "published"
+    assert payload["products"][0]["approval_required"] is True
     assert payload["users"][0]["groups"] == ["admins"]
     assert payload["users"][0]["first_name"] == "Dev"
     assert payload["groups"][0]["products"] == ["starter"]

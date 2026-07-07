@@ -47,6 +47,7 @@ from app.config import (
     OperationRequestMetadataConfig,
     OperationResponseMetadataConfig,
     ProductConfig,
+    ProductState,
     RouteAuthzConfig,
     RouteConfig,
     Subscription,
@@ -554,7 +555,7 @@ def test_suspended_subscription_returns_403() -> None:
             },
         )
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Subscription is not active"
+    assert resp.json()["detail"] == "Subscription is not active (state: suspended)"
 
 
 def test_backend_basic_auth_is_applied_and_url_is_used() -> None:
@@ -1513,6 +1514,224 @@ def test_product_access_denied_without_product_grant() -> None:
         )
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Subscription not authorized for product"
+
+
+def _product_gate_config(
+    *,
+    issuer: str,
+    audience: str,
+    jwks: dict[str, Any],
+    products: dict[str, ProductConfig],
+    subscription_products: list[str],
+    route_products: list[str],
+) -> GatewayConfig:
+    return GatewayConfig(
+        allow_anonymous=False,
+        oidc=OIDCConfig(issuer=issuer, audience=audience, jwks=jwks),
+        products=products,
+        subscription=SubscriptionConfig(
+            required=True,
+            subscriptions={
+                "demo": Subscription(
+                    id="sub1",
+                    name="demo",
+                    keys=SubscriptionKeyPair(primary="good", secondary="good2"),
+                    products=subscription_products,
+                )
+            },
+        ),
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                upstream_base_url=_http_url("upstream"),
+                upstream_path_prefix="/api",
+                products=route_products,
+            )
+        ],
+    )
+
+
+@pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
+def test_unpublished_product_denies_access_even_with_grant() -> None:
+    issuer = _http_url("issuer.example")
+    audience = "api"
+    jwks, private_key = _make_rsa_jwks()
+    token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
+
+    config = _product_gate_config(
+        issuer=issuer,
+        audience=audience,
+        jwks=jwks,
+        products={"p1": ProductConfig(name="p1", state=ProductState.NotPublished)},
+        subscription_products=["p1"],
+        route_products=["p1"],
+    )
+
+    app = create_app(
+        config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)))
+    )
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/health",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": "good",
+            },
+        )
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Product is not published"
+
+
+@pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
+def test_grant_on_unpublished_product_does_not_authorize_published_route() -> None:
+    issuer = _http_url("issuer.example")
+    audience = "api"
+    jwks, private_key = _make_rsa_jwks()
+    token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
+
+    config = _product_gate_config(
+        issuer=issuer,
+        audience=audience,
+        jwks=jwks,
+        products={
+            "p1": ProductConfig(name="p1"),
+            "p2": ProductConfig(name="p2", state=ProductState.NotPublished),
+        },
+        subscription_products=["p2"],
+        route_products=["p1", "p2"],
+    )
+
+    app = create_app(
+        config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)))
+    )
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/health",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": "good",
+            },
+        )
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Product is not published"
+
+
+@pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
+def test_published_product_still_authorizes_when_sibling_is_unpublished() -> None:
+    issuer = _http_url("issuer.example")
+    audience = "api"
+    jwks, private_key = _make_rsa_jwks()
+    token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
+
+    config = _product_gate_config(
+        issuer=issuer,
+        audience=audience,
+        jwks=jwks,
+        products={
+            "p1": ProductConfig(name="p1"),
+            "p2": ProductConfig(name="p2", state=ProductState.NotPublished),
+        },
+        subscription_products=["p1"],
+        route_products=["p1", "p2"],
+    )
+
+    app = create_app(
+        config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)))
+    )
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/health",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": "good",
+            },
+        )
+    assert resp.status_code == 200
+
+
+@pytest.mark.contract("AUTH-SUBSCRIPTION-LIFECYCLE")
+def test_submitted_subscription_key_is_rejected_until_approved_via_management_plane() -> None:
+    issuer = _http_url("issuer.example")
+    audience = "api"
+    jwks, private_key = _make_rsa_jwks()
+    token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
+
+    config = GatewayConfig(
+        allow_anonymous=False,
+        oidc=OIDCConfig(issuer=issuer, audience=audience, jwks=jwks),
+        tenant_access=TenantAccessConfig(enabled=True, primary_key="t1", secondary_key="t2"),
+        products={"p1": ProductConfig(name="p1", approval_required=True)},
+        subscription=SubscriptionConfig(
+            required=True,
+            subscriptions={
+                "demo": Subscription(
+                    id="sub1",
+                    name="demo",
+                    keys=SubscriptionKeyPair(primary="good", secondary="good2"),
+                    state=SubscriptionState.Submitted,
+                    products=["p1"],
+                )
+            },
+        ),
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                upstream_base_url=_http_url("upstream"),
+                upstream_path_prefix="/api",
+                products=["p1"],
+            )
+        ],
+    )
+
+    app = create_app(
+        config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)))
+    )
+    with TestClient(app) as client:
+        pending = client.get(
+            "/api/v1/health",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": "good",
+            },
+        )
+        assert pending.status_code == 403
+        assert pending.json()["detail"] == "Subscription is not active (state: submitted)"
+
+        approved = client.patch(
+            "/apim/management/subscriptions/sub1",
+            json={"state": "active"},
+            headers={"X-Apim-Tenant-Key": "t1"},
+        )
+        assert approved.status_code == 200
+        assert approved.json()["state"] == "active"
+
+        resp = client.get(
+            "/api/v1/health",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": "good",
+            },
+        )
+        assert resp.status_code == 200
+
+        rejected = client.patch(
+            "/apim/management/subscriptions/sub1",
+            json={"state": "rejected"},
+            headers={"X-Apim-Tenant-Key": "t1"},
+        )
+        assert rejected.status_code == 200
+
+        denied = client.get(
+            "/api/v1/health",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": "good",
+            },
+        )
+        assert denied.status_code == 403
+        assert denied.json()["detail"] == "Subscription is not active (state: rejected)"
 
 
 def test_rotate_subscription_key_updates_gateway_lookup() -> None:

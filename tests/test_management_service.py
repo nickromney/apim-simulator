@@ -144,6 +144,27 @@ def test_delete_product_unlinks_legacy_routes_and_subscriptions() -> None:
     assert all("starter" not in route.products for route in updated.routes)
 
 
+def test_upsert_product_persists_publish_state_and_approval() -> None:
+    cfg = GatewayConfig(products={"starter": ProductConfig(name="Starter", groups=["admins"], tags=["demo"])})
+    service, _, _ = _make_service(cfg)
+
+    body = SimpleNamespace(
+        name="Starter",
+        description="Approval-gated product",
+        state="not_published",
+        require_subscription=True,
+        approval_required=True,
+    )
+    updated = service.upsert_product(cfg, "starter", body)
+
+    product = updated.products["starter"]
+    assert product.state.value == "not_published"
+    assert product.approval_required is True
+    # Existing group/tag links survive an upsert.
+    assert product.groups == ["admins"]
+    assert product.tags == ["demo"]
+
+
 def test_subscription_lifecycle_round_trips_through_persistence() -> None:
     cfg = GatewayConfig()
     service, _, _ = _make_service(cfg)
