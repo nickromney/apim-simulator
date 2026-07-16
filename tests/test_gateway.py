@@ -94,11 +94,21 @@ def _http_url(target: str) -> str:
 
 
 def _lifespan_helpers(app: Any) -> dict[str, Any]:
-    lifespan = app.router.lifespan_context.__wrapped__
-    return {
-        name: cell.cell_contents
-        for name, cell in zip(lifespan.__code__.co_freevars, lifespan.__closure__ or (), strict=False)
-    }
+    # include_router merges lifespan contexts, wrapping create_app's lifespan in
+    # nested/original shims - walk the closure chain to find the real one.
+    queue = [app.router.lifespan_context]
+    while queue:
+        candidate = queue.pop()
+        fn = getattr(candidate, "__wrapped__", candidate)
+        code = getattr(fn, "__code__", None)
+        closure = getattr(fn, "__closure__", None) or ()
+        if code is None:
+            continue
+        cells = dict(zip(code.co_freevars, closure, strict=False))
+        if "_require_management_plane" in cells:
+            return {name: cell.cell_contents for name, cell in cells.items()}
+        queue.extend(cell.cell_contents for cell in closure)
+    raise AssertionError("create_app lifespan closure not found")
 
 
 def _make_cached_request() -> tuple[SimpleNamespace, Request]:
