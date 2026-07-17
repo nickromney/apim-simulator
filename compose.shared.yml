@@ -1,0 +1,5 @@
+services:
+  apim-simulator:
+    environment:
+      APIM_CONFIG_PATH: /tmp/shared-apim-config.json
+      APIM_CONFIG_SOURCE_PATH: ${SHARED_APIM_CONFIG_PATH:-/app/examples/shared-gateway/apim.json}

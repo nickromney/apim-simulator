@@ -134,6 +134,16 @@ def create_portal_subscription(
         raise HTTPException(status_code=404, detail="Product not found")
     if not product.require_subscription:
         raise HTTPException(status_code=400, detail="Product does not use subscriptions")
+    if product.subscriptions_limit is not None:
+        existing = sum(
+            1
+            for subscription in cfg.subscription.subscriptions.values()
+            if subscription.created_by == _created_by(user_id)
+            and product_id in subscription.products
+            and subscription.state in {SubscriptionState.Active, SubscriptionState.Submitted}
+        )
+        if existing >= product.subscriptions_limit:
+            raise HTTPException(status_code=409, detail="Subscription limit reached for this product")
 
     sub_id = f"{user_id}-{product_id}"
     if any(subscription.id == sub_id for subscription in cfg.subscription.subscriptions.values()):
