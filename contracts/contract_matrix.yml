@@ -269,6 +269,107 @@ contracts:
     fixture_or_golden: inline-xml
     assertion_kind: policy-golden
 
+  - id: POLICY-EMIT-METRIC
+    status: adapted
+    surface: policy
+    module: app/policy.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#policies
+    owner_tests:
+      - tests/test_policy_golden.py::test_golden_policy_emit_metric_uses_dimensions_and_value
+    fixture_or_golden: inline-xml
+    assertion_kind: policy-golden
+
+  - id: POLICY-VALIDATE-CONTENT
+    status: adapted
+    surface: policy
+    module: app/policy.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#policies
+    owner_tests:
+      - tests/test_policy_validation.py::test_validate_content_prevents_invalid_json
+    fixture_or_golden: inline-xml
+    assertion_kind: policy-golden
+
+  - id: POLICY-VALIDATE-PARAMETERS
+    status: adapted
+    surface: policy
+    module: app/policy.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#policies
+    owner_tests:
+      - tests/test_policy_validation.py::test_validate_parameters_requires_declared_parameters
+    fixture_or_golden: inline-xml
+    assertion_kind: policy-golden
+
+  - id: POLICY-VALIDATE-STATUS-CODE
+    status: adapted
+    surface: policy
+    module: app/policy.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#policies
+    owner_tests:
+      - tests/test_policy_validation.py::test_validate_status_code_prevent_mutates_response
+    fixture_or_golden: inline-xml
+    assertion_kind: policy-golden
+
+  - id: BACKEND-POOL
+    status: adapted
+    surface: gateway
+    module: app/main.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#backends
+    owner_tests:
+      - tests/test_backend_pool.py::test_pool_round_robin_alternates_members
+      - tests/test_backend_pool.py::test_pool_fails_over_and_opens_circuit
+      - tests/test_backend_pool.py::test_pool_returns_503_when_all_members_are_open
+    fixture_or_golden: null
+    assertion_kind: http-json
+
+  - id: POLICY-PRODUCT-SCOPE
+    status: adapted
+    surface: policy
+    module: app/main.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/CAPABILITY-MATRIX.md#policies
+    owner_tests:
+      - tests/test_policy_scopes.py::test_product_policy_applies_for_authorizing_product
+      - tests/test_policy_scopes.py::test_product_policy_runs_before_api_scope
+    fixture_or_golden: inline-xml
+    assertion_kind: http-json
+
+  - id: POLICY-LLM-TOKEN-LIMIT
+    status: adapted
+    surface: policy
+    module: app/policy.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/AI-GATEWAY.md#llm-token-limit
+    owner_tests:
+      - tests/test_policy_llm.py::test_llm_token_limit_consumes_actual_usage_then_blocks
+      - tests/test_policy_llm.py::test_llm_token_limit_estimate_blocks_before_backend
+      - tests/test_policy_llm.py::test_llm_token_limit_quota_returns_403
+    fixture_or_golden: inline-xml
+    assertion_kind: policy-golden
+
+  - id: POLICY-LLM-EMIT-TOKEN-METRIC
+    status: adapted
+    surface: policy
+    module: app/policy.py
+    doc_refs:
+      - docs/SCOPE.md#supported-now
+      - docs/AI-GATEWAY.md#llm-emit-token-metric
+    owner_tests:
+      - tests/test_policy_llm.py::test_llm_emit_token_metric_emits_usage_with_dimensions
+    fixture_or_golden: inline-xml
+    assertion_kind: policy-golden
+
   - id: TF-IMPORT-MVP
     status: supported
     surface: import

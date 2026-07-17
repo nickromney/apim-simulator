@@ -15,6 +15,15 @@ allowed_python_execution=(
   "scripts/release_version.sh"
 )
 
+# Container init-hook scripts that run unattended inside a third-party
+# vendor image (not this repo's CLI convention). They must be executable so
+# the vendor's init framework picks them up, and they depend on binaries
+# that only exist in that image (e.g. LocalStack's `awslocal`), so they
+# cannot implement the standard --help/--dry-run/--execute interface.
+allowed_non_cli_entrypoints=(
+  "examples/aws-api-gateway/init-aws.sh"
+)
+
 bash4_feature_patterns=(
   '(^|[^[:alnum:]_])(mapfile|readarray)([[:space:]]|$)'
   '(^|[^[:alnum:]_])(declare|typeset)[[:space:]]+-A([[:space:]]|$)'
@@ -44,6 +53,19 @@ is_allowed_python_script() {
   local allowed
 
   for allowed in "${allowed_python_execution[@]}"; do
+    if [[ "${candidate}" == "${allowed}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+is_allowed_non_cli_entrypoint() {
+  local candidate="$1"
+  local allowed
+
+  for allowed in "${allowed_non_cli_entrypoints[@]}"; do
     if [[ "${candidate}" == "${allowed}" ]]; then
       return 0
     fi
@@ -271,7 +293,7 @@ while IFS= read -r -d '' rel; do
   fi
   count=$((count + 1))
 
-  if [[ -x "${file}" ]]; then
+  if [[ -x "${file}" ]] && ! is_allowed_non_cli_entrypoint "${rel}"; then
     entrypoint_count=$((entrypoint_count + 1))
     validate_entrypoint_interface "${rel}" "${file}"
   fi

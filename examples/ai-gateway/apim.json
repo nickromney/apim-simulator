@@ -1,0 +1,109 @@
+{
+  "allowed_origins": [
+    "${APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST}",
+    "${APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE}",
+    "${APIM_ALLOWED_ORIGIN_VITE}",
+    "${APIM_ALLOWED_ORIGIN_GATEWAY}"
+  ],
+  "allow_anonymous": true,
+  "trace_enabled": true,
+  "tenant_access": {
+    "enabled": true,
+    "primary_key": "local-dev-tenant-key",
+    "secondary_key": "local-dev-tenant-key-secondary"
+  },
+  "portal": {
+    "enabled": true
+  },
+  "products": {
+    "ai-workloads": {
+      "name": "AI Workloads",
+      "description": "Token-metered access to the mock LLM backend",
+      "require_subscription": true
+    }
+  },
+  "subscription": {
+    "required": true,
+    "header_names": ["Ocp-Apim-Subscription-Key", "X-Ocp-Apim-Subscription-Key", "api-key"],
+    "subscriptions": {
+      "ai-team-alpha": {
+        "id": "sub-ai-team-alpha",
+        "name": "ai-team-alpha",
+        "keys": {
+          "primary": "ai-team-alpha-key",
+          "secondary": "ai-team-alpha-key-secondary"
+        },
+        "products": ["ai-workloads"],
+        "created_by": "publisher"
+      },
+      "ai-team-beta": {
+        "id": "sub-ai-team-beta",
+        "name": "ai-team-beta",
+        "keys": {
+          "primary": "ai-team-beta-key",
+          "secondary": "ai-team-beta-key-secondary"
+        },
+        "products": ["ai-workloads"],
+        "created_by": "publisher"
+      }
+    }
+  },
+  "proxy_max_attempts": 2,
+  "backends": {
+    "llm-backend": {
+      "url": "http://llm-backend:8000",
+      "description": "Mock OpenAI-compatible chat completion backend"
+    },
+    "llm-backend-b": {
+      "url": "http://llm-backend-b:8000",
+      "description": "Second mock deployment for pool load balancing"
+    },
+    "llm-pool": {
+      "type": "pool",
+      "description": "Round-robin pool across both mock LLM deployments",
+      "pool": [
+        { "backend_id": "llm-backend", "weight": 1, "priority": 1 },
+        { "backend_id": "llm-backend-b", "weight": 1, "priority": 1 }
+      ],
+      "circuit_breaker": {
+        "failure_count": 3,
+        "interval_seconds": 60,
+        "trip_duration_seconds": 30
+      }
+    }
+  },
+  "apis": {
+    "azure-openai-api": {
+      "name": "Azure OpenAI (mock)",
+      "path": "openai",
+      "upstream_base_url": "http://llm-backend:8000",
+      "upstream_path_prefix": "/openai",
+      "backend": "llm-pool",
+      "products": ["ai-workloads"],
+      "policies_xml": "<policies><inbound><llm-token-limit counter-key=\"@(context.Subscription.Id)\" tokens-per-minute=\"300\" estimate-prompt-tokens=\"false\" remaining-tokens-header-name=\"x-apim-remaining-tokens\" tokens-consumed-header-name=\"x-apim-tokens-consumed\" /><llm-emit-token-metric namespace=\"ai-usage\"><dimension name=\"Subscription ID\" /><dimension name=\"API ID\" /></llm-emit-token-metric></inbound><backend /><outbound /><on-error /></policies>",
+      "operations": {
+        "chat-completions": {
+          "name": "Chat Completions (deployment)",
+          "method": "POST",
+          "url_template": "/deployments/{deploymentId}/chat/completions"
+        }
+      }
+    },
+    "openai-compat-api": {
+      "name": "OpenAI-compatible passthrough (mock)",
+      "path": "llm/v1",
+      "upstream_base_url": "http://llm-backend:8000",
+      "upstream_path_prefix": "/v1",
+      "backend": "llm-backend",
+      "products": ["ai-workloads"],
+      "policies_xml": "<policies><inbound><llm-token-limit counter-key=\"@(context.Subscription.Id)\" token-quota=\"5000\" token-quota-period=\"Daily\" estimate-prompt-tokens=\"true\" remaining-quota-tokens-header-name=\"x-apim-remaining-quota-tokens\" tokens-consumed-header-name=\"x-apim-tokens-consumed\" /><llm-emit-token-metric namespace=\"ai-usage\"><dimension name=\"Subscription ID\" /><dimension name=\"API ID\" /></llm-emit-token-metric></inbound><backend /><outbound /><on-error /></policies>",
+      "operations": {
+        "chat-completions": {
+          "name": "Chat Completions",
+          "method": "POST",
+          "url_template": "/chat/completions"
+        }
+      }
+    }
+  }
+}

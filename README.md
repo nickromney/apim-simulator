@@ -161,6 +161,9 @@ stays on a hardened runtime base.
 | Todo demo with OTEL | `make up-todo-otel` | [http://localhost:3000](http://localhost:3000) | You want the richest browser-backed teaching flow |
 | Hello starter | `make up-hello` | [http://localhost:8000/api/hello](http://localhost:8000/api/hello) | You want the smallest backend scaffold behind APIM |
 | OIDC example | `make up-oidc` | [http://localhost:8000](http://localhost:8000) | You want JWT plus subscription flows |
+| AI gateway example | `make up-ai` | [http://localhost:8000](http://localhost:8000) | You want an LLM backend behind token-limit and token-metric policies |
+| Shared gateway RBAC example | `make up-shared` | [http://localhost:8000](http://localhost:8000) | You want one gateway shared by several workload identities, segregated by role |
+| AWS API Gateway comparison | `make up-aws` | [http://localhost:4566](http://localhost:4566) | You want an AWS-shaped gateway beside the simulator for comparison |
 | MCP example | `make up-mcp` | [http://localhost:8000/mcp](http://localhost:8000/mcp) | You want an MCP server behind APIM |
 | Edge HTTP | `make up-edge` | [http://edge.apim.127.0.0.1.sslip.io:8088](http://edge.apim.127.0.0.1.sslip.io:8088) | You want forwarded-header and reverse-proxy behaviour |
 | Edge TLS | `make up-tls` | [https://edge.apim.127.0.0.1.sslip.io:9443](https://edge.apim.127.0.0.1.sslip.io:9443) | You want local TLS termination behaviour |
@@ -308,6 +311,32 @@ make up-ui
 
 Then open `http://localhost:3007`, use `Load Local Demo`, and connect to `http://localhost:8000`.
 
+### Management CLI
+
+`apimsim` is a thin HTTP client over the same management API — no business
+logic, just requests and pretty-printed JSON. It ships as a console script
+via this repo's `pyproject.toml`, so `uv sync` installs it into the project's
+virtualenv. Point it at a running simulator with `--base-url`/`APIM_BASE_URL`
+and `--tenant-key`/`APIM_TENANT_KEY`:
+
+```bash
+uv run apimsim --tenant-key local-dev-tenant-key apis
+uv run apimsim --tenant-key local-dev-tenant-key api default
+uv run apimsim --tenant-key local-dev-tenant-key replay /api/health
+uv run apimsim trace <trace_id>
+```
+
+It also covers authoring: importing an OpenAPI document, editing policy XML,
+and deleting resources (destructive commands require `--yes`):
+
+```bash
+uv run apimsim --tenant-key local-dev-tenant-key import-openapi weather --file openapi.json
+uv run apimsim --tenant-key local-dev-tenant-key set-policy api weather --file policy.xml
+uv run apimsim --tenant-key local-dev-tenant-key delete-api weather --yes
+```
+
+Run `uv run apimsim --help` for the full command list.
+
 ### Optional Backstage Portal
 
 The simulator publishes [Backstage catalog metadata](catalog-info.yaml) for the
@@ -408,6 +437,31 @@ HELLO_APIM_CONFIG_PATH=/app/examples/migrating-from-aws-api-gateway/apim.http-ap
 curl -H "Ocp-Apim-Subscription-Key: aws-migration-demo-key" http://localhost:8000/prod/hello
 ```
 
+### AI gateway example
+
+Mock OpenAI/Azure OpenAI-shaped LLM backend behind `llm-token-limit` and
+`llm-emit-token-metric` policies:
+
+```bash
+make up-ai
+make smoke-ai
+```
+
+See [docs/AI-GATEWAY.md](docs/AI-GATEWAY.md) for the policy semantics and the
+Kong/NGINX comparison.
+
+### Shared gateway RBAC example
+
+One gateway shared by several simulated AKS workload identities (Keycloak
+client-credentials clients), segregated per API by role claims:
+
+```bash
+make up-shared
+make smoke-shared
+```
+
+See [examples/shared-gateway/README.md](examples/shared-gateway/README.md).
+
 ### MCP example
 
 Minimal streamable HTTP MCP server behind APIM:
@@ -478,6 +532,8 @@ make test
 - Build a new API behind the simulator: [docs/APIM-STARTER-RECIPE.md](docs/APIM-STARTER-RECIPE.md)
 - Delivery workflow for contributors: [docs/APIM-TEAM-PLAYBOOK.md](docs/APIM-TEAM-PLAYBOOK.md)
 - AWS API Gateway mapping: [docs/MIGRATING-FROM-AWS-API-GATEWAY.md](docs/MIGRATING-FROM-AWS-API-GATEWAY.md)
+- AI gateway policies and examples: [docs/AI-GATEWAY.md](docs/AI-GATEWAY.md)
+- Architecture decisions: [docs/adr/0001-goldilocks-ai-gateway-scope.md](docs/adr/0001-goldilocks-ai-gateway-scope.md)
 - Scope and limits: [docs/SCOPE.md](docs/SCOPE.md)
 - Capability matrix: [docs/CAPABILITY-MATRIX.md](docs/CAPABILITY-MATRIX.md)
 - Management-surface guide: [docs/APIM-SDK-SURFACE-GUIDE.md](docs/APIM-SDK-SURFACE-GUIDE.md)

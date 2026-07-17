@@ -1,0 +1,30 @@
+services:
+  localstack:
+    image: localstack/localstack:4.9
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${AWS_GATEWAY_PORT:-4566}:4566"
+    environment:
+      SERVICES: apigateway
+      DEBUG: 0
+    volumes:
+      - ./examples/aws-api-gateway/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-sf",
+          "http://localhost:4566/_localstack/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - apim
+
+networks:
+  apim:

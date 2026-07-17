@@ -1,0 +1,89 @@
+{
+  "allowed_origins": [
+    "${APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE}",
+    "${APIM_ALLOWED_ORIGIN_VITE}",
+    "${APIM_ALLOWED_ORIGIN_GATEWAY}"
+  ],
+  "allow_anonymous": false,
+  "trace_enabled": true,
+  "tenant_access": {
+    "enabled": true,
+    "primary_key": "local-dev-tenant-key",
+    "secondary_key": "local-dev-tenant-key-secondary"
+  },
+  "oidc": {
+    "issuer": "${OIDC_ISSUER_EXTERNAL}",
+    "audience": "api-app",
+    "jwks_uri": "http://keycloak:8080/realms/subnet-calculator/protocol/openid-connect/certs"
+  },
+  "products": {
+    "team-a": {
+      "name": "Team A",
+      "description": "Authorized by the caller's application id (azp claim), Entra-style",
+      "require_subscription": false
+    },
+    "team-b": {
+      "name": "Team B",
+      "description": "Authorized by the caller's application id (azp claim), Entra-style",
+      "require_subscription": false
+    },
+    "shared-platform": {
+      "name": "Shared Platform",
+      "description": "APIs shared by every workload on this gateway",
+      "require_subscription": false
+    }
+  },
+  "subscription": {
+    "required": false
+  },
+  "apis": {
+    "team-a-api": {
+      "name": "Team A API",
+      "path": "team-a",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "products": ["team-a"],
+      "operations": {
+        "echo": {
+          "name": "Echo",
+          "method": "GET",
+          "url_template": "/echo",
+          "authz": {
+            "required_claims": { "azp": "workload-team-a" }
+          }
+        }
+      }
+    },
+    "team-b-api": {
+      "name": "Team B API",
+      "path": "team-b",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "products": ["team-b"],
+      "operations": {
+        "echo": {
+          "name": "Echo",
+          "method": "GET",
+          "url_template": "/echo",
+          "authz": {
+            "required_claims": { "azp": "workload-team-b" }
+          }
+        }
+      }
+    },
+    "shared-api": {
+      "name": "Shared Platform API",
+      "path": "shared",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "products": ["shared-platform"],
+      "operations": {
+        "echo": {
+          "name": "Echo",
+          "method": "GET",
+          "url_template": "/echo"
+        }
+      }
+    }
+  }
+}
