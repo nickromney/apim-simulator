@@ -64,6 +64,7 @@ SMOKE_OIDC_KEYCLOAK_BASE_URL ?= $(KEYCLOAK_BASE_URL)
 SMOKE_MCP_URL ?= $(APIM_BASE_URL)/mcp
 SMOKE_EDGE_BASE_URL ?= $(EDGE_HTTP_BASE_URL)
 SMOKE_AI_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
+SMOKE_AI_FOUNDRY_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
 SMOKE_SHARED_BASE_URL ?= $(APIM_LOOPBACK_BASE_URL)
 SMOKE_SHARED_KEYCLOAK_BASE_URL ?= $(KEYCLOAK_BASE_URL)
 SMOKE_AWS_BASE_URL ?= http://127.0.0.1:$(AWS_GATEWAY_PORT)
@@ -78,7 +79,7 @@ export APIM_BASE_URL APIM_LOOPBACK_BASE_URL GRAFANA_BASE_URL KEYCLOAK_BASE_URL O
 export TODO_FRONTEND_BASE_URL TODO_FRONTEND_BROWSER_URL TODO_FRONTEND_ORIGIN_LOCALHOST TODO_FRONTEND_ORIGIN_LOOPBACK TODO_APIM_BASE_URL TODO_APIM_PUBLIC_BASE_URL TODO_GRAFANA_BASE_URL TODO_OBSERVABILITY_DASHBOARD_URL
 export APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE APIM_ALLOWED_ORIGIN_VITE APIM_ALLOWED_ORIGIN_GATEWAY
 export EDGE_HTTP_BASE_URL EDGE_TLS_BASE_URL
-export SMOKE_HELLO_BASE_URL SMOKE_HELLO_KEYCLOAK_BASE_URL SMOKE_OIDC_BASE_URL SMOKE_OIDC_KEYCLOAK_BASE_URL SMOKE_MCP_URL SMOKE_EDGE_BASE_URL SMOKE_AI_BASE_URL SMOKE_SHARED_BASE_URL SMOKE_SHARED_KEYCLOAK_BASE_URL SMOKE_AWS_BASE_URL
+export SMOKE_HELLO_BASE_URL SMOKE_HELLO_KEYCLOAK_BASE_URL SMOKE_OIDC_BASE_URL SMOKE_OIDC_KEYCLOAK_BASE_URL SMOKE_MCP_URL SMOKE_EDGE_BASE_URL SMOKE_AI_BASE_URL SMOKE_AI_FOUNDRY_BASE_URL SMOKE_SHARED_BASE_URL SMOKE_SHARED_KEYCLOAK_BASE_URL SMOKE_AWS_BASE_URL
 
 COMPOSE_BACKSTAGE_OVERLAY := $(if $(filter true,$(BACKSTAGE_ENABLED)),-f compose.backstage.yml --profile backstage)
 COMPOSE_CORE := $(call compose_stack,core) -f compose.yml -f compose.public.yml $(COMPOSE_BACKSTAGE_OVERLAY)
@@ -93,6 +94,7 @@ COMPOSE_HELLO := $(call compose_stack,hello) -f compose.yml -f compose.public.ym
 COMPOSE_HELLO_OTEL := $(call compose_stack,hello-otel) -f compose.yml -f compose.public.yml -f compose.hello.yml -f compose.otel.yml -f compose.hello.otel.yml
 COMPOSE_HELLO_OIDC := $(call compose_stack,hello-oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.hello.yml
 COMPOSE_AI := $(call compose_stack,ai) -f compose.yml -f compose.public.yml -f compose.ai.yml
+COMPOSE_AI_FOUNDRY := $(call compose_stack,ai-foundry) -f compose.yml -f compose.public.yml -f compose.ai-foundry.yml
 COMPOSE_SHARED := $(call compose_stack,shared) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.shared.yml
 COMPOSE_AWS := $(call compose_stack,aws) -f compose.yml -f compose.public.yml -f compose.aws.yml
 COMPOSE_TODO := $(call compose_stack,todo) -f compose.todo.yml
@@ -110,7 +112,7 @@ CHECK_VERSION_SCRIPT ?= scripts/check-version.sh
 RELEASE_SCRIPT ?= scripts/release.sh
 RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 
-.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run build-backstage up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-backstage up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-shared up-aws up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-ai logs-shared logs-aws logs-todo logs-todo-otel logs-backstage test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-ai smoke-shared smoke-aws smoke-todo smoke-backstage smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-backstage compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-ai compose-config-shared compose-config-aws compose-config-todo compose-config-todo-otel
+.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run build-backstage up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-backstage up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-ai-foundry check-aifoundry-network up-shared up-aws up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-ai logs-ai-foundry logs-shared logs-aws logs-todo logs-todo-otel logs-backstage test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-ai smoke-ai-foundry smoke-shared smoke-aws smoke-todo smoke-backstage smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-backstage compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-ai compose-config-ai-foundry compose-config-shared compose-config-aws compose-config-todo compose-config-todo-otel
 
 help:
 	@printf "Run:\n"
@@ -118,6 +120,7 @@ help:
 	@printf $(HELP_FMT) "down" "Stop all compose services defined by this repo"
 	@printf $(HELP_FMT) "up" "Start the direct public simulator stack"
 	@printf $(HELP_FMT) "up-ai" "Start the AI gateway example with the mock LLM backend"
+	@printf $(HELP_FMT) "up-ai-foundry" "Start the gateway fronting the sibling AI Foundry simulator (start that first)"
 	@printf $(HELP_FMT) "up-aws" "Start LocalStack AWS API Gateway comparison beside the simulator stack"
 	@printf $(HELP_FMT) "up-edge" "Start the edge HTTP MCP stack on $(APIM_EDGE_HOST):8088"
 	@printf $(HELP_FMT) "up-hello" "Start the anonymous hello API example behind APIM"
@@ -178,6 +181,7 @@ help:
 	@printf "\nVerification and Smoke:\n"
 	@printf $(HELP_FMT) "export-todo-har" "Capture the todo APIM flow as a HAR file for Proxyman"
 	@printf $(HELP_FMT) "smoke-ai" "Run the AI gateway token-limit smoke test"
+	@printf $(HELP_FMT) "smoke-ai-foundry" "Run the AI Foundry integration smoke test (cache, content safety, 429)"
 	@printf $(HELP_FMT) "smoke-aws" "Run the LocalStack AWS API Gateway comparison smoke test"
 	@printf $(HELP_FMT) "smoke-edge" "Run the edge MCP and forwarded-header smoke test"
 	@printf $(HELP_FMT) "smoke-hello" "Run the hello API smoke test (mode via SMOKE_HELLO_MODE)"
@@ -317,6 +321,17 @@ up-hello-oidc-subscription:
 up-ai:
 	$(COMPOSE_AI) up --build -d
 
+up-ai-foundry: check-aifoundry-network
+	$(COMPOSE_AI_FOUNDRY) up --build -d
+
+check-aifoundry-network:
+	@docker network inspect aifoundry >/dev/null 2>&1 || { \
+	  echo "error: Docker network 'aifoundry' not found."; \
+	  echo "Start the sibling AI Foundry simulator first: run 'make up' in your aifoundry-simulator checkout"; \
+	  echo "(https://github.com/nickromney/aifoundry-simulator)."; \
+	  exit 1; \
+	}
+
 up-shared:
 	$(COMPOSE_SHARED) up --build -d
 
@@ -352,6 +367,7 @@ down:
 	$(COMPOSE_HELLO_OTEL) down --remove-orphans
 	$(COMPOSE_HELLO_OIDC) down --remove-orphans
 	$(COMPOSE_AI) down --remove-orphans
+	$(COMPOSE_AI_FOUNDRY) down --remove-orphans
 	$(COMPOSE_SHARED) down --remove-orphans
 	$(COMPOSE_AWS) down --remove-orphans
 	$(COMPOSE_TODO) down --remove-orphans
@@ -389,6 +405,9 @@ logs-hello-otel:
 
 logs-ai:
 	$(COMPOSE_AI) logs -f apim-simulator llm-backend
+
+logs-ai-foundry:
+	$(COMPOSE_AI_FOUNDRY) logs -f apim-simulator
 
 logs-shared:
 	$(COMPOSE_SHARED) logs -f apim-simulator keycloak
@@ -550,6 +569,9 @@ smoke-hello:
 smoke-ai:
 	$(UV_RUN) python scripts/smoke_ai.py
 
+smoke-ai-foundry:
+	$(UV_RUN) python scripts/smoke_ai_foundry.py
+
 smoke-shared:
 	$(UV_RUN) python scripts/smoke_shared.py
 
@@ -624,6 +646,9 @@ compose-config-hello-otel:
 
 compose-config-ai:
 	$(COMPOSE_AI) config
+
+compose-config-ai-foundry:
+	$(COMPOSE_AI_FOUNDRY) config
 
 compose-config-shared:
 	$(COMPOSE_SHARED) config

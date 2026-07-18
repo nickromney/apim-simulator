@@ -148,8 +148,8 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `azure-openai-token-limit` | Partial | - | Alias of `llm-token-limit` |
 | `llm-emit-token-metric` | Partial | - | Adapted: emits OTEL counter `apim.llm.tokens` with policy dimensions instead of Application Insights metrics |
 | `azure-openai-emit-token-metric` | Partial | - | Alias of `llm-emit-token-metric` |
-| `llm-semantic-cache-lookup`/`-store` | No | - | Will integrate with the sibling AI Foundry simulator; see ADR 0003 |
-| `llm-content-safety` | No | - | Will integrate with the sibling AI Foundry simulator; see ADR 0003 |
+| `llm-semantic-cache-lookup`/`-store` | No | - | Policy not implemented; the sibling AI Foundry simulator provides service-side semantic caching behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
+| `llm-content-safety` | No | - | Policy not implemented; the sibling AI Foundry simulator serves the Content Safety API behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `emit-metric` | Partial | - | Adapted: emits the OTEL counter `apim.policy.metric` with dimensions |
 | `validate-content` | Partial | - | Size, content-type map, and JSON well-formedness; JSON Schema enforcement deferred |
 | `validate-parameters` | Partial | - | Required/unspecified headers and query against operation metadata; path parameters deferred |

@@ -21,5 +21,18 @@ make smoke-ai
   the `llm-pool` backend; `x-apim-backend-id` shows the member that served
   each call
 
+## Variant: fronting the sibling AI Foundry simulator
+
+[apim.foundry.json](apim.foundry.json) points the same gateway policies at
+the sibling [aifoundry-simulator](https://github.com/nickromney/aifoundry-simulator)
+instead of the mock backend, adding semantic-cache and content-safety
+behaviour behind the gateway. Start that simulator first (`make up` in its
+checkout), then:
+
+```bash
+make up-ai-foundry
+make smoke-ai-foundry
+```
+
 Full policy semantics, adapted-behaviour notes, and the Kong/NGINX comparison
 live in [docs/AI-GATEWAY.md](../../docs/AI-GATEWAY.md).

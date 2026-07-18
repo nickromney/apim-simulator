@@ -162,6 +162,7 @@ stays on a hardened runtime base.
 | Hello starter | `make up-hello` | [http://localhost:8000/api/hello](http://localhost:8000/api/hello) | You want the smallest backend scaffold behind APIM |
 | OIDC example | `make up-oidc` | [http://localhost:8000](http://localhost:8000) | You want JWT plus subscription flows |
 | AI gateway example | `make up-ai` | [http://localhost:8000](http://localhost:8000) | You want an LLM backend behind token-limit and token-metric policies |
+| AI Foundry integration | `make up-ai-foundry` | [http://localhost:8000](http://localhost:8000) | You want the gateway fronting the sibling AI Foundry simulator (semantic cache, content safety) |
 | Shared gateway RBAC example | `make up-shared` | [http://localhost:8000](http://localhost:8000) | You want one gateway shared by several workload identities, segregated by role |
 | AWS API Gateway comparison | `make up-aws` | [http://localhost:4566](http://localhost:4566) | You want an AWS-shaped gateway beside the simulator for comparison |
 | MCP example | `make up-mcp` | [http://localhost:8000/mcp](http://localhost:8000/mcp) | You want an MCP server behind APIM |
@@ -449,6 +450,23 @@ make smoke-ai
 
 See [docs/AI-GATEWAY.md](docs/AI-GATEWAY.md) for the policy semantics and the
 Kong/NGINX comparison.
+
+### AI Foundry integration
+
+The same gateway policies fronting the sibling
+[aifoundry-simulator](https://github.com/nickromney/aifoundry-simulator)
+(model deployments with semantic caching and content filtering, plus an
+Azure AI Content Safety API) instead of the mock LLM backend. Start that
+simulator first (`make up` in its checkout creates the shared `aifoundry`
+Docker network), then:
+
+```bash
+make up-ai-foundry
+make smoke-ai-foundry
+```
+
+See the "Fronting the sibling AI Foundry simulator" section of
+[docs/AI-GATEWAY.md](docs/AI-GATEWAY.md).
 
 ### Shared gateway RBAC example
 

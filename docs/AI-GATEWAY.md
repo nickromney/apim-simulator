@@ -98,6 +98,43 @@ Every gateway trace (`x-apim-trace: true`) also records
 `llm-token-limit`/`llm-emit-token-metric` steps with the counted tokens,
 which is the quickest way to see the policies work.
 
+## Fronting the sibling AI Foundry simulator
+
+The mock LLM backend exercises the gateway policies, but the deferred
+concerns — semantic caching and content safety — simulate other Azure
+services, and those now exist as their own project:
+[aifoundry-simulator](https://github.com/nickromney/aifoundry-simulator)
+(a sibling on GitHub, not necessarily adjacent on local disk). Its `make up`
+publishes model deployments, a semantic cache, and the Azure AI Content
+Safety API on a Docker network named `aifoundry`; this repo's
+`compose.ai-foundry.yml` overlay attaches the gateway to that network and
+loads [examples/ai-gateway/apim.foundry.json](../examples/ai-gateway/apim.foundry.json),
+which proxies `/openai` and `/contentsafety` to
+`http://aifoundry-simulator:8000` and injects the Foundry backend key via
+`set-header`.
+
+```bash
+# in your aifoundry-simulator checkout
+make up
+
+# in this repo
+make up-ai-foundry
+make smoke-ai-foundry
+```
+
+The smoke test asserts, end to end through the gateway: subscription 401s,
+completions with real `usage` numbers feeding `llm-token-limit` (429 after
+the budget), `x-semantic-cache` miss-then-hit on a repeated prompt,
+`[simulate:violence=6]` returning Azure's 400 `content_filter` body
+unchanged, deterministic embeddings, and the Content Safety
+`text:analyze` / `text:shieldPrompt` operations.
+
+The `llm-semantic-cache-*` and `llm-content-safety` *policies* remain
+unimplemented (see the capability matrix): caching and filtering happen
+service-side in the Foundry simulator, which is where Azure hosts them too.
+Gateway-side thin clients of that service are the natural next step —
+tracked in [NEXT-FEATURES.md](NEXT-FEATURES.md).
+
 ## How Kong and NGINX solve the same problems
 
 | Concern | Azure APIM | Kong AI Gateway | NGINX / F5 |

@@ -13,6 +13,9 @@ regexes = [
   '''(?i)\baws-migration-demo-key(?:-secondary)?\b''',
   '''(?i)\btutorial-key(?:-secondary)?\b''',
   '''(?i)\bdemo-password\b''',
+  '''(?i)\bai-team-(?:alpha|beta)-key(?:-secondary)?\b''',
+  '''(?i)\blocal-foundry-key-(?:alpha|beta)\b''',
+  '''(?i)\blocal-foundry-admin-key\b''',
 ]
 
 [[allowlists]]
