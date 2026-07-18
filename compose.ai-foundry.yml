@@ -1,0 +1,17 @@
+services:
+  apim-simulator:
+    environment:
+      APIM_CONFIG_PATH: /tmp/ai-foundry-apim-config.json
+      APIM_CONFIG_SOURCE_PATH: ${AI_FOUNDRY_APIM_CONFIG_PATH:-/app/examples/ai-gateway/apim.foundry.json}
+      OTEL_SERVICE_NAME: apim-simulator
+    networks:
+      - apim
+      - aifoundry
+
+networks:
+  # Created by the sibling aifoundry-simulator's `make up`
+  # (https://github.com/nickromney/aifoundry-simulator) — start that stack
+  # first so the gateway can reach http://aifoundry-simulator:8000.
+  aifoundry:
+    external: true
+    name: aifoundry

@@ -44,17 +44,16 @@ Prefer new examples that exercise shipped capabilities rather than speculative p
 [ADR 0003](adr/0003-gap-closure-round.md)): both proxy other Azure services.
 The AI Foundry simulator now exists as a sibling project,
 [aifoundry-simulator](https://github.com/nickromney/aifoundry-simulator) —
-sibling on GitHub, not necessarily adjacent on disk. Its
-`examples/apim-integration/` already defines the hand-off: copy its APIM
-config into this repo's `examples/` and start it with
-`HELLO_APIM_CONFIG_PATH=/app/examples/ai-foundry-backend.json make up-hello`
-(the Foundry backend is reachable from the gateway container at
-`host.docker.internal:8020`). This repo's future work is the *integration*:
-implement the two policies as thin adapted clients targeting that service —
-the same way the AI gateway example targets the mock LLM backend — plus a
-compose overlay that runs both simulators side by side. Do not implement
-embeddings or moderation logic here, and do not assume the two checkouts
-share a parent directory.
+sibling on GitHub, not necessarily adjacent on disk. The compose overlay
+landed: `make up-ai-foundry` attaches the gateway to that simulator's
+`aifoundry` Docker network with
+[examples/ai-gateway/apim.foundry.json](../examples/ai-gateway/apim.foundry.json),
+and `make smoke-ai-foundry` asserts the integration end to end (see
+[AI-GATEWAY.md](AI-GATEWAY.md)). The remaining work is the two policies as
+thin adapted clients targeting that service — the same way the AI gateway
+example targets the mock LLM backend. Do not implement embeddings or
+moderation logic here, and do not assume the two checkouts share a parent
+directory.
 
 ## Still Deferred
 
