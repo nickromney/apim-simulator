@@ -80,6 +80,18 @@ def pytest_configure(config: pytest.Config) -> None:
     config._contract_matrix = _load_contract_matrix()
 
 
+def _is_partial_run(config: pytest.Config) -> bool:
+    """True when a subset of the suite was selected (paths, -k, or -m).
+
+    Contract coverage can only be judged against the full suite; enforcing it
+    on partial runs would make single-file invocations impossible.
+    """
+    if config.getoption("keyword", "") or config.getoption("markexpr", ""):
+        return True
+    testpaths = set(config.getini("testpaths") or [])
+    return any(arg.split("::")[0] not in testpaths for arg in config.args)
+
+
 def pytest_collection_finish(session: pytest.Session) -> None:
     contracts: dict[str, dict[str, Any]] = getattr(session.config, "_contract_matrix", {})
     marked_items: dict[str, set[str]] = {contract_id: set() for contract_id in contracts}
@@ -96,6 +108,12 @@ def pytest_collection_finish(session: pytest.Session) -> None:
                 errors.append(f"{item.nodeid}: unknown contract id {contract_id!r}")
                 continue
             marked_items[contract_id].add(item.nodeid)
+
+    if _is_partial_run(session.config):
+        # Unknown-id errors above still apply; coverage checks below do not.
+        if errors:
+            raise pytest.UsageError("Contract coverage validation failed:\n- " + "\n- ".join(errors))
+        return
 
     for contract_id, metadata in contracts.items():
         if metadata["status"] not in ENFORCED_STATUSES:
