@@ -72,7 +72,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle |
 | Subscription bypass | Yes | - | Header conditions |
 | Approval required | Yes | `azurerm_api_management_product.approval_required` | `approval_required` on products; pending subscriptions stay `submitted` until approved |
-| Subscription limits | No | `azurerm_api_management_product.subscriptions_limit` | Not enforced |
+| Subscription limits | Partial | `azurerm_api_management_product.subscriptions_limit` | Enforced at portal sign-up (409 when reached; 0 disables self-serve) |
 
 ## Tags
 
@@ -116,7 +116,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Inbound policies | Yes | `azurerm_api_management_api_policy` | XML format |
 | Outbound policies | Yes | - | `<outbound>` section |
 | On-error policies | Yes | - | `<on-error>` section |
-| Policy inheritance | Yes | - | Gateway -> API -> Operation |
+| Policy inheritance | Yes | - | Gateway -> Product -> API -> Operation (product scope is adapted; see ADR 0003) |
 | `set-header` | Yes | - | Add/override/delete modes |
 | `rewrite-uri` | Yes | - | Path rewriting |
 | `set-variable` | Yes | - | Writes to request-scoped `variables` |
@@ -144,6 +144,16 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `cache-remove-value` | Partial | - | Removes from local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
 | `mock-response` | Partial | - | Supports `status-code` and `content-type`, returning the first matching authored response example for the current operation |
 | `send-request` | Yes | - | Supports `new\|copy`, headers/body, timeout, ignore-error, managed identity, certificate placeholder |
+| `llm-token-limit` | Partial | - | Adapted: sliding-minute and quota-period windows, estimate/actual usage counting, 429/403 with retry and remaining headers; see [AI-GATEWAY.md](AI-GATEWAY.md) |
+| `azure-openai-token-limit` | Partial | - | Alias of `llm-token-limit` |
+| `llm-emit-token-metric` | Partial | - | Adapted: emits OTEL counter `apim.llm.tokens` with policy dimensions instead of Application Insights metrics |
+| `azure-openai-emit-token-metric` | Partial | - | Alias of `llm-emit-token-metric` |
+| `llm-semantic-cache-lookup`/`-store` | No | - | Policy not implemented; the sibling AI Foundry simulator provides service-side semantic caching behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
+| `llm-content-safety` | No | - | Policy not implemented; the sibling AI Foundry simulator serves the Content Safety API behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
+| `emit-metric` | Partial | - | Adapted: emits the OTEL counter `apim.policy.metric` with dimensions |
+| `validate-content` | Partial | - | Size, content-type map, and JSON well-formedness; JSON Schema enforcement deferred |
+| `validate-parameters` | Partial | - | Required/unspecified headers and query against operation metadata; path parameters deferred |
+| `validate-status-code` | Partial | - | Explicit codes plus declared operation responses; `prevent` mutates the response to 502 |
 | `log-to-eventhub` | No | - | Use observability stack |
 
 ## Backends
@@ -155,8 +165,8 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Basic auth | Yes | - | `auth_type: basic` |
 | Client cert auth | Partial | - | `auth_type: client_certificate` |
 | Managed identity | Partial | - | `auth_type: managed_identity` |
-| Circuit breaker | No | - | Not implemented |
-| Load balancing | No | - | Single upstream |
+| Circuit breaker | Partial | - | Adapted per-member breaker on pool backends (failure count/interval/trip duration); see ADR 0003 |
+| Load balancing | Partial | - | `type: pool` backends with deterministic weighted round-robin and priority failover |
 
 ## Management Plane
 

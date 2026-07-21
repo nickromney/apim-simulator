@@ -14,6 +14,8 @@ This repository is not trying to clone all of Azure API Management. It is a loca
 - Route-level scope, role, and claim checks
 - Client-certificate and proxy-forwarded mTLS validation modes
 - Host matching, API version-set routing, and forwarded-header-aware tracing
+- Policy scopes merged global → product → API → operation, including a `product` management policy scope
+- Load-balanced backend pools with priority/weight members and adapted circuit breakers
 - A practical XML policy subset:
   - `set-header`
   - `rewrite-uri`
@@ -38,13 +40,23 @@ This repository is not trying to clone all of Azure API Management. It is a loca
   - `validate-jwt`
   - `set-backend-service`
   - `send-request`
+  - `llm-token-limit` / `azure-openai-token-limit` (adapted token counting, including SSE streams; see [AI-GATEWAY.md](AI-GATEWAY.md))
+  - `llm-emit-token-metric` / `azure-openai-emit-token-metric` (adapted to an OTEL counter)
+  - `emit-metric` (adapted to an OTEL counter)
+  - `validate-content` (size, content-type map, JSON well-formedness; schema enforcement deferred)
+  - `validate-parameters` (headers and query against operation metadata)
+  - `validate-status-code` (adapted: `prevent` mutates the response to 502)
 - Curated Azure-Samples/APIM compatibility fixtures with documented supported, adapted, and unsupported cases
+- An AI gateway example: a mock OpenAI/Azure OpenAI-shaped LLM backend behind token-limit and token-metric policies ([AI-GATEWAY.md](AI-GATEWAY.md))
+- A shared-gateway RBAC example: one gateway serving several simulated workload identities, segregated per API by role claims ([examples/shared-gateway](../examples/shared-gateway/README.md))
+- An opt-in LocalStack overlay running an AWS-shaped API Gateway beside the simulator for comparison
 - Compose-backed direct public, edge HTTP, edge TLS, private/internal, OIDC, MCP, hello starter, todo demo, and OTEL/[LGTM](https://github.com/grafana/docker-otel-lgtm) scenarios
 
 ## Currently Deferred
 
 - External cache backends for the `cache-*` policies
 - `quota-by-key` bandwidth enforcement
+- `llm-semantic-cache-lookup`/`-store`, `llm-content-safety`, and load-balanced backend pools (see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
 - Full APIM policy expression compatibility
 - Broader control-plane parity beyond the current local CRUD and inspection surface
 - Broader Azure-Samples/APIM fixture coverage beyond the curated set

@@ -104,6 +104,66 @@
       "attributes": {
         "access.token.lifespan": "1800"
       }
+    },
+    {
+      "clientId": "workload-team-a",
+      "name": "Team A workload",
+      "description": "Simulates the managed identity of an AKS workload owned by team A",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "workload-team-a-demo-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "workload-team-b",
+      "name": "Team B workload",
+      "description": "Simulates the managed identity of an AKS workload owned by team B",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "workload-team-b-demo-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
     }
   ],
   "clientScopes": [
@@ -173,6 +233,22 @@
         "admin",
         "user"
       ]
+    },
+    {
+      "username": "service-account-workload-team-a",
+      "enabled": true,
+      "serviceAccountClientId": "workload-team-a",
+      "realmRoles": [
+        "team-a"
+      ]
+    },
+    {
+      "username": "service-account-workload-team-b",
+      "enabled": true,
+      "serviceAccountClientId": "workload-team-b",
+      "realmRoles": [
+        "team-b"
+      ]
     }
   ],
   "roles": {
@@ -184,6 +260,14 @@
       {
         "name": "admin",
         "description": "Administrator role"
+      },
+      {
+        "name": "team-a",
+        "description": "Team A workload role"
+      },
+      {
+        "name": "team-b",
+        "description": "Team B workload role"
       }
     ]
   }

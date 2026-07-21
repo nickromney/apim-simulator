@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
 from app.config import GatewayConfig, NamedValueConfig
 from app.policy import (
@@ -415,3 +416,51 @@ def test_golden_policy_parses_policy_parity_v2_nodes() -> None:
     assert isinstance(doc.inbound[4], CacheRemoveValue)
     assert isinstance(doc.outbound[0], CacheStore)
     assert isinstance(doc.outbound[1], CacheStoreValue)
+
+
+@pytest.mark.contract("POLICY-EMIT-METRIC")
+def test_golden_policy_emit_metric_uses_dimensions_and_value() -> None:
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <emit-metric name="requests-by-team" namespace="internal" value="2">
+      <dimension name="API ID" />
+      <dimension name="team" value="alpha" />
+    </emit-metric>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    emitted: list[tuple[int, dict[str, str]]] = []
+    runtime = PolicyRuntime(custom_metric_emitter=lambda amount, attributes: emitted.append((amount, attributes)))
+    req = PolicyRequest(
+        method="GET",
+        path="/api/health",
+        query={},
+        headers={},
+        variables={"api_id": "demo-api"},
+    )
+    assert apply_inbound([doc], req, runtime) is None
+    assert emitted == [
+        (
+            2,
+            {
+                "apim.metric.name": "requests-by-team",
+                "apim.metric.namespace": "internal",
+                "apim.metric.dimension.API ID": "demo-api",
+                "apim.metric.dimension.team": "alpha",
+            },
+        )
+    ]
+
+
+@pytest.mark.contract("POLICY-EMIT-METRIC")
+def test_golden_policy_emit_metric_requires_name_and_dimension() -> None:
+    with pytest.raises(HTTPException):
+        parse_policies_xml("<policies><inbound><emit-metric name='x' /></inbound></policies>")
+    with pytest.raises(HTTPException):
+        parse_policies_xml("<policies><inbound><emit-metric><dimension name='d' /></emit-metric></inbound></policies>")

@@ -185,3 +185,24 @@ def test_subscription_signup_error_paths() -> None:
 
         open_product = client.post("/apim/portal/subscriptions", json={"product_id": "open"}, headers=headers)
         assert open_product.status_code == 400
+
+
+def test_subscription_signup_respects_product_subscriptions_limit() -> None:
+    config = _portal_config()
+    config.products["capped"] = ProductConfig(name="Capped", subscriptions_limit=0)
+    config.apis["hello"].products.append("capped")
+    with _client(config) as client:
+        blocked = client.post(
+            "/apim/portal/subscriptions",
+            json={"product_id": "capped"},
+            headers={"X-Apim-Portal-User": "dev-1"},
+        )
+        assert blocked.status_code == 409
+        assert blocked.json()["detail"] == "Subscription limit reached for this product"
+
+        allowed = client.post(
+            "/apim/portal/subscriptions",
+            json={"product_id": "starter"},
+            headers={"X-Apim-Portal-User": "dev-1"},
+        )
+        assert allowed.status_code == 201

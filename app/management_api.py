@@ -318,6 +318,11 @@ def build_management_router(*, require_management_plane: Callable[[], Management
             if api is None:
                 raise HTTPException(status_code=404, detail="API policy scope not found")
             return api
+        if scope == "product":
+            product = cfg.products.get(scope_name)
+            if product is None:
+                raise HTTPException(status_code=404, detail="Product policy scope not found")
+            return product
         if scope == "operation":
             api_name, sep, operation_name = scope_name.partition(":")
             if not sep:

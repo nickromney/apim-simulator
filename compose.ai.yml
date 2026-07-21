@@ -1,0 +1,86 @@
+x-python-service-hardening: &python-service-hardening
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  llm-backend:
+    <<: *python-service-hardening
+    build:
+      context: .
+      dockerfile: examples/llm-backend/Dockerfile
+      args:
+        PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev}
+        PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13}
+        APP_UID: ${APP_UID:-65532}
+        APP_GID: ${APP_GID:-65532}
+    image: apim-simulator-llm-backend:latest
+    expose:
+      - "8000"
+    environment:
+      OTEL_SERVICE_NAME: llm-backend
+      MOCK_LLM_LATENCY_MS: ${MOCK_LLM_LATENCY_MS:-0}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - apim
+
+  llm-backend-b:
+    <<: *python-service-hardening
+    build:
+      context: .
+      dockerfile: examples/llm-backend/Dockerfile
+      args:
+        PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev}
+        PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13}
+        APP_UID: ${APP_UID:-65532}
+        APP_GID: ${APP_GID:-65532}
+    image: apim-simulator-llm-backend:latest
+    expose:
+      - "8000"
+    environment:
+      OTEL_SERVICE_NAME: llm-backend-b
+      MOCK_LLM_LATENCY_MS: ${MOCK_LLM_LATENCY_MS:-0}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - apim
+
+  apim-simulator:
+    environment:
+      APIM_CONFIG_PATH: /tmp/ai-apim-config.json
+      APIM_CONFIG_SOURCE_PATH: ${AI_APIM_CONFIG_PATH:-/app/examples/ai-gateway/apim.json}
+      OTEL_SERVICE_NAME: apim-simulator
+    depends_on:
+      llm-backend:
+        condition: service_healthy
+      llm-backend-b:
+        condition: service_healthy
+
+networks:
+  apim:

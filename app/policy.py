@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import math
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -67,6 +68,8 @@ class PolicyRuntime:
     response_cache: dict[str, Any] = field(default_factory=dict)
     value_cache: dict[str, Any] = field(default_factory=dict)
     deferred_actions: list[Any] = field(default_factory=list)
+    llm_metric_emitter: Any = None
+    custom_metric_emitter: Any = None
 
 
 @dataclass(frozen=True)
@@ -1071,6 +1074,771 @@ class QuotaByKey(PolicyNode):
         return ResponseSpec(status_code=403, headers=headers, body=b"Quota exceeded")
 
 
+LLM_RATE_WINDOW_SECONDS = 60
+LLM_QUOTA_PERIODS = ("hourly", "daily", "weekly", "monthly", "yearly")
+
+
+def _estimate_llm_tokens_from_text(text: str) -> int:
+    # Adapted heuristic: Azure estimates from the prompt schema; the simulator
+    # approximates roughly four characters per token, which is close enough to
+    # exercise limit behaviour locally.
+    stripped = text.strip()
+    if not stripped:
+        return 0
+    return max(1, math.ceil(len(stripped) / 4))
+
+
+def _llm_message_part_text(part: Any) -> str:
+    if isinstance(part, str):
+        return part
+    if isinstance(part, dict):
+        text = part.get("text")
+        if isinstance(text, str):
+            return text
+    return ""
+
+
+def _llm_prompt_text(body: bytes) -> str:
+    if not body:
+        return ""
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return body.decode("utf-8", errors="replace")
+    if not isinstance(payload, dict):
+        return ""
+    chunks: list[str] = []
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                chunks.append(content)
+            elif isinstance(content, list):
+                chunks.extend(_llm_message_part_text(part) for part in content)
+    for field_name in ("prompt", "input", "system"):
+        value = payload.get(field_name)
+        if isinstance(value, str):
+            chunks.append(value)
+        elif isinstance(value, list):
+            chunks.extend(part for part in value if isinstance(part, str))
+    return "\n".join(chunk for chunk in chunks if chunk)
+
+
+def _llm_usage_from_response(body: bytes) -> dict[str, int] | None:
+    if not body:
+        return None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return _llm_usage_counts(payload.get("usage"))
+
+
+def _llm_usage_counts(usage: Any) -> dict[str, int] | None:
+    if not isinstance(usage, dict):
+        return None
+
+    def _usage_int(*names: str) -> int | None:
+        for name in names:
+            value = usage.get(name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return int(value)
+        return None
+
+    prompt = _usage_int("prompt_tokens", "input_tokens")
+    completion = _usage_int("completion_tokens", "output_tokens")
+    total = _usage_int("total_tokens")
+    if total is None and prompt is None and completion is None:
+        return None
+    if total is None:
+        total = (prompt or 0) + (completion or 0)
+    return {"prompt": prompt or 0, "completion": completion or 0, "total": total}
+
+
+def _llm_usage_from_sse(body: bytes) -> tuple[dict[str, int] | None, str]:
+    """Scan an SSE stream for a usage payload and collect completion deltas.
+
+    Returns (usage, delta_text): usage from the last chunk that carries one
+    (OpenAI stream_options.include_usage or Anthropic message_delta), plus the
+    concatenated completion text for estimation when no usage chunk exists.
+    """
+    usage: dict[str, int] | None = None
+    delta_parts: list[str] = []
+    text = body.decode("utf-8", errors="replace")
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("data:"):
+            continue
+        payload_text = stripped[len("data:") :].strip()
+        if not payload_text or payload_text == "[DONE]":
+            continue
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        chunk_usage = _llm_usage_counts(payload.get("usage"))
+        if chunk_usage is not None:
+            usage = chunk_usage
+        choices = payload.get("choices")
+        if isinstance(choices, list):
+            for choice in choices:
+                if not isinstance(choice, dict):
+                    continue
+                delta = choice.get("delta")
+                if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+                    delta_parts.append(delta["content"])
+        delta = payload.get("delta")
+        if isinstance(delta, dict) and isinstance(delta.get("text"), str):
+            delta_parts.append(delta["text"])
+    return usage, "".join(delta_parts)
+
+
+def _looks_like_sse(req: PolicyRequest) -> bool:
+    media_type = (req.response_media_type or "").lower()
+    if "text/event-stream" in media_type:
+        return True
+    return req.response_body.lstrip()[:5] == b"data:"
+
+
+def _llm_observed_usage(req: PolicyRequest, *, estimated_prompt_tokens: int) -> dict[str, int]:
+    usage = _llm_usage_from_response(req.response_body)
+    if usage is not None:
+        return usage
+    if _looks_like_sse(req):
+        sse_usage, delta_text = _llm_usage_from_sse(req.response_body)
+        if sse_usage is not None:
+            return sse_usage
+        completion = _estimate_llm_tokens_from_text(delta_text)
+        total = estimated_prompt_tokens + completion
+        return {"prompt": estimated_prompt_tokens, "completion": completion, "total": total}
+    status = req.response_status_code
+    if status is not None and status >= 400:
+        return {"prompt": 0, "completion": 0, "total": 0}
+    # Non-JSON responses without a stream carry no usage payload, so fall back
+    # to the prompt estimate, mirroring Azure's estimate-on-stream behaviour.
+    return {"prompt": estimated_prompt_tokens, "completion": 0, "total": estimated_prompt_tokens}
+
+
+def _llm_consumed_tokens(req: PolicyRequest, *, estimated_prompt_tokens: int) -> int:
+    return _llm_observed_usage(req, estimated_prompt_tokens=estimated_prompt_tokens)["total"]
+
+
+def _llm_rate_bucket(store: dict[str, Any], key: str) -> list[list[float]]:
+    bucket = store.setdefault(key, [])
+    if not isinstance(bucket, list):
+        bucket = []
+        store[key] = bucket
+    return bucket
+
+
+def _prune_llm_rate_bucket(bucket: list[list[float]], now: float) -> None:
+    cutoff = now - LLM_RATE_WINDOW_SECONDS
+    while bucket and bucket[0][0] <= cutoff:
+        bucket.pop(0)
+
+
+def _llm_rate_tokens_used(bucket: list[list[float]]) -> int:
+    return sum(int(entry[1]) for entry in bucket)
+
+
+def _llm_rate_retry_after(bucket: list[list[float]], now: float) -> int:
+    if not bucket:
+        return LLM_RATE_WINDOW_SECONDS
+    oldest = bucket[0][0]
+    return max(1, math.ceil(oldest + LLM_RATE_WINDOW_SECONDS - now))
+
+
+def _llm_quota_window(now: float, period: str) -> tuple[float, float]:
+    moment = datetime.fromtimestamp(now, tz=UTC)
+    if period == "hourly":
+        start = moment.replace(minute=0, second=0, microsecond=0)
+        end = start + timedelta(hours=1)
+    elif period == "daily":
+        start = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+    elif period == "weekly":
+        day_start = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = day_start - timedelta(days=moment.weekday())
+        end = start + timedelta(days=7)
+    elif period == "monthly":
+        start = moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = (start + timedelta(days=32)).replace(day=1)
+    else:
+        start = moment.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = start.replace(year=start.year + 1)
+    return start.timestamp(), end.timestamp()
+
+
+def _llm_quota_entry(store: dict[str, Any], key: str, *, now: float, period: str) -> dict[str, Any]:
+    window_start, window_end = _llm_quota_window(now, period)
+    entry = store.get(key)
+    if not isinstance(entry, dict) or float(entry.get("window_start") or 0.0) != window_start:
+        entry = {"window_start": window_start, "window_end": window_end, "tokens": 0}
+        store[key] = entry
+    return entry
+
+
+@dataclass(frozen=True)
+class LlmTokenLimitDeferred(DeferredPolicyAction):
+    counter_key: str
+    tokens_per_minute: int
+    token_quota: int
+    token_quota_period: str
+    estimated_prompt_tokens: int
+    remaining_tokens_header_name: str | None
+    remaining_tokens_variable_name: str | None
+    remaining_quota_tokens_header_name: str | None
+    remaining_quota_tokens_variable_name: str | None
+    tokens_consumed_header_name: str | None
+    tokens_consumed_variable_name: str | None
+
+    def finalize(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:
+        consumed = _llm_consumed_tokens(req, estimated_prompt_tokens=self.estimated_prompt_tokens)
+        now = time.time()
+        headers = _response_header_target(req)
+        remaining_rate: int | None = None
+        remaining_quota: int | None = None
+
+        rate_store = req.variables.get("rate_limit_store")
+        if self.tokens_per_minute > 0 and isinstance(rate_store, dict):
+            bucket = _llm_rate_bucket(rate_store, f"llm-token-limit:{self.counter_key}")
+            _prune_llm_rate_bucket(bucket, now)
+            if consumed:
+                bucket.append([now, float(consumed)])
+            remaining_rate = max(0, self.tokens_per_minute - _llm_rate_tokens_used(bucket))
+
+        quota_store = req.variables.get("quota_store")
+        if self.token_quota > 0 and self.token_quota_period and isinstance(quota_store, dict):
+            entry = _llm_quota_entry(
+                quota_store,
+                f"llm-token-quota:{self.counter_key}",
+                now=now,
+                period=self.token_quota_period,
+            )
+            if consumed:
+                entry["tokens"] = int(entry.get("tokens") or 0) + consumed
+            remaining_quota = max(0, self.token_quota - int(entry.get("tokens") or 0))
+
+        if self.tokens_consumed_header_name:
+            headers[self.tokens_consumed_header_name.lower()] = str(consumed)
+        if self.tokens_consumed_variable_name:
+            req.variables[self.tokens_consumed_variable_name] = consumed
+            _record_variable_write(runtime, self.tokens_consumed_variable_name, consumed, "llm-token-limit")
+        if remaining_rate is not None:
+            if self.remaining_tokens_header_name:
+                headers[self.remaining_tokens_header_name.lower()] = str(remaining_rate)
+            if self.remaining_tokens_variable_name:
+                req.variables[self.remaining_tokens_variable_name] = remaining_rate
+                _record_variable_write(runtime, self.remaining_tokens_variable_name, remaining_rate, "llm-token-limit")
+        if remaining_quota is not None:
+            if self.remaining_quota_tokens_header_name:
+                headers[self.remaining_quota_tokens_header_name.lower()] = str(remaining_quota)
+            if self.remaining_quota_tokens_variable_name:
+                req.variables[self.remaining_quota_tokens_variable_name] = remaining_quota
+                _record_variable_write(
+                    runtime, self.remaining_quota_tokens_variable_name, remaining_quota, "llm-token-limit"
+                )
+        _record_step(
+            runtime,
+            "llm-token-limit",
+            {
+                "counter_key": self.counter_key,
+                "deferred": True,
+                "tokens_consumed": consumed,
+                "remaining_tokens": remaining_rate,
+                "remaining_quota_tokens": remaining_quota,
+            },
+        )
+
+
+@dataclass(frozen=True)
+class LlmTokenLimit(PolicyNode):
+    counter_key: str
+    estimate_prompt_tokens: str
+    tokens_per_minute: str | None = None
+    token_quota: str | None = None
+    token_quota_period: str | None = None
+    retry_after_header_name: str | None = None
+    retry_after_variable_name: str | None = None
+    remaining_tokens_header_name: str | None = None
+    remaining_tokens_variable_name: str | None = None
+    remaining_quota_tokens_header_name: str | None = None
+    remaining_quota_tokens_variable_name: str | None = None
+    tokens_consumed_header_name: str | None = None
+    tokens_consumed_variable_name: str | None = None
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        rate_store = req.variables.get("rate_limit_store")
+        quota_store = req.variables.get("quota_store")
+        if not isinstance(rate_store, dict) and not isinstance(quota_store, dict):
+            return None
+        counter_key = render_policy_value(self.counter_key, req, runtime)
+        if not counter_key:
+            raise HTTPException(status_code=500, detail="llm-token-limit requires counter-key")
+        estimate = _policy_bool(self.estimate_prompt_tokens, req, runtime, default=False)
+        tokens_per_minute = max(0, _policy_int(self.tokens_per_minute, req, runtime, default=0))
+        token_quota = max(0, _policy_int(self.token_quota, req, runtime, default=0))
+        token_quota_period = render_policy_value(self.token_quota_period or "", req, runtime).strip().lower()
+        if token_quota > 0 and token_quota_period not in LLM_QUOTA_PERIODS:
+            raise HTTPException(status_code=500, detail="llm-token-limit token-quota-period is invalid")
+
+        estimated_prompt_tokens = _estimate_llm_tokens_from_text(_llm_prompt_text(req.body)) if estimate else 0
+        now = time.time()
+
+        used_quota = 0
+        if token_quota > 0 and isinstance(quota_store, dict):
+            entry = _llm_quota_entry(
+                quota_store,
+                f"llm-token-quota:{counter_key}",
+                now=now,
+                period=token_quota_period,
+            )
+            used_quota = int(entry.get("tokens") or 0)
+            blocked = (used_quota + estimated_prompt_tokens > token_quota) if estimate else (used_quota >= token_quota)
+            if blocked:
+                retry_after = max(1, math.ceil(float(entry.get("window_end") or now) - now))
+                return self._limit_response(
+                    req,
+                    runtime,
+                    status_code=403,
+                    retry_after=retry_after,
+                    body=f"Token quota is exceeded. Try again in {retry_after} seconds.",
+                    counter_key=counter_key,
+                )
+
+        used_rate = 0
+        if tokens_per_minute > 0 and isinstance(rate_store, dict):
+            bucket = _llm_rate_bucket(rate_store, f"llm-token-limit:{counter_key}")
+            _prune_llm_rate_bucket(bucket, now)
+            used_rate = _llm_rate_tokens_used(bucket)
+            blocked = (
+                (used_rate + estimated_prompt_tokens > tokens_per_minute)
+                if estimate
+                else (used_rate >= tokens_per_minute)
+            )
+            if blocked:
+                retry_after = _llm_rate_retry_after(bucket, now)
+                return self._limit_response(
+                    req,
+                    runtime,
+                    status_code=429,
+                    retry_after=retry_after,
+                    body=f"Token limit is exceeded. Try again in {retry_after} seconds.",
+                    counter_key=counter_key,
+                )
+
+        req.variables["_policy_response_buffering_required"] = True
+        if self.tokens_consumed_variable_name:
+            req.variables[self.tokens_consumed_variable_name] = estimated_prompt_tokens
+        if runtime is not None:
+            runtime.deferred_actions.append(
+                LlmTokenLimitDeferred(
+                    counter_key=counter_key,
+                    tokens_per_minute=tokens_per_minute,
+                    token_quota=token_quota,
+                    token_quota_period=token_quota_period,
+                    estimated_prompt_tokens=estimated_prompt_tokens,
+                    remaining_tokens_header_name=self.remaining_tokens_header_name,
+                    remaining_tokens_variable_name=self.remaining_tokens_variable_name,
+                    remaining_quota_tokens_header_name=self.remaining_quota_tokens_header_name,
+                    remaining_quota_tokens_variable_name=self.remaining_quota_tokens_variable_name,
+                    tokens_consumed_header_name=self.tokens_consumed_header_name,
+                    tokens_consumed_variable_name=self.tokens_consumed_variable_name,
+                )
+            )
+        _record_step(
+            runtime,
+            "llm-token-limit",
+            {
+                "counter_key": counter_key,
+                "estimate_prompt_tokens": estimate,
+                "estimated_prompt_tokens": estimated_prompt_tokens,
+                "tokens_used_minute": used_rate,
+                "tokens_used_quota": used_quota,
+            },
+        )
+        return None
+
+    def _limit_response(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        status_code: int,
+        retry_after: int,
+        body: str,
+        counter_key: str,
+    ) -> ResponseSpec:
+        header_name = self.retry_after_header_name or "Retry-After"
+        if self.retry_after_variable_name:
+            req.variables[self.retry_after_variable_name] = retry_after
+            _record_variable_write(runtime, self.retry_after_variable_name, retry_after, "llm-token-limit")
+        _record_step(
+            runtime,
+            "llm-token-limit",
+            {"counter_key": counter_key, "blocked": True, "status_code": status_code, "retry_after": retry_after},
+        )
+        headers = {
+            "content-type": "text/plain",
+            header_name.lower(): str(retry_after),
+        }
+        return ResponseSpec(status_code=status_code, headers=headers, body=body.encode("utf-8"))
+
+
+_LLM_DEFAULT_DIMENSION_SOURCES = {
+    "api id": "api_id",
+    "operation id": "operation_id",
+    "subscription id": "subscription_id",
+    "product id": "product_id",
+    "product": "product_id",
+    "client ip address": "client_ip",
+}
+
+
+def _default_llm_dimension_value(req: PolicyRequest, name: str) -> str:
+    source = _LLM_DEFAULT_DIMENSION_SOURCES.get(name.strip().lower())
+    if source is None:
+        return ""
+    return _stringify_policy_value(req.variables.get(source))
+
+
+@dataclass(frozen=True)
+class LlmEmitTokenMetricDeferred(DeferredPolicyAction):
+    namespace: str
+    dimensions: tuple[tuple[str, str], ...]
+    estimated_prompt_tokens: int
+
+    def finalize(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:
+        usage = _llm_observed_usage(req, estimated_prompt_tokens=self.estimated_prompt_tokens)
+        emitter = runtime.llm_metric_emitter if runtime is not None else None
+        if emitter is not None:
+            attributes = {
+                "apim.llm.metric.namespace": self.namespace,
+                **{f"apim.llm.dimension.{name}": value for name, value in self.dimensions},
+            }
+            for token_type in ("prompt", "completion", "total"):
+                if usage[token_type]:
+                    emitter(usage[token_type], {**attributes, "apim.llm.token.type": token_type})
+        _record_step(
+            runtime,
+            "llm-emit-token-metric",
+            {
+                "namespace": self.namespace,
+                "dimensions": dict(self.dimensions),
+                "prompt_tokens": usage["prompt"],
+                "completion_tokens": usage["completion"],
+                "total_tokens": usage["total"],
+            },
+        )
+
+
+@dataclass(frozen=True)
+class LlmEmitTokenMetric(PolicyNode):
+    namespace: str
+    dimensions: tuple[tuple[str, str | None], ...]
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        resolved: list[tuple[str, str]] = []
+        for name, value in self.dimensions:
+            if value is None:
+                resolved.append((name, _default_llm_dimension_value(req, name)))
+            else:
+                resolved.append((name, render_policy_value(value, req, runtime)))
+        estimated_prompt_tokens = _estimate_llm_tokens_from_text(_llm_prompt_text(req.body))
+        req.variables["_policy_response_buffering_required"] = True
+        if runtime is not None:
+            runtime.deferred_actions.append(
+                LlmEmitTokenMetricDeferred(
+                    namespace=self.namespace,
+                    dimensions=tuple(resolved),
+                    estimated_prompt_tokens=estimated_prompt_tokens,
+                )
+            )
+        _record_step(
+            runtime,
+            "llm-emit-token-metric",
+            {"namespace": self.namespace, "dimensions": dict(resolved)},
+        )
+        return None
+
+
+@dataclass(frozen=True)
+class EmitMetric(PolicyNode):
+    name: str
+    namespace: str
+    value: str | None
+    dimensions: tuple[tuple[str, str | None], ...]
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        amount = _policy_int(self.value, req, runtime, default=1) if self.value else 1
+        resolved: dict[str, str] = {}
+        for dim_name, dim_value in self.dimensions:
+            if dim_value is None:
+                resolved[dim_name] = _default_llm_dimension_value(req, dim_name)
+            else:
+                resolved[dim_name] = render_policy_value(dim_value, req, runtime)
+        emitter = runtime.custom_metric_emitter if runtime is not None else None
+        if emitter is not None and amount:
+            attributes = {
+                "apim.metric.name": self.name,
+                "apim.metric.namespace": self.namespace,
+                **{f"apim.metric.dimension.{name}": value for name, value in resolved.items()},
+            }
+            emitter(amount, attributes)
+        _record_step(
+            runtime,
+            "emit-metric",
+            {"name": self.name, "namespace": self.namespace, "value": amount, "dimensions": resolved},
+        )
+        return None
+
+
+VALIDATION_ACTIONS = ("ignore", "prevent", "detect")
+
+
+def _validation_action(value: str | None, *, default: str) -> str:
+    action = (value or default).strip().lower()
+    if action not in VALIDATION_ACTIONS:
+        raise HTTPException(status_code=500, detail=f"Unsupported validation action: {action}")
+    return action
+
+
+def _record_validation_error(
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    policy: str,
+    errors_variable_name: str | None,
+    message: str,
+) -> None:
+    if errors_variable_name:
+        existing = req.variables.get(errors_variable_name)
+        errors = existing if isinstance(existing, list) else []
+        errors.append({"source": policy, "message": message})
+        req.variables[errors_variable_name] = errors
+    _record_step(runtime, policy, {"error": message})
+
+
+def _operation_request_metadata(req: PolicyRequest, runtime: PolicyRuntime | None) -> Any:
+    if runtime is None or runtime.gateway_config is None:
+        return None
+    api = runtime.gateway_config.apis.get(str(req.variables.get("api_id") or ""))
+    if api is None:
+        return None
+    operation = api.operations.get(str(req.variables.get("operation_id") or ""))
+    if operation is None:
+        return None
+    return operation
+
+
+@dataclass(frozen=True)
+class ValidateContentType:
+    content_type: str
+    validate_as: str
+    action: str
+
+
+@dataclass(frozen=True)
+class ValidateContent(PolicyNode):
+    unspecified_content_type_action: str = "ignore"
+    max_size: int | None = None
+    size_exceeded_action: str = "prevent"
+    errors_variable_name: str | None = None
+    content_types: tuple[ValidateContentType, ...] = ()
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        if not req.body:
+            return None
+        if self.max_size is not None and len(req.body) > self.max_size:
+            outcome = self._fail(
+                req,
+                runtime,
+                action=self.size_exceeded_action,
+                message=f"Request body is larger than max-size ({self.max_size} bytes)",
+            )
+            if outcome is not None:
+                return outcome
+        request_content_type = (req.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        matched = next(
+            (item for item in self.content_types if item.content_type.lower() == request_content_type),
+            None,
+        )
+        if matched is None:
+            if request_content_type and self.unspecified_content_type_action != "ignore":
+                return self._fail(
+                    req,
+                    runtime,
+                    action=self.unspecified_content_type_action,
+                    message=f"Content type {request_content_type} is not specified for validation",
+                )
+            return None
+        if matched.action == "ignore":
+            return None
+        if matched.validate_as == "json":
+            try:
+                json.loads(req.body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return self._fail(
+                    req,
+                    runtime,
+                    action=matched.action,
+                    message=f"Body is not valid JSON for content type {request_content_type}",
+                )
+        _record_step(runtime, "validate-content", {"content_type": request_content_type, "valid": True})
+        return None
+
+    def _fail(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        action: str,
+        message: str,
+    ) -> ResponseSpec | None:
+        if action == "ignore":
+            return None
+        _record_validation_error(
+            req, runtime, policy="validate-content", errors_variable_name=self.errors_variable_name, message=message
+        )
+        if action == "prevent":
+            return ResponseSpec(
+                status_code=400,
+                headers={"content-type": "text/plain"},
+                body=message.encode("utf-8"),
+            )
+        return None
+
+
+@dataclass(frozen=True)
+class ValidateParameters(PolicyNode):
+    specified_parameter_action: str = "prevent"
+    unspecified_parameter_action: str = "ignore"
+    errors_variable_name: str | None = None
+    headers_specified_action: str | None = None
+    headers_unspecified_action: str | None = None
+    query_specified_action: str | None = None
+    query_unspecified_action: str | None = None
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        operation = _operation_request_metadata(req, runtime)
+        request_meta = getattr(operation, "request", None)
+        declared_headers = list(getattr(request_meta, "headers", []) or [])
+        declared_query = list(getattr(request_meta, "query_parameters", []) or [])
+
+        checks = (
+            (
+                "header",
+                declared_headers,
+                {name.lower() for name in req.headers},
+                lambda name: name.lower(),
+                self.headers_specified_action or self.specified_parameter_action,
+                self.headers_unspecified_action or self.unspecified_parameter_action,
+            ),
+            (
+                "query",
+                declared_query,
+                set(req.query),
+                lambda name: name,
+                self.query_specified_action or self.specified_parameter_action,
+                self.query_unspecified_action or self.unspecified_parameter_action,
+            ),
+        )
+
+        for kind, declared, present, normalise, specified_action, unspecified_action in checks:
+            declared_names = {normalise(param.name) for param in declared}
+            if specified_action != "ignore":
+                for param in declared:
+                    if param.required and normalise(param.name) not in present:
+                        outcome = self._fail(
+                            req,
+                            runtime,
+                            action=specified_action,
+                            message=f"Required {kind} parameter {param.name} is missing",
+                        )
+                        if outcome is not None:
+                            return outcome
+            if unspecified_action != "ignore":
+                builtin = {"host", "content-type", "content-length", "accept", "connection", "user-agent"}
+                for name in sorted(present):
+                    if name in declared_names or (kind == "header" and name in builtin):
+                        continue
+                    outcome = self._fail(
+                        req,
+                        runtime,
+                        action=unspecified_action,
+                        message=f"Unspecified {kind} parameter {name} is not allowed",
+                    )
+                    if outcome is not None:
+                        return outcome
+        return None
+
+    def _fail(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        action: str,
+        message: str,
+    ) -> ResponseSpec | None:
+        _record_validation_error(
+            req, runtime, policy="validate-parameters", errors_variable_name=self.errors_variable_name, message=message
+        )
+        if action == "prevent":
+            return ResponseSpec(
+                status_code=400,
+                headers={"content-type": "text/plain"},
+                body=message.encode("utf-8"),
+            )
+        return None
+
+
+@dataclass(frozen=True)
+class ValidateStatusCode(PolicyNode):
+    unspecified_status_code_action: str = "prevent"
+    errors_variable_name: str | None = None
+    status_codes: tuple[tuple[int, str], ...] = ()
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        status = req.response_status_code
+        if status is None:
+            return None
+        explicit = dict(self.status_codes)
+        if status in explicit:
+            action = explicit[status]
+        else:
+            operation = _operation_request_metadata(req, runtime)
+            declared = {resp.status_code for resp in getattr(operation, "responses", []) or []}
+            if status in declared:
+                _record_step(runtime, "validate-status-code", {"status_code": status, "declared": True})
+                return None
+            action = self.unspecified_status_code_action
+        if action == "ignore":
+            return None
+        _record_validation_error(
+            req,
+            runtime,
+            policy="validate-status-code",
+            errors_variable_name=self.errors_variable_name,
+            message=f"Response status code {status} is not specified for this operation",
+        )
+        if action == "prevent":
+            # Outbound policies cannot short-circuit in this engine, so
+            # prevent mutates the response in place instead.
+            req.response_status_code = 502
+            req.response_body = b"Response status code validation failed"
+            req.response_media_type = "text/plain"
+            if req.response_headers is not None:
+                req.response_headers["content-type"] = "text/plain"
+        return None
+
+
 @dataclass(frozen=True)
 class CacheLookup(PolicyNode):
     vary_by_headers: list[str] = field(default_factory=list)
@@ -1824,6 +2592,139 @@ def _parse_quota_by_key(el: ElementTree.Element) -> QuotaByKey:
     )
 
 
+def _parse_llm_token_limit(el: ElementTree.Element) -> LlmTokenLimit:
+    counter_key = el.attrib.get("counter-key")
+    if not counter_key:
+        raise HTTPException(status_code=500, detail="llm-token-limit missing counter-key")
+    estimate_prompt_tokens = el.attrib.get("estimate-prompt-tokens")
+    if estimate_prompt_tokens is None:
+        raise HTTPException(status_code=500, detail="llm-token-limit missing estimate-prompt-tokens")
+    tokens_per_minute = el.attrib.get("tokens-per-minute")
+    token_quota = el.attrib.get("token-quota")
+    token_quota_period = el.attrib.get("token-quota-period")
+    if not tokens_per_minute and not token_quota:
+        raise HTTPException(
+            status_code=500,
+            detail="llm-token-limit requires tokens-per-minute or token-quota",
+        )
+    if token_quota and not token_quota_period:
+        raise HTTPException(status_code=500, detail="llm-token-limit token-quota requires token-quota-period")
+    return LlmTokenLimit(
+        counter_key=counter_key,
+        estimate_prompt_tokens=estimate_prompt_tokens,
+        tokens_per_minute=tokens_per_minute,
+        token_quota=token_quota,
+        token_quota_period=token_quota_period,
+        retry_after_header_name=el.attrib.get("retry-after-header-name"),
+        retry_after_variable_name=el.attrib.get("retry-after-variable-name"),
+        remaining_tokens_header_name=el.attrib.get("remaining-tokens-header-name"),
+        remaining_tokens_variable_name=el.attrib.get("remaining-tokens-variable-name"),
+        remaining_quota_tokens_header_name=el.attrib.get("remaining-quota-tokens-header-name"),
+        remaining_quota_tokens_variable_name=el.attrib.get("remaining-quota-tokens-variable-name"),
+        tokens_consumed_header_name=el.attrib.get("tokens-consumed-header-name"),
+        tokens_consumed_variable_name=el.attrib.get("tokens-consumed-variable-name"),
+    )
+
+
+def _parse_llm_emit_token_metric(el: ElementTree.Element) -> LlmEmitTokenMetric:
+    dimensions: list[tuple[str, str | None]] = []
+    for child in el.findall("dimension"):
+        name = (child.attrib.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=500, detail="llm-emit-token-metric dimension missing name")
+        dimensions.append((name, child.attrib.get("value")))
+    return LlmEmitTokenMetric(
+        namespace=(el.attrib.get("namespace") or "llm").strip() or "llm",
+        dimensions=tuple(dimensions),
+    )
+
+
+def _parse_emit_metric(el: ElementTree.Element) -> EmitMetric:
+    name = (el.attrib.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=500, detail="emit-metric missing name")
+    dimensions: list[tuple[str, str | None]] = []
+    for child in el.findall("dimension"):
+        dim_name = (child.attrib.get("name") or "").strip()
+        if not dim_name:
+            raise HTTPException(status_code=500, detail="emit-metric dimension missing name")
+        dimensions.append((dim_name, child.attrib.get("value")))
+    if not dimensions:
+        raise HTTPException(status_code=500, detail="emit-metric requires at least one dimension")
+    return EmitMetric(
+        name=name,
+        namespace=(el.attrib.get("namespace") or "apim").strip() or "apim",
+        value=el.attrib.get("value"),
+        dimensions=tuple(dimensions),
+    )
+
+
+def _parse_validate_content(el: ElementTree.Element) -> ValidateContent:
+    max_size_raw = (el.attrib.get("max-size") or "").strip()
+    content_types: list[ValidateContentType] = []
+    for child in el.findall("content"):
+        content_type = (child.attrib.get("type") or "").strip()
+        if not content_type:
+            raise HTTPException(status_code=500, detail="validate-content content element missing type")
+        validate_as = (child.attrib.get("validate-as") or "json").strip().lower()
+        if validate_as != "json":
+            raise HTTPException(status_code=500, detail=f"Unsupported validate-as: {validate_as}")
+        content_types.append(
+            ValidateContentType(
+                content_type=content_type,
+                validate_as=validate_as,
+                action=_validation_action(child.attrib.get("action"), default="prevent"),
+            )
+        )
+    return ValidateContent(
+        unspecified_content_type_action=_validation_action(
+            el.attrib.get("unspecified-content-type-action"), default="ignore"
+        ),
+        max_size=int(max_size_raw) if max_size_raw else None,
+        size_exceeded_action=_validation_action(el.attrib.get("size-exceeded-action"), default="prevent"),
+        errors_variable_name=el.attrib.get("errors-variable-name"),
+        content_types=tuple(content_types),
+    )
+
+
+def _parse_validate_parameters(el: ElementTree.Element) -> ValidateParameters:
+    headers_el = el.find("headers")
+    query_el = el.find("query")
+
+    def _child_action(child: ElementTree.Element | None, attr: str) -> str | None:
+        if child is None or child.attrib.get(attr) is None:
+            return None
+        return _validation_action(child.attrib.get(attr), default="ignore")
+
+    return ValidateParameters(
+        specified_parameter_action=_validation_action(el.attrib.get("specified-parameter-action"), default="prevent"),
+        unspecified_parameter_action=_validation_action(
+            el.attrib.get("unspecified-parameter-action"), default="ignore"
+        ),
+        errors_variable_name=el.attrib.get("errors-variable-name"),
+        headers_specified_action=_child_action(headers_el, "specified-parameter-action"),
+        headers_unspecified_action=_child_action(headers_el, "unspecified-parameter-action"),
+        query_specified_action=_child_action(query_el, "specified-parameter-action"),
+        query_unspecified_action=_child_action(query_el, "unspecified-parameter-action"),
+    )
+
+
+def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
+    status_codes: list[tuple[int, str]] = []
+    for child in el.findall("status-code"):
+        code_raw = (child.attrib.get("code") or "").strip()
+        if not code_raw:
+            raise HTTPException(status_code=500, detail="validate-status-code status-code element missing code")
+        status_codes.append((int(code_raw), _validation_action(child.attrib.get("action"), default="ignore")))
+    return ValidateStatusCode(
+        unspecified_status_code_action=_validation_action(
+            el.attrib.get("unspecified-status-code-action"), default="prevent"
+        ),
+        errors_variable_name=el.attrib.get("errors-variable-name"),
+        status_codes=tuple(status_codes),
+    )
+
+
 def _parse_cache_lookup(el: ElementTree.Element) -> CacheLookup:
     return CacheLookup(
         vary_by_headers=_vary_values(
@@ -2101,6 +3002,18 @@ def _parse_node(
         return _parse_quota(el)
     if tag == "quota-by-key":
         return _parse_quota_by_key(el)
+    if tag in {"llm-token-limit", "azure-openai-token-limit"}:
+        return _parse_llm_token_limit(el)
+    if tag in {"llm-emit-token-metric", "azure-openai-emit-token-metric"}:
+        return _parse_llm_emit_token_metric(el)
+    if tag == "emit-metric":
+        return _parse_emit_metric(el)
+    if tag == "validate-content":
+        return _parse_validate_content(el)
+    if tag == "validate-parameters":
+        return _parse_validate_parameters(el)
+    if tag == "validate-status-code":
+        return _parse_validate_status_code(el)
     if tag == "cache-lookup":
         return _parse_cache_lookup(el)
     if tag == "cache-store":

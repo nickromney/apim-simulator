@@ -38,11 +38,30 @@ Prefer new examples that exercise shipped capabilities rather than speculative p
 - richer mTLS examples
 - policy-heavy examples that pair runtime behaviour with traces and OTEL
 
+### AI Foundry Simulator Integration
+
+`llm-semantic-cache-*` and `llm-content-safety` stay out of this repo (see
+[ADR 0003](adr/0003-gap-closure-round.md)): both proxy other Azure services.
+The AI Foundry simulator now exists as a sibling project,
+[aifoundry-simulator](https://github.com/nickromney/aifoundry-simulator) —
+sibling on GitHub, not necessarily adjacent on disk. The compose overlay
+landed: `make up-ai-foundry` attaches the gateway to that simulator's
+`aifoundry` Docker network with
+[examples/ai-gateway/apim.foundry.json](../examples/ai-gateway/apim.foundry.json),
+and `make smoke-ai-foundry` asserts the integration end to end (see
+[AI-GATEWAY.md](AI-GATEWAY.md)). The remaining work is the two policies as
+thin adapted clients targeting that service — the same way the AI gateway
+example targets the mock LLM backend. Do not implement embeddings or
+moderation logic here, and do not assume the two checkouts share a parent
+directory.
+
 ## Still Deferred
 
 - External cache backends
 - Full APIM expression-engine compatibility
 - `quota-by-key` bandwidth enforcement
+- `llm-semantic-cache-lookup`/`-store` and `llm-content-safety` (both simulate other Azure services; see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
+- Load-balanced backend pools with circuit breakers (the natural next AI-gateway step if demand appears)
 - Developer portal CMS, theming, email, and notification features (the adapted consumer workflows ship at `/apim/portal`)
 - Full ARM or SDK wire compatibility
 

@@ -20,6 +20,8 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from app.config import (
+    BackendCircuitBreakerConfig,
+    BackendConfig,
     GatewayConfig,
     ProductState,
     load_config,
@@ -84,6 +86,8 @@ class GatewayMetrics:
     cache_events: Any
     policy_short_circuits: Any
     config_reloads: Any
+    llm_tokens: Any
+    custom_metrics: Any
 
 
 def _serialize_gateway_config(cfg: GatewayConfig) -> str:
@@ -243,6 +247,69 @@ def _render_backend_value(value: str | None, policy_req: PolicyRequest, cfg: Gat
     return render_policy_value(value, policy_req, runtime)
 
 
+_DEFAULT_POOL_CIRCUIT_BREAKER = BackendCircuitBreakerConfig()
+
+
+def _pool_member_breaker(pool_backend: BackendConfig, member_backend: BackendConfig) -> BackendCircuitBreakerConfig:
+    return member_backend.circuit_breaker or pool_backend.circuit_breaker or _DEFAULT_POOL_CIRCUIT_BREAKER
+
+
+def _backend_health_entry(health: dict[str, Any], backend_id: str) -> dict[str, Any]:
+    entry = health.setdefault(backend_id, {"failures": [], "open_until": 0.0})
+    if not isinstance(entry, dict):
+        entry = {"failures": [], "open_until": 0.0}
+        health[backend_id] = entry
+    return entry
+
+
+def _record_backend_result(
+    health: dict[str, Any],
+    breaker: BackendCircuitBreakerConfig,
+    backend_id: str,
+    *,
+    now: float,
+    failed: bool,
+) -> None:
+    entry = _backend_health_entry(health, backend_id)
+    if not failed:
+        entry["failures"] = []
+        return
+    failures = [t for t in entry.get("failures", []) if t > now - breaker.interval_seconds]
+    failures.append(now)
+    if len(failures) >= max(1, breaker.failure_count):
+        entry["open_until"] = now + breaker.trip_duration_seconds
+        entry["failures"] = []
+    else:
+        entry["failures"] = failures
+
+
+def _select_pool_member(
+    cfg: GatewayConfig,
+    health: dict[str, Any],
+    pool_id: str,
+    pool_backend: BackendConfig,
+    *,
+    now: float,
+) -> tuple[str, BackendConfig] | None:
+    members = [m for m in pool_backend.pool if cfg.backends.get(m.backend_id) is not None]
+    if not members:
+        return None
+    rotation = _backend_health_entry(health, f"pool:{pool_id}")
+    for priority in sorted({m.priority for m in members}):
+        group = [m for m in members if m.priority == priority]
+        # Deterministic weighted round-robin: expand by weight, then walk the
+        # schedule from the pool's rotation cursor skipping open circuits.
+        schedule = [m for m in group for _ in range(max(1, m.weight))]
+        start = int(rotation.get(f"rr:{priority}", 0))
+        for offset in range(len(schedule)):
+            member = schedule[(start + offset) % len(schedule)]
+            member_entry = _backend_health_entry(health, member.backend_id)
+            if float(member_entry.get("open_until", 0.0)) <= now:
+                rotation[f"rr:{priority}"] = (start + offset + 1) % len(schedule)
+                return member.backend_id, cfg.backends[member.backend_id]
+    return None
+
+
 def _get_gateway_metrics(telemetry: ObservabilityRuntime) -> GatewayMetrics:
     global _GATEWAY_METRICS
     if _GATEWAY_METRICS is not None:
@@ -275,6 +342,15 @@ def _get_gateway_metrics(telemetry: ObservabilityRuntime) -> GatewayMetrics:
         config_reloads=meter.create_counter(
             "apim.gateway.config.reloads",
             description="Gateway config reload attempts",
+        ),
+        llm_tokens=meter.create_counter(
+            "apim.llm.tokens",
+            unit="{token}",
+            description="LLM tokens observed by llm-emit-token-metric policies",
+        ),
+        custom_metrics=meter.create_counter(
+            "apim.policy.metric",
+            description="Custom metrics emitted by emit-metric policies",
         ),
     )
     return _GATEWAY_METRICS
@@ -445,6 +521,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         app.state.rate_limit_store = {}
         app.state.quota_store = {}
         app.state.trace_store = {}
+        app.state.backend_health = {}
         app.state.config_reload_fn = manager.reload_config
         app.state.startup_complete = True
 
@@ -667,12 +744,26 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                     request.state.apim_result_reason = "subscription_not_authorized"
                     raise HTTPException(status_code=403, detail="Subscription not authorized for product")
 
+        # Azure applies policies at product scope for the product the call is
+        # authorized under. Adapted rule: prefer the first published product
+        # granted by the subscription, else the first published product on the
+        # route (open products and subscription bypass).
+        effective_product_id = ""
+        if allowed_products:
+            published = [p for p in allowed_products if _product_is_published(cfg, p)]
+            if auth.subscription is not None:
+                granted = set(auth.subscription_products)
+                effective_product_id = next((p for p in published if p in granted), "")
+            if not effective_product_id and published:
+                effective_product_id = published[0]
+
         set_current_span_attributes(
             **{
                 APIM_ROUTE_NAME_ATTR: route.name,
                 "apim.route.path_prefix": route.path_prefix,
                 "apim.subscription.present": auth.subscription is not None,
                 "apim.allowed_products.count": len(allowed_products),
+                "apim.product.effective": effective_product_id,
             }
         )
 
@@ -692,6 +783,9 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             policy_docs.append(_doc_for(xml))
         if cfg.policies_xml:
             policy_docs.append(_doc_for(cfg.policies_xml))
+        effective_product = cfg.products.get(effective_product_id) if effective_product_id else None
+        if effective_product is not None and effective_product.policies_xml:
+            policy_docs.append(_doc_for(effective_product.policies_xml))
         for xml in route.policies_xml_documents:
             policy_docs.append(_doc_for(xml))
         if route.policies_xml:
@@ -737,6 +831,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
                 "operation_id": route.operation_id or "",
                 "subscription_id": auth.subscription.id if auth.subscription else "",
                 "products": auth.subscription_products,
+                "product_id": effective_product_id,
                 "client_ip": client_ip,
                 "correlation_id": correlation_id,
                 "incoming_host": incoming_host,
@@ -766,6 +861,8 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             trace=trace_collector,
             response_cache=request.app.state.policy_response_cache,
             value_cache=request.app.state.policy_value_cache,
+            llm_metric_emitter=lambda amount, attributes: gateway_metrics.llm_tokens.add(amount, attributes),
+            custom_metric_emitter=lambda amount, attributes: gateway_metrics.custom_metrics.add(amount, attributes),
         )
 
         set_current_span_attributes(
@@ -948,8 +1045,20 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         backend_id = selected_backend_id or (route.backend or "" if not selected_backend_url else "")
         if selected_backend_url:
             upstream_base_url = selected_backend_url
+        pool_backend: BackendConfig | None = None
+        pool_backend_id = ""
+        backend_health: dict[str, Any] = request.app.state.backend_health
         if backend_id:
             backend = cfg.backends.get(backend_id)
+            if backend is not None and (backend.type or "single").lower() == "pool":
+                pool_backend = backend
+                pool_backend_id = backend_id
+                selection = _select_pool_member(cfg, backend_health, pool_backend_id, pool_backend, now=time.time())
+                if selection is None:
+                    request.state.apim_result_reason = "backend_pool_exhausted"
+                    raise HTTPException(status_code=503, detail="All backend pool members are unavailable")
+                backend_id, backend = selection
+                policy_req.headers["x-apim-backend-pool"] = pool_backend_id
             if backend is not None:
                 upstream_base_url = selected_backend_url or (
                     _render_backend_value(backend.url, policy_req, cfg) or backend.url
@@ -1059,6 +1168,24 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         start = time.perf_counter()
         attempts_used = 0
 
+        def _pool_failover() -> None:
+            # Record the failure for the current member and rotate to another
+            # healthy member for the next attempt. Pool members are assumed to
+            # share auth configuration; only the base URL is recomputed.
+            nonlocal backend_id, backend, upstream_base_url, upstream_url
+            if pool_backend is None or backend is None:
+                return
+            now = time.time()
+            breaker = _pool_member_breaker(pool_backend, backend)
+            _record_backend_result(backend_health, breaker, backend_id, now=now, failed=True)
+            reselected = _select_pool_member(cfg, backend_health, pool_backend_id, pool_backend, now=now)
+            if reselected is None:
+                return
+            backend_id, backend = reselected
+            upstream_base_url = _render_backend_value(backend.url, policy_req, cfg) or backend.url
+            upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=upstream_base_url)
+            policy_req.headers["x-apim-backend-id"] = backend_id
+
         for attempt in range(1, max_attempts + 1):
             attempts_used = attempt
             req = client.build_request(
@@ -1074,14 +1201,27 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             except httpx.RequestError as exc:
                 last_exc = exc
                 if attempt >= max_attempts:
+                    _pool_failover()
                     break
+                _pool_failover()
                 continue
 
             if upstream_response.status_code in cfg.proxy_retry_statuses and attempt < max_attempts:
                 await upstream_response.aclose()
                 upstream_response = None
+                _pool_failover()
                 continue
             break
+
+        if pool_backend is not None and backend is not None and upstream_response is not None:
+            breaker = _pool_member_breaker(pool_backend, backend)
+            _record_backend_result(
+                backend_health,
+                breaker,
+                backend_id,
+                now=time.time(),
+                failed=upstream_response.status_code in breaker.error_statuses,
+            )
 
         elapsed_seconds = time.perf_counter() - start
         request.state.apim_upstream_attempts = attempts_used
@@ -1145,11 +1285,20 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
         response_headers = filter_response_headers(dict(upstream_response.headers))
         media_type = upstream_response.headers.get("content-type")
         response_headers["x-correlation-id"] = correlation_id
+        if pool_backend is not None:
+            response_headers["x-apim-backend-pool"] = pool_backend_id
+            response_headers["x-apim-backend-id"] = backend_id
         request.state.apim_upstream_duration_seconds = elapsed_seconds
         upstream_status_code = int(upstream_response.status_code)
         if not (100 <= upstream_status_code <= 599):
             raise HTTPException(status_code=502, detail="Backend API returned invalid status code")
-        requires_buffering = cache_key is not None or policy_response_cache_active or not cfg.proxy_streaming
+        policy_buffering_required = bool(policy_req.variables.get("_policy_response_buffering_required"))
+        requires_buffering = (
+            cache_key is not None
+            or policy_response_cache_active
+            or policy_buffering_required
+            or not cfg.proxy_streaming
+        )
         content = b""
         if requires_buffering:
             content = await upstream_response.aread()

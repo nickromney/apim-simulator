@@ -357,8 +357,10 @@ class ProductConfig(BaseModel):
     state: ProductState = ProductState.Published
     require_subscription: bool = True
     approval_required: bool = False
+    subscriptions_limit: int | None = None
     groups: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    policies_xml: str | None = None
 
     @model_validator(mode="after")
     def _approval_requires_subscription(self) -> ProductConfig:
@@ -367,9 +369,29 @@ class ProductConfig(BaseModel):
         return self
 
 
+class BackendPoolMemberConfig(BaseModel):
+    # Mirrors Microsoft.ApiManagement/service/backends pool.services entries.
+    backend_id: str
+    weight: int = 1
+    priority: int = 1
+
+
+class BackendCircuitBreakerConfig(BaseModel):
+    # Adapted from the ARM backend circuitBreaker.rules shape: trip after
+    # failure_count errors inside interval_seconds, stay open for
+    # trip_duration_seconds.
+    failure_count: int = 3
+    interval_seconds: float = 60.0
+    trip_duration_seconds: float = 30.0
+    error_statuses: list[int] = Field(default_factory=lambda: [500, 502, 503, 504])
+
+
 class BackendConfig(BaseModel):
-    url: str
+    url: str = ""
     description: str | None = None
+    type: str = "single"  # single|pool
+    pool: list[BackendPoolMemberConfig] = Field(default_factory=list)
+    circuit_breaker: BackendCircuitBreakerConfig | None = None
     auth_type: str = "none"  # none|basic|managed_identity|client_certificate
     basic_username: str | None = None
     basic_password: str | None = None
@@ -379,6 +401,16 @@ class BackendConfig(BaseModel):
     header_credentials: dict[str, str] = Field(default_factory=dict)
     query_credentials: dict[str, str] = Field(default_factory=dict)
     client_certificate_thumbprints: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_backend_shape(self) -> BackendConfig:
+        backend_type = (self.type or "single").lower()
+        if backend_type == "pool":
+            if not self.pool:
+                raise ValueError("pool backends require at least one pool member")
+        elif not self.url:
+            raise ValueError("url is required for non-pool backends")
+        return self
 
 
 class RouteConfig(BaseModel):
