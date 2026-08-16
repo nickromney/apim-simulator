@@ -15,6 +15,7 @@ export OBSERVABILITY_DASHBOARD_URL
 
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 
+# shellcheck disable=SC2016 # envsubst needs the names literal, not expanded
 envsubst '${API_BASE_URL} ${APIM_SUBSCRIPTION_KEY} ${GRAFANA_BASE_URL} ${OBSERVABILITY_DASHBOARD_URL}' \
   < "$TEMPLATE_PATH" \
   > "$OUTPUT_PATH"

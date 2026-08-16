@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 DRY_RUN=0
 EXECUTE=0
+# shellcheck source-path=SCRIPTDIR
 # shellcheck source=../../../scripts/stack-env.sh
 source "$ROOT_DIR/scripts/stack-env.sh"
 stack_env_init

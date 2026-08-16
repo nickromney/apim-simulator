@@ -471,6 +471,7 @@ lint:
 	@$(MAKE) --no-print-directory lint-markdown
 	@$(MAKE) --no-print-directory lint-bash32
 	@$(MAKE) --no-print-directory lint-shell
+	@$(MAKE) --no-print-directory lint-shellcheck
 
 lint-check:
 	uv run --extra dev ruff format --check .
@@ -487,6 +488,10 @@ lint-bash32:
 
 lint-shell:
 	@"$(AUDIT_SHELL_SCRIPTS_SCRIPT)" --execute
+
+# lint-shell audits conventions; this is the one that runs shellcheck.
+lint-shellcheck:
+	@./scripts/lint-shellcheck.sh --execute
 
 frontend-check:
 	npm --prefix ui ci

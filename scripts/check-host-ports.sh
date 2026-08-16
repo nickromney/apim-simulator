@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/shell-cli.sh"
 
+# shellcheck disable=SC2329 # invoked by name through the shell_cli_* helpers
 usage() {
   cat <<'EOF'
 Usage: ./scripts/check-host-ports.sh [--dry-run] [--execute] [PORT...]

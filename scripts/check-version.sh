@@ -219,6 +219,7 @@ PY
 check_action_pins() {
   local pins
   pins="$(
+    # shellcheck disable=SC2086 # deliberate split: the list is passed as separate argv entries
     "${UV_BIN}" run --project "${ROOT_DIR}" python - ${WORKFLOW_FILES} <<'PY'
 import re
 import sys
@@ -403,6 +404,7 @@ PY
 check_docker_digest_pins() {
   local pins
   pins="$(
+    # shellcheck disable=SC2086 # deliberate split: the list is passed as separate argv entries
     "${UV_BIN}" run --project "${ROOT_DIR}" python - ${COMPOSE_FILES} <<'PY'
 import re
 import sys
@@ -448,6 +450,7 @@ PY
 check_uv_builder_version() {
   local pins
   pins="$(
+    # shellcheck disable=SC2086 # deliberate split: the list is passed as separate argv entries
     "${UV_BIN}" run --project "${ROOT_DIR}" python - ${DOCKERFILES} <<'PY'
 import re
 import sys

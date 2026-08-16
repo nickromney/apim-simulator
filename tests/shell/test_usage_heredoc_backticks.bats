@@ -70,3 +70,23 @@ setup() {
 
   [ -z "${offenders}" ]
 }
+
+@test "make lint actually runs shellcheck, not only the conventions audit" {
+  # lint-shell calls audit-shell-scripts.sh, which checks conventions and never
+  # invokes shellcheck. The only shellcheck run was the pre-commit hook, over
+  # staged files, so an untouched script was never rechecked -- which is how the
+  # SC2006 behind the executing-heredoc bug went unseen. Asserts both halves:
+  # the target exists AND lint depends on it.
+  run grep -cE '^\s*@\$\(MAKE\) --no-print-directory lint-shellcheck$' "${REPO_ROOT}/Makefile"
+
+  [ "${status}" -eq 0 ]
+  [ "${output}" -ge 1 ]
+}
+
+@test "every tracked shell script passes shellcheck" {
+  # The ratchet: 9 of 35 were failing on 2026-08-16, now none.
+  run make -C "${REPO_ROOT}" lint-shellcheck
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"OK   shellcheck"* ]]
+}
