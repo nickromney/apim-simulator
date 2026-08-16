@@ -1,5 +1,14 @@
 .DEFAULT_GOAL := help
 
+# Recipes are POSIX today, so this changes nothing now -- it is here to stop the
+# defect the sibling platform repo hit in its PR #197. `SHELL ?= /bin/bash` there
+# was a silent no-op, because GNU make always has SHELL defined and `?=` can
+# never fire, so every recipe ran under /bin/sh: bash on Arch, dash on
+# ubuntu-latest. The first recipe to use `set -o pipefail` or `[[ ]]` passed
+# locally and died on CI with "Illegal option -o pipefail". Pin it with `:=`
+# before that can happen, not after.
+SHELL := /bin/bash
+
 COMPOSE ?= docker compose
 STACK_SLOT_WIDTH ?= 100
 PORT_OFFSET ?= 0
