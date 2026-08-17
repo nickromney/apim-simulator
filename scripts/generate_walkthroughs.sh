@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCS_DIR="$ROOT_DIR/docs"
+# shellcheck source-path=SCRIPTDIR
 # shellcheck source=./stack-env.sh
 source "$ROOT_DIR/scripts/stack-env.sh"
 # shellcheck source=/dev/null
@@ -336,7 +337,7 @@ EOF
 
   sb_note "$DOC_CORE" <<EOF
 ## Direct Public Gateway With OTEL
-`make up-otel` adds the LGTM stack on [$GRAFANA_BASE_URL]($GRAFANA_BASE_URL) so APIM traffic is visible in Grafana, Loki, Tempo, and Prometheus.
+\`make up-otel\` adds the LGTM stack on [$GRAFANA_BASE_URL]($GRAFANA_BASE_URL) so APIM traffic is visible in Grafana, Loki, Tempo, and Prometheus.
 EOF
 
   sb_exec "$DOC_CORE" <<'EOF'

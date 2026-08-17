@@ -1,5 +1,14 @@
 .DEFAULT_GOAL := help
 
+# Recipes are POSIX today, so this changes nothing now -- it is here to stop the
+# defect the sibling platform repo hit in its PR #197. `SHELL ?= /bin/bash` there
+# was a silent no-op, because GNU make always has SHELL defined and `?=` can
+# never fire, so every recipe ran under /bin/sh: bash on Arch, dash on
+# ubuntu-latest. The first recipe to use `set -o pipefail` or `[[ ]]` passed
+# locally and died on CI with "Illegal option -o pipefail". Pin it with `:=`
+# before that can happen, not after.
+SHELL := /bin/bash
+
 COMPOSE ?= docker compose
 STACK_SLOT_WIDTH ?= 100
 PORT_OFFSET ?= 0
@@ -462,6 +471,7 @@ lint:
 	@$(MAKE) --no-print-directory lint-markdown
 	@$(MAKE) --no-print-directory lint-bash32
 	@$(MAKE) --no-print-directory lint-shell
+	@$(MAKE) --no-print-directory lint-shellcheck
 
 lint-check:
 	uv run --extra dev ruff format --check .
@@ -478,6 +488,10 @@ lint-bash32:
 
 lint-shell:
 	@"$(AUDIT_SHELL_SCRIPTS_SCRIPT)" --execute
+
+# lint-shell audits conventions; this is the one that runs shellcheck.
+lint-shellcheck:
+	@./scripts/lint-shellcheck.sh --execute
 
 frontend-check:
 	npm --prefix ui ci

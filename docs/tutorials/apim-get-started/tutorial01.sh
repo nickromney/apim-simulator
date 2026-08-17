@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# shellcheck source-path=SCRIPTDIR
 # shellcheck source=../../../scripts/stack-env.sh
 source "$ROOT_DIR/scripts/stack-env.sh"
 stack_env_init

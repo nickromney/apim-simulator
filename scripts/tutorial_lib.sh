@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR_TUTORIAL_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
 # shellcheck source=./stack-env.sh
 source "$SCRIPT_DIR_TUTORIAL_LIB/stack-env.sh"
 

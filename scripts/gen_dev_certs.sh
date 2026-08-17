@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck disable=SC1007 # CDPATH= is a one-command env prefix, not an assignment
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1007 # CDPATH= is a one-command env prefix, not an assignment
 DEFAULT_ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 ROOT_DIR="${APIM_SIMULATOR_ROOT_DIR:-$DEFAULT_ROOT_DIR}"
 # shellcheck source=/dev/null
