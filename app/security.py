@@ -327,6 +327,35 @@ def _cert_matches_trusted(cert: ClientCertContext, trusted: TrustedClientCertifi
     return False
 
 
+def require_admin(request: Request) -> None:
+    cfg: GatewayConfig = request.app.state.gateway_config
+    if not cfg.admin_token:
+        raise HTTPException(status_code=404, detail="Not found")
+    provided = request.headers.get("x-apim-admin-token", "")
+    if provided != cfg.admin_token:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def require_tenant_access(request: Request) -> None:
+    cfg: GatewayConfig = request.app.state.gateway_config
+    if not cfg.tenant_access.enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    admin = request.headers.get("x-apim-admin-token", "")
+    if cfg.admin_token and admin == cfg.admin_token:
+        return
+
+    provided = request.headers.get("x-apim-tenant-key", "")
+    if not provided:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if provided == (cfg.tenant_access.primary_key or ""):
+        return
+    if provided == (cfg.tenant_access.secondary_key or ""):
+        return
+    raise HTTPException(status_code=403, detail="Forbidden")
+
+
 def validate_client_certificate(request: Request, config: GatewayConfig) -> ClientCertContext | None:
     """Validate client certificate based on gateway config.
 

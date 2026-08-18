@@ -107,6 +107,16 @@ class SubscriptionConfig(BaseModel):
     subscriptions: dict[str, Subscription] = Field(default_factory=dict)
     bypass: list[HeaderCondition] = Field(default_factory=list)
 
+    def find_entry(self, subscription_id: str) -> tuple[str, Subscription] | None:
+        for config_key, sub in self.subscriptions.items():
+            if sub.id == subscription_id:
+                return config_key, sub
+        return None
+
+    def find_by_id(self, subscription_id: str) -> Subscription | None:
+        entry = self.find_entry(subscription_id)
+        return entry[1] if entry is not None else None
+
     def lookup_subscription_by_key(self, key: str) -> Subscription | None:
         for sub in self.subscriptions.values():
             if key == sub.keys.primary or key == sub.keys.secondary:

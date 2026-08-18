@@ -60,27 +60,13 @@ def project_route(config: GatewayConfig, route: RouteConfig) -> dict[str, Any]:
 def project_operation(
     config: GatewayConfig, api_id: str, operation_id: str, operation: OperationConfig
 ) -> dict[str, Any]:
+    payload = operation.model_dump(mode="json")
+    payload.pop("policies_xml", None)
     return {
         "id": operation_id,
         "resource_id": nested_resource_id(config, "apis", api_id, "operations", operation_id),
         "api_id": api_id,
-        "name": operation.name,
-        "method": operation.method,
-        "url_template": operation.url_template,
-        "description": operation.description,
-        "upstream_base_url": operation.upstream_base_url,
-        "upstream_path_prefix": operation.upstream_path_prefix,
-        "backend": operation.backend,
-        "products": operation.products,
-        "api_version_set": operation.api_version_set,
-        "api_version": operation.api_version,
-        "subscription_header_names": operation.subscription_header_names,
-        "subscription_query_param_names": operation.subscription_query_param_names,
-        "authz": operation.authz.model_dump(mode="json") if operation.authz is not None else None,
-        "tags": list(operation.tags),
-        "template_parameters": [item.model_dump(mode="json") for item in operation.template_parameters],
-        "request": operation.request.model_dump(mode="json") if operation.request is not None else None,
-        "responses": [item.model_dump(mode="json") for item in operation.responses],
+        **payload,
         "policy_scope": policy_scope("operation", f"{api_id}:{operation_id}"),
     }
 
@@ -114,26 +100,13 @@ def project_api_release(
 
 
 def project_api(config: GatewayConfig, api_id: str, api: ApiConfig) -> dict[str, Any]:
+    payload = api.model_dump(mode="json")
+    for key in ("policies_xml", "operations", "schemas", "revisions", "releases"):
+        payload.pop(key, None)
     return {
         "id": api_id,
         "resource_id": nested_resource_id(config, "apis", api_id),
-        "name": api.name,
-        "path": api.path,
-        "upstream_base_url": api.upstream_base_url,
-        "upstream_path_prefix": api.upstream_path_prefix,
-        "backend": api.backend,
-        "products": api.products,
-        "api_version_set": api.api_version_set,
-        "api_version": api.api_version,
-        "revision": api.revision,
-        "revision_description": api.revision_description,
-        "version_description": api.version_description,
-        "source_api_id": api.source_api_id,
-        "is_current": api.is_current,
-        "is_online": api.is_online,
-        "subscription_header_names": api.subscription_header_names,
-        "subscription_query_param_names": api.subscription_query_param_names,
-        "tags": list(api.tags),
+        **payload,
         "policy_scope": policy_scope("api", api_id),
         "operations": [
             project_operation(config, api_id, operation_id, op) for operation_id, op in api.operations.items()
@@ -151,16 +124,12 @@ def project_api(config: GatewayConfig, api_id: str, api: ApiConfig) -> dict[str,
 
 def project_product(config: GatewayConfig, product_id: str, product: ProductConfig) -> dict[str, Any]:
     subscription_count = sum(1 for sub in config.subscription.subscriptions.values() if product_id in sub.products)
+    payload = product.model_dump(mode="json")
+    payload.pop("policies_xml", None)
     return {
         "id": product_id,
         "resource_id": nested_resource_id(config, "products", product_id),
-        "name": product.name,
-        "description": product.description,
-        "state": product.state.value,
-        "require_subscription": product.require_subscription,
-        "approval_required": product.approval_required,
-        "groups": list(product.groups),
-        "tags": list(product.tags),
+        **payload,
         "subscription_count": subscription_count,
     }
 

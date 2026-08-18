@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from app.config import (
     ApiConfig,
+    BackendConfig,
     GatewayConfig,
     GroupConfig,
     OperationConfig,
@@ -282,6 +283,45 @@ def test_management_service_raises_not_found_for_missing_resources() -> None:
     with pytest.raises(HTTPException, match="Tag not found") as tag_exc:
         service.delete_tag(cfg, "missing")
     assert tag_exc.value.status_code == 404
+
+
+def test_upsert_backend_accepts_pool_fields() -> None:
+    cfg = GatewayConfig(
+        backends={"a": BackendConfig(url=http_url("backend-a")), "b": BackendConfig(url=http_url("backend-b"))}
+    )
+    service, _, _ = _make_service(cfg)
+
+    class Body:
+        def model_dump(self, mode: str = "json") -> dict:
+            return {
+                "url": "",
+                "type": "pool",
+                "pool": [
+                    {"backend_id": "a", "weight": 1, "priority": 1},
+                    {"backend_id": "b", "weight": 1, "priority": 1},
+                ],
+            }
+
+    updated = service.upsert_backend(cfg, "llm-pool", Body())
+    assert updated.backends["llm-pool"].type == "pool"
+    assert [m.backend_id for m in updated.backends["llm-pool"].pool] == ["a", "b"]
+
+
+def test_subscription_lookup_lives_on_the_tenant_document() -> None:
+    cfg = GatewayConfig(
+        subscription=SubscriptionConfig(
+            subscriptions={
+                "demo": Subscription(
+                    id="demo",
+                    name="Demo",
+                    keys=SubscriptionKeyPair(primary="p", secondary="s"),
+                )
+            }
+        )
+    )
+    assert cfg.subscription.find_by_id("demo") is not None
+    assert cfg.subscription.find_entry("demo")[0] == "demo"
+    assert cfg.subscription.find_by_id("missing") is None
 
 
 def test_unlink_list_item_returns_false_when_item_is_missing() -> None:

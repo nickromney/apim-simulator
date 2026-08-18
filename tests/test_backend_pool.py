@@ -6,6 +6,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.backend_pool import record_backend_result, select_pool_member
 from app.config import (
     BackendCircuitBreakerConfig,
     BackendConfig,
@@ -177,3 +178,26 @@ def test_pool_backend_requires_members() -> None:
         BackendConfig(type="pool")
     with pytest.raises(ValueError):
         BackendConfig()
+
+
+def test_select_pool_member_round_robin_without_fastapi() -> None:
+    cfg = _pool_config(
+        members=[
+            BackendPoolMemberConfig(backend_id="backend-a"),
+            BackendPoolMemberConfig(backend_id="backend-b"),
+        ]
+    )
+    health: dict = {}
+    pool = cfg.backends["llm-pool"]
+    first = select_pool_member(cfg, health, "llm-pool", pool, now=0.0)
+    second = select_pool_member(cfg, health, "llm-pool", pool, now=0.0)
+    assert first is not None and second is not None
+    assert first[0] == "backend-a"
+    assert second[0] == "backend-b"
+
+
+def test_record_backend_result_trips_open_circuit() -> None:
+    breaker = BackendCircuitBreakerConfig(failure_count=1, interval_seconds=60.0, trip_duration_seconds=30.0)
+    health: dict = {}
+    record_backend_result(health, breaker, "backend-a", now=10.0, failed=True)
+    assert health["backend-a"]["open_until"] == 40.0

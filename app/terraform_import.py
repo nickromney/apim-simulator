@@ -12,7 +12,9 @@ from app.config import (
     ApiSchemaConfig,
     ApiVersioningScheme,
     ApiVersionSetConfig,
+    BackendCircuitBreakerConfig,
     BackendConfig,
+    BackendPoolMemberConfig,
     ClientCertificateMode,
     DiagnosticConfig,
     DiagnosticDataMaskingConfig,
@@ -162,6 +164,67 @@ def _subscription_key_parameter_names(values: dict[str, Any]) -> tuple[list[str]
     header = str(block.get("header") or "").strip() or None
     query = str(block.get("query") or "").strip() or None
     return ([header] if header else None, [query] if query else None)
+
+
+def _backend_pool_members(values: dict[str, Any]) -> list[BackendPoolMemberConfig]:
+    pool = values.get("pool")
+    if isinstance(pool, dict):
+        raw_members = pool.get("services") or pool.get("members") or []
+    elif isinstance(pool, list):
+        raw_members = pool
+    else:
+        raw_members = values.get("pool_services") or []
+    members: list[BackendPoolMemberConfig] = []
+    if not isinstance(raw_members, list):
+        return members
+    for item in raw_members:
+        if not isinstance(item, dict):
+            continue
+        backend_id = item.get("backend_id") or item.get("name") or item.get("id")
+        if not backend_id:
+            continue
+        backend_id = str(backend_id).rstrip("/").rsplit("/", 1)[-1]
+        members.append(
+            BackendPoolMemberConfig(
+                backend_id=backend_id,
+                weight=int(item.get("weight") or 1),
+                priority=int(item.get("priority") or 1),
+            )
+        )
+    return members
+
+
+def _backend_circuit_breaker(values: dict[str, Any]) -> BackendCircuitBreakerConfig | None:
+    raw = values.get("circuit_breaker") or values.get("circuitBreaker")
+    block = _first_block(raw) if not isinstance(raw, dict) else raw
+    if not block:
+        return None
+    rules = block.get("rules")
+    if isinstance(rules, list) and rules:
+        block = rules[0] if isinstance(rules[0], dict) else block
+    failure_count = block.get("failure_count") or block.get("failureCount") or block.get("trip_threshold")
+    interval = block.get("interval_seconds") or block.get("intervalSeconds") or block.get("interval")
+    trip = block.get("trip_duration_seconds") or block.get("tripDurationSeconds") or block.get("trip_duration")
+    statuses = block.get("error_statuses") or block.get("errorStatuses") or block.get("status_code_ranges")
+    parsed_statuses: list[int] = []
+    if isinstance(statuses, list):
+        for item in statuses:
+            if isinstance(item, int):
+                parsed_statuses.append(item)
+            elif isinstance(item, str) and item.isdigit():
+                parsed_statuses.append(int(item))
+    kwargs: dict[str, Any] = {}
+    if failure_count is not None:
+        kwargs["failure_count"] = int(failure_count)
+    if interval is not None:
+        kwargs["interval_seconds"] = float(interval)
+    if trip is not None:
+        kwargs["trip_duration_seconds"] = float(trip)
+    if parsed_statuses:
+        kwargs["error_statuses"] = parsed_statuses
+    if not kwargs:
+        return None
+    return BackendCircuitBreakerConfig(**kwargs)
 
 
 def _string_list(value: Any) -> list[str]:
@@ -995,9 +1058,15 @@ def import_from_tofu_show_json(
         if res.type == "azurerm_api_management_backend":
             credentials = _first_block(res.values.get("credentials")) or {}
             authorization = _first_block(credentials.get("authorization")) or {}
+            pool_members = _backend_pool_members(res.values)
+            breaker = _backend_circuit_breaker(res.values)
+            backend_type = str(res.values.get("type") or ("pool" if pool_members else "single"))
             backends[res.name] = BackendConfig(
-                url=str(res.values.get("url") or http_url("upstream")),
+                url=str(res.values.get("url") or ("" if pool_members else http_url("upstream"))),
                 description=str(res.values.get("description")) if res.values.get("description") else None,
+                type=backend_type,
+                pool=pool_members,
+                circuit_breaker=breaker,
                 authorization_scheme=(str(authorization.get("scheme")) if authorization.get("scheme") else None),
                 authorization_parameter=(
                     str(authorization.get("parameter")) if authorization.get("parameter") else None
