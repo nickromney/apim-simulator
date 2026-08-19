@@ -220,6 +220,15 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
     return None
 
 
+def apply_claim_headers(headers: dict[str, str], claims: dict[str, Any]) -> None:
+    headers["x-apim-user-object-id"] = str(claims.get("sub", ""))
+    headers["x-apim-user-email"] = str(claims.get("email", ""))
+    headers["x-apim-user-name"] = str(claims.get("name") or claims.get("preferred_username") or "")
+    headers["x-apim-auth-method"] = "oidc"
+    headers["x-ms-client-principal"] = build_client_principal(claims)
+    headers["x-ms-client-principal-name"] = str(claims.get("preferred_username", ""))
+
+
 def build_upstream_headers(request: Request, auth: AuthContext) -> dict[str, str]:
     headers: dict[str, str] = {
         key: value
@@ -230,13 +239,7 @@ def build_upstream_headers(request: Request, auth: AuthContext) -> dict[str, str
     if incoming_host:
         headers["host"] = incoming_host
 
-    claims = auth.claims
-    headers["x-apim-user-object-id"] = str(claims.get("sub", ""))
-    headers["x-apim-user-email"] = str(claims.get("email", ""))
-    headers["x-apim-user-name"] = str(claims.get("name") or claims.get("preferred_username") or "")
-    headers["x-apim-auth-method"] = "oidc"
-    headers["x-ms-client-principal"] = build_client_principal(claims)
-    headers["x-ms-client-principal-name"] = str(claims.get("preferred_username", ""))
+    apply_claim_headers(headers, auth.claims)
 
     if auth.subscription is not None:
         headers["x-user-id"] = auth.subscription.id
