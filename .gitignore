@@ -22,3 +22,7 @@ examples/todo-app/frontend-astro/dist/
 examples/todo-app/frontend-astro/playwright-report/
 examples/todo-app/frontend-astro/test-results/
 .run/
+
+# mutmut working copy and cache (make mutation-clean)
+mutants/
+.mutmut-cache

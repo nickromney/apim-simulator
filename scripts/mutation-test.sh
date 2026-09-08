@@ -29,12 +29,17 @@ BUDGET_SECONDS="${MUTATION_BUDGET_SECONDS:-1800}"
 # headroom, or when nothing else is running.
 MAX_CHILDREN="${MUTATION_MAX_CHILDREN:-}"
 FAIL_ON_SURVIVORS=1
+# mutmut runs each mutant by forking without an exec, and on this macOS host a
+# reproducible share of children die on SIGSEGV before they report anything. A
+# reconcile pass re-runs exactly those mutants one at a time in a fresh process,
+# where they do not crash, and folds the verdicts back into the score.
+RECONCILE="${MUTATION_RECONCILE:-0}"
 REPORT_DIR="${MUTATION_REPORT_DIR:-.run/mutation}"
 
 # shellcheck disable=SC2329 # invoked by name through the shell_cli_* helpers
 usage() {
   cat <<EOF
-Usage: ${0##*/} [--module NAME]... [--budget SECONDS] [--max-children N] [--no-fail] [--dry-run] [--execute]
+Usage: ${0##*/} [--module NAME]... [--budget SECONDS] [--max-children N] [--no-fail] [--reconcile] [--dry-run] [--execute]
 
 Run mutation testing over one module at a time and report a score for each.
 
@@ -59,6 +64,12 @@ Raise --max-children deliberately, on a machine with headroom.
 Logs for every run are kept under ${REPORT_DIR}, which is git-ignored. A module
 that scores nothing is a runner problem, not a perfect suite, so its log is
 named in the output rather than discarded.
+
+--reconcile re-runs the mutants mutmut could not report on, one at a time in a
+fresh process. mutmut forks without an exec, and on this macOS host a
+reproducible share of those children die on SIGSEGV; the same mutant run in its
+own process reports a verdict. The pass costs one full suite run per mutant, so
+it is opt-in.
 
 Exits non-zero when mutants survive. --no-fail reports the score and exits 0,
 which is how a baseline is measured before the gaps are closed.
@@ -93,6 +104,10 @@ while [[ $# -gt 0 ]]; do
       FAIL_ON_SURVIVORS=0
       shift
       ;;
+    --reconcile)
+      RECONCILE=1
+      shift
+      ;;
     *)
       shell_cli_unknown_flag "$(shell_cli_script_name)" "$1"
       exit 1
@@ -117,10 +132,33 @@ _count() {
   printf '%s\n' "$1" | awk -v want="$2" '$2 == want { print $1; found = 1 } END { if (!found) print 0 }'
 }
 
+# Mutants mutmut recorded with an exit code it cannot turn into a verdict.
+# The meta file it writes per source file holds the raw code for every mutant.
+_unreconciled_keys() {
+  local meta="mutants/${1//.//}.py.meta"
+  [[ -f "${meta}" ]] || return 0
+  jq -r '.exit_code_by_key | to_entries[]
+         | select(.value != null and (.value | IN(0, 1, 2, 33, 34, 35, 36, 37, -24, 24, 152, 255)) | not)
+         | .key' "${meta}"
+}
+
+# Re-run one mutant in its own process. The mutated tree is only on the path
+# through PYTHONPATH: without it pytest imports the installed package and the
+# trampoline never sees its own module, so every mutant looks like a survivor.
+# Returns 0 when the suite noticed the mutant, 1 when it did not.
+_reconcile_one() {
+  local key="$1" status=0
+  MUTANT_UNDER_TEST="${key}" PYTHONPATH="${ROOT_DIR}/mutants" \
+    uv run --project "${ROOT_DIR}" --extra dev pytest \
+    -p no:cacheprovider -m "not integration and not repo" -q -x >/dev/null 2>&1 || status=$?
+  [[ "${status}" -ne 0 ]]
+}
+
 main() {
   local module="" report="" scores="" status=0
   local killed=0 survived=0 no_tests=0 timeout_n=0 segfault=0 suspicious=0 not_checked=0
   local total=0 accounted=0 unreconciled=0
+  local reconciled_killed=0 reconciled_survived=0
   local total_survived=0
   local -a rows=()
 
@@ -171,6 +209,25 @@ main() {
     killed=$((killed + timeout_n))
     accounted=$((killed + survived + no_tests))
     unreconciled=$((total - accounted))
+    if [[ "${unreconciled}" -ne 0 && "${RECONCILE}" -eq 1 ]]; then
+      printf '  reconciling %d mutant(s) out of process ...\n' "${unreconciled}"
+      reconciled_killed=0
+      reconciled_survived=0
+      while IFS= read -r key; do
+        [[ -n "${key}" ]] || continue
+        if _reconcile_one "${key}"; then
+          reconciled_killed=$((reconciled_killed + 1))
+        else
+          reconciled_survived=$((reconciled_survived + 1))
+          printf '    survived: %s\n' "${key}"
+        fi
+      done < <(_unreconciled_keys "${module}")
+      killed=$((killed + reconciled_killed))
+      survived=$((survived + reconciled_survived))
+      accounted=$((killed + survived + no_tests))
+      unreconciled=$((total - accounted))
+    fi
+
     if [[ "${unreconciled}" -ne 0 ]]; then
       rows+=("$(printf '%s\tNOT SCORED\t%d of %d unreconciled (segfault %d, suspicious %d, unchecked %d)\tlog: %s' \
         "${module}" "${unreconciled}" "${total}" "${segfault}" "${suspicious}" "${not_checked}" "${report}")")

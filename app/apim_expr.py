@@ -199,7 +199,7 @@ def build_expression_context(req: PolicyRequest) -> ExpressionContext:
 def split_last(value: Any, separator: str) -> str:
     text = str(value)
     parts = text.split(separator)
-    return parts[-1] if parts else ""
+    return parts[-1]
 
 
 def _strip_outer_expression(text: str) -> str:
@@ -218,7 +218,10 @@ def _render_interpolated(text: str, context: ExpressionContext) -> str:
     out: list[str] = []
     i = 0
     while i < len(text):
-        if text[i] == "{" and (i == 0 or text[i - 1] != "{"):
+        # Every "{" opens an expression. A "{" whose predecessor is also "{"
+        # is unreachable here: the earlier one opened an expression and moved
+        # the cursor past it. Escaped "{{" is therefore not supported.
+        if text[i] == "{":
             depth = 1
             j = i + 1
             while j < len(text) and depth:
@@ -243,6 +246,9 @@ def _translate_expression(expr: str) -> str:
     translated = re.sub(r"\bfalse\b", "False", translated, flags=re.IGNORECASE)
     translated = translated.replace("&&", " and ")
     translated = translated.replace("||", " or ")
+    # Spacing "!=" apart keeps the negation rewrite below from reading a
+    # following "!" as the tail of an "=". No parseable expression can tell the
+    # difference; see the note in tests/test_apim_expr_unit.py.
     translated = translated.replace("!=", " != ")
     translated = re.sub(r"(?<![=!<>])!(?!=)", " not ", translated)
     translated = translated.replace("context.Request.Headers.GetValueOrDefault", "context.request.headers_get")
@@ -263,7 +269,9 @@ def _translate_expression(expr: str) -> str:
     translated = translated.replace(".Trim()", ".strip()")
     translated = translated.replace(".ToString()", "")
     translated = translated.replace(".Last()", "[-1]")
-    return translated
+    # A leading "!" becomes " not ", and ast.parse reads the leading space as an
+    # indent rather than as whitespace: "@(!false)" raised IndentationError.
+    return translated.strip()
 
 
 def _validate_ast(expression: str) -> None:
@@ -272,7 +280,9 @@ def _validate_ast(expression: str) -> None:
         if not isinstance(node, ALLOWED_AST_NODES):
             raise ValueError(f"Unsupported expression syntax: {type(node).__name__}")
         if isinstance(node, ast.Name):
-            if node.id not in {"context", "True", "False"} and node.id not in ALLOWED_FUNCTIONS:
+            # "True" and "False" parse as ast.Constant, never as ast.Name, so
+            # they do not need naming here.
+            if node.id != "context" and node.id not in ALLOWED_FUNCTIONS:
                 raise ValueError(f"Unsupported expression name: {node.id}")
 
 
@@ -291,8 +301,6 @@ def evaluate_apim_expression(expression: str, context: ExpressionContext) -> Any
             "split_last": split_last,
             "str": str,
             "len": len,
-            "True": True,
-            "False": False,
         },
     )
 
