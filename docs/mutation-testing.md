@@ -33,6 +33,9 @@ make mutation-baseline   # reports scores, exits 0
 make mutation-gate       # fails if any mutant survived
 ```
 
+Add `--reconcile` to either script invocation to re-run, out of process, any
+mutant the forked worker could not report on.
+
 ### Bounding a run
 
 `scripts/mutation-test.sh` gives each module its own budget through
@@ -89,31 +92,72 @@ more alarming number.
 
 | Module | Killed | Survived | Unreached | Score |
 | --- | ---: | ---: | ---: | ---: |
-| `app/backend_pool.py` | 218 | 28 | 0 | 88% |
-| `app/effective_policy.py` | 57 | 11 | 0 | 83% |
-| `app/named_values.py` | -- | -- | -- | not scored: 54 of 120 segfault |
-| `app/urls.py` | -- | -- | -- | not scored: 3 of 21 segfault |
-| `app/apim_expr.py` | -- | -- | -- | not scored: 3 of 571 timed out |
+| `app/effective_policy.py` | 67 | 1 | 0 | 98% |
+| `app/backend_pool.py` | 242 | 4 | 0 | 98% |
+| `app/apim_expr.py` | 536 | 12 | 0 | 97% |
+| `app/urls.py` | 19 | 2 | 0 | 90% |
+| `app/named_values.py` | 118 | 2 | 0 | 98% |
 
-Only the first two are measurements. The rest are the runner declining to
-report, and they are listed here so the gap is visible rather than absent.
+The last two are reconciled scores: mutmut's forked worker crashed on those
+mutants, and `--reconcile` re-ran them one at a time in a fresh process. See
+"Reconciling out of process" below.
 
-`app/apim_expr.py` should score on the next run: its three unreconciled mutants
-are timeouts, and the runner now counts a timeout as killed. The batch above ran
-with the earlier logic.
+`app/named_values.py` scored 52% the first time it could be scored at all, and
+every one of the 54 mutants the forked worker had been crashing on turned out to
+be a survivor. That is what the crash was hiding. `tests/test_named_values_unit.py`
+took it to 98%. Masking was the part worth reaching first: a survivor in
+`mask_secret_data` means nothing in the suite would notice a secret being written
+out in the clear.
 
-`app/backend_pool.py` is the one that has been worked, and it is the only module
-here with a before and after that mean anything. Its first run reported 72% with
-**106 mutants no test reached at all**: the module read as 88% line-covered, but
+Two of its survivors are worth repeating, because both were tests that passed
+while proving nothing. Three mutants blanked the `name` and `env_var_name` of the
+resolved value, and survived because the resolver builds its result on three
+separate paths while the assertions covered only one. A fourth changed the
+characters trimmed from the normalised environment variable name, and the test
+written to kill it used a lower-case letter -- but the trim runs before the
+upper-casing, so that letter could never have been affected either way.
+
+`app/apim_expr.py` went from 64% to 97% in the same pass. Everything the
+gateway knew about the expression evaluator it learned through policy documents
+that happened to use one accessor or another, so the translation table was
+covered where some example needed it and nowhere else.
+`tests/test_apim_expr_unit.py` drives the module directly: one case per
+translation rule, per validation refusal, and per branch of the request
+normaliser. All twelve remaining survivors are recorded equivalents.
+
+`app/effective_policy.py` went from 83% to 98% in this pass. Its eleven
+survivors were three gaps, not eleven: nothing asserted the tag of the merged
+root, nothing drove a document that failed to parse or an empty scope group
+ahead of a populated one, and nothing built a target carrying
+`policies_xml_documents`. Five tests in `tests/test_effective_policy.py` close
+all three. The one remaining survivor is an accepted equivalent, recorded
+against the test that would otherwise be expected to kill it.
+
+`app/backend_pool.py` was the first module worked this way. Its first run
+reported 72% with **106 mutants no test reached at all**: the module read as 88% line-covered, but
 every mutant in `_apply_auth_type`, `_apply_authorization_header` and
 `_apply_credential_pairs` was untouched. Those functions were exercised only
 incidentally, by gateway requests that happened to pass through them.
 `tests/test_backend_pool_unit.py` drives them directly, and the module now
-scores 88% with nothing unreached and 98% line coverage.
+scores 98% with nothing unreached and 98% line coverage.
 
 That 72% figure came from the same broken scorer as everything else, so treat it
 as indicative of the direction rather than as a measurement. The 106 unreached
 mutants were counted correctly, and they were the point.
+
+Its 28 survivors were worked in a later pass and are now four, all recorded
+equivalents. Three groups accounted for almost all of them. The health map
+handed back a repaired entry without storing it, and nothing noticed because no
+test mutated what it was given. The rotation walked forward past an open
+circuit, and no test had an open circuit to walk past, so walking backwards
+scored the same. And every credential is rendered as a policy value, able to
+read the request and to resolve a named value from the gateway config, but each
+test exercised only one of those two, so a mutant that dropped the other went
+unnoticed. Every credential value in the suite now depends on both.
+
+That last one is the trap worth naming. The first attempt at these tests scored
+95%, not 98%: six mutants survived precisely because each new test proved half
+of what it looked like it proved.
 
 ## What it found first: a logging handler bound to a dead stream
 
@@ -148,6 +192,20 @@ CLI's line is present.
 This is the argument for mutation testing in one defect: 319 passing tests and
 82% coverage said nothing about it, and the thing that found it was a runner
 refusing to report a score it could not stand behind.
+
+## What it found next: a leading negation that would not parse
+
+`@(!false)` raised `IndentationError`. The translator rewrites a leading `!`
+into `" not "`, and `ast.parse` reads that leading space as an indent, so every
+expression that opened with a negation failed before it was evaluated. The
+translated text is stripped before parsing now.
+
+Two pieces of dead code came out of the same module, both found because their
+mutants could not be killed. The interpolation scanner guarded against a `{`
+whose predecessor was also a `{`, which cannot happen: the earlier brace opens
+an expression and moves the cursor past it. Escaped `{{` is therefore not
+supported, and never was. The AST validator and the `eval` locals both named
+`True` and `False`, which parse as `ast.Constant` and never reach a name lookup.
 
 ## What survivors usually mean
 
@@ -185,6 +243,22 @@ This is not hypothetical caution. The first version of this runner computed
 `segfault` and been dropped on the floor. Every score in the first draft of this
 document was computed that way and none of them were trustworthy.
 
+## Reconciling out of process
+
+`scripts/mutation-test.sh --reconcile` takes the mutants mutmut recorded with an
+exit code it cannot turn into a verdict, and re-runs each one on its own in a
+fresh process. Out of the fork, they do not crash, and each returns a verdict
+that is folded back into the score. It costs one suite run per mutant -- about
+fifteen minutes for the 54 in `app/named_values.py` -- so it is opt-in rather
+than part of the default pass.
+
+The mutated tree has to be on the import path for this, and getting that wrong
+fails silently in the worst possible direction. `PYTHONPATH` must point at
+`mutants/`: without it pytest imports the installed package instead, the
+trampoline never sees its own module, the suite passes, and **every mutant is
+reported as a survivor**. The check that catches this is to re-run a mutant
+mutmut already scored as killed: it must fail.
+
 ## Open: mutmut's forked worker crashes on some modules
 
 mutmut runs each mutant by `os.fork()` with no `exec`, then running pytest
@@ -195,21 +269,29 @@ What is known:
 
 - It is deterministic per module, but not uniform across them.
   `app/named_values.py` returns exactly 54 segfaults out of 120 on every run.
-  `app/urls.py` returned 0 on one run and 3 on the next, so the rate varies
+  `app/urls.py` returned 0 on one run, then 3, then 2, so the rate varies
   between runs even where the module is small.
 - It is not a timeout. Raising `timeout_constant` and `timeout_multiplier`
   changed nothing.
 - It is not concurrency. `--max-children 1` gives the same 54.
 - It is not the mutants. Running a segfaulting mutant directly, with
   `MUTANT_UNDER_TEST` set and the same pytest arguments, passes all 281 tests.
-- Most are not real crashes. A run producing 54 segfaults leaves about 4 macOS
-  crash reports, so the rest are `SIGKILL`, which mutmut also labels `segfault`.
+- They are real segfaults. Every one of the 54 exits on signal 11, read from the
+  exit codes mutmut writes to `mutants/app/<module>.py.meta`. An earlier draft of
+  this document guessed most were `SIGKILL` from the child's CPU-time limit,
+  which mutmut also labels `segfault`; the recorded codes say otherwise.
+- It is not macOS fork safety. `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` gives
+  the same 54.
+- It correlates with survivors. All 54 turned out to survive, and a surviving
+  mutant is the one whose child runs the whole suite rather than exiting at the
+  first failure. Whatever the crash is, it is reached late in a full run.
 - It is module-specific in degree. `app/effective_policy.py` and
   `app/backend_pool.py` reconcile fully; `app/named_values.py` loses 45% of its
   mutants.
 
-Until this is understood, treat any module the runner declines to score as
-unmeasured rather than as passing.
+Until this is understood, `--reconcile` is the way round it. Treat any module
+the runner declines to score, and that has not been reconciled, as unmeasured
+rather than as passing.
 
 ## Accepted equivalents
 
@@ -217,6 +299,21 @@ Some mutants change the source without changing any behaviour an honest test
 could observe. Record those next to the test that would otherwise be expected to
 kill them. Never drop one silently from the score: a survivor you cannot explain
 is a gap, and a survivor you can explain is documentation.
+
+Three are recorded so far. `policy_xml_documents_for_target` reads its list with
+`getattr(target, "policies_xml_documents", [])` and passes the result through
+`or []`, so changing that default to `None` cannot change the returned list for
+any target. The note sits beside the test in
+`tests/test_effective_policy.py`.
+
+The expression evaluator keeps two. `eval` is handed an empty `__builtins__`,
+and four mutants weaken or remove it and survive, because `_validate_ast`
+refuses every name outside the allowlist before `eval` is ever reached: nothing
+that gets that far can name a builtin. The empty globals stay as a second line
+of defence rather than because a test can observe them. Separately, spelling an
+encoding "UTF-8", changing the maxsplit of a split whose `[0]` is all anyone
+reads, and upper-casing a literal inside a pattern compiled with
+`re.IGNORECASE` are all the same source in different words.
 
 ## Holding the line
 

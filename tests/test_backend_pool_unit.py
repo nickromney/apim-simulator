@@ -26,6 +26,7 @@ from app.config import (
     BackendConfig,
     BackendPoolMemberConfig,
     GatewayConfig,
+    NamedValueConfig,
 )
 from app.policy import PolicyRequest
 
@@ -48,10 +49,11 @@ def _empty_pool() -> BackendConfig:
     return BackendConfig.model_construct(url="https://pool.invalid", type="pool", pool=[])
 
 
-def _config(*backend_ids: str) -> GatewayConfig:
+def _config(*backend_ids: str, named_values: dict[str, str] | None = None) -> GatewayConfig:
     return GatewayConfig(
         allow_anonymous=True,
         backends={bid: BackendConfig(url=f"https://{bid}.invalid") for bid in backend_ids},
+        named_values={name: NamedValueConfig(value=value) for name, value in (named_values or {}).items()},
     )
 
 
@@ -326,6 +328,9 @@ def test_client_certificate_auth_is_signalled_as_a_header() -> None:
 
 
 def test_an_unset_auth_type_adds_nothing() -> None:
+    # Accepted equivalents: _apply_auth_type__mutmut_4 and __mutmut_5 rewrite the
+    # "none" fallback. Nothing compares against it: an auth type that matches
+    # none of the three branches falls through, whatever it is called.
     req = _policy_request()
     auth = apply_backend_credentials(_backend(), req, _config())
 
@@ -393,3 +398,153 @@ def test_no_thumbprint_header_is_set_when_none_are_configured() -> None:
     apply_backend_credentials(_backend(), req, _config())
 
     assert "x-apim-client-certificate-thumbprints" not in req.headers
+
+
+# --- health bookkeeping the suite reached only by accident ------------------
+
+
+def test_a_repaired_health_entry_is_stored_back_on_the_health_map() -> None:
+    """The caller mutates the entry it is handed, so it has to be the stored one.
+
+    Accepted equivalents: backend_health_entry__mutmut_3 and __mutmut_5 change
+    the setdefault default to None or drop it. The isinstance check below
+    replaces anything that is not a dict, so the default never reaches a caller.
+    """
+    health: dict = {"b": "not an entry"}
+
+    entry = backend_health_entry(health, "b")
+    entry["open_until"] = 5.0
+
+    assert health["b"] is entry
+    assert backend_health_entry(health, "b")["open_until"] == 5.0
+
+
+def test_an_entry_without_a_failures_key_records_a_failure() -> None:
+    health: dict = {"b": {"open_until": 0.0}}
+
+    record_backend_result(health, BackendCircuitBreakerConfig(failure_count=2), "b", now=10.0, failed=True)
+
+    assert health["b"]["failures"] == [10.0]
+
+
+def test_a_failure_exactly_one_interval_old_has_expired() -> None:
+    breaker = BackendCircuitBreakerConfig(failure_count=2, interval_seconds=10, trip_duration_seconds=30)
+    health: dict = {"b": {"failures": [0.0], "open_until": 0.0}}
+
+    record_backend_result(health, breaker, "b", now=10.0, failed=True)
+
+    assert health["b"]["open_until"] == 0.0
+    assert health["b"]["failures"] == [10.0]
+
+
+# --- rotation direction and cursor -----------------------------------------
+
+
+def test_the_rotation_walks_forward_past_an_open_circuit() -> None:
+    cfg = _config("a", "b", "c")
+    pool = _pool(_member("a"), _member("b"), _member("c"))
+    health: dict = {"a": {"failures": [], "open_until": 100.0}}
+
+    assert select_pool_member(cfg, health, "p", pool, now=0.0)[0] == "b"
+
+
+def test_the_cursor_resumes_after_the_member_that_was_chosen() -> None:
+    cfg = _config("a", "b", "c")
+    pool = _pool(_member("a"), _member("b"), _member("c"))
+    health: dict = {"a": {"failures": [], "open_until": 100.0}}
+
+    assert select_pool_member(cfg, health, "p", pool, now=0.0)[0] == "b"
+    assert select_pool_member(cfg, health, "p", pool, now=0.0)[0] == "c"
+
+
+def test_an_entry_without_an_open_until_counts_as_closed() -> None:
+    cfg = _config("a")
+    pool = _pool(_member("a"))
+    health: dict = {"a": {"failures": []}}
+
+    assert select_pool_member(cfg, health, "p", pool, now=0.0)[0] == "a"
+
+
+# --- credentials are policy values, not literals ----------------------------
+#
+# Every credential goes through render_policy_value, so it can read the request
+# and resolve a named value from the gateway config. Nothing asserted that until
+# these: a literal renders to itself either way, and mutants that dropped the
+# request or the config went unnoticed.
+
+
+def test_basic_auth_credentials_are_rendered_against_the_request_and_config() -> None:
+    req = _policy_request(**{"x-tenant": "acme"})
+    auth = apply_backend_credentials(
+        _backend(
+            auth_type="basic",
+            basic_username="{header:x-tenant}-{{realm}}",
+            basic_password="{{upstream-secret}}-{header:x-tenant}",
+        ),
+        req,
+        _config(named_values={"upstream-secret": "s3cret", "realm": "eu"}),
+    )
+
+    assert auth == ("acme-eu", "s3cret-acme")
+
+
+def test_the_managed_identity_resource_is_rendered() -> None:
+    req = _policy_request(**{"x-tenant": "acme"})
+    apply_backend_credentials(
+        _backend(auth_type="managed_identity", managed_identity_resource="{header:x-tenant}/{{scope}}"),
+        req,
+        _config(named_values={"scope": ".default"}),
+    )
+
+    assert req.headers["x-apim-managed-identity-resource"] == "acme/.default"
+
+
+def test_an_explicit_authorization_is_rendered_from_both_halves() -> None:
+    req = _policy_request(**{"x-scheme": "Bearer"})
+    apply_backend_credentials(
+        _backend(
+            authorization_scheme="{header:x-scheme}{{scheme-suffix}}",
+            authorization_parameter="{{token}}-{header:x-scheme}",
+        ),
+        req,
+        _config(named_values={"token": "abc123", "scheme-suffix": "+"}),
+    )
+
+    assert req.headers["authorization"] == "Bearer+ abc123-Bearer"
+
+
+def test_an_authorization_half_that_renders_empty_contributes_nothing() -> None:
+    req = _policy_request()
+    apply_backend_credentials(
+        _backend(authorization_scheme='@("")', authorization_parameter="opaque-token"),
+        req,
+        _config(),
+    )
+
+    assert req.headers["authorization"] == "opaque-token"
+
+
+def test_an_authorization_parameter_that_renders_empty_leaves_the_scheme_alone() -> None:
+    req = _policy_request()
+    apply_backend_credentials(
+        _backend(authorization_scheme="Negotiate", authorization_parameter='@("")'),
+        req,
+        _config(),
+    )
+
+    assert req.headers["authorization"] == "Negotiate"
+
+
+def test_header_and_query_credentials_are_rendered() -> None:
+    req = _policy_request(**{"x-tenant": "acme"})
+    apply_backend_credentials(
+        _backend(
+            header_credentials={"X-Api-Key": "{{api-key}}-{header:x-tenant}"},
+            query_credentials={"tenant": "{header:x-tenant}-{{region}}"},
+        ),
+        req,
+        _config(named_values={"api-key": "k-1", "region": "eu"}),
+    )
+
+    assert req.headers["x-api-key"] == "k-1-acme"
+    assert req.query["tenant"] == "acme-eu"
