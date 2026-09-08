@@ -81,19 +81,24 @@ def render_backend_value(value: str | None, policy_req: PolicyRequest, cfg: Gate
     return render_policy_value(value, policy_req, runtime)
 
 
-def apply_backend_credentials(
-    backend: BackendConfig,
-    policy_req: PolicyRequest,
-    cfg: GatewayConfig,
-) -> tuple[str, str] | None:
-    upstream_auth: tuple[str, str] | None = None
+def _apply_auth_type(backend: BackendConfig, policy_req: PolicyRequest, cfg: GatewayConfig) -> tuple[str, str] | None:
+    """Apply the backend's declared auth scheme.
+
+    Only basic auth produces credentials httpx can send; managed identity and
+    client certificates are signalled to the upstream as headers, because the
+    simulator has no real identity to present. A caller that already set its own
+    Authorization header is never overridden.
+    """
     auth_type = (backend.auth_type or "none").lower()
+
     if auth_type == "basic":
         username = render_backend_value(backend.basic_username, policy_req, cfg)
         password = render_backend_value(backend.basic_password, policy_req, cfg)
         if "authorization" not in policy_req.headers and username and password:
-            upstream_auth = (username, password)
-    elif auth_type == "managed_identity":
+            return (username, password)
+        return None
+
+    if auth_type == "managed_identity":
         policy_req.headers.setdefault("x-apim-managed-identity", "true")
         if backend.managed_identity_resource:
             policy_req.headers.setdefault(
@@ -102,12 +107,22 @@ def apply_backend_credentials(
             )
     elif auth_type == "client_certificate":
         policy_req.headers.setdefault("x-apim-client-certificate", "present")
+    return None
 
-    if backend.authorization_scheme and backend.authorization_parameter and "authorization" not in policy_req.headers:
-        scheme = render_backend_value(backend.authorization_scheme, policy_req, cfg) or ""
-        parameter = render_backend_value(backend.authorization_parameter, policy_req, cfg) or ""
-        policy_req.headers["authorization"] = f"{scheme} {parameter}".strip()
 
+def _apply_authorization_header(backend: BackendConfig, policy_req: PolicyRequest, cfg: GatewayConfig) -> None:
+    """Set an explicit `scheme parameter` Authorization, unless one already exists."""
+    if not (backend.authorization_scheme and backend.authorization_parameter):
+        return
+    if "authorization" in policy_req.headers:
+        return
+    scheme = render_backend_value(backend.authorization_scheme, policy_req, cfg) or ""
+    parameter = render_backend_value(backend.authorization_parameter, policy_req, cfg) or ""
+    policy_req.headers["authorization"] = f"{scheme} {parameter}".strip()
+
+
+def _apply_credential_pairs(backend: BackendConfig, policy_req: PolicyRequest, cfg: GatewayConfig) -> None:
+    """Add the backend's header and query credentials to the upstream call."""
     for header_name, header_value in backend.header_credentials.items():
         rendered = render_backend_value(header_value, policy_req, cfg)
         if rendered is not None:
@@ -117,6 +132,16 @@ def apply_backend_credentials(
         rendered = render_backend_value(query_value, policy_req, cfg)
         if rendered is not None:
             policy_req.query[query_name] = rendered
+
+
+def apply_backend_credentials(
+    backend: BackendConfig,
+    policy_req: PolicyRequest,
+    cfg: GatewayConfig,
+) -> tuple[str, str] | None:
+    upstream_auth = _apply_auth_type(backend, policy_req, cfg)
+    _apply_authorization_header(backend, policy_req, cfg)
+    _apply_credential_pairs(backend, policy_req, cfg)
 
     if backend.client_certificate_thumbprints:
         policy_req.headers.setdefault(

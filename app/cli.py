@@ -5,6 +5,8 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -165,101 +167,106 @@ async def _request(
     return await client.request(method, path, headers=_headers(tenant_key), json=json_body)
 
 
+def _import_openapi_body(args: argparse.Namespace) -> dict[str, Any]:
+    """Body for an OpenAPI import, from either a local file or a URL.
+
+    A .json file is `openapi+json`; anything else read from disk is treated as
+    YAML `openapi`. A URL is never fetched here, it is handed to the gateway as
+    `openapi-link`.
+    """
+    if args.file is not None:
+        suffix = Path(args.file).suffix.lower()
+        content_format = "openapi+json" if suffix == ".json" else "openapi"
+        content_value = _read_text_file(args.file)
+    else:
+        content_format = "openapi-link"
+        content_value = args.url
+
+    body: dict[str, Any] = {"content_format": content_format, "content_value": content_value}
+    if args.api_name is not None:
+        body["name"] = args.api_name
+    if args.api_path is not None:
+        body["path"] = args.api_path
+    return body
+
+
+def _set_policy_body(args: argparse.Namespace) -> dict[str, Any]:
+    return {"xml": _read_text_file(args.file) if args.file is not None else args.xml}
+
+
+def _replay_body(args: argparse.Namespace) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "method": args.method,
+        "path": args.path,
+        "query": _parse_kv_pairs(args.query, flag="--query"),
+        "headers": _parse_kv_pairs(args.header, flag="--header"),
+    }
+    if args.body_text is not None:
+        body["body_text"] = args.body_text
+    if args.body_base64 is not None:
+        body["body_base64"] = args.body_base64
+    return body
+
+
+def _json_file_body(args: argparse.Namespace) -> Any:
+    return _read_json_file(args.file)
+
+
+@dataclass(frozen=True)
+class _Command:
+    """One CLI verb, as the management-plane call it turns into.
+
+    `path` is formatted against the parsed arguments, so a template names the
+    argparse destinations it needs. `confirm` names the thing being destroyed;
+    a command that sets it refuses to run without --yes.
+    """
+
+    method: str
+    path: str
+    body: Callable[[argparse.Namespace], Any] | None = None
+    confirm: str | None = None
+
+
+_COMMANDS: dict[str, _Command] = {
+    "status": _Command("GET", "/apim/management/status"),
+    "summary": _Command("GET", "/apim/management/summary"),
+    "service": _Command("GET", "/apim/management/service"),
+    "apis": _Command("GET", "/apim/management/apis"),
+    "api": _Command("GET", "/apim/management/apis/{api_id}"),
+    "operations": _Command("GET", "/apim/management/apis/{api_id}/operations"),
+    "put-api": _Command("PUT", "/apim/management/apis/{api_id}", body=_json_file_body),
+    "delete-api": _Command("DELETE", "/apim/management/apis/{api_id}", confirm="API {api_id!r}"),
+    "import-openapi": _Command("POST", "/apim/management/apis/{api_id}/import", body=_import_openapi_body),
+    "products": _Command("GET", "/apim/management/products"),
+    "product": _Command("GET", "/apim/management/products/{product_id}"),
+    "put-product": _Command("PUT", "/apim/management/products/{product_id}", body=_json_file_body),
+    "delete-product": _Command("DELETE", "/apim/management/products/{product_id}", confirm="product {product_id!r}"),
+    "subscriptions": _Command("GET", "/apim/management/subscriptions"),
+    "policy": _Command("GET", "/apim/management/policies/{scope_type}/{scope_name}"),
+    "set-policy": _Command("PUT", "/apim/management/policies/{scope_type}/{scope_name}", body=_set_policy_body),
+    "traces": _Command("GET", "/apim/management/traces"),
+    "trace": _Command("GET", "/apim/trace/{trace_id}"),
+    "replay": _Command("POST", "/apim/management/replay", body=_replay_body),
+}
+
+
 async def _dispatch(args: argparse.Namespace, client: httpx.AsyncClient) -> httpx.Response:
-    command = args.command
-    if command == "status":
-        return await _request(client, "GET", "/apim/management/status", tenant_key=args.tenant_key)
-    if command == "summary":
-        return await _request(client, "GET", "/apim/management/summary", tenant_key=args.tenant_key)
-    if command == "service":
-        return await _request(client, "GET", "/apim/management/service", tenant_key=args.tenant_key)
-    if command == "apis":
-        return await _request(client, "GET", "/apim/management/apis", tenant_key=args.tenant_key)
-    if command == "api":
-        return await _request(client, "GET", f"/apim/management/apis/{args.api_id}", tenant_key=args.tenant_key)
-    if command == "operations":
-        return await _request(
-            client, "GET", f"/apim/management/apis/{args.api_id}/operations", tenant_key=args.tenant_key
-        )
-    if command == "put-api":
-        body = _read_json_file(args.file)
-        return await _request(
-            client, "PUT", f"/apim/management/apis/{args.api_id}", tenant_key=args.tenant_key, json_body=body
-        )
-    if command == "delete-api":
-        if not args.yes:
-            raise CliUsageError(f"refusing to delete API {args.api_id!r} without --yes")
-        return await _request(client, "DELETE", f"/apim/management/apis/{args.api_id}", tenant_key=args.tenant_key)
-    if command == "import-openapi":
-        if args.file is not None:
-            suffix = Path(args.file).suffix.lower()
-            content_format = "openapi+json" if suffix == ".json" else "openapi"
-            content_value = _read_text_file(args.file)
-        else:
-            content_format = "openapi-link"
-            content_value = args.url
-        import_body: dict[str, Any] = {"content_format": content_format, "content_value": content_value}
-        if args.api_name is not None:
-            import_body["name"] = args.api_name
-        if args.api_path is not None:
-            import_body["path"] = args.api_path
-        return await _request(
-            client,
-            "POST",
-            f"/apim/management/apis/{args.api_id}/import",
-            tenant_key=args.tenant_key,
-            json_body=import_body,
-        )
-    if command == "products":
-        return await _request(client, "GET", "/apim/management/products", tenant_key=args.tenant_key)
-    if command == "product":
-        return await _request(client, "GET", f"/apim/management/products/{args.product_id}", tenant_key=args.tenant_key)
-    if command == "put-product":
-        body = _read_json_file(args.file)
-        return await _request(
-            client, "PUT", f"/apim/management/products/{args.product_id}", tenant_key=args.tenant_key, json_body=body
-        )
-    if command == "delete-product":
-        if not args.yes:
-            raise CliUsageError(f"refusing to delete product {args.product_id!r} without --yes")
-        return await _request(
-            client, "DELETE", f"/apim/management/products/{args.product_id}", tenant_key=args.tenant_key
-        )
-    if command == "subscriptions":
-        return await _request(client, "GET", "/apim/management/subscriptions", tenant_key=args.tenant_key)
-    if command == "policy":
-        return await _request(
-            client,
-            "GET",
-            f"/apim/management/policies/{args.scope_type}/{args.scope_name}",
-            tenant_key=args.tenant_key,
-        )
-    if command == "set-policy":
-        xml = _read_text_file(args.file) if args.file is not None else args.xml
-        return await _request(
-            client,
-            "PUT",
-            f"/apim/management/policies/{args.scope_type}/{args.scope_name}",
-            tenant_key=args.tenant_key,
-            json_body={"xml": xml},
-        )
-    if command == "traces":
-        return await _request(client, "GET", "/apim/management/traces", tenant_key=args.tenant_key)
-    if command == "trace":
-        return await _request(client, "GET", f"/apim/trace/{args.trace_id}", tenant_key=args.tenant_key)
-    if command == "replay":
-        body: dict[str, Any] = {
-            "method": args.method,
-            "path": args.path,
-            "query": _parse_kv_pairs(args.query, flag="--query"),
-            "headers": _parse_kv_pairs(args.header, flag="--header"),
-        }
-        if args.body_text is not None:
-            body["body_text"] = args.body_text
-        if args.body_base64 is not None:
-            body["body_base64"] = args.body_base64
-        return await _request(client, "POST", "/apim/management/replay", tenant_key=args.tenant_key, json_body=body)
-    raise SystemExit(f"error: unknown command {command!r}")  # pragma: no cover - argparse enforces valid choices
+    """Turn the parsed command line into one management-plane call."""
+    command = _COMMANDS.get(args.command)
+    if command is None:  # pragma: no cover - argparse enforces valid choices
+        raise SystemExit(f"error: unknown command {args.command!r}")
+
+    fields = vars(args)
+    if command.confirm is not None and not args.yes:
+        raise CliUsageError(f"refusing to delete {command.confirm.format(**fields)} without --yes")
+
+    return await _request(
+        client,
+        command.method,
+        command.path.format(**fields),
+        tenant_key=args.tenant_key,
+        json_body=command.body(args) if command.body is not None else None,
+    )
 
 
 def _error_detail(response: httpx.Response) -> str:

@@ -9,7 +9,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import time
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -59,29 +62,37 @@ def extract_scopes(claims: dict) -> set[str]:
     return scopes
 
 
-def extract_roles(claims: dict) -> set[str]:
-    roles: set[str] = set()
-    raw = claims.get("roles")
-    if isinstance(raw, str) and raw:
-        roles.add(raw)
-    if isinstance(raw, list):
-        roles.update(str(r) for r in raw if r)
+def _roles_in(value: Any) -> set[str]:
+    """Roles from one claim value, which may be a single role or a list of them."""
+    if isinstance(value, str) and value:
+        return {value}
+    if isinstance(value, list):
+        return {str(role) for role in value if role}
+    return set()
+
+
+def _role_claim_sources(claims: dict) -> Iterator[Any]:
+    """Every place an identity provider might have put roles.
+
+    Three shapes in the wild: a top-level `roles`, Keycloak's realm-wide
+    `realm_access.roles`, and its per-client `resource_access.<client>.roles`.
+    """
+    yield claims.get("roles")
 
     realm_access = claims.get("realm_access")
     if isinstance(realm_access, dict):
-        rr = realm_access.get("roles")
-        if isinstance(rr, list):
-            roles.update(str(r) for r in rr if r)
+        yield realm_access.get("roles")
 
     resource_access = claims.get("resource_access")
     if isinstance(resource_access, dict):
         for entry in resource_access.values():
-            if not isinstance(entry, dict):
-                continue
-            cr = entry.get("roles")
-            if isinstance(cr, list):
-                roles.update(str(r) for r in cr if r)
-    return roles
+            if isinstance(entry, dict):
+                yield entry.get("roles")
+
+
+def extract_roles(claims: dict) -> set[str]:
+    """The union of every role claim, whichever shape the issuer used."""
+    return set().union(*(_roles_in(source) for source in _role_claim_sources(claims)))
 
 
 def product_is_published(cfg: GatewayConfig, product_id: str) -> bool:
@@ -370,11 +381,171 @@ def _policy_response(
     return Response(content=body, status_code=status_code, headers=headers, media_type=media_type)
 
 
-async def execute_gateway_request(request: Request) -> Response:
-    from app.telemetry import set_current_span_attributes
+@dataclass
+class _UpstreamPayload:
+    """The upstream response, normalised and buffered if anything needs the body."""
 
-    cfg: GatewayConfig = request.app.state.gateway_config
-    gateway_metrics = request.app.state.gateway_metrics
+    status_code: int
+    headers: dict[str, str]
+    media_type: str | None
+    content: bytes
+    buffered: bool
+
+
+async def _read_upstream_response(
+    *,
+    upstream_response: httpx.Response,
+    correlation_id: str | None,
+    pool: _PoolState,
+    cfg: GatewayConfig,
+    cache_key: str | None,
+    policy_req: PolicyRequest,
+    policy_response_cache_active: bool,
+) -> _UpstreamPayload:
+    """Normalise the upstream response, buffering the body only when needed.
+
+    Streaming is the point of the proxy, so the body is read into memory only
+    when something downstream must see all of it: the cache, a policy that
+    asked to buffer, or a non-streaming configuration.
+    """
+    headers = filter_response_headers(dict(upstream_response.headers))
+    headers["x-correlation-id"] = correlation_id
+    if pool.pool_backend is not None:
+        headers["x-apim-backend-pool"] = pool.pool_backend_id
+        headers["x-apim-backend-id"] = pool.backend_id
+
+    status_code = int(upstream_response.status_code)
+    if not (100 <= status_code <= 599):
+        raise HTTPException(status_code=502, detail="Backend API returned invalid status code")
+
+    requires_buffering = (
+        cache_key is not None
+        or policy_response_cache_active
+        or bool(policy_req.variables.get("_policy_response_buffering_required"))
+        or not cfg.proxy_streaming
+    )
+    content = b""
+    if requires_buffering:
+        content = await upstream_response.aread()
+        await upstream_response.aclose()
+
+    return _UpstreamPayload(
+        status_code=status_code,
+        headers=headers,
+        media_type=upstream_response.headers.get("content-type"),
+        content=content,
+        buffered=requires_buffering,
+    )
+
+
+async def _apply_outbound_policies(
+    *,
+    policy_docs: list[Any],
+    policy_runtime: Any,
+    request: Request,
+    policy_req: PolicyRequest,
+    response_headers: dict[str, str],
+    content: bytes,
+    media_type: str | None,
+    upstream_status_code: int,
+) -> tuple[dict[str, str], bytes, str | None]:
+    """Run the outbound stage and return what it made of the response."""
+    outbound_req = PolicyRequest(
+        method=request.method,
+        path=policy_req.path,
+        query=dict(policy_req.query),
+        headers=response_headers,
+        variables=policy_req.variables,
+        body=policy_req.body,
+        response_status_code=upstream_status_code,
+        response_headers=response_headers,
+        response_body=content,
+        response_media_type=media_type,
+    )
+    await apply_outbound_async(policy_docs, outbound_req, policy_runtime)
+    return outbound_req.headers, outbound_req.response_body, outbound_req.response_media_type or media_type
+
+
+def _enforce_authz_with_policy_claims(
+    *, request: Request, route: Any, auth: AuthContext, policy_req: PolicyRequest
+) -> None:
+    """Apply route authorization against the claims policy actually validated.
+
+    A validate-jwt policy can produce a richer claim set than the gateway's own
+    authentication did. When it has, those claims are what authorization must
+    read, and they are copied onto the upstream headers too.
+    """
+    effective_claims = auth.claims
+    jwt_claims = policy_req.variables.get("_last_jwt_claims")
+    if isinstance(jwt_claims, dict):
+        effective_claims = jwt_claims
+        apply_claim_headers(policy_req.headers, effective_claims)
+
+    try:
+        enforce_route_authz(route, effective_claims)
+    except HTTPException as exc:
+        request.state.apim_result_reason = _route_authz_reason(exc)
+        raise
+
+
+def _serve_from_cache(
+    *,
+    cache_key: str,
+    request: Request,
+    route: Any,
+    policy_req: PolicyRequest,
+    policy_runtime: Any,
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+    cfg: GatewayConfig,
+    gateway_metrics: Any,
+    correlation_id: str | None,
+    trace_id: str | None,
+) -> Response | None:
+    """The cached response for this key, or None to go upstream.
+
+    An entry the cache holds but cannot serve (expired, or vary-mismatched) is
+    evicted rather than left to be re-checked on every later request.
+    """
+    cached = request.app.state.cache.get(cache_key)
+    if cached is None:
+        return None
+    cached_response = cached_gateway_response(
+        cached=cached,
+        request=request,
+        route_name=route.name,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        cfg=cfg,
+        gateway_metrics=gateway_metrics,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+    )
+    if cached_response is None:
+        request.app.state.cache.pop(cache_key, None)
+    return cached_response
+
+
+@dataclass(frozen=True)
+class _AdmittedRequest:
+    """A request that passed the gate: it has a route, an identity and a product."""
+
+    resolved: Any
+    route: Any
+    auth: AuthContext
+    effective_product_id: str
+
+
+def _admit_request(request: Request, cfg: GatewayConfig) -> _AdmittedRequest:
+    """Decide whether this call may proceed, and against which product.
+
+    Refusals are annotated with the reason the access log reports before being
+    re-raised, so an operator can tell a missing subscription from an
+    unpublished product without reading the policy.
+    """
+    from app.telemetry import set_current_span_attributes
 
     validate_client_certificate(request, cfg)
 
@@ -385,9 +556,7 @@ async def execute_gateway_request(request: Request) -> Response:
     route = resolved.route
     request.state.apim_route_name = route.name
 
-    verifiers = request.app.state.oidc_verifiers
-    auth = authenticate_request(request, cfg, verifiers, route)
-
+    auth = authenticate_request(request, cfg, request.app.state.oidc_verifiers, route)
     allowed_products = allowed_products_for_route(route)
     try:
         effective_product_id = enforce_product_grant(
@@ -397,12 +566,7 @@ async def execute_gateway_request(request: Request) -> Response:
             subscription_is_bypassed=subscription_bypassed(request, cfg),
         )
     except HTTPException as exc:
-        if exc.status_code == 401:
-            request.state.apim_result_reason = "missing_subscription"
-        elif exc.detail == "Product is not published":
-            request.state.apim_result_reason = "product_not_published"
-        else:
-            request.state.apim_result_reason = "subscription_not_authorized"
+        request.state.apim_result_reason = _product_grant_reason(exc)
         raise
 
     set_current_span_attributes(
@@ -414,8 +578,17 @@ async def execute_gateway_request(request: Request) -> Response:
             "apim.product.effective": effective_product_id,
         }
     )
+    return _AdmittedRequest(resolved=resolved, route=route, auth=auth, effective_product_id=effective_product_id)
 
-    policy_cache: dict[str, Any] = request.app.state.policy_cache
+
+def _policy_document_stack(
+    cfg: GatewayConfig, route: Any, effective_product_id: str, policy_cache: dict[Any, Any]
+) -> list[Any]:
+    """Parse the global -> product -> API -> operation policy stack, once each.
+
+    Parsing is memoised on the XML plus the fragment table, because the same
+    documents are re-parsed on every single request otherwise.
+    """
 
     def _doc_for(xml: str) -> Any:
         cache_key = (xml, tuple(sorted(cfg.policy_fragments.items())))
@@ -427,38 +600,467 @@ async def execute_gateway_request(request: Request) -> Response:
         return doc
 
     effective_product = cfg.products.get(effective_product_id) if effective_product_id else None
-    policy_docs = [_doc_for(xml) for xml in stacked_policy_xml_documents(cfg, route, effective_product)]
+    return [_doc_for(xml) for xml in stacked_policy_xml_documents(cfg, route, effective_product)]
 
+
+async def _read_body_within_limit(request: Request, cfg: GatewayConfig) -> bytes:
+    """The request body, or a 413 when it exceeds the configured ceiling."""
     body = await request.body()
     if len(body) > cfg.max_request_body_bytes:
         request.state.apim_result_reason = "request_body_too_large"
         raise HTTPException(status_code=413, detail="Request body too large")
-    headers = {k.lower(): v for k, v in build_upstream_headers(request, auth).items()}
+    return body
 
-    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
-    headers.setdefault("x-correlation-id", correlation_id)
 
-    incoming_host = request.headers.get("host", "")
-    forwarded_host = request.headers.get("x-forwarded-host", "")
-    forwarded_proto = request.headers.get("x-forwarded-proto", "")
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    client_ip = (
-        forwarded_for.split(",", 1)[0].strip() if forwarded_for else (request.client.host if request.client else "")
+async def _fail_upstream_unavailable(
+    *,
+    request: Request,
+    cfg: GatewayConfig,
+    policy_docs: list[Any],
+    policy_req: PolicyRequest,
+    policy_runtime: Any,
+    attempts_used: int,
+    elapsed_seconds: float,
+    last_exc: Exception | None,
+    correlation_id: str | None,
+    trace_id: str | None,
+    trace_store: dict[str, Any],
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+) -> Response:
+    """Every retry failed. Give on-error policy the last word, else raise 502."""
+    from app.telemetry import set_current_span_attributes
+
+    request.state.apim_result_reason = "upstream_unavailable"
+    request.state.apim_upstream_duration_seconds = elapsed_seconds
+    set_current_span_attributes(
+        **{
+            APIM_RESULT_REASON_ATTR: "upstream_unavailable",
+            APIM_UPSTREAM_ATTEMPTS_ATTR: attempts_used,
+        }
     )
-    request.state.apim_client_ip = client_ip
-    subscription_record = cfg.subscription.find_by_id(auth.subscription.id) if auth.subscription else None
-    subscription_owner = subscription_record.created_by if subscription_record is not None else None
-    subscription_groups = (
-        sorted(group.id for group in cfg.groups.values() if subscription_owner and subscription_owner in group.users)
-        if subscription_owner
-        else []
+
+    override = None
+    if policy_docs:
+        failure_req = PolicyRequest(
+            method=request.method,
+            path=policy_req.path,
+            query=dict(policy_req.query),
+            headers=dict(policy_req.headers),
+            variables={**policy_req.variables, "error": "upstream_unavailable"},
+        )
+        override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
+
+    if override is None:
+        logging.getLogger("apim-simulator").exception("Unable to reach upstream", exc_info=last_exc)
+        raise HTTPException(status_code=502, detail="Backend API unavailable")
+
+    request.state.apim_result_reason = "policy_on_error_override"
+    return _policy_response(
+        body=override.body,
+        status_code=override.status_code,
+        headers=dict(override.headers),
+        media_type=override.media_type,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        trace_store=trace_store,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        cfg=cfg,
+        extra={
+            "attempts": attempts_used,
+            "status": override.status_code,
+            "elapsed_ms": int(elapsed_seconds * 1000),
+            "cache": None,
+            "reason": "policy_on_error_override",
+        },
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
     )
 
-    upstream_path = resolved.upstream_path
-    upstream_query = dict(request.query_params)
-    policy_req = PolicyRequest(
+
+def _client_ip(request: Request, forwarded_for: str) -> str:
+    """The caller's address: the first X-Forwarded-For hop, else the socket peer."""
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.client.host if request.client else ""
+
+
+def _subscription_context(cfg: GatewayConfig, auth: AuthContext) -> tuple[str | None, list[str]]:
+    """Who owns the calling subscription, and which groups that owner is in.
+
+    Policies address groups by id, so an owner with no groups and no owner at
+    all both resolve to an empty list rather than to None.
+    """
+    if auth.subscription is None:
+        return None, []
+    record = cfg.subscription.find_by_id(auth.subscription.id)
+    owner = record.created_by if record is not None else None
+    if not owner:
+        return owner, []
+    return owner, sorted(group.id for group in cfg.groups.values() if owner in group.users)
+
+
+def _gateway_cache_key(
+    *,
+    cfg: GatewayConfig,
+    request: Request,
+    upstream_url: str,
+    policy_req: PolicyRequest,
+    policy_response_cache_active: bool,
+) -> str | None:
+    """The gateway cache key for this exchange, or None when it is not cacheable.
+
+    Only GETs are cached, never a streaming proxy, and never when a policy has
+    already taken responsibility for caching the response itself.
+    """
+    if not cfg.cache_enabled or request.method != "GET" or cfg.proxy_streaming or policy_response_cache_active:
+        return None
+    return request_cache_key(
         method=request.method,
-        path=upstream_path,
+        upstream_url=upstream_url,
+        query=policy_req.query,
+        authorization=request.headers.get("authorization", ""),
+        subscription_key=request.headers.get("ocp-apim-subscription-key", ""),
+    )
+
+
+@dataclass
+class _BackendChoice:
+    """Where this exchange is going upstream, and how it authenticates there."""
+
+    upstream_base_url: str
+    upstream_auth: tuple[str, str] | None
+    pool: _PoolState
+
+
+def _choose_backend(
+    *,
+    cfg: GatewayConfig,
+    route: Any,
+    policy_req: PolicyRequest,
+    backend_health: dict[str, Any],
+    request: Request,
+) -> _BackendChoice:
+    """Resolve the upstream for this exchange.
+
+    Precedence: a backend a policy selected outright, then a named backend on
+    the route. A named backend of type `pool` picks one healthy member, and an
+    exhausted pool is a 503 rather than a fall-through to the route default.
+    """
+    upstream_base_url = route.upstream_base_url
+    upstream_auth: tuple[str, str] | None = None
+    selected_backend_url = str(policy_req.variables.get("selected_backend_url") or "")
+    selected_backend_id = str(policy_req.variables.get("selected_backend_id") or "")
+    backend_id = selected_backend_id or (route.backend or "" if not selected_backend_url else "")
+    if selected_backend_url:
+        upstream_base_url = selected_backend_url
+
+    pool = _PoolState(
+        pool_backend=None, pool_backend_id="", backend=None, backend_id=backend_id, backend_health=backend_health
+    )
+    if not backend_id:
+        return _BackendChoice(upstream_base_url, upstream_auth, pool)
+
+    backend = cfg.backends.get(backend_id)
+    if backend is not None and (backend.type or "single").lower() == "pool":
+        pool.pool_backend = backend
+        pool.pool_backend_id = backend_id
+        selection = select_pool_member(cfg, backend_health, backend_id, backend, now=time.time())
+        if selection is None:
+            request.state.apim_result_reason = "backend_pool_exhausted"
+            raise HTTPException(status_code=503, detail="All backend pool members are unavailable")
+        backend_id, backend = selection
+        policy_req.headers["x-apim-backend-pool"] = pool.pool_backend_id
+
+    pool.backend_id = backend_id
+    pool.backend = backend
+    if backend is not None:
+        upstream_base_url = selected_backend_url or (render_backend_value(backend.url, policy_req, cfg) or backend.url)
+        policy_req.headers.setdefault("x-apim-backend-id", backend_id)
+        upstream_auth = apply_backend_credentials(backend, policy_req, cfg)
+
+    return _BackendChoice(upstream_base_url, upstream_auth, pool)
+
+
+@dataclass
+class _PoolState:
+    """The backend pool member currently in play, and its health bookkeeping.
+
+    A pool call can change its mind mid-exchange: when a member fails, the
+    breaker is tripped and another member is selected. Both the caller and the
+    retry loop need to see that change, so it lives in one mutable object
+    rather than in six `nonlocal` names.
+    """
+
+    pool_backend: Any
+    pool_backend_id: str
+    backend: Any
+    backend_id: str
+    backend_health: dict[str, Any]
+
+    @property
+    def is_pool(self) -> bool:
+        return self.pool_backend is not None and self.backend is not None
+
+    def trip_and_reselect(self, cfg: GatewayConfig, policy_req: PolicyRequest) -> str | None:
+        """Record this member as failed and pick another, if the pool has one.
+
+        Returns the new member's base URL, or None when this is not a pool or
+        the pool has nothing left to offer.
+        """
+        if not self.is_pool:
+            return None
+        now = time.time()
+        breaker = pool_member_breaker(self.pool_backend, self.backend)
+        record_backend_result(self.backend_health, breaker, self.backend_id, now=now, failed=True)
+        reselected = select_pool_member(cfg, self.backend_health, self.pool_backend_id, self.pool_backend, now=now)
+        if reselected is None:
+            return None
+        self.backend_id, self.backend = reselected
+        policy_req.headers["x-apim-backend-id"] = self.backend_id
+        return render_backend_value(self.backend.url, policy_req, cfg) or self.backend.url
+
+
+@dataclass
+class _UpstreamAttempt:
+    """What the retry loop finished with."""
+
+    response: httpx.Response | None
+    attempts: int
+    elapsed_seconds: float
+    error: Exception | None
+    upstream_url: str
+    pool: _PoolState
+
+
+async def _send_upstream_with_retries(
+    *,
+    client: httpx.AsyncClient,
+    cfg: GatewayConfig,
+    method: str,
+    upstream_url: str,
+    policy_req: PolicyRequest,
+    upstream_auth: tuple[str, str] | None,
+    route: Any,
+    pool: _PoolState,
+) -> _UpstreamAttempt:
+    """Call the upstream, retrying on transport errors and retryable statuses.
+
+    Each failed attempt against a pool trips that member's breaker and reselects,
+    so a retry can land on a different backend than the one that just failed.
+    """
+    timeout = httpx.Timeout(cfg.proxy_timeout_seconds)
+    max_attempts = max(1, cfg.proxy_max_attempts)
+    last_exc: Exception | None = None
+    upstream_response: httpx.Response | None = None
+    attempts_used = 0
+    start = time.perf_counter()
+
+    def _failover() -> None:
+        nonlocal upstream_url
+        base_url = pool.trip_and_reselect(cfg, policy_req)
+        if base_url is not None:
+            upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+
+    for attempt in range(1, max_attempts + 1):
+        attempts_used = attempt
+        req = client.build_request(
+            method,
+            upstream_url,
+            content=policy_req.body,
+            headers=policy_req.headers,
+            params=policy_req.query,
+            timeout=timeout,
+        )
+        try:
+            upstream_response = await client.send(req, stream=cfg.proxy_streaming, auth=upstream_auth)
+        except httpx.RequestError as exc:
+            last_exc = exc
+            _failover()
+            if attempt >= max_attempts:
+                break
+            continue
+
+        if upstream_response.status_code in cfg.proxy_retry_statuses and attempt < max_attempts:
+            await upstream_response.aclose()
+            upstream_response = None
+            _failover()
+            continue
+        break
+
+    if pool.is_pool and upstream_response is not None:
+        breaker = pool_member_breaker(pool.pool_backend, pool.backend)
+        record_backend_result(
+            pool.backend_health,
+            breaker,
+            pool.backend_id,
+            now=time.time(),
+            failed=upstream_response.status_code in breaker.error_statuses,
+        )
+
+    return _UpstreamAttempt(
+        response=upstream_response,
+        attempts=attempts_used,
+        elapsed_seconds=time.perf_counter() - start,
+        error=last_exc,
+        upstream_url=upstream_url,
+        pool=pool,
+    )
+
+
+_ROUTE_AUTHZ_REASONS = {
+    "Missing required scope": "missing_required_scope",
+    "Missing required role": "missing_required_role",
+}
+
+
+def _product_grant_reason(exc: HTTPException) -> str:
+    """Why a product grant was refused, in the vocabulary the access log uses."""
+    if exc.status_code == 401:
+        return "missing_subscription"
+    if exc.detail == "Product is not published":
+        return "product_not_published"
+    return "subscription_not_authorized"
+
+
+def _route_authz_reason(exc: HTTPException) -> str:
+    """Why route authorization was refused. Anything unnamed is a claim failure."""
+    return _ROUTE_AUTHZ_REASONS.get(exc.detail, "missing_required_claim")
+
+
+@dataclass(frozen=True)
+class _TraceContext:
+    """Whether this exchange is being traced, and what to collect into.
+
+    Tracing is opt-in per request and only where the tenant enables it, so all
+    three fields move together: an id and a collector exist exactly when the
+    trace was requested.
+    """
+
+    requested: bool
+    trace_id: str | None
+    collector: PolicyTraceCollector | None
+
+    @classmethod
+    def read(cls, request: Request, cfg: GatewayConfig) -> _TraceContext:
+        requested = cfg.trace_enabled and request.headers.get("x-apim-trace", "").lower() == "true"
+        request.state.apim_trace_requested = requested
+        return cls(
+            requested=requested,
+            trace_id=f"trace-{int(time.time() * 1000)}" if requested else None,
+            collector=PolicyTraceCollector() if requested else None,
+        )
+
+
+def _uncached_response(
+    *,
+    request: Request,
+    cfg: GatewayConfig,
+    upstream_response: httpx.Response,
+    streaming: bool,
+    status_code: int,
+    response_headers: dict[str, str],
+    media_type: str | None,
+    content: bytes,
+    attempts_used: int,
+    elapsed_seconds: float,
+    trace: _TraceContext,
+    trace_store: dict[str, Any],
+    trace_base: dict[str, Any],
+) -> Response:
+    """Return the upstream response, streamed or buffered.
+
+    Streaming hands the open upstream body straight to the client and closes it
+    as a background task, so nothing here may read `content` in that case.
+    """
+    _record_final_reason(
+        request,
+        reason="upstream_stream" if streaming else "upstream_response",
+        attempts_used=attempts_used,
+    )
+    if trace.requested:
+        attach_trace(
+            response_headers,
+            trace_id=trace.trace_id,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace.collector,
+            cfg=cfg,
+            extra={
+                "attempts": attempts_used,
+                "status": status_code,
+                "elapsed_ms": int(elapsed_seconds * 1000),
+                "cache": None,
+            },
+        )
+
+    if streaming:
+        return StreamingResponse(
+            upstream_response.aiter_bytes(),
+            status_code=status_code,
+            headers=response_headers,
+            media_type=media_type,
+            background=BackgroundTask(upstream_response.aclose),
+        )
+    return Response(content=content, status_code=status_code, headers=response_headers, media_type=media_type)
+
+
+@dataclass(frozen=True)
+class _ForwardingContext:
+    """What the proxy chain in front of the gateway said about this call."""
+
+    incoming_host: str
+    forwarded_host: str
+    forwarded_proto: str
+    forwarded_for: str
+    client_ip: str
+
+    @classmethod
+    def read(cls, request: Request) -> _ForwardingContext:
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        return cls(
+            incoming_host=request.headers.get("host", ""),
+            forwarded_host=request.headers.get("x-forwarded-host", ""),
+            forwarded_proto=request.headers.get("x-forwarded-proto", ""),
+            forwarded_for=forwarded_for,
+            client_ip=_client_ip(request, forwarded_for),
+        )
+
+    def as_trace_fields(self) -> dict[str, str]:
+        return {
+            "incoming_host": self.incoming_host,
+            "forwarded_host": self.forwarded_host,
+            "forwarded_proto": self.forwarded_proto,
+            "forwarded_for": self.forwarded_for,
+            "client_ip": self.client_ip,
+        }
+
+
+def _build_policy_request(
+    *,
+    request: Request,
+    route: Any,
+    auth: AuthContext,
+    resolved: Any,
+    headers: dict[str, str],
+    body: bytes,
+    effective_product_id: str,
+    correlation_id: str | None,
+    forwarding: _ForwardingContext,
+    subscription_owner: str | None,
+    subscription_groups: list[str],
+) -> PolicyRequest:
+    """The request object policy expressions read and write.
+
+    Its `variables` are the policy-visible surface: everything a policy can
+    address by name, plus the underscore-prefixed entries the pipeline uses to
+    pass state between its own stages.
+    """
+    upstream_query = dict(request.query_params)
+    return PolicyRequest(
+        method=request.method,
+        path=resolved.upstream_path,
         query=upstream_query,
         headers=headers,
         variables={
@@ -468,12 +1070,12 @@ async def execute_gateway_request(request: Request) -> Response:
             "subscription_id": auth.subscription.id if auth.subscription else "",
             "products": auth.subscription_products,
             "product_id": effective_product_id,
-            "client_ip": client_ip,
+            "client_ip": forwarding.client_ip,
             "correlation_id": correlation_id,
-            "incoming_host": incoming_host,
-            "forwarded_host": forwarded_host,
-            "forwarded_proto": forwarded_proto,
-            "forwarded_for": forwarded_for,
+            "incoming_host": forwarding.incoming_host,
+            "forwarded_host": forwarding.forwarded_host,
+            "forwarded_proto": forwarding.forwarded_proto,
+            "forwarded_for": forwarding.forwarded_for,
             "subscription_owner": subscription_owner or "",
             "subscription_groups": subscription_groups,
             "rate_limit_store": request.app.state.rate_limit_store,
@@ -485,10 +1087,188 @@ async def execute_gateway_request(request: Request) -> Response:
         body=body,
     )
 
-    trace_requested = cfg.trace_enabled and request.headers.get("x-apim-trace", "").lower() == "true"
-    request.state.apim_trace_requested = trace_requested
-    trace_id = f"trace-{int(time.time() * 1000)}" if trace_requested else None
-    trace_collector = PolicyTraceCollector() if trace_requested else None
+
+def _record_final_reason(request: Request, *, reason: str, attempts_used: int) -> None:
+    """Stamp how the exchange ended onto the request state and the active span."""
+    from app.telemetry import set_current_span_attributes
+
+    request.state.apim_result_reason = reason
+    set_current_span_attributes(**{APIM_RESULT_REASON_ATTR: reason, APIM_UPSTREAM_ATTEMPTS_ATTR: attempts_used})
+
+
+def _store_and_respond(
+    *,
+    request: Request,
+    cfg: GatewayConfig,
+    route: Any,
+    gateway_metrics: Any,
+    cache_key: str,
+    status_code: int,
+    response_headers: dict[str, str],
+    media_type: str | None,
+    content: bytes,
+    attempts_used: int,
+    elapsed_seconds: float,
+    trace_id: str | None,
+    trace_store: dict[str, Any],
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+) -> Response:
+    """Record a cache miss, store the response, and return it.
+
+    The cache is a plain dict with no eviction policy, so reaching the entry
+    ceiling clears it outright rather than evicting by age.
+    """
+    from app.telemetry import set_current_span_attributes
+
+    request.state.apim_cache_result = "miss"
+    _record_final_reason(request, reason="upstream_response", attempts_used=attempts_used)
+    gateway_metrics.cache_events.add(
+        1,
+        {
+            APIM_ROUTE_NAME_ATTR: route.name,
+            APIM_CACHE_RESULT_ATTR: "miss",
+            "http.request.method": request.method,
+        },
+    )
+    set_current_span_attributes(**{APIM_CACHE_RESULT_ATTR: "miss"})
+    response_headers["x-apim-cache"] = "miss"
+
+    if len(request.app.state.cache) >= cfg.cache_max_entries:
+        request.app.state.cache.clear()
+    request.app.state.cache[cache_key] = (
+        time.time() + cfg.cache_ttl_seconds,
+        status_code,
+        dict(response_headers),
+        media_type,
+        content,
+    )
+
+    attach_trace(
+        response_headers,
+        trace_id=trace_id,
+        trace_store=trace_store,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        cfg=cfg,
+        extra={
+            "attempts": attempts_used,
+            "status": status_code,
+            "elapsed_ms": int(elapsed_seconds * 1000),
+            "cache": "miss",
+        },
+    )
+    return Response(content=content, status_code=status_code, headers=response_headers, media_type=media_type)
+
+
+async def _short_circuit_policy_stages(
+    *,
+    policy_docs: list[Any],
+    policy_req: PolicyRequest,
+    policy_runtime: Any,
+    request: Request,
+    route: Any,
+    cfg: GatewayConfig,
+    gateway_metrics: Any,
+    correlation_id: str | None,
+    trace_id: str | None,
+    trace_store: dict[str, Any],
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+) -> Response | None:
+    """Run inbound then backend policy, returning a response if either ends the call.
+
+    The two stages differ only in which one they name, so they share a body
+    rather than being written out twice.
+    """
+    from app.telemetry import set_current_span_attributes
+
+    if not policy_docs:
+        return None
+
+    for stage, apply_stage in (("inbound", apply_inbound_async), ("backend", apply_backend_async)):
+        early = await apply_stage(policy_docs, policy_req, policy_runtime)
+        if early is None:
+            continue
+        reason = f"policy_{stage}_short_circuit"
+        request.state.apim_result_reason = reason
+        request.state.apim_upstream_attempts = 0
+        gateway_metrics.policy_short_circuits.add(
+            1,
+            {
+                APIM_ROUTE_NAME_ATTR: route.name,
+                "apim.policy.stage": stage,
+                "http.request.method": request.method,
+            },
+        )
+        set_current_span_attributes(**{APIM_RESULT_REASON_ATTR: reason, APIM_UPSTREAM_ATTEMPTS_ATTR: 0})
+        return _policy_response(
+            body=early.body,
+            status_code=early.status_code,
+            headers=dict(early.headers),
+            media_type=early.media_type,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
+            cfg=cfg,
+            extra={
+                "upstream_url": None,
+                "attempts": 0,
+                "status": early.status_code,
+                "elapsed_ms": 0,
+                "cache": None,
+                "reason": reason,
+            },
+            policy_req=policy_req,
+            policy_runtime=policy_runtime,
+        )
+    return None
+
+
+async def execute_gateway_request(request: Request) -> Response:
+    from app.telemetry import set_current_span_attributes
+
+    cfg: GatewayConfig = request.app.state.gateway_config
+    gateway_metrics = request.app.state.gateway_metrics
+
+    admitted = _admit_request(request, cfg)
+    resolved, route, auth, effective_product_id = (
+        admitted.resolved,
+        admitted.route,
+        admitted.auth,
+        admitted.effective_product_id,
+    )
+
+    policy_docs = _policy_document_stack(cfg, route, effective_product_id, request.app.state.policy_cache)
+
+    body = await _read_body_within_limit(request, cfg)
+    headers = {k.lower(): v for k, v in build_upstream_headers(request, auth).items()}
+
+    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
+    headers.setdefault("x-correlation-id", correlation_id)
+
+    forwarding = _ForwardingContext.read(request)
+    request.state.apim_client_ip = forwarding.client_ip
+    subscription_owner, subscription_groups = _subscription_context(cfg, auth)
+
+    policy_req = _build_policy_request(
+        request=request,
+        route=route,
+        auth=auth,
+        resolved=resolved,
+        headers=headers,
+        body=body,
+        effective_product_id=effective_product_id,
+        correlation_id=correlation_id,
+        forwarding=forwarding,
+        subscription_owner=subscription_owner,
+        subscription_groups=subscription_groups,
+    )
+
+    trace = _TraceContext.read(request, cfg)
+    trace_requested, trace_id, trace_collector = trace.requested, trace.trace_id, trace.collector
     client: httpx.AsyncClient = request.app.state.http_client
     policy_runtime = PolicyRuntime(
         gateway_config=cfg,
@@ -512,142 +1292,43 @@ async def execute_gateway_request(request: Request) -> Response:
     trace_base = {
         "route": route.name,
         "correlation_id": correlation_id,
-        "incoming_host": incoming_host,
-        "forwarded_host": forwarded_host,
-        "forwarded_proto": forwarded_proto,
-        "forwarded_for": forwarded_for,
-        "client_ip": client_ip,
+        **forwarding.as_trace_fields(),
         "upstream_url": None,
     }
 
-    if policy_docs:
-        early = await apply_inbound_async(policy_docs, policy_req, policy_runtime)
-        if early is not None:
-            request.state.apim_result_reason = "policy_inbound_short_circuit"
-            request.state.apim_upstream_attempts = 0
-            gateway_metrics.policy_short_circuits.add(
-                1,
-                {
-                    APIM_ROUTE_NAME_ATTR: route.name,
-                    "apim.policy.stage": "inbound",
-                    "http.request.method": request.method,
-                },
-            )
-            set_current_span_attributes(
-                **{
-                    APIM_RESULT_REASON_ATTR: "policy_inbound_short_circuit",
-                    APIM_UPSTREAM_ATTEMPTS_ATTR: 0,
-                }
-            )
-            return _policy_response(
-                body=early.body,
-                status_code=early.status_code,
-                headers=dict(early.headers),
-                media_type=early.media_type,
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-                trace_store=trace_store,
-                trace_base=trace_base,
-                trace_collector=trace_collector,
-                cfg=cfg,
-                extra={
-                    "upstream_url": None,
-                    "attempts": 0,
-                    "status": early.status_code,
-                    "elapsed_ms": 0,
-                    "cache": None,
-                    "reason": "policy_inbound_short_circuit",
-                },
-                policy_req=policy_req,
-                policy_runtime=policy_runtime,
-            )
+    short_circuit = await _short_circuit_policy_stages(
+        policy_docs=policy_docs,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        request=request,
+        route=route,
+        cfg=cfg,
+        gateway_metrics=gateway_metrics,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        trace_store=trace_store,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+    )
+    if short_circuit is not None:
+        return short_circuit
 
-        backend_early = await apply_backend_async(policy_docs, policy_req, policy_runtime)
-        if backend_early is not None:
-            request.state.apim_result_reason = "policy_backend_short_circuit"
-            request.state.apim_upstream_attempts = 0
-            gateway_metrics.policy_short_circuits.add(
-                1,
-                {
-                    APIM_ROUTE_NAME_ATTR: route.name,
-                    "apim.policy.stage": "backend",
-                    "http.request.method": request.method,
-                },
-            )
-            set_current_span_attributes(
-                **{
-                    APIM_RESULT_REASON_ATTR: "policy_backend_short_circuit",
-                    APIM_UPSTREAM_ATTEMPTS_ATTR: 0,
-                }
-            )
-            return _policy_response(
-                body=backend_early.body,
-                status_code=backend_early.status_code,
-                headers=dict(backend_early.headers),
-                media_type=backend_early.media_type,
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-                trace_store=trace_store,
-                trace_base=trace_base,
-                trace_collector=trace_collector,
-                cfg=cfg,
-                extra={
-                    "upstream_url": None,
-                    "attempts": 0,
-                    "status": backend_early.status_code,
-                    "elapsed_ms": 0,
-                    "cache": None,
-                    "reason": "policy_backend_short_circuit",
-                },
-                policy_req=policy_req,
-                policy_runtime=policy_runtime,
-            )
+    _enforce_authz_with_policy_claims(request=request, route=route, auth=auth, policy_req=policy_req)
 
-    effective_claims = auth.claims
-    jwt_claims = policy_req.variables.get("_last_jwt_claims")
-    if isinstance(jwt_claims, dict):
-        effective_claims = jwt_claims
-        apply_claim_headers(policy_req.headers, effective_claims)
-
-    try:
-        enforce_route_authz(route, effective_claims)
-    except HTTPException as exc:
-        if exc.detail == "Missing required scope":
-            request.state.apim_result_reason = "missing_required_scope"
-        elif exc.detail == "Missing required role":
-            request.state.apim_result_reason = "missing_required_role"
-        else:
-            request.state.apim_result_reason = "missing_required_claim"
-        raise
-
-    upstream_base_url = route.upstream_base_url
-    upstream_auth: tuple[str, str] | None = None
-    selected_backend_url = str(policy_req.variables.get("selected_backend_url") or "")
-    selected_backend_id = str(policy_req.variables.get("selected_backend_id") or "")
-    backend_id = selected_backend_id or (route.backend or "" if not selected_backend_url else "")
-    if selected_backend_url:
-        upstream_base_url = selected_backend_url
-    pool_backend = None
-    pool_backend_id = ""
-    backend = None
-    backend_health: dict[str, Any] = request.app.state.backend_health
-    if backend_id:
-        backend = cfg.backends.get(backend_id)
-        if backend is not None and (backend.type or "single").lower() == "pool":
-            pool_backend = backend
-            pool_backend_id = backend_id
-            selection = select_pool_member(cfg, backend_health, pool_backend_id, pool_backend, now=time.time())
-            if selection is None:
-                request.state.apim_result_reason = "backend_pool_exhausted"
-                raise HTTPException(status_code=503, detail="All backend pool members are unavailable")
-            backend_id, backend = selection
-            policy_req.headers["x-apim-backend-pool"] = pool_backend_id
-        if backend is not None:
-            upstream_base_url = selected_backend_url or (
-                render_backend_value(backend.url, policy_req, cfg) or backend.url
-            )
-            policy_req.headers.setdefault("x-apim-backend-id", backend_id)
-            upstream_auth = apply_backend_credentials(backend, policy_req, cfg)
+    choice = _choose_backend(
+        cfg=cfg,
+        route=route,
+        policy_req=policy_req,
+        backend_health=request.app.state.backend_health,
+        request=request,
+    )
+    upstream_base_url = choice.upstream_base_url
+    upstream_auth = choice.upstream_auth
+    backend_id = choice.pool.backend_id
+    backend = choice.pool.backend
+    pool_backend = choice.pool.pool_backend
+    pool_backend_id = choice.pool.pool_backend_id
+    backend_health = choice.pool.backend_health
 
     request.state.apim_backend_id = backend_id or "direct"
     set_current_span_attributes(
@@ -668,185 +1349,98 @@ async def execute_gateway_request(request: Request) -> Response:
     trace_base["upstream_url"] = upstream_url
 
     policy_response_cache_active = bool(policy_req.variables.get("_policy_response_cache_active"))
-    cache_key = None
-    if (
-        cfg.cache_enabled
-        and (request.method == "GET")
-        and (not cfg.proxy_streaming)
-        and not policy_response_cache_active
-    ):
-        authz = request.headers.get("authorization", "")
-        sub_key = request.headers.get("ocp-apim-subscription-key", "")
-        cache_key = request_cache_key(
-            method=request.method,
-            upstream_url=upstream_url,
-            query=policy_req.query,
-            authorization=authz,
-            subscription_key=sub_key,
+    cache_key = _gateway_cache_key(
+        cfg=cfg,
+        request=request,
+        upstream_url=upstream_url,
+        policy_req=policy_req,
+        policy_response_cache_active=policy_response_cache_active,
+    )
+    if cache_key is not None:
+        hit = _serve_from_cache(
+            cache_key=cache_key,
+            request=request,
+            route=route,
+            policy_req=policy_req,
+            policy_runtime=policy_runtime,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
+            cfg=cfg,
+            gateway_metrics=gateway_metrics,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
         )
-        cached = request.app.state.cache.get(cache_key)
-        if cached is not None:
-            cached_response = cached_gateway_response(
-                cached=cached,
-                request=request,
-                route_name=route.name,
-                policy_req=policy_req,
-                policy_runtime=policy_runtime,
-                trace_base=trace_base,
-                trace_collector=trace_collector,
-                cfg=cfg,
-                gateway_metrics=gateway_metrics,
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-            )
-            if cached_response is not None:
-                return cached_response
-            request.app.state.cache.pop(cache_key, None)
+        if hit is not None:
+            return hit
 
-    timeout = httpx.Timeout(cfg.proxy_timeout_seconds)
-    max_attempts = max(1, cfg.proxy_max_attempts)
-    last_exc: Exception | None = None
-    upstream_response: httpx.Response | None = None
-    start = time.perf_counter()
-    attempts_used = 0
+    attempt_result = await _send_upstream_with_retries(
+        client=client,
+        cfg=cfg,
+        method=request.method,
+        upstream_url=upstream_url,
+        policy_req=policy_req,
+        upstream_auth=upstream_auth,
+        route=route,
+        pool=_PoolState(
+            pool_backend=pool_backend,
+            pool_backend_id=pool_backend_id,
+            backend=backend,
+            backend_id=backend_id,
+            backend_health=backend_health,
+        ),
+    )
+    upstream_response = attempt_result.response
+    attempts_used = attempt_result.attempts
+    last_exc = attempt_result.error
+    backend_id = attempt_result.pool.backend_id
+    backend = attempt_result.pool.backend
+    upstream_url = attempt_result.upstream_url
+    elapsed_seconds = attempt_result.elapsed_seconds
 
-    def _pool_failover() -> None:
-        nonlocal backend_id, backend, upstream_base_url, upstream_url
-        if pool_backend is None or backend is None:
-            return
-        now = time.time()
-        breaker = pool_member_breaker(pool_backend, backend)
-        record_backend_result(backend_health, breaker, backend_id, now=now, failed=True)
-        reselected = select_pool_member(cfg, backend_health, pool_backend_id, pool_backend, now=now)
-        if reselected is None:
-            return
-        backend_id, backend = reselected
-        upstream_base_url = render_backend_value(backend.url, policy_req, cfg) or backend.url
-        upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=upstream_base_url)
-        policy_req.headers["x-apim-backend-id"] = backend_id
-
-    for attempt in range(1, max_attempts + 1):
-        attempts_used = attempt
-        req = client.build_request(
-            request.method,
-            upstream_url,
-            content=policy_req.body,
-            headers=policy_req.headers,
-            params=policy_req.query,
-            timeout=timeout,
-        )
-        try:
-            upstream_response = await client.send(req, stream=cfg.proxy_streaming, auth=upstream_auth)
-        except httpx.RequestError as exc:
-            last_exc = exc
-            if attempt >= max_attempts:
-                _pool_failover()
-                break
-            _pool_failover()
-            continue
-
-        if upstream_response.status_code in cfg.proxy_retry_statuses and attempt < max_attempts:
-            await upstream_response.aclose()
-            upstream_response = None
-            _pool_failover()
-            continue
-        break
-
-    if pool_backend is not None and backend is not None and upstream_response is not None:
-        breaker = pool_member_breaker(pool_backend, backend)
-        record_backend_result(
-            backend_health,
-            breaker,
-            backend_id,
-            now=time.time(),
-            failed=upstream_response.status_code in breaker.error_statuses,
-        )
-
-    elapsed_seconds = time.perf_counter() - start
     request.state.apim_upstream_attempts = attempts_used
 
     if upstream_response is None:
-        request.state.apim_result_reason = "upstream_unavailable"
-        request.state.apim_upstream_duration_seconds = elapsed_seconds
-        set_current_span_attributes(
-            **{
-                APIM_RESULT_REASON_ATTR: "upstream_unavailable",
-                APIM_UPSTREAM_ATTEMPTS_ATTR: attempts_used,
-            }
+        return await _fail_upstream_unavailable(
+            request=request,
+            cfg=cfg,
+            policy_docs=policy_docs,
+            policy_req=policy_req,
+            policy_runtime=policy_runtime,
+            attempts_used=attempts_used,
+            elapsed_seconds=elapsed_seconds,
+            last_exc=last_exc,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
         )
-        if policy_docs:
-            failure_req = PolicyRequest(
-                method=request.method,
-                path=policy_req.path,
-                query=dict(policy_req.query),
-                headers=dict(policy_req.headers),
-                variables={**policy_req.variables, "error": "upstream_unavailable"},
-            )
-            override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
-            if override is not None:
-                request.state.apim_result_reason = "policy_on_error_override"
-                return _policy_response(
-                    body=override.body,
-                    status_code=override.status_code,
-                    headers=dict(override.headers),
-                    media_type=override.media_type,
-                    correlation_id=correlation_id,
-                    trace_id=trace_id,
-                    trace_store=trace_store,
-                    trace_base=trace_base,
-                    trace_collector=trace_collector,
-                    cfg=cfg,
-                    extra={
-                        "attempts": attempts_used,
-                        "status": override.status_code,
-                        "elapsed_ms": int(elapsed_seconds * 1000),
-                        "cache": None,
-                        "reason": "policy_on_error_override",
-                    },
-                    policy_req=policy_req,
-                    policy_runtime=policy_runtime,
-                )
-        import logging
 
-        logging.getLogger("apim-simulator").exception("Unable to reach upstream", exc_info=last_exc)
-        raise HTTPException(status_code=502, detail="Backend API unavailable")
-
-    response_headers = filter_response_headers(dict(upstream_response.headers))
-    media_type = upstream_response.headers.get("content-type")
-    response_headers["x-correlation-id"] = correlation_id
-    if pool_backend is not None:
-        response_headers["x-apim-backend-pool"] = pool_backend_id
-        response_headers["x-apim-backend-id"] = backend_id
     request.state.apim_upstream_duration_seconds = elapsed_seconds
-    upstream_status_code = int(upstream_response.status_code)
-    if not (100 <= upstream_status_code <= 599):
-        raise HTTPException(status_code=502, detail="Backend API returned invalid status code")
-    policy_buffering_required = bool(policy_req.variables.get("_policy_response_buffering_required"))
-    requires_buffering = (
-        cache_key is not None or policy_response_cache_active or policy_buffering_required or not cfg.proxy_streaming
+    upstream = await _read_upstream_response(
+        upstream_response=upstream_response,
+        correlation_id=correlation_id,
+        pool=attempt_result.pool,
+        cfg=cfg,
+        cache_key=cache_key,
+        policy_req=policy_req,
+        policy_response_cache_active=policy_response_cache_active,
     )
-    content = b""
-    if requires_buffering:
-        content = await upstream_response.aread()
-        await upstream_response.aclose()
+    response_headers, media_type, content = upstream.headers, upstream.media_type, upstream.content
+    upstream_status_code = upstream.status_code
+    requires_buffering = upstream.buffered
 
     if policy_docs:
-        outbound_req = PolicyRequest(
-            method=request.method,
-            path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=response_headers,
-            variables=policy_req.variables,
-            body=policy_req.body,
-            response_status_code=upstream_status_code,
+        response_headers, content, media_type = await _apply_outbound_policies(
+            policy_docs=policy_docs,
+            policy_runtime=policy_runtime,
+            request=request,
+            policy_req=policy_req,
             response_headers=response_headers,
-            response_body=content,
-            response_media_type=media_type,
+            content=content,
+            media_type=media_type,
+            upstream_status_code=upstream_status_code,
         )
-        await apply_outbound_async(policy_docs, outbound_req, policy_runtime)
-        response_headers = outbound_req.headers
-        content = outbound_req.response_body
-        media_type = outbound_req.response_media_type or media_type
 
     finalize_deferred_actions(
         PolicyRequest(
@@ -865,110 +1459,36 @@ async def execute_gateway_request(request: Request) -> Response:
     )
 
     if cache_key is not None:
-        request.state.apim_cache_result = "miss"
-        request.state.apim_result_reason = "upstream_response"
-        gateway_metrics.cache_events.add(
-            1,
-            {
-                APIM_ROUTE_NAME_ATTR: route.name,
-                APIM_CACHE_RESULT_ATTR: "miss",
-                "http.request.method": request.method,
-            },
-        )
-        set_current_span_attributes(
-            **{
-                APIM_CACHE_RESULT_ATTR: "miss",
-                APIM_RESULT_REASON_ATTR: "upstream_response",
-                APIM_UPSTREAM_ATTEMPTS_ATTR: attempts_used,
-            }
-        )
-        response_headers["x-apim-cache"] = "miss"
-        if len(request.app.state.cache) >= cfg.cache_max_entries:
-            request.app.state.cache.clear()
-        request.app.state.cache[cache_key] = (
-            time.time() + cfg.cache_ttl_seconds,
-            upstream_status_code,
-            dict(response_headers),
-            media_type,
-            content,
-        )
-        attach_trace(
-            response_headers,
+        return _store_and_respond(
+            request=request,
+            cfg=cfg,
+            route=route,
+            gateway_metrics=gateway_metrics,
+            cache_key=cache_key,
+            status_code=upstream_status_code,
+            response_headers=response_headers,
+            media_type=media_type,
+            content=content,
+            attempts_used=attempts_used,
+            elapsed_seconds=elapsed_seconds,
             trace_id=trace_id if trace_requested else None,
             trace_store=trace_store,
             trace_base=trace_base,
             trace_collector=trace_collector,
-            cfg=cfg,
-            extra={
-                "attempts": attempts_used,
-                "status": upstream_status_code,
-                "elapsed_ms": int(elapsed_seconds * 1000),
-                "cache": "miss",
-            },
-        )
-        return Response(
-            content=content,
-            status_code=upstream_status_code,
-            headers=response_headers,
-            media_type=media_type,
         )
 
-    if cfg.proxy_streaming and not requires_buffering:
-        request.state.apim_result_reason = "upstream_stream"
-        set_current_span_attributes(
-            **{
-                APIM_RESULT_REASON_ATTR: "upstream_stream",
-                APIM_UPSTREAM_ATTEMPTS_ATTR: attempts_used,
-            }
-        )
-        if trace_requested:
-            attach_trace(
-                response_headers,
-                trace_id=trace_id,
-                trace_store=trace_store,
-                trace_base=trace_base,
-                trace_collector=trace_collector,
-                cfg=cfg,
-                extra={
-                    "attempts": attempts_used,
-                    "status": upstream_status_code,
-                    "elapsed_ms": int(elapsed_seconds * 1000),
-                    "cache": None,
-                },
-            )
-        return StreamingResponse(
-            upstream_response.aiter_bytes(),
-            status_code=upstream_status_code,
-            headers=response_headers,
-            media_type=media_type,
-            background=BackgroundTask(upstream_response.aclose),
-        )
-
-    request.state.apim_result_reason = "upstream_response"
-    set_current_span_attributes(
-        **{
-            APIM_RESULT_REASON_ATTR: "upstream_response",
-            APIM_UPSTREAM_ATTEMPTS_ATTR: attempts_used,
-        }
-    )
-    if trace_requested:
-        attach_trace(
-            response_headers,
-            trace_id=trace_id,
-            trace_store=trace_store,
-            trace_base=trace_base,
-            trace_collector=trace_collector,
-            cfg=cfg,
-            extra={
-                "attempts": attempts_used,
-                "status": upstream_status_code,
-                "elapsed_ms": int(elapsed_seconds * 1000),
-                "cache": None,
-            },
-        )
-    return Response(
-        content=content,
+    return _uncached_response(
+        request=request,
+        cfg=cfg,
+        upstream_response=upstream_response,
+        streaming=cfg.proxy_streaming and not requires_buffering,
         status_code=upstream_status_code,
-        headers=response_headers,
+        response_headers=response_headers,
         media_type=media_type,
+        content=content,
+        attempts_used=attempts_used,
+        elapsed_seconds=elapsed_seconds,
+        trace=trace,
+        trace_store=trace_store,
+        trace_base=trace_base,
     )

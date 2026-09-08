@@ -11,7 +11,53 @@ CONTRACT_MATRIX_PATH = Path(__file__).resolve().parent.parent / "contracts" / "c
 ENFORCED_STATUSES = {"supported", "adapted", "partial"}
 
 
+def _string_list_field(entry: dict[str, Any], field: str, contract_id: str) -> tuple[list[str] | None, str | None]:
+    """Read a list-of-non-empty-strings field. Returns (value, error message)."""
+    raw = entry.get(field) or []
+    if not isinstance(raw, list) or not all(isinstance(item, str) and item.strip() for item in raw):
+        return None, f"{contract_id}: {field} must be a list of non-empty strings"
+    return [item.strip() for item in raw], None
+
+
+def _parse_contract_entry(
+    entry: Any, index: int, seen: set[str]
+) -> tuple[str | None, dict[str, Any] | None, str | None]:
+    """Validate one matrix entry. Returns (id, parsed, error message)."""
+    if not isinstance(entry, dict):
+        return None, None, f"contracts[{index}] must be a mapping"
+
+    contract_id = entry.get("id")
+    if not isinstance(contract_id, str) or not contract_id.strip():
+        return None, None, f"contracts[{index}] is missing a non-empty string 'id'"
+    contract_id = contract_id.strip()
+
+    if contract_id in seen:
+        return None, None, f"duplicate contract id: {contract_id}"
+
+    owner_tests, error = _string_list_field(entry, "owner_tests", contract_id)
+    if error is not None:
+        return None, None, error
+    doc_refs, error = _string_list_field(entry, "doc_refs", contract_id)
+    if error is not None:
+        return None, None, error
+
+    return (
+        contract_id,
+        {
+            "status": str(entry.get("status") or "").strip().lower(),
+            "owner_tests": owner_tests,
+            "doc_refs": doc_refs,
+        },
+        None,
+    )
+
+
 def _load_contract_matrix() -> dict[str, dict[str, Any]]:
+    """Read and validate contracts/contract_matrix.yml.
+
+    Every entry is checked, and all failures are reported together: fixing one
+    malformed contract at a time across repeated runs is the slow way to do it.
+    """
     if not CONTRACT_MATRIX_PATH.exists():
         raise pytest.UsageError(f"Contract matrix not found: {CONTRACT_MATRIX_PATH}")
 
@@ -22,37 +68,12 @@ def _load_contract_matrix() -> dict[str, dict[str, Any]]:
 
     out: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
-
     for index, entry in enumerate(contracts, start=1):
-        if not isinstance(entry, dict):
-            errors.append(f"contracts[{index}] must be a mapping")
+        contract_id, parsed, error = _parse_contract_entry(entry, index, set(out))
+        if error is not None:
+            errors.append(error)
             continue
-
-        contract_id = entry.get("id")
-        if not isinstance(contract_id, str) or not contract_id.strip():
-            errors.append(f"contracts[{index}] is missing a non-empty string 'id'")
-            continue
-        contract_id = contract_id.strip()
-
-        if contract_id in out:
-            errors.append(f"duplicate contract id: {contract_id}")
-            continue
-
-        owner_tests = entry.get("owner_tests") or []
-        if not isinstance(owner_tests, list) or not all(isinstance(item, str) and item.strip() for item in owner_tests):
-            errors.append(f"{contract_id}: owner_tests must be a list of non-empty strings")
-            continue
-
-        doc_refs = entry.get("doc_refs") or []
-        if not isinstance(doc_refs, list) or not all(isinstance(item, str) and item.strip() for item in doc_refs):
-            errors.append(f"{contract_id}: doc_refs must be a list of non-empty strings")
-            continue
-
-        out[contract_id] = {
-            "status": str(entry.get("status") or "").strip().lower(),
-            "owner_tests": [item.strip() for item in owner_tests],
-            "doc_refs": [item.strip() for item in doc_refs],
-        }
+        out[contract_id] = parsed
 
     if errors:
         raise pytest.UsageError("Contract matrix validation failed:\n- " + "\n- ".join(errors))
@@ -92,8 +113,14 @@ def _is_partial_run(config: pytest.Config) -> bool:
     return any(arg.split("::")[0] not in testpaths for arg in config.args)
 
 
-def pytest_collection_finish(session: pytest.Session) -> None:
-    contracts: dict[str, dict[str, Any]] = getattr(session.config, "_contract_matrix", {})
+def _collect_contract_marks(
+    session: pytest.Session, contracts: dict[str, dict[str, Any]]
+) -> tuple[dict[str, set[str]], dict[str, set[str]], list[str]]:
+    """Index which collected tests claim which contract ids.
+
+    Returns the tests per contract, the contracts per test, and any test naming
+    a contract id the matrix does not define.
+    """
     marked_items: dict[str, set[str]] = {contract_id: set() for contract_id in contracts}
     contract_ids_by_nodeid: dict[str, set[str]] = {}
     errors: list[str] = []
@@ -109,16 +136,44 @@ def pytest_collection_finish(session: pytest.Session) -> None:
                 continue
             marked_items[contract_id].add(item.nodeid)
 
-    if _is_partial_run(session.config):
-        # Unknown-id errors above still apply; coverage checks below do not.
-        if errors:
-            raise pytest.UsageError("Contract coverage validation failed:\n- " + "\n- ".join(errors))
-        return
+    return marked_items, contract_ids_by_nodeid, errors
 
+
+def _owner_test_errors(
+    session: pytest.Session,
+    contract_id: str,
+    owner_patterns: list[str],
+    contract_ids_by_nodeid: dict[str, set[str]],
+) -> list[str]:
+    """Check that each declared owner pattern matches a test that claims the contract.
+
+    A pattern matching nothing and a pattern matching only unmarked tests are
+    different failures, and both are worth naming separately.
+    """
+    errors: list[str] = []
+    for pattern in owner_patterns:
+        matched_nodeids = [item.nodeid for item in session.items if fnmatch(item.nodeid, pattern)]
+        if not matched_nodeids:
+            errors.append(f"{contract_id}: owner test pattern {pattern!r} matched no collected tests")
+            continue
+        if not any(contract_id in contract_ids_by_nodeid.get(nodeid, set()) for nodeid in matched_nodeids):
+            errors.append(
+                f"{contract_id}: owner test pattern {pattern!r} matched tests, but none were marked with {contract_id}"
+            )
+    return errors
+
+
+def _contract_coverage_errors(
+    session: pytest.Session,
+    contracts: dict[str, dict[str, Any]],
+    marked_items: dict[str, set[str]],
+    contract_ids_by_nodeid: dict[str, set[str]],
+) -> list[str]:
+    """Every enforced contract needs a marked test and a working owner pattern."""
+    errors: list[str] = []
     for contract_id, metadata in contracts.items():
         if metadata["status"] not in ENFORCED_STATUSES:
             continue
-
         if not marked_items[contract_id]:
             errors.append(f"{contract_id}: no collected tests are marked with this contract id")
 
@@ -126,17 +181,24 @@ def pytest_collection_finish(session: pytest.Session) -> None:
         if not owner_patterns:
             errors.append(f"{contract_id}: enforced contracts must declare at least one owner_tests entry")
             continue
+        errors.extend(_owner_test_errors(session, contract_id, owner_patterns, contract_ids_by_nodeid))
+    return errors
 
-        for pattern in owner_patterns:
-            matched_nodeids = [item.nodeid for item in session.items if fnmatch(item.nodeid, pattern)]
-            if not matched_nodeids:
-                errors.append(f"{contract_id}: owner test pattern {pattern!r} matched no collected tests")
-                continue
-            if not any(contract_id in contract_ids_by_nodeid.get(nodeid, set()) for nodeid in matched_nodeids):
-                errors.append(
-                    f"{contract_id}: owner test pattern {pattern!r} matched tests, "
-                    f"but none were marked with {contract_id}"
-                )
 
+def _fail_on(errors: list[str]) -> None:
     if errors:
         raise pytest.UsageError("Contract coverage validation failed:\n- " + "\n- ".join(errors))
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Check the collected suite against the contract matrix."""
+    contracts: dict[str, dict[str, Any]] = getattr(session.config, "_contract_matrix", {})
+    marked_items, contract_ids_by_nodeid, errors = _collect_contract_marks(session, contracts)
+
+    # Unknown-id errors apply to every run; coverage checks need the full suite.
+    if _is_partial_run(session.config):
+        _fail_on(errors)
+        return
+
+    errors.extend(_contract_coverage_errors(session, contracts, marked_items, contract_ids_by_nodeid))
+    _fail_on(errors)

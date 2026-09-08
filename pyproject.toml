@@ -25,6 +25,7 @@ dev = [
     "coverage[toml]>=7.6.0",
     "diff-cover>=9.2.0",
     "ruff>=0.8.0",
+    "mutmut>=3.2.0",
 ]
 mcp = [
     "mcp==1.26.0",
@@ -52,6 +53,7 @@ addopts = "-v --strict-markers"
 markers = [
     "contract(*ids): associates a test with one or more contract ids from contracts/contract_matrix.yml",
     "integration: requires external services (e.g. Keycloak) running",
+    "repo: asserts on repository artifacts (Dockerfile, catalog, packaging) rather than on app behaviour",
 ]
 
 [tool.coverage.run]
@@ -60,18 +62,44 @@ source = ["app"]
 relative_files = true
 
 [tool.coverage.report]
-fail_under = 75
+# A ratchet, like the complexity gate. It sat at 75 while the suite measured 82,
+# which means seven points of coverage could be lost without anything failing.
+# Raise it as coverage rises; never lower it to admit a regression.
+fail_under = 82
 show_missing = true
 skip_covered = false
 
 [tool.ruff]
 line-length = 120
 target-version = "py313"
+# mutmut writes deliberately-mutated copies of app/ here. Linting them reports
+# hundreds of findings about code nobody wrote.
+extend-exclude = ["mutants"]
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4", "UP"]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "C901"]
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+# A ratchet that has reached its target. A function scoring 14 is telling you it
+# holds fourteen paths a reader has to keep straight, and that a name is hiding
+# in there; 8 is the point at which that stops being true. This number only ever
+# goes down -- never raise it to admit a new function. Route-registration
+# builders carry a scoped noqa instead; see docs/complexity.md for why.
+max-complexity = 8
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.mutmut]
+source_paths = ["app"]
+
+# The suite reads fixtures from these directories by repo-root-relative path.
+# mutmut executes inside a `mutants/` copy, so anything not copied here fails
+# collection before a single mutant is scored.
+also_copy = ["contracts", "scripts", "examples"]
+
+# Integration tests need Keycloak on the network. They skip, so they can kill
+# no mutant while still costing collection time on every one of them.
+pytest_add_cli_args = ["-p", "no:cacheprovider", "-m", "not integration and not repo"]

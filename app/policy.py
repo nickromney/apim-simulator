@@ -6,6 +6,7 @@ import json
 import math
 import re
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -162,7 +163,61 @@ class ExpressionCondition(Condition):
         return bool(evaluate_apim_expression(self.expression, build_expression_context(req)))
 
 
+def _strip_condition_quotes(value: str) -> str:
+    """Drop one matched pair of surrounding quotes, single or double."""
+    value = value.strip()
+    if (value.startswith("'") and value.endswith("'")) or (value.startswith('"') and value.endswith('"')):
+        return value[1:-1]
+    return value
+
+
+def _condition_call_argument(expr: str, opener: str) -> str:
+    """The argument of a `name(...)` call at the head of a condition expression."""
+    return _strip_condition_quotes(expr.split(opener, 1)[1].split(")", 1)[0])
+
+
+def _parse_header_starts_with(expr: str) -> Condition:
+    prefix = _strip_condition_quotes(expr.split(".startswith(", 1)[1].rsplit(")", 1)[0])
+    return HeaderStartsWith(name=_condition_call_argument(expr, "header(").lower(), prefix=prefix)
+
+
+def _parse_header_equals(expr: str) -> Condition:
+    left, right = expr.split("==", 1)
+    return HeaderEquals(name=_condition_call_argument(left, "header(").lower(), value=_strip_condition_quotes(right))
+
+
+def _parse_query_equals(expr: str) -> Condition:
+    left, right = expr.split("==", 1)
+    return QueryEquals(name=_condition_call_argument(left, "query("), value=_strip_condition_quotes(right))
+
+
+def _parse_method_is(expr: str) -> Condition:
+    return MethodIs(method=_strip_condition_quotes(expr.split("==", 1)[1]))
+
+
+def _parse_path_starts_with(expr: str) -> Condition:
+    return PathStartsWith(prefix=_strip_condition_quotes(expr.split("path.startswith(", 1)[1].rsplit(")", 1)[0]))
+
+
+# Recognisers for the condition mini-language, in precedence order. The
+# startswith form must be tried before the equality form, because a
+# `header(x).startswith(y)` expression can also contain "==" inside its prefix.
+_CONDITION_FORMS: tuple[tuple[Callable[[str], bool], Callable[[str], Condition]], ...] = (
+    (lambda e: e.startswith("header(") and ").startswith(" in e, _parse_header_starts_with),
+    (lambda e: e.startswith("header(") and "==" in e, _parse_header_equals),
+    (lambda e: e.startswith("query(") and "==" in e, _parse_query_equals),
+    (lambda e: e.startswith("method") and "==" in e, _parse_method_is),
+    (lambda e: e.startswith("path.startswith("), _parse_path_starts_with),
+)
+
+
 def parse_condition(expr: str | None) -> Condition:
+    """Parse a `<when condition="...">` expression.
+
+    An empty condition always fires. An `@`-prefixed one is a full policy
+    expression evaluated at request time; everything else is the small
+    comparison language recognised by _CONDITION_FORMS.
+    """
     if not expr:
         return Always()
 
@@ -170,36 +225,9 @@ def parse_condition(expr: str | None) -> Condition:
     if expr.startswith("@"):
         return ExpressionCondition(expression=expr)
 
-    def _strip_quotes(v: str) -> str:
-        v = v.strip()
-        if (v.startswith("'") and v.endswith("'")) or (v.startswith('"') and v.endswith('"')):
-            return v[1:-1]
-        return v
-
-    if expr.startswith("header(") and ").startswith(" in expr:
-        name = _strip_quotes(expr.split("header(", 1)[1].split(")", 1)[0]).lower()
-        prefix = _strip_quotes(expr.split(".startswith(", 1)[1].rsplit(")", 1)[0])
-        return HeaderStartsWith(name=name, prefix=prefix)
-
-    if expr.startswith("header(") and "==" in expr:
-        left, right = expr.split("==", 1)
-        name = _strip_quotes(left.split("header(", 1)[1].split(")", 1)[0]).lower()
-        value = _strip_quotes(right)
-        return HeaderEquals(name=name, value=value)
-
-    if expr.startswith("query(") and "==" in expr:
-        left, right = expr.split("==", 1)
-        name = _strip_quotes(left.split("query(", 1)[1].split(")", 1)[0])
-        value = _strip_quotes(right)
-        return QueryEquals(name=name, value=value)
-
-    if expr.startswith("method") and "==" in expr:
-        _, right = expr.split("==", 1)
-        return MethodIs(method=_strip_quotes(right))
-
-    if expr.startswith("path.startswith("):
-        prefix = _strip_quotes(expr.split("path.startswith(", 1)[1].rsplit(")", 1)[0])
-        return PathStartsWith(prefix=prefix)
+    for matches, build in _CONDITION_FORMS:
+        if matches(expr):
+            return build(expr)
 
     raise HTTPException(status_code=500, detail=f"Unsupported policy condition: {expr}")
 
@@ -357,6 +385,50 @@ def _encode_mock_response_example(value: Any, *, content_type: str | None) -> by
     return str(value).encode("utf-8")
 
 
+def _mock_operation(req: PolicyRequest, runtime: PolicyRuntime | None) -> Any | None:
+    """The catalogue operation this request maps to, if it can be resolved.
+
+    Mocking is driven by the API catalogue, so a route with no api/operation
+    pair, or one naming something absent, has no sample to return.
+    """
+    if runtime is None or runtime.gateway_config is None:
+        return None
+    api_id = str(req.variables.get("api_id") or "")
+    operation_id = str(req.variables.get("operation_id") or "")
+    if not api_id or not operation_id:
+        return None
+    api = runtime.gateway_config.apis.get(api_id)
+    if api is None:
+        return None
+    return api.operations.get(operation_id)
+
+
+def _mock_representation(operation: Any, *, status_code: int, content_type: str | None) -> Any | None:
+    """The response representation to mock.
+
+    Prefers the response declared for this status code, falling back to the
+    first declared response: a mock-response naming a status the operation does
+    not document is still better served by an example than by an empty body.
+    """
+    candidates = [item for item in operation.responses if item.status_code == status_code]
+    if not candidates and operation.responses:
+        candidates = [operation.responses[0]]
+    if not candidates:
+        return None
+
+    representations = list(candidates[0].representations)
+    if not representations:
+        return None
+    if content_type:
+        matched = next(
+            (r for r in representations if r.content_type.lower() == content_type.lower()),
+            None,
+        )
+        if matched is not None:
+            return matched
+    return representations[0]
+
+
 def _mock_response_sample(
     req: PolicyRequest,
     runtime: PolicyRuntime | None,
@@ -364,53 +436,22 @@ def _mock_response_sample(
     status_code: int,
     content_type: str | None,
 ) -> tuple[bytes, str | None]:
-    if runtime is None or runtime.gateway_config is None:
-        return b"", content_type
-
-    api_id = str(req.variables.get("api_id") or "")
-    operation_id = str(req.variables.get("operation_id") or "")
-    if not api_id or not operation_id:
-        return b"", content_type
-
-    api = runtime.gateway_config.apis.get(api_id)
-    if api is None:
-        return b"", content_type
-    operation = api.operations.get(operation_id)
+    """The body a `mock-response` should return, from the API catalogue."""
+    operation = _mock_operation(req, runtime)
     if operation is None:
         return b"", content_type
 
-    candidates = [item for item in operation.responses if item.status_code == status_code]
-    if not candidates and operation.responses:
-        candidates = [operation.responses[0]]
-    if not candidates:
+    representation = _mock_representation(operation, status_code=status_code, content_type=content_type)
+    if representation is None:
         return b"", content_type
 
-    response = candidates[0]
-    representations = list(response.representations)
-    if not representations:
-        return b"", content_type
-
-    if content_type:
-        matched = next(
-            (
-                representation
-                for representation in representations
-                if representation.content_type.lower() == content_type.lower()
-            ),
-            None,
-        )
-        if matched is not None:
-            representations = [matched]
-
-    representation = representations[0]
     resolved_content_type = content_type or representation.content_type
-
     for example in representation.examples:
         if example.value is not None:
-            return _encode_mock_response_example(
-                example.value, content_type=resolved_content_type
-            ), resolved_content_type
-
+            return (
+                _encode_mock_response_example(example.value, content_type=resolved_content_type),
+                resolved_content_type,
+            )
     return b"", resolved_content_type
 
 
@@ -486,33 +527,40 @@ class IpFilter(PolicyNode):
     action: str
     allow: set[str]
 
+    def _matches_any_entry(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        """Is this address in the allow list, as a network or a literal?
+
+        An entry that will not parse is skipped rather than failing the request:
+        one malformed line in a list must not take the whole filter down.
+        """
+        for entry in self.allow:
+            try:
+                if "/" in entry:
+                    if ip in ipaddress.ip_network(entry, strict=False):
+                        return True
+                elif ip == ipaddress.ip_address(entry):
+                    return True
+            except ValueError:
+                continue
+        return False
+
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        """Allow or forbid by client address.
+
+        An unknown or unparseable client address is not filtered on: the policy
+        has nothing to decide against, and guessing would be worse than passing.
+        """
         ip_raw = req.variables.get("client_ip")
         if not isinstance(ip_raw, str) or not ip_raw:
             return None
-
         try:
             ip = ipaddress.ip_address(ip_raw)
         except ValueError:
             return None
 
-        allowed = False
-        for entry in self.allow:
-            try:
-                if "/" in entry:
-                    if ip in ipaddress.ip_network(entry, strict=False):
-                        allowed = True
-                        break
-                elif ip == ipaddress.ip_address(entry):
-                    allowed = True
-                    break
-            except ValueError:
-                continue
-
+        allowed = self._matches_any_entry(ip)
         action = (self.action or "allow").lower()
-        if action == "allow" and not allowed:
-            return ResponseSpec(status_code=403, headers={"content-type": "text/plain"}, body=b"IP not allowed")
-        if action == "forbid" and allowed:
+        if (action == "allow" and not allowed) or (action == "forbid" and allowed):
             return ResponseSpec(status_code=403, headers={"content-type": "text/plain"}, body=b"IP not allowed")
         return None
 
@@ -911,7 +959,41 @@ class RateLimitByKey(PolicyNode):
     remaining_calls_variable_name: str | None = None
     total_calls_header_name: str | None = None
 
+    def _defer(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
+        """Queue the increment for after the response is known."""
+        if runtime is None:
+            return
+        runtime.deferred_actions.append(
+            RateLimitByKeyDeferred(
+                calls=self.calls,
+                renewal_period=self.renewal_period,
+                counter_key=self.counter_key,
+                increment_condition=self.increment_condition,
+                increment_count=self.increment_count,
+                retry_after_header_name=self.retry_after_header_name,
+                retry_after_variable_name=self.retry_after_variable_name,
+                remaining_calls_header_name=self.remaining_calls_header_name,
+                remaining_calls_variable_name=self.remaining_calls_variable_name,
+                total_calls_header_name=self.total_calls_header_name,
+            )
+        )
+
+    def _publish_counts(self, req: PolicyRequest, runtime: PolicyRuntime | None, *, remaining: int, calls: int) -> None:
+        """Expose the remaining and total call counts where they were asked for."""
+        if self.remaining_calls_variable_name:
+            req.variables[self.remaining_calls_variable_name] = remaining
+            _record_variable_write(runtime, self.remaining_calls_variable_name, remaining, "rate-limit-by-key")
+        if self.remaining_calls_header_name:
+            _queue_response_header(req, self.remaining_calls_header_name, remaining)
+        if self.total_calls_header_name:
+            _queue_response_header(req, self.total_calls_header_name, calls)
+
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        """Count this call against a keyed bucket, or refuse it.
+
+        When the increment depends on the response, the counting is deferred and
+        this stage only checks whether the bucket is already full.
+        """
         store = req.variables.get("rate_limit_store")
         if not isinstance(store, dict):
             return None
@@ -920,35 +1002,21 @@ class RateLimitByKey(PolicyNode):
         counter_key = render_policy_value(self.counter_key, req, runtime)
         if not counter_key:
             raise HTTPException(status_code=500, detail="rate-limit-by-key requires counter-key")
+
         now = time.time()
         bucket = _rate_limit_bucket(store, f"rate-limit-by-key:{counter_key}")
         _prune_rate_limit_bucket(bucket, now, renewal_period)
 
         if _is_deferred_expression(self.increment_condition) or _is_deferred_expression(self.increment_count):
             if len(bucket) >= calls:
-                retry_after = _rate_limit_retry_after(bucket, now, renewal_period)
                 return self._limit_response(
                     req,
                     runtime,
                     calls=calls,
-                    retry_after=retry_after,
+                    retry_after=_rate_limit_retry_after(bucket, now, renewal_period),
                     remaining=0,
                 )
-            if runtime is not None:
-                runtime.deferred_actions.append(
-                    RateLimitByKeyDeferred(
-                        calls=self.calls,
-                        renewal_period=self.renewal_period,
-                        counter_key=self.counter_key,
-                        increment_condition=self.increment_condition,
-                        increment_count=self.increment_count,
-                        retry_after_header_name=self.retry_after_header_name,
-                        retry_after_variable_name=self.retry_after_variable_name,
-                        remaining_calls_header_name=self.remaining_calls_header_name,
-                        remaining_calls_variable_name=self.remaining_calls_variable_name,
-                        total_calls_header_name=self.total_calls_header_name,
-                    )
-                )
+            self._defer(req, runtime)
             _record_step(
                 runtime,
                 "rate-limit-by-key",
@@ -965,26 +1033,20 @@ class RateLimitByKey(PolicyNode):
         increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
         if should_increment and increment:
             bucket.extend([now] * increment)
+
         remaining = max(0, calls - len(bucket))
-        if self.remaining_calls_variable_name:
-            req.variables[self.remaining_calls_variable_name] = remaining
-            _record_variable_write(runtime, self.remaining_calls_variable_name, remaining, "rate-limit-by-key")
-        if self.remaining_calls_header_name:
-            _queue_response_header(req, self.remaining_calls_header_name, remaining)
-        if self.total_calls_header_name:
-            _queue_response_header(req, self.total_calls_header_name, calls)
+        self._publish_counts(req, runtime, remaining=remaining, calls=calls)
         _record_step(
             runtime,
             "rate-limit-by-key",
             {"counter_key": counter_key, "count": len(bucket), "remaining": remaining},
         )
         if len(bucket) > calls:
-            retry_after = _rate_limit_retry_after(bucket, now, renewal_period)
             return self._limit_response(
                 req,
                 runtime,
                 calls=calls,
-                retry_after=retry_after,
+                retry_after=_rate_limit_retry_after(bucket, now, renewal_period),
                 remaining=remaining,
             )
         return None
@@ -1098,6 +1160,38 @@ def _llm_message_part_text(part: Any) -> str:
     return ""
 
 
+def _llm_message_texts(messages: Any) -> list[str]:
+    """Text from a chat `messages` array.
+
+    A message's content is either a plain string or a list of typed parts, and
+    both spellings are in use across the providers this gateway fronts.
+    """
+    if not isinstance(messages, list):
+        return []
+    chunks: list[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            chunks.append(content)
+        elif isinstance(content, list):
+            chunks.extend(_llm_message_part_text(part) for part in content)
+    return chunks
+
+
+def _llm_top_level_prompt_texts(payload: dict[str, Any]) -> list[str]:
+    """Text from the non-chat prompt fields, each a string or a list of strings."""
+    chunks: list[str] = []
+    for field_name in ("prompt", "input", "system"):
+        value = payload.get(field_name)
+        if isinstance(value, str):
+            chunks.append(value)
+        elif isinstance(value, list):
+            chunks.extend(part for part in value if isinstance(part, str))
+    return chunks
+
+
 def _llm_prompt_text(body: bytes) -> str:
     if not body:
         return ""
@@ -1107,23 +1201,7 @@ def _llm_prompt_text(body: bytes) -> str:
         return body.decode("utf-8", errors="replace")
     if not isinstance(payload, dict):
         return ""
-    chunks: list[str] = []
-    messages = payload.get("messages")
-    if isinstance(messages, list):
-        for message in messages:
-            if not isinstance(message, dict):
-                continue
-            content = message.get("content")
-            if isinstance(content, str):
-                chunks.append(content)
-            elif isinstance(content, list):
-                chunks.extend(_llm_message_part_text(part) for part in content)
-    for field_name in ("prompt", "input", "system"):
-        value = payload.get(field_name)
-        if isinstance(value, str):
-            chunks.append(value)
-        elif isinstance(value, list):
-            chunks.extend(part for part in value if isinstance(part, str))
+    chunks = [*_llm_message_texts(payload.get("messages")), *_llm_top_level_prompt_texts(payload)]
     return "\n".join(chunk for chunk in chunks if chunk)
 
 
@@ -1160,17 +1238,14 @@ def _llm_usage_counts(usage: Any) -> dict[str, int] | None:
     return {"prompt": prompt or 0, "completion": completion or 0, "total": total}
 
 
-def _llm_usage_from_sse(body: bytes) -> tuple[dict[str, int] | None, str]:
-    """Scan an SSE stream for a usage payload and collect completion deltas.
+def _sse_json_payloads(body: bytes) -> Iterator[dict[str, Any]]:
+    """Yield the JSON object carried by each `data:` line of an SSE stream.
 
-    Returns (usage, delta_text): usage from the last chunk that carries one
-    (OpenAI stream_options.include_usage or Anthropic message_delta), plus the
-    concatenated completion text for estimation when no usage chunk exists.
+    Lines that are not data, the `[DONE]` sentinel, and anything that is not a
+    JSON object are skipped: a stream is read for what it happens to contain,
+    never rejected wholesale.
     """
-    usage: dict[str, int] | None = None
-    delta_parts: list[str] = []
-    text = body.decode("utf-8", errors="replace")
-    for line in text.splitlines():
+    for line in body.decode("utf-8", errors="replace").splitlines():
         stripped = line.strip()
         if not stripped.startswith("data:"):
             continue
@@ -1181,22 +1256,45 @@ def _llm_usage_from_sse(body: bytes) -> tuple[dict[str, int] | None, str]:
             payload = json.loads(payload_text)
         except json.JSONDecodeError:
             continue
-        if not isinstance(payload, dict):
-            continue
+        if isinstance(payload, dict):
+            yield payload
+
+
+def _sse_delta_texts(payload: dict[str, Any]) -> list[str]:
+    """Completion text from one stream chunk, in either provider's shape.
+
+    OpenAI puts it at `choices[].delta.content`; Anthropic puts it at
+    `delta.text`. A chunk may legitimately carry neither.
+    """
+    parts: list[str] = []
+    choices = payload.get("choices")
+    if isinstance(choices, list):
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta")
+            if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+                parts.append(delta["content"])
+    delta = payload.get("delta")
+    if isinstance(delta, dict) and isinstance(delta.get("text"), str):
+        parts.append(delta["text"])
+    return parts
+
+
+def _llm_usage_from_sse(body: bytes) -> tuple[dict[str, int] | None, str]:
+    """Scan an SSE stream for a usage payload and collect completion deltas.
+
+    Returns (usage, delta_text): usage from the last chunk that carries one
+    (OpenAI stream_options.include_usage or Anthropic message_delta), plus the
+    concatenated completion text for estimation when no usage chunk exists.
+    """
+    usage: dict[str, int] | None = None
+    delta_parts: list[str] = []
+    for payload in _sse_json_payloads(body):
         chunk_usage = _llm_usage_counts(payload.get("usage"))
         if chunk_usage is not None:
             usage = chunk_usage
-        choices = payload.get("choices")
-        if isinstance(choices, list):
-            for choice in choices:
-                if not isinstance(choice, dict):
-                    continue
-                delta = choice.get("delta")
-                if isinstance(delta, dict) and isinstance(delta.get("content"), str):
-                    delta_parts.append(delta["content"])
-        delta = payload.get("delta")
-        if isinstance(delta, dict) and isinstance(delta.get("text"), str):
-            delta_parts.append(delta["text"])
+        delta_parts.extend(_sse_delta_texts(payload))
     return usage, "".join(delta_parts)
 
 
@@ -1299,52 +1397,75 @@ class LlmTokenLimitDeferred(DeferredPolicyAction):
     tokens_consumed_header_name: str | None
     tokens_consumed_variable_name: str | None
 
+    def _rate_remaining(self, req: PolicyRequest, *, consumed: int, now: float) -> int | None:
+        """Charge the per-minute token bucket and report what is left of it."""
+        rate_store = req.variables.get("rate_limit_store")
+        if self.tokens_per_minute <= 0 or not isinstance(rate_store, dict):
+            return None
+        bucket = _llm_rate_bucket(rate_store, f"llm-token-limit:{self.counter_key}")
+        _prune_llm_rate_bucket(bucket, now)
+        if consumed:
+            bucket.append([now, float(consumed)])
+        return max(0, self.tokens_per_minute - _llm_rate_tokens_used(bucket))
+
+    def _quota_remaining(self, req: PolicyRequest, *, consumed: int, now: float) -> int | None:
+        """Charge the longer-period token quota and report what is left of it."""
+        quota_store = req.variables.get("quota_store")
+        if self.token_quota <= 0 or not self.token_quota_period or not isinstance(quota_store, dict):
+            return None
+        entry = _llm_quota_entry(
+            quota_store,
+            f"llm-token-quota:{self.counter_key}",
+            now=now,
+            period=self.token_quota_period,
+        )
+        if consumed:
+            entry["tokens"] = int(entry.get("tokens") or 0) + consumed
+        return max(0, self.token_quota - int(entry.get("tokens") or 0))
+
+    def _publish(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        headers: dict[str, str],
+        *,
+        value: int | None,
+        header_name: str | None,
+        variable_name: str | None,
+    ) -> None:
+        """Expose one counter as a response header, a policy variable, or both."""
+        if value is None:
+            return
+        if header_name:
+            headers[header_name.lower()] = str(value)
+        if variable_name:
+            req.variables[variable_name] = value
+            _record_variable_write(runtime, variable_name, value, "llm-token-limit")
+
     def finalize(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:
+        """Charge the token budgets once the response is known, and report them.
+
+        Deferred because the consumed-token count is only available after the
+        upstream has answered.
+        """
         consumed = _llm_consumed_tokens(req, estimated_prompt_tokens=self.estimated_prompt_tokens)
         now = time.time()
         headers = _response_header_target(req)
-        remaining_rate: int | None = None
-        remaining_quota: int | None = None
 
-        rate_store = req.variables.get("rate_limit_store")
-        if self.tokens_per_minute > 0 and isinstance(rate_store, dict):
-            bucket = _llm_rate_bucket(rate_store, f"llm-token-limit:{self.counter_key}")
-            _prune_llm_rate_bucket(bucket, now)
-            if consumed:
-                bucket.append([now, float(consumed)])
-            remaining_rate = max(0, self.tokens_per_minute - _llm_rate_tokens_used(bucket))
+        remaining_rate = self._rate_remaining(req, consumed=consumed, now=now)
+        remaining_quota = self._quota_remaining(req, consumed=consumed, now=now)
 
-        quota_store = req.variables.get("quota_store")
-        if self.token_quota > 0 and self.token_quota_period and isinstance(quota_store, dict):
-            entry = _llm_quota_entry(
-                quota_store,
-                f"llm-token-quota:{self.counter_key}",
-                now=now,
-                period=self.token_quota_period,
-            )
-            if consumed:
-                entry["tokens"] = int(entry.get("tokens") or 0) + consumed
-            remaining_quota = max(0, self.token_quota - int(entry.get("tokens") or 0))
+        for value, header_name, variable_name in (
+            (consumed, self.tokens_consumed_header_name, self.tokens_consumed_variable_name),
+            (remaining_rate, self.remaining_tokens_header_name, self.remaining_tokens_variable_name),
+            (
+                remaining_quota,
+                self.remaining_quota_tokens_header_name,
+                self.remaining_quota_tokens_variable_name,
+            ),
+        ):
+            self._publish(req, runtime, headers, value=value, header_name=header_name, variable_name=variable_name)
 
-        if self.tokens_consumed_header_name:
-            headers[self.tokens_consumed_header_name.lower()] = str(consumed)
-        if self.tokens_consumed_variable_name:
-            req.variables[self.tokens_consumed_variable_name] = consumed
-            _record_variable_write(runtime, self.tokens_consumed_variable_name, consumed, "llm-token-limit")
-        if remaining_rate is not None:
-            if self.remaining_tokens_header_name:
-                headers[self.remaining_tokens_header_name.lower()] = str(remaining_rate)
-            if self.remaining_tokens_variable_name:
-                req.variables[self.remaining_tokens_variable_name] = remaining_rate
-                _record_variable_write(runtime, self.remaining_tokens_variable_name, remaining_rate, "llm-token-limit")
-        if remaining_quota is not None:
-            if self.remaining_quota_tokens_header_name:
-                headers[self.remaining_quota_tokens_header_name.lower()] = str(remaining_quota)
-            if self.remaining_quota_tokens_variable_name:
-                req.variables[self.remaining_quota_tokens_variable_name] = remaining_quota
-                _record_variable_write(
-                    runtime, self.remaining_quota_tokens_variable_name, remaining_quota, "llm-token-limit"
-                )
         _record_step(
             runtime,
             "llm-token-limit",
@@ -1374,11 +1495,112 @@ class LlmTokenLimit(PolicyNode):
     tokens_consumed_header_name: str | None = None
     tokens_consumed_variable_name: str | None = None
 
+    def _quota_block(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        quota_store: Any,
+        counter_key: str,
+        token_quota: int,
+        token_quota_period: str,
+        estimate: bool,
+        estimated_prompt_tokens: int,
+        now: float,
+    ) -> tuple[int, ResponseSpec | None]:
+        """Check the longer-period quota. Returns (tokens used, refusal or None).
+
+        Estimating counts the prompt before the call and refuses when it would
+        push past the quota; not estimating only refuses once already at it.
+        """
+        if token_quota <= 0 or not isinstance(quota_store, dict):
+            return 0, None
+        entry = _llm_quota_entry(quota_store, f"llm-token-quota:{counter_key}", now=now, period=token_quota_period)
+        used = int(entry.get("tokens") or 0)
+        blocked = (used + estimated_prompt_tokens > token_quota) if estimate else (used >= token_quota)
+        if not blocked:
+            return used, None
+        retry_after = max(1, math.ceil(float(entry.get("window_end") or now) - now))
+        return used, self._limit_response(
+            req,
+            runtime,
+            status_code=403,
+            retry_after=retry_after,
+            body=f"Token quota is exceeded. Try again in {retry_after} seconds.",
+            counter_key=counter_key,
+        )
+
+    def _rate_block(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        rate_store: Any,
+        counter_key: str,
+        tokens_per_minute: int,
+        estimate: bool,
+        estimated_prompt_tokens: int,
+        now: float,
+    ) -> tuple[int, ResponseSpec | None]:
+        """Check the per-minute budget. Returns (tokens used, refusal or None)."""
+        if tokens_per_minute <= 0 or not isinstance(rate_store, dict):
+            return 0, None
+        bucket = _llm_rate_bucket(rate_store, f"llm-token-limit:{counter_key}")
+        _prune_llm_rate_bucket(bucket, now)
+        used = _llm_rate_tokens_used(bucket)
+        blocked = (used + estimated_prompt_tokens > tokens_per_minute) if estimate else (used >= tokens_per_minute)
+        if not blocked:
+            return used, None
+        retry_after = _llm_rate_retry_after(bucket, now)
+        return used, self._limit_response(
+            req,
+            runtime,
+            status_code=429,
+            retry_after=retry_after,
+            body=f"Token limit is exceeded. Try again in {retry_after} seconds.",
+            counter_key=counter_key,
+        )
+
+    def _defer(
+        self,
+        runtime: PolicyRuntime | None,
+        *,
+        counter_key: str,
+        tokens_per_minute: int,
+        token_quota: int,
+        token_quota_period: str,
+        estimated_prompt_tokens: int,
+    ) -> None:
+        """Queue the real token accounting for after the response is known."""
+        if runtime is None:
+            return
+        runtime.deferred_actions.append(
+            LlmTokenLimitDeferred(
+                counter_key=counter_key,
+                tokens_per_minute=tokens_per_minute,
+                token_quota=token_quota,
+                token_quota_period=token_quota_period,
+                estimated_prompt_tokens=estimated_prompt_tokens,
+                remaining_tokens_header_name=self.remaining_tokens_header_name,
+                remaining_tokens_variable_name=self.remaining_tokens_variable_name,
+                remaining_quota_tokens_header_name=self.remaining_quota_tokens_header_name,
+                remaining_quota_tokens_variable_name=self.remaining_quota_tokens_variable_name,
+                tokens_consumed_header_name=self.tokens_consumed_header_name,
+                tokens_consumed_variable_name=self.tokens_consumed_variable_name,
+            )
+        )
+
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        """Refuse calls already over a token budget, and defer the real counting.
+
+        Actual usage is only known once the model has answered, so this stage
+        checks the budgets and queues the accounting.
+        """
         rate_store = req.variables.get("rate_limit_store")
         quota_store = req.variables.get("quota_store")
         if not isinstance(rate_store, dict) and not isinstance(quota_store, dict):
             return None
+
         counter_key = render_policy_value(self.counter_key, req, runtime)
         if not counter_key:
             raise HTTPException(status_code=500, detail="llm-token-limit requires counter-key")
@@ -1392,67 +1614,45 @@ class LlmTokenLimit(PolicyNode):
         estimated_prompt_tokens = _estimate_llm_tokens_from_text(_llm_prompt_text(req.body)) if estimate else 0
         now = time.time()
 
-        used_quota = 0
-        if token_quota > 0 and isinstance(quota_store, dict):
-            entry = _llm_quota_entry(
-                quota_store,
-                f"llm-token-quota:{counter_key}",
-                now=now,
-                period=token_quota_period,
-            )
-            used_quota = int(entry.get("tokens") or 0)
-            blocked = (used_quota + estimated_prompt_tokens > token_quota) if estimate else (used_quota >= token_quota)
-            if blocked:
-                retry_after = max(1, math.ceil(float(entry.get("window_end") or now) - now))
-                return self._limit_response(
-                    req,
-                    runtime,
-                    status_code=403,
-                    retry_after=retry_after,
-                    body=f"Token quota is exceeded. Try again in {retry_after} seconds.",
-                    counter_key=counter_key,
-                )
+        used_quota, refusal = self._quota_block(
+            req,
+            runtime,
+            quota_store=quota_store,
+            counter_key=counter_key,
+            token_quota=token_quota,
+            token_quota_period=token_quota_period,
+            estimate=estimate,
+            estimated_prompt_tokens=estimated_prompt_tokens,
+            now=now,
+        )
+        if refusal is not None:
+            return refusal
 
-        used_rate = 0
-        if tokens_per_minute > 0 and isinstance(rate_store, dict):
-            bucket = _llm_rate_bucket(rate_store, f"llm-token-limit:{counter_key}")
-            _prune_llm_rate_bucket(bucket, now)
-            used_rate = _llm_rate_tokens_used(bucket)
-            blocked = (
-                (used_rate + estimated_prompt_tokens > tokens_per_minute)
-                if estimate
-                else (used_rate >= tokens_per_minute)
-            )
-            if blocked:
-                retry_after = _llm_rate_retry_after(bucket, now)
-                return self._limit_response(
-                    req,
-                    runtime,
-                    status_code=429,
-                    retry_after=retry_after,
-                    body=f"Token limit is exceeded. Try again in {retry_after} seconds.",
-                    counter_key=counter_key,
-                )
+        used_rate, refusal = self._rate_block(
+            req,
+            runtime,
+            rate_store=rate_store,
+            counter_key=counter_key,
+            tokens_per_minute=tokens_per_minute,
+            estimate=estimate,
+            estimated_prompt_tokens=estimated_prompt_tokens,
+            now=now,
+        )
+        if refusal is not None:
+            return refusal
 
+        # The deferred accounting reads the response body, so it must be buffered.
         req.variables["_policy_response_buffering_required"] = True
         if self.tokens_consumed_variable_name:
             req.variables[self.tokens_consumed_variable_name] = estimated_prompt_tokens
-        if runtime is not None:
-            runtime.deferred_actions.append(
-                LlmTokenLimitDeferred(
-                    counter_key=counter_key,
-                    tokens_per_minute=tokens_per_minute,
-                    token_quota=token_quota,
-                    token_quota_period=token_quota_period,
-                    estimated_prompt_tokens=estimated_prompt_tokens,
-                    remaining_tokens_header_name=self.remaining_tokens_header_name,
-                    remaining_tokens_variable_name=self.remaining_tokens_variable_name,
-                    remaining_quota_tokens_header_name=self.remaining_quota_tokens_header_name,
-                    remaining_quota_tokens_variable_name=self.remaining_quota_tokens_variable_name,
-                    tokens_consumed_header_name=self.tokens_consumed_header_name,
-                    tokens_consumed_variable_name=self.tokens_consumed_variable_name,
-                )
-            )
+        self._defer(
+            runtime,
+            counter_key=counter_key,
+            tokens_per_minute=tokens_per_minute,
+            token_quota=token_quota,
+            token_quota_period=token_quota_period,
+            estimated_prompt_tokens=estimated_prompt_tokens,
+        )
         _record_step(
             runtime,
             "llm-token-limit",
@@ -1653,18 +1853,46 @@ class ValidateContent(PolicyNode):
     errors_variable_name: str | None = None
     content_types: tuple[ValidateContentType, ...] = ()
 
-    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        if not req.body:
+    def _size_failure(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> ResponseSpec | None:
+        if self.max_size is None or len(req.body) <= self.max_size:
             return None
-        if self.max_size is not None and len(req.body) > self.max_size:
-            outcome = self._fail(
+        return self._fail(
+            req,
+            runtime,
+            action=self.size_exceeded_action,
+            message=f"Request body is larger than max-size ({self.max_size} bytes)",
+        )
+
+    def _json_failure(
+        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, matched: Any, request_content_type: str
+    ) -> ResponseSpec | None:
+        if matched.validate_as != "json":
+            return None
+        try:
+            json.loads(req.body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return self._fail(
                 req,
                 runtime,
-                action=self.size_exceeded_action,
-                message=f"Request body is larger than max-size ({self.max_size} bytes)",
+                action=matched.action,
+                message=f"Body is not valid JSON for content type {request_content_type}",
             )
-            if outcome is not None:
-                return outcome
+        return None
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        """Validate the request body against the declared content types.
+
+        An empty body is never validated. A content type the policy does not
+        declare is handled by unspecified-content-type-action, which may well be
+        to ignore it.
+        """
+        if not req.body:
+            return None
+
+        outcome = self._size_failure(req, runtime)
+        if outcome is not None:
+            return outcome
+
         request_content_type = (req.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
         matched = next(
             (item for item in self.content_types if item.content_type.lower() == request_content_type),
@@ -1681,16 +1909,11 @@ class ValidateContent(PolicyNode):
             return None
         if matched.action == "ignore":
             return None
-        if matched.validate_as == "json":
-            try:
-                json.loads(req.body.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                return self._fail(
-                    req,
-                    runtime,
-                    action=matched.action,
-                    message=f"Body is not valid JSON for content type {request_content_type}",
-                )
+
+        outcome = self._json_failure(req, runtime, matched=matched, request_content_type=request_content_type)
+        if outcome is not None:
+            return outcome
+
         _record_step(runtime, "validate-content", {"content_type": request_content_type, "valid": True})
         return None
 
@@ -1716,6 +1939,11 @@ class ValidateContent(PolicyNode):
         return None
 
 
+# Headers every HTTP client sends. validate-parameters must not reject these as
+# "unspecified", or it fails every request rather than catching a mistake.
+_ALWAYS_ALLOWED_HEADERS = frozenset({"host", "content-type", "content-length", "accept", "connection", "user-agent"})
+
+
 @dataclass(frozen=True)
 class ValidateParameters(PolicyNode):
     specified_parameter_action: str = "prevent"
@@ -1726,16 +1954,71 @@ class ValidateParameters(PolicyNode):
     query_specified_action: str | None = None
     query_unspecified_action: str | None = None
 
+    def _missing_required_failure(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        kind: str,
+        declared: list[Any],
+        present: set[str],
+        normalise: Any,
+        action: str,
+    ) -> ResponseSpec | None:
+        """Refuse when a parameter the operation declares required is absent."""
+        if action == "ignore":
+            return None
+        for param in declared:
+            if param.required and normalise(param.name) not in present:
+                outcome = self._fail(
+                    req,
+                    runtime,
+                    action=action,
+                    message=f"Required {kind} parameter {param.name} is missing",
+                )
+                if outcome is not None:
+                    return outcome
+        return None
+
+    def _unspecified_failure(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        kind: str,
+        declared_names: set[str],
+        present: set[str],
+        action: str,
+    ) -> ResponseSpec | None:
+        """Refuse parameters the operation never declared.
+
+        Headers every HTTP client sends are exempt: rejecting `host` or
+        `user-agent` would fail every request rather than catch a mistake.
+        """
+        if action == "ignore":
+            return None
+        for name in sorted(present):
+            if name in declared_names or (kind == "header" and name in _ALWAYS_ALLOWED_HEADERS):
+                continue
+            outcome = self._fail(
+                req,
+                runtime,
+                action=action,
+                message=f"Unspecified {kind} parameter {name} is not allowed",
+            )
+            if outcome is not None:
+                return outcome
+        return None
+
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        """Check headers and query parameters against the operation's contract."""
         operation = _operation_request_metadata(req, runtime)
         request_meta = getattr(operation, "request", None)
-        declared_headers = list(getattr(request_meta, "headers", []) or [])
-        declared_query = list(getattr(request_meta, "query_parameters", []) or [])
 
         checks = (
             (
                 "header",
-                declared_headers,
+                list(getattr(request_meta, "headers", []) or []),
                 {name.lower() for name in req.headers},
                 lambda name: name.lower(),
                 self.headers_specified_action or self.specified_parameter_action,
@@ -1743,7 +2026,7 @@ class ValidateParameters(PolicyNode):
             ),
             (
                 "query",
-                declared_query,
+                list(getattr(request_meta, "query_parameters", []) or []),
                 set(req.query),
                 lambda name: name,
                 self.query_specified_action or self.specified_parameter_action,
@@ -1752,31 +2035,28 @@ class ValidateParameters(PolicyNode):
         )
 
         for kind, declared, present, normalise, specified_action, unspecified_action in checks:
-            declared_names = {normalise(param.name) for param in declared}
-            if specified_action != "ignore":
-                for param in declared:
-                    if param.required and normalise(param.name) not in present:
-                        outcome = self._fail(
-                            req,
-                            runtime,
-                            action=specified_action,
-                            message=f"Required {kind} parameter {param.name} is missing",
-                        )
-                        if outcome is not None:
-                            return outcome
-            if unspecified_action != "ignore":
-                builtin = {"host", "content-type", "content-length", "accept", "connection", "user-agent"}
-                for name in sorted(present):
-                    if name in declared_names or (kind == "header" and name in builtin):
-                        continue
-                    outcome = self._fail(
-                        req,
-                        runtime,
-                        action=unspecified_action,
-                        message=f"Unspecified {kind} parameter {name} is not allowed",
-                    )
-                    if outcome is not None:
-                        return outcome
+            outcome = self._missing_required_failure(
+                req,
+                runtime,
+                kind=kind,
+                declared=declared,
+                present=present,
+                normalise=normalise,
+                action=specified_action,
+            )
+            if outcome is not None:
+                return outcome
+
+            outcome = self._unspecified_failure(
+                req,
+                runtime,
+                kind=kind,
+                declared_names={normalise(param.name) for param in declared},
+                present=present,
+                action=unspecified_action,
+            )
+            if outcome is not None:
+                return outcome
         return None
 
     def _fail(
@@ -2038,27 +2318,56 @@ class ValidateJwt(PolicyNode):
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         raise RuntimeError("validate-jwt must be executed through apply_async")
 
-    async def apply_async(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        token = render_policy_value(self.token_value or "", req, runtime) if self.token_value else None
-        header_name = render_policy_value(self.header_name or "", req, runtime) if self.header_name else None
-        query_name = (
-            render_policy_value(self.query_parameter_name or "", req, runtime) if self.query_parameter_name else None
-        )
+    def _extract_token(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> str | None:
+        """Find the bearer token, wherever the policy says it lives.
 
+        A named header wins, then a named query parameter, then an explicit
+        token expression. When a scheme is required on Authorization, a value
+        without that exact prefix counts as no token at all.
+        """
+        header_name = render_policy_value(self.header_name or "", req, runtime) if self.header_name else None
         if header_name:
             header_value = req.headers.get(header_name.lower())
             if header_value is None:
-                return self._failure(req, runtime, "JWT not present.")
+                return None
             if self.require_scheme and header_name.lower() == "authorization":
                 expected_prefix = f"{self.require_scheme} "
                 if not header_value.startswith(expected_prefix):
-                    return self._failure(req, runtime, "JWT not present.")
-                token = header_value[len(expected_prefix) :].strip()
-            else:
-                token = header_value.strip()
-        elif query_name:
-            token = req.query.get(query_name)
+                    return None
+                return header_value[len(expected_prefix) :].strip()
+            return header_value.strip()
 
+        query_name = (
+            render_policy_value(self.query_parameter_name or "", req, runtime) if self.query_parameter_name else None
+        )
+        if query_name:
+            return req.query.get(query_name)
+
+        return render_policy_value(self.token_value or "", req, runtime) if self.token_value else None
+
+    def _publish_claims(
+        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, claims: dict[str, Any], token: str
+    ) -> None:
+        """Expose the validated claims to later policy and to route authorization."""
+        req.variables["_last_jwt_claims"] = claims
+        _record_variable_write(runtime, "_last_jwt_claims", claims, "validate-jwt")
+        if self.output_token_variable_name:
+            jwt_value = JwtValue(claims, token)
+            req.variables[self.output_token_variable_name] = jwt_value
+            _record_variable_write(runtime, self.output_token_variable_name, jwt_value, "validate-jwt")
+        _record_jwt_validation(
+            runtime,
+            {
+                "status": "valid",
+                "issuer": claims.get("iss"),
+                "audience": claims.get("aud"),
+                "output_variable": self.output_token_variable_name,
+            },
+        )
+
+    async def apply_async(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        """Validate a JWT and publish its claims, or refuse the call."""
+        token = self._extract_token(req, runtime)
         if not token:
             return self._failure(req, runtime, "JWT not present.")
 
@@ -2076,21 +2385,7 @@ class ValidateJwt(PolicyNode):
                 body=str(self.failed_validation_error_message or exc.detail).encode("utf-8"),
             )
 
-        req.variables["_last_jwt_claims"] = claims
-        _record_variable_write(runtime, "_last_jwt_claims", claims, "validate-jwt")
-        if self.output_token_variable_name:
-            jwt_value = JwtValue(claims, token)
-            req.variables[self.output_token_variable_name] = jwt_value
-            _record_variable_write(runtime, self.output_token_variable_name, jwt_value, "validate-jwt")
-        _record_jwt_validation(
-            runtime,
-            {
-                "status": "valid",
-                "issuer": claims.get("iss"),
-                "audience": claims.get("aud"),
-                "output_variable": self.output_token_variable_name,
-            },
-        )
+        self._publish_claims(req, runtime, claims=claims, token=token)
         return None
 
     def _failure(self, req: PolicyRequest, runtime: PolicyRuntime | None, detail: str) -> ResponseSpec:
@@ -2143,43 +2438,55 @@ class ValidateJwt(PolicyNode):
 
         raise HTTPException(status_code=401, detail="Invalid or expired access token") from last_error
 
-    def _validate_claims(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
-        expected_issuers = [render_policy_value(item, req, runtime) for item in self.issuers]
-        expected_audiences = [render_policy_value(item, req, runtime) for item in self.audiences]
-        if not expected_issuers and claims.get("_metadata_issuer"):
-            expected_issuers = [str(claims.get("_metadata_issuer"))]
-
-        issuer = str(claims.get("iss") or "")
-        if expected_issuers and issuer not in expected_issuers:
+    def _check_issuer(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
+        """The issuer must be one the policy names, or the one discovered from metadata."""
+        expected = [render_policy_value(item, req, runtime) for item in self.issuers]
+        if not expected and claims.get("_metadata_issuer"):
+            expected = [str(claims.get("_metadata_issuer"))]
+        if expected and str(claims.get("iss") or "") not in expected:
             raise HTTPException(status_code=401, detail="Issuer validation failed")
 
+    def _check_audience(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
+        """`aud` may be a single value or a list; one overlap is enough."""
+        expected = [render_policy_value(item, req, runtime) for item in self.audiences]
+        if not expected:
+            return
         actual_aud = claims.get("aud")
-        audiences = (
-            [str(item) for item in actual_aud]
-            if isinstance(actual_aud, list)
-            else ([str(actual_aud)] if actual_aud else [])
-        )
-        if expected_audiences and not set(expected_audiences).intersection(audiences):
+        if isinstance(actual_aud, list):
+            audiences = [str(item) for item in actual_aud]
+        else:
+            audiences = [str(actual_aud)] if actual_aud else []
+        if not set(expected).intersection(audiences):
             raise HTTPException(status_code=401, detail="Audience validation failed")
 
+    @staticmethod
+    def _claim_values(actual: Any, separator: str | None) -> list[str]:
+        """A claim's values, whether it is a list, a delimited string, or a scalar."""
+        if isinstance(actual, list):
+            return [str(item) for item in actual]
+        if separator and isinstance(actual, str):
+            return [item.strip() for item in actual.split(separator) if item.strip()]
+        return [str(actual)]
+
+    def _check_required_claims(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
+        """Each required claim must be present and match, by `any` or by `all`."""
         for claim in self.required_claims:
             actual = claims.get(claim.name)
             if actual is None:
                 raise HTTPException(status_code=401, detail=f"Missing required claim: {claim.name}")
-            if isinstance(actual, list):
-                actual_values = [str(item) for item in actual]
-            elif claim.separator and isinstance(actual, str):
-                actual_values = [item.strip() for item in actual.split(claim.separator) if item.strip()]
-            else:
-                actual_values = [str(actual)]
 
-            expected = [render_policy_value(item, req, runtime) for item in claim.values]
-            if claim.match == "any":
-                if not set(expected).intersection(actual_values):
-                    raise HTTPException(status_code=401, detail=f"Claim validation failed: {claim.name}")
-                continue
-            if not set(expected).issubset(set(actual_values)):
+            actual_values = set(self._claim_values(actual, claim.separator))
+            expected = {render_policy_value(item, req, runtime) for item in claim.values}
+            satisfied = (
+                bool(expected.intersection(actual_values)) if claim.match == "any" else expected.issubset(actual_values)
+            )
+            if not satisfied:
                 raise HTTPException(status_code=401, detail=f"Claim validation failed: {claim.name}")
+
+    def _validate_claims(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
+        self._check_issuer(claims, req, runtime)
+        self._check_audience(claims, req, runtime)
+        self._check_required_claims(claims, req, runtime)
 
 
 @dataclass(frozen=True)
@@ -2228,20 +2535,25 @@ class SendRequest(PolicyNode):
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         raise RuntimeError("send-request must be executed through apply_async")
 
-    async def apply_async(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        if runtime is None or runtime.http_client is None:
-            raise HTTPException(status_code=500, detail="send-request requires an HTTP client")
+    def _build_callout_request(
+        self, req: PolicyRequest, runtime: PolicyRuntime | None
+    ) -> tuple[str, str, PolicyRequest]:
+        """Assemble the outbound call: its URL, method, headers and body.
 
+        `mode="copy"` starts from the inbound request; anything else starts from
+        an empty GET. Either way the policy's own set-header and set-body nodes
+        are applied on top.
+        """
         mode = (render_policy_value(self.mode, req, runtime) or "new").lower()
-        headers = dict(req.headers) if mode == "copy" else {}
-        method = req.method if mode == "copy" else "GET"
-        body = req.body if mode == "copy" else b""
-        url = str(req.variables.get("original_request_url") or "")
+        copying = mode == "copy"
 
+        url = str(req.variables.get("original_request_url") or "")
         if self.url is not None:
             url = render_policy_value(self.url, req, runtime)
         if not url:
             raise HTTPException(status_code=500, detail="send-request requires set-url")
+
+        method = req.method if copying else "GET"
         if self.method is not None:
             method = render_policy_value(self.method, req, runtime).upper()
 
@@ -2249,54 +2561,70 @@ class SendRequest(PolicyNode):
             method=req.method,
             path=req.path,
             query=dict(req.query),
-            headers=headers,
+            headers=dict(req.headers) if copying else {},
             variables=req.variables,
-            body=body,
+            body=req.body if copying else b"",
         )
         for header in self.headers:
             header.apply(temp_req, runtime)
         if self.body is not None:
             temp_req.body = render_policy_value(self.body, req, runtime).encode("utf-8")
 
+        self._apply_callout_authentication(temp_req, req, runtime)
+        return url, method, temp_req
+
+    def _apply_callout_authentication(
+        self, temp_req: PolicyRequest, req: PolicyRequest, runtime: PolicyRuntime | None
+    ) -> None:
+        """Signal managed identity or client certificate to the callout target.
+
+        The simulator has no real credential to present, so it says which one
+        would have been used rather than presenting one.
+        """
         if self.authentication_managed_identity_resource is not None:
             temp_req.headers["x-apim-managed-identity"] = "true"
             temp_req.headers["x-apim-managed-identity-resource"] = render_policy_value(
-                self.authentication_managed_identity_resource,
-                req,
-                runtime,
+                self.authentication_managed_identity_resource, req, runtime
             )
         if self.authentication_certificate_thumbprint is not None:
             temp_req.headers["x-apim-authentication-certificate-thumbprint"] = render_policy_value(
-                self.authentication_certificate_thumbprint,
-                req,
-                runtime,
+                self.authentication_certificate_thumbprint, req, runtime
             )
 
+    def _record_ignored_error(
+        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, url: str, method: str, exc: Exception
+    ) -> None:
+        """Record a failed callout the policy asked to tolerate."""
+        req.variables[self.response_variable_name] = None
+        _record_variable_write(runtime, self.response_variable_name, None, "send-request")
+        _record_send_request(
+            runtime,
+            {
+                "url": url,
+                "method": method,
+                "status": "ignored-error",
+                "error": str(exc),
+                "response_variable_name": self.response_variable_name,
+            },
+        )
+
+    async def apply_async(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        """Make a side call and store its response in a policy variable."""
+        if runtime is None or runtime.http_client is None:
+            raise HTTPException(status_code=500, detail="send-request requires an HTTP client")
+
+        url, method, temp_req = self._build_callout_request(req, runtime)
         timeout = float(render_policy_value(self.timeout or "60", req, runtime)) if self.timeout else 60.0
+
         try:
             response = await runtime.http_client.request(
-                method,
-                url,
-                headers=temp_req.headers,
-                content=temp_req.body,
-                timeout=timeout,
+                method, url, headers=temp_req.headers, content=temp_req.body, timeout=timeout
             )
         except httpx.RequestError as exc:
-            if self.ignore_error:
-                req.variables[self.response_variable_name] = None
-                _record_variable_write(runtime, self.response_variable_name, None, "send-request")
-                _record_send_request(
-                    runtime,
-                    {
-                        "url": url,
-                        "method": method,
-                        "status": "ignored-error",
-                        "error": str(exc),
-                        "response_variable_name": self.response_variable_name,
-                    },
-                )
-                return None
-            raise HTTPException(status_code=500, detail=f"send-request failed: {exc}") from exc
+            if not self.ignore_error:
+                raise HTTPException(status_code=500, detail=f"send-request failed: {exc}") from exc
+            self._record_ignored_error(req, runtime, url=url, method=method, exc=exc)
+            return None
 
         callout = CalloutResponse(
             status_code=response.status_code,
@@ -2968,6 +3296,48 @@ def _parse_children(
     return out
 
 
+# Policy elements whose parser needs nothing but the element itself. Some Azure
+# elements have two spellings (the vendor-neutral `llm-*` and the older
+# `azure-openai-*`); both map to the same parser rather than to two nodes.
+_ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
+    "set-header": _parse_set_header,
+    "set-variable": _parse_set_variable,
+    "set-query-parameter": _parse_set_query_parameter,
+    "set-body": _parse_set_body,
+    "rewrite-uri": _parse_rewrite_uri,
+    "check-header": _parse_check_header,
+    "ip-filter": _parse_ip_filter,
+    "rate-limit": _parse_rate_limit,
+    "rate-limit-by-key": _parse_rate_limit_by_key,
+    "quota": _parse_quota,
+    "quota-by-key": _parse_quota_by_key,
+    "llm-token-limit": _parse_llm_token_limit,
+    "azure-openai-token-limit": _parse_llm_token_limit,
+    "llm-emit-token-metric": _parse_llm_emit_token_metric,
+    "azure-openai-emit-token-metric": _parse_llm_emit_token_metric,
+    "emit-metric": _parse_emit_metric,
+    "validate-content": _parse_validate_content,
+    "validate-parameters": _parse_validate_parameters,
+    "validate-status-code": _parse_validate_status_code,
+    "cache-lookup": _parse_cache_lookup,
+    "cache-store": _parse_cache_store,
+    "cache-lookup-value": _parse_cache_lookup_value,
+    "cache-store-value": _parse_cache_store_value,
+    "cache-remove-value": _parse_cache_remove_value,
+    "return-response": _parse_return_response,
+    "mock-response": _parse_mock_response,
+    "validate-jwt": _parse_validate_jwt,
+    "set-backend-service": _parse_set_backend_service,
+    "send-request": _parse_send_request,
+}
+
+# Elements that carry no attributes worth reading.
+_CONSTANT_ELEMENTS: dict[str, Callable[[], PolicyNode]] = {
+    "base": NoOp,
+    "cors": Cors,
+}
+
+
 def _parse_node(
     el: ElementTree.Element,
     *,
@@ -2975,59 +3345,15 @@ def _parse_node(
     section_name: str,
     seen_fragments: set[str],
 ) -> PolicyNode:
+    """One policy element to one node.
+
+    `choose` is the only element that can contain other elements, so it is the
+    only one that needs the fragment table and the recursion guard.
+    """
     tag = el.tag
-    if tag == "base":
-        return NoOp()
-    if tag == "set-header":
-        return _parse_set_header(el)
-    if tag == "set-variable":
-        return _parse_set_variable(el)
-    if tag == "set-query-parameter":
-        return _parse_set_query_parameter(el)
-    if tag == "set-body":
-        return _parse_set_body(el)
-    if tag == "rewrite-uri":
-        return _parse_rewrite_uri(el)
-    if tag == "check-header":
-        return _parse_check_header(el)
-    if tag == "ip-filter":
-        return _parse_ip_filter(el)
-    if tag == "cors":
-        return Cors()
-    if tag == "rate-limit":
-        return _parse_rate_limit(el)
-    if tag == "rate-limit-by-key":
-        return _parse_rate_limit_by_key(el)
-    if tag == "quota":
-        return _parse_quota(el)
-    if tag == "quota-by-key":
-        return _parse_quota_by_key(el)
-    if tag in {"llm-token-limit", "azure-openai-token-limit"}:
-        return _parse_llm_token_limit(el)
-    if tag in {"llm-emit-token-metric", "azure-openai-emit-token-metric"}:
-        return _parse_llm_emit_token_metric(el)
-    if tag == "emit-metric":
-        return _parse_emit_metric(el)
-    if tag == "validate-content":
-        return _parse_validate_content(el)
-    if tag == "validate-parameters":
-        return _parse_validate_parameters(el)
-    if tag == "validate-status-code":
-        return _parse_validate_status_code(el)
-    if tag == "cache-lookup":
-        return _parse_cache_lookup(el)
-    if tag == "cache-store":
-        return _parse_cache_store(el)
-    if tag == "cache-lookup-value":
-        return _parse_cache_lookup_value(el)
-    if tag == "cache-store-value":
-        return _parse_cache_store_value(el)
-    if tag == "cache-remove-value":
-        return _parse_cache_remove_value(el)
-    if tag == "return-response":
-        return _parse_return_response(el)
-    if tag == "mock-response":
-        return _parse_mock_response(el)
+    constant = _CONSTANT_ELEMENTS.get(tag)
+    if constant is not None:
+        return constant()
     if tag == "choose":
         return _parse_choose(
             el,
@@ -3035,13 +3361,10 @@ def _parse_node(
             section_name=section_name,
             seen_fragments=seen_fragments,
         )
-    if tag == "validate-jwt":
-        return _parse_validate_jwt(el)
-    if tag == "set-backend-service":
-        return _parse_set_backend_service(el)
-    if tag == "send-request":
-        return _parse_send_request(el)
-    raise HTTPException(status_code=500, detail=f"Unsupported policy element: {tag}")
+    parser = _ELEMENT_PARSERS.get(tag)
+    if parser is None:
+        raise HTTPException(status_code=500, detail=f"Unsupported policy element: {tag}")
+    return parser(el)
 
 
 def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = None) -> PolicyDocument:

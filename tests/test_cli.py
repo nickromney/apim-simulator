@@ -188,7 +188,9 @@ def test_wrong_tenant_key_is_a_403_error_with_exit_code_1(capsys: pytest.Capture
     assert exit_code == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err.strip() == "error: 403 Forbidden"
+    # The gateway's own access log shares this stderr, so assert the CLI's line
+    # is present rather than that it is the only thing written.
+    assert "error: 403 Forbidden" in captured.err
 
 
 def test_missing_tenant_key_is_a_403_error_with_exit_code_1(
@@ -203,7 +205,7 @@ def test_missing_tenant_key_is_a_403_error_with_exit_code_1(
 
     assert exit_code == 1
     captured = capsys.readouterr()
-    assert captured.err.strip() == "error: 403 Forbidden"
+    assert "error: 403 Forbidden" in captured.err
 
 
 def test_policy_get_and_set_round_trip(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:

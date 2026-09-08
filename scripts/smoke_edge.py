@@ -9,8 +9,9 @@ from pathlib import Path
 from urllib.parse import urlparse, urlunsplit
 
 import httpx
-from smoke_mcp import make_async_client, resolve_tls_verify
+from smoke_mcp import make_async_client
 from smoke_mcp import run_with_retry as run_mcp
+from tls_verify import resolve_tls_verify
 
 EDGE_ROOT_HOST = os.getenv("APIM_EDGE_ROOT_HOST", "apim.127.0.0.1.sslip.io")
 EDGE_HOST = os.getenv("APIM_EDGE_HOST", "edge.apim.127.0.0.1.sslip.io")

@@ -46,26 +46,37 @@ def _decode_request_body(content: bytes) -> str:
         return content.decode("utf-8", errors="replace")
 
 
+def _assert_dict_subset(expected: dict, actual: Any, *, path: str) -> None:
+    """Every expected key must be present; extra keys in `actual` are allowed."""
+    if not isinstance(actual, dict):
+        raise AssertionError(f"{path}: expected dict, got {type(actual).__name__}")
+    for key, expected_value in expected.items():
+        if key not in actual:
+            raise AssertionError(f"{path}: missing key {key!r}")
+        _assert_subset(expected_value, actual[key], path=f"{path}.{key}")
+
+
+def _assert_list_subset(expected: list, actual: Any, *, path: str) -> None:
+    """Lists compare element-wise, and their lengths must match exactly.
+
+    Unlike dicts, a list with extra entries is a difference: order and arity are
+    part of what a response promises.
+    """
+    if not isinstance(actual, list):
+        raise AssertionError(f"{path}: expected list, got {type(actual).__name__}")
+    if len(expected) != len(actual):
+        raise AssertionError(f"{path}: expected list length {len(expected)}, got {len(actual)}")
+    for index, expected_value in enumerate(expected):
+        _assert_subset(expected_value, actual[index], path=f"{path}[{index}]")
+
+
 def _assert_subset(expected: Any, actual: Any, *, path: str = "root") -> None:
+    """Assert `actual` contains everything `expected` describes."""
     if isinstance(expected, dict):
-        if not isinstance(actual, dict):
-            raise AssertionError(f"{path}: expected dict, got {type(actual).__name__}")
-        for key, expected_value in expected.items():
-            if key not in actual:
-                raise AssertionError(f"{path}: missing key {key!r}")
-            _assert_subset(expected_value, actual[key], path=f"{path}.{key}")
-        return
-
-    if isinstance(expected, list):
-        if not isinstance(actual, list):
-            raise AssertionError(f"{path}: expected list, got {type(actual).__name__}")
-        if len(expected) != len(actual):
-            raise AssertionError(f"{path}: expected list length {len(expected)}, got {len(actual)}")
-        for index, expected_value in enumerate(expected):
-            _assert_subset(expected_value, actual[index], path=f"{path}[{index}]")
-        return
-
-    if expected != actual:
+        _assert_dict_subset(expected, actual, path=path)
+    elif isinstance(expected, list):
+        _assert_list_subset(expected, actual, path=path)
+    elif expected != actual:
         raise AssertionError(f"{path}: expected {expected!r}, got {actual!r}")
 
 

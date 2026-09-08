@@ -267,41 +267,55 @@ class ManagementService:
             raise HTTPException(status_code=400, detail="Unsupported API versioning scheme")
         return scheme
 
+    def _api_scope(self, cfg: GatewayConfig, scope_name: str) -> Any:
+        api = cfg.apis.get(scope_name)
+        if api is None:
+            raise HTTPException(status_code=404, detail="API policy scope not found")
+        return api
+
+    def _product_scope(self, cfg: GatewayConfig, scope_name: str) -> Any:
+        product = cfg.products.get(scope_name)
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product policy scope not found")
+        return product
+
+    def _operation_scope(self, cfg: GatewayConfig, scope_name: str) -> Any:
+        api_name, sep, operation_name = scope_name.partition(":")
+        if not sep:
+            raise HTTPException(status_code=400, detail="Operation scope must use api:operation")
+        operation = self._api_scope(cfg, api_name).operations.get(operation_name)
+        if operation is None:
+            raise HTTPException(status_code=404, detail="Operation policy scope not found")
+        return operation
+
+    def _route_scope(self, cfg: GatewayConfig, scope_name: str) -> Any:
+        """Routes are only addressable in a config that declares no APIs.
+
+        Where APIs exist the routes are derived from them, so writing policy to
+        one would be silently discarded on the next materialisation.
+        """
+        if cfg.apis:
+            raise HTTPException(status_code=400, detail="Route policy updates are unavailable for API-backed configs")
+        for route in cfg.routes:
+            if route.name == scope_name:
+                return route
+        raise HTTPException(status_code=404, detail="Route policy scope not found")
+
     def policy_scope_target(self, cfg: GatewayConfig, scope_type: str, scope_name: str) -> Any:
+        """The object a policy document at this scope is attached to."""
         scope = scope_type.lower()
         if scope == "gateway":
             return cfg
-        if scope == "api":
-            api = cfg.apis.get(scope_name)
-            if api is None:
-                raise HTTPException(status_code=404, detail="API policy scope not found")
-            return api
-        if scope == "product":
-            product = cfg.products.get(scope_name)
-            if product is None:
-                raise HTTPException(status_code=404, detail="Product policy scope not found")
-            return product
-        if scope == "operation":
-            api_name, sep, operation_name = scope_name.partition(":")
-            if not sep:
-                raise HTTPException(status_code=400, detail="Operation scope must use api:operation")
-            api = cfg.apis.get(api_name)
-            if api is None:
-                raise HTTPException(status_code=404, detail="API policy scope not found")
-            operation = api.operations.get(operation_name)
-            if operation is None:
-                raise HTTPException(status_code=404, detail="Operation policy scope not found")
-            return operation
-        if scope == "route":
-            if cfg.apis:
-                raise HTTPException(
-                    status_code=400, detail="Route policy updates are unavailable for API-backed configs"
-                )
-            for route in cfg.routes:
-                if route.name == scope_name:
-                    return route
-            raise HTTPException(status_code=404, detail="Route policy scope not found")
-        raise HTTPException(status_code=404, detail="Unsupported policy scope")
+        resolvers = {
+            "api": self._api_scope,
+            "product": self._product_scope,
+            "operation": self._operation_scope,
+            "route": self._route_scope,
+        }
+        resolver = resolvers.get(scope)
+        if resolver is None:
+            raise HTTPException(status_code=404, detail="Unsupported policy scope")
+        return resolver(cfg, scope_name)
 
     def policy_xml_for_target(self, target: Any) -> str:
         return effective_policy_xml(policy_xml_documents_for_target(target))

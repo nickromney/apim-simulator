@@ -93,24 +93,6 @@ def _http_url(target: str) -> str:
     return urlunsplit(("http", host, f"/{path}" if path else "", query, ""))
 
 
-def _lifespan_helpers(app: Any) -> dict[str, Any]:
-    # include_router merges lifespan contexts, wrapping create_app's lifespan in
-    # nested/original shims - walk the closure chain to find the real one.
-    queue = [app.router.lifespan_context]
-    while queue:
-        candidate = queue.pop()
-        fn = getattr(candidate, "__wrapped__", candidate)
-        code = getattr(fn, "__code__", None)
-        closure = getattr(fn, "__closure__", None) or ()
-        if code is None:
-            continue
-        cells = dict(zip(code.co_freevars, closure, strict=False))
-        if "_require_management_plane" in cells:
-            return {name: cell.cell_contents for name, cell in cells.items()}
-        queue.extend(cell.cell_contents for cell in closure)
-    raise AssertionError("create_app lifespan closure not found")
-
-
 def _make_cached_request() -> tuple[SimpleNamespace, Request]:
     app = SimpleNamespace(state=SimpleNamespace(trace_store={}))
 
@@ -3051,79 +3033,6 @@ def test_management_subscription_crud_endpoints_delegate_through_management_plan
     assert deleted.json() == {"deleted": True, "subscription_id": "demo", "remaining": 0}
 
 
-def test_create_app_requires_management_plane(monkeypatch) -> None:
-    monkeypatch.setattr(app_main, "ManagementService", lambda *args, **kwargs: None)
-    app = create_app()
-    helpers = _lifespan_helpers(app)
-
-    with pytest.raises(HTTPException, match="Management service not initialized") as exc_info:
-        helpers["_require_management_plane"]()
-
-    assert exc_info.value.status_code == 500
-
-
-def test_config_watcher_skips_reload_when_management_service_unavailable(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(app_main, "ManagementService", lambda *args, **kwargs: None)
-    config_path = tmp_path / "apim.json"
-    config_path.write_text("{}", encoding="utf-8")
-    app = create_app()
-    watcher = _lifespan_helpers(app)["_config_watcher"]
-    warning_seen = threading.Event()
-    original_warning = app_main.logger.warning
-
-    def warning(message: str, *args: Any, **kwargs: Any) -> Any:
-        if message == "config watcher skipped reload because management service was unavailable":
-            warning_seen.set()
-        return original_warning(message, *args, **kwargs)
-
-    monkeypatch.setattr(app_main.logger, "warning", warning)
-
-    async def run_watcher() -> None:
-        task = asyncio.create_task(watcher(app, str(config_path), interval=0.01))
-        try:
-            await asyncio.sleep(0)
-            config_path.write_text("updated", encoding="utf-8")
-            assert await asyncio.to_thread(warning_seen.wait, 1.0)
-        finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-
-    asyncio.run(run_watcher())
-
-
-def test_config_watcher_reloads_config_when_management_service_is_available(monkeypatch, tmp_path: Path) -> None:
-    class DummyManagementService:
-        def __init__(self) -> None:
-            self.reloaded = threading.Event()
-
-        def apply_runtime_config(self, *_: Any, **__: Any) -> None:
-            pass
-
-        def reload_config(self) -> None:
-            self.reloaded.set()
-
-    dummy = DummyManagementService()
-    monkeypatch.setattr(app_main, "ManagementService", lambda *args, **kwargs: dummy)
-    config_path = tmp_path / "apim.json"
-    config_path.write_text("{}", encoding="utf-8")
-    app = create_app()
-    watcher = _lifespan_helpers(app)["_config_watcher"]
-
-    async def run_watcher() -> None:
-        task = asyncio.create_task(watcher(app, str(config_path), interval=0.01))
-        try:
-            await asyncio.sleep(0)
-            config_path.write_text("updated", encoding="utf-8")
-            assert await asyncio.to_thread(dummy.reloaded.wait, 1.0)
-        finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-
-    asyncio.run(run_watcher())
-
-
 def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monkeypatch) -> None:
     issuer = _http_url("issuer.example")
     audience = "api-app"
@@ -4418,3 +4327,257 @@ def test_external_cache_policy_is_unsupported_at_runtime() -> None:
 
     assert resp.status_code == 500
     assert resp.json()["detail"] == "Unsupported caching-type external"
+
+
+def test_require_manager_returns_the_service_when_it_exists() -> None:
+    service = object()
+    assert app_main._require_manager(service) is service
+
+
+def test_require_manager_reports_a_missing_service_as_a_server_error() -> None:
+    """A management plane that never came up is a 500, not a 404."""
+    with pytest.raises(HTTPException, match="Management service not initialized") as exc_info:
+        app_main._require_manager(None)
+
+    assert exc_info.value.status_code == 500
+
+
+def test_config_fingerprint_reports_no_change_for_an_unchanged_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "apim.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    first = app_main._ConfigFingerprint.read(config_path)
+    assert first is not None
+    assert not first.succeeds(first)
+
+
+def test_config_fingerprint_is_none_for_a_missing_file(tmp_path: Path) -> None:
+    assert app_main._ConfigFingerprint.read(tmp_path / "absent.json") is None
+
+
+def test_config_fingerprint_notices_a_swapped_symlink_target() -> None:
+    """A ConfigMap update swaps the symlink, and mtime alone can miss it."""
+    previous = app_main._ConfigFingerprint(mtime=1.0, target="/data/..2026_01_01")
+    current = app_main._ConfigFingerprint(mtime=1.0, target="/data/..2026_01_02")
+
+    assert current.succeeds(previous)
+
+
+def test_config_fingerprint_notices_a_changed_mtime() -> None:
+    previous = app_main._ConfigFingerprint(mtime=1.0, target="")
+    current = app_main._ConfigFingerprint(mtime=2.0, target="")
+
+    assert current.succeeds(previous)
+
+
+def test_config_fingerprint_ignores_an_empty_target() -> None:
+    """Empty means 'not a symlink', not 'the symlink went away'."""
+    previous = app_main._ConfigFingerprint(mtime=1.0, target="/data/..2026_01_01")
+    current = app_main._ConfigFingerprint(mtime=1.0, target="")
+
+    assert not current.succeeds(previous)
+
+
+def test_config_watcher_skips_reload_when_management_service_unavailable(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "apim.json"
+    config_path.write_text("{}", encoding="utf-8")
+    warning_seen = threading.Event()
+    original_warning = app_main.logger.warning
+
+    def warning(message: str, *args: Any, **kwargs: Any) -> Any:
+        if message == "config watcher skipped reload because management service was unavailable":
+            warning_seen.set()
+        return original_warning(message, *args, **kwargs)
+
+    monkeypatch.setattr(app_main.logger, "warning", warning)
+
+    async def run_watcher() -> None:
+        task = asyncio.create_task(
+            app_main._watch_config(str(config_path), resolve_manager=lambda: None, interval=0.01)
+        )
+        try:
+            await asyncio.sleep(0)
+            config_path.write_text("updated", encoding="utf-8")
+            assert await asyncio.to_thread(warning_seen.wait, 1.0)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    asyncio.run(run_watcher())
+
+
+def test_config_watcher_reloads_config_when_management_service_is_available(tmp_path: Path) -> None:
+    class DummyManagementService:
+        def __init__(self) -> None:
+            self.reloaded = threading.Event()
+
+        def reload_config(self) -> None:
+            self.reloaded.set()
+
+    dummy = DummyManagementService()
+    config_path = tmp_path / "apim.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    async def run_watcher() -> None:
+        task = asyncio.create_task(
+            app_main._watch_config(str(config_path), resolve_manager=lambda: dummy, interval=0.01)
+        )
+        try:
+            await asyncio.sleep(0)
+            config_path.write_text("updated", encoding="utf-8")
+            assert await asyncio.to_thread(dummy.reloaded.wait, 1.0)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    asyncio.run(run_watcher())
+
+
+def test_config_watcher_survives_a_reload_that_raises(tmp_path: Path) -> None:
+    """One bad reload must not take the watcher down with it."""
+
+    class ExplodingService:
+        def __init__(self) -> None:
+            self.calls = threading.Event()
+
+        def reload_config(self) -> None:
+            self.calls.set()
+            raise RuntimeError("bad config")
+
+    service = ExplodingService()
+    config_path = tmp_path / "apim.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    async def run_watcher() -> None:
+        task = asyncio.create_task(
+            app_main._watch_config(str(config_path), resolve_manager=lambda: service, interval=0.01)
+        )
+        try:
+            await asyncio.sleep(0)
+            config_path.write_text("updated", encoding="utf-8")
+            assert await asyncio.to_thread(service.calls.wait, 1.0)
+            await asyncio.sleep(0.05)
+            assert not task.done(), "watcher died on a failing reload"
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    asyncio.run(run_watcher())
+
+
+def test_watch_settings_are_inactive_without_a_path(monkeypatch) -> None:
+    monkeypatch.setenv("APIM_CONFIG_WATCH", "true")
+    monkeypatch.setenv("APIM_CONFIG_PATH", "")
+    assert not app_main._WatchSettings.from_env().active
+
+
+def test_watch_settings_are_inactive_when_watching_is_off(monkeypatch) -> None:
+    monkeypatch.setenv("APIM_CONFIG_WATCH", "false")
+    monkeypatch.setenv("APIM_CONFIG_PATH", "/etc/apim/config.json")
+    assert not app_main._WatchSettings.from_env().active
+
+
+def test_watch_settings_are_active_when_both_are_set(monkeypatch) -> None:
+    monkeypatch.setenv("APIM_CONFIG_WATCH", "TRUE")
+    monkeypatch.setenv("APIM_CONFIG_PATH", " /etc/apim/config.json ")
+    monkeypatch.setenv("APIM_CONFIG_WATCH_INTERVAL", "2.5")
+    settings = app_main._WatchSettings.from_env()
+
+    assert settings.active
+    assert settings.path == "/etc/apim/config.json"
+    assert settings.interval == 2.5
+
+
+def test_build_oidc_verifiers_prefers_the_plural_provider_map() -> None:
+    cfg = GatewayConfig(
+        allow_anonymous=True,
+        oidc_providers={
+            "a": OIDCConfig(issuer=_http_url("issuer-a"), audience="aud-a"),
+            "b": OIDCConfig(issuer=_http_url("issuer-b"), audience="aud-b"),
+        },
+    )
+    assert sorted(app_main._build_oidc_verifiers(cfg)) == ["a", "b"]
+
+
+def test_build_oidc_verifiers_returns_nothing_when_oidc_is_unconfigured() -> None:
+    assert app_main._build_oidc_verifiers(GatewayConfig(allow_anonymous=True)) == {}
+
+
+def test_the_stderr_log_handler_follows_a_replaced_stream() -> None:
+    """The handler must resolve sys.stderr at emit time, not at construction.
+
+    `logging.StreamHandler()` binds whichever stream is current when it is built,
+    and the gateway builds this handler once and keeps it for the life of the
+    process. Bound early, every later log line goes to a stream nobody reads --
+    and if that stream is later closed, each one raises
+    `ValueError: I/O operation on closed file`.
+
+    Found by a mutation run: mutmut's clean-test check failed inside the
+    `mutants/` copy because logging was first configured under pytest's capture.
+    """
+    import io
+    import logging as stdlib_logging
+    import sys as stdlib_sys
+
+    from app.telemetry import _CurrentStderrHandler
+
+    handler = _CurrentStderrHandler()
+    handler.setFormatter(stdlib_logging.Formatter("%(message)s"))
+    record = stdlib_logging.LogRecord(
+        name="test",
+        level=stdlib_logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hello",
+        args=(),
+        exc_info=None,
+    )
+
+    original = stdlib_sys.stderr
+    first, second = io.StringIO(), io.StringIO()
+    try:
+        stdlib_sys.stderr = first
+        handler.emit(record)
+        stdlib_sys.stderr = second
+        handler.emit(record)
+    finally:
+        stdlib_sys.stderr = original
+
+    assert first.getvalue().strip() == "hello"
+    assert second.getvalue().strip() == "hello", "handler is still writing to the stream it was built with"
+
+
+def test_the_stderr_log_handler_survives_a_closed_original_stream() -> None:
+    """The exact failure mode: the stream present at construction gets closed."""
+    import io
+    import logging as stdlib_logging
+    import sys as stdlib_sys
+
+    from app.telemetry import _CurrentStderrHandler
+
+    original = stdlib_sys.stderr
+    closed, live = io.StringIO(), io.StringIO()
+    try:
+        stdlib_sys.stderr = closed
+        handler = _CurrentStderrHandler()
+        handler.setFormatter(stdlib_logging.Formatter("%(message)s"))
+        closed.close()
+        stdlib_sys.stderr = live
+        handler.emit(
+            stdlib_logging.LogRecord(
+                name="test",
+                level=stdlib_logging.INFO,
+                pathname=__file__,
+                lineno=1,
+                msg="after close",
+                args=(),
+                exc_info=None,
+            )
+        )
+    finally:
+        stdlib_sys.stderr = original
+
+    assert live.getvalue().strip() == "after close"

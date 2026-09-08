@@ -99,31 +99,30 @@ def _request_host_candidate_groups(request: Request) -> list[list[str]]:
     return groups
 
 
+def _host_pattern_matches(pattern: str, request_host: str) -> bool:
+    """Does one host_match entry match one request host?
+
+    Both sides are compared with and without their port, because a route may be
+    written as `api.example.com` while the Host header carries `api.example.com:8443`,
+    or the other way round. A pattern containing `*` is matched as a glob.
+    """
+    request_no_port = _strip_port(request_host)
+    for candidate in (pattern, _strip_port(pattern)):
+        if candidate in (request_host, request_no_port):
+            return True
+        if "*" in candidate and (fnmatch(request_host, candidate) or fnmatch(request_no_port, candidate)):
+            return True
+    return False
+
+
 def _route_matches_host(route: RouteConfig, request_hosts: list[str]) -> bool:
+    """A route with no host_match answers for any host; one with it needs a hit."""
     if not route.host_match:
         return True
     if not request_hosts:
         return False
-    for expected in route.host_match:
-        expected_norm = _normalize_host(expected)
-        if not expected_norm:
-            continue
-        expected_no_port = _strip_port(expected_norm)
-        for request_host in request_hosts:
-            request_no_port = _strip_port(request_host)
-            if expected_norm == request_host or expected_norm == request_no_port:
-                return True
-            if expected_no_port == request_host or expected_no_port == request_no_port:
-                return True
-            if "*" in expected_norm and (
-                fnmatch(request_host, expected_norm) or fnmatch(request_no_port, expected_norm)
-            ):
-                return True
-            if "*" in expected_no_port and (
-                fnmatch(request_host, expected_no_port) or fnmatch(request_no_port, expected_no_port)
-            ):
-                return True
-    return False
+    patterns = [normalized for expected in route.host_match if (normalized := _normalize_host(expected))]
+    return any(_host_pattern_matches(pattern, request_host) for pattern in patterns for request_host in request_hosts)
 
 
 def _available_versions(config: GatewayConfig, *, method: str, path: str, version_set: str) -> set[str]:
@@ -175,6 +174,41 @@ def _read_version(request: Request, *, config: GatewayConfig, route: RouteConfig
     return None, path
 
 
+def _resolve_versioned_route(
+    config: GatewayConfig,
+    request: Request,
+    *,
+    route: RouteConfig,
+    path: str,
+    request_hosts: list[str],
+) -> ResolvedRoute | None:
+    """Pick the route for the API version this request asked for.
+
+    A version set that does not exist, a request naming no version where the set
+    declares no default, and a version with no matching route are all "no route"
+    rather than a fall-through to the unversioned match.
+    """
+    version_set_id = route.api_version_set
+    version_set = config.api_version_sets.get(version_set_id)
+    if version_set is None:
+        return None
+
+    requested_version, upstream_path = _read_version(request, config=config, route=route, path=path)
+    requested_version = requested_version or version_set.default_version
+    if not requested_version:
+        return None
+
+    for candidate in config.routes:
+        if (
+            candidate.api_version_set == version_set_id
+            and candidate.api_version == requested_version
+            and candidate.matches(method=request.method, path=path)
+            and _route_matches_host(candidate, request_hosts)
+        ):
+            return ResolvedRoute(route=candidate, upstream_path=upstream_path, api_version=requested_version)
+    return None
+
+
 def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | None:
     path = request.url.path
     request_host_groups = _request_host_candidate_groups(request)
@@ -190,32 +224,7 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
 
             if not route.api_version_set:
                 return ResolvedRoute(route=route, upstream_path=path)
-
-            version_set_id = route.api_version_set
-            version_set = config.api_version_sets.get(version_set_id)
-            if version_set is None:
-                # Misconfigured; fall through to "no route".
-                return None
-
-            requested_version, upstream_path = _read_version(request, config=config, route=route, path=path)
-            if not requested_version:
-                requested_version = version_set.default_version
-
-            if not requested_version:
-                return None
-
-            for candidate in config.routes:
-                if candidate.api_version_set != version_set_id:
-                    continue
-                if candidate.api_version != requested_version:
-                    continue
-                if not candidate.matches(method=request.method, path=path):
-                    continue
-                if not _route_matches_host(candidate, request_hosts):
-                    continue
-                return ResolvedRoute(route=candidate, upstream_path=upstream_path, api_version=requested_version)
-
-            return None
+            return _resolve_versioned_route(config, request, route=route, path=path, request_hosts=request_hosts)
 
     return None
 

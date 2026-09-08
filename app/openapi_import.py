@@ -79,6 +79,30 @@ def _upstream_base_url(document: dict[str, Any]) -> str | None:
     return None
 
 
+def _operations_from_paths(paths: dict[Any, Any]) -> list[ImportedOperation]:
+    """One operation per HTTP method under each path.
+
+    Anything that is not a path string mapping to a method dict is skipped
+    rather than rejected: OpenAPI documents carry `$ref`, `parameters` and
+    vendor extensions alongside the operations.
+    """
+    operations: list[ImportedOperation] = []
+    for path, methods in paths.items():
+        if not isinstance(path, str) or not isinstance(methods, dict):
+            continue
+        for method_name, payload in methods.items():
+            if method_name.lower() not in HTTP_METHODS:
+                continue
+            operations.append(
+                ImportedOperation(
+                    name=_operation_name(method_name, path, payload if isinstance(payload, dict) else {}),
+                    method=method_name.upper(),
+                    url_template=path,
+                )
+            )
+    return operations
+
+
 def parse_api_import(
     *,
     content_format: str,
@@ -97,22 +121,7 @@ def parse_api_import(
     if not isinstance(paths, dict):
         raise ValueError("API import document missing paths")
 
-    operations: list[ImportedOperation] = []
-    for path, methods in paths.items():
-        if not isinstance(path, str) or not isinstance(methods, dict):
-            continue
-        for method_name, payload in methods.items():
-            if method_name.lower() not in HTTP_METHODS:
-                continue
-            if not isinstance(payload, dict):
-                payload = {}
-            operations.append(
-                ImportedOperation(
-                    name=_operation_name(method_name, path, payload),
-                    method=method_name.upper(),
-                    url_template=path,
-                )
-            )
+    operations = _operations_from_paths(paths)
 
     diagnostics: list[str] = []
     if not operations:

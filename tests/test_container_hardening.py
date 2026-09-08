@@ -7,7 +7,11 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
+
+# Marked `repo`: asserts on the Dockerfile and container image, not on app behaviour.
+pytestmark = pytest.mark.repo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PINNED_LGTM_IMAGE = "grafana/otel-lgtm:0.24.0@sha256:a7fbde2893d86ae4807701bc482736243e584eb90b5faa273d291ffff2a1374f"
@@ -409,3 +413,53 @@ def test_gitleaks_config_allows_known_demo_credentials() -> None:
 def test_keycloak_persists_data_on_a_named_volume() -> None:
     service = _service("compose.oidc.yml", "keycloak")
     assert "keycloak-data:/opt/keycloak/data" in service["volumes"]
+
+
+def _dockerfile() -> str:
+    return (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+
+def test_dependency_bytecode_is_compiled_into_the_image() -> None:
+    """Containers run read-only, so a .pyc not baked in can never be cached.
+
+    Without --compile-bytecode the interpreter recompiles the whole dependency
+    tree in memory on every start, and nothing about that failure is visible
+    except a slower boot.
+    """
+    assert "--compile-bytecode" in _dockerfile()
+
+
+def test_application_bytecode_is_compiled_into_the_image() -> None:
+    compile_line = next((line for line in _dockerfile().splitlines() if "compileall" in line), "")
+    assert "compileall" in compile_line and "/app/app" in compile_line, (
+        "app/ bytecode is not precompiled; it cannot be cached on a read-only rootfs"
+    )
+
+
+def test_application_bytecode_compilation_is_not_best_effort() -> None:
+    """An app/ that will not compile is a broken image, not a warning."""
+    compile_line = next(line for line in _dockerfile().splitlines() if "compileall" in line)
+    assert "|| true" not in compile_line
+
+
+def test_image_declares_a_healthcheck_against_the_startup_probe() -> None:
+    """/apim/health answers before the app can serve; /apim/startup does not."""
+    dockerfile = _dockerfile()
+    assert "HEALTHCHECK" in dockerfile
+    assert "/apim/startup" in dockerfile
+
+
+def test_runtime_image_still_carries_the_example_tenant_documents() -> None:
+    """compose points APIM_CONFIG_SOURCE_PATH at /app/examples: runtime input, not samples."""
+    assert re.search(r"^COPY .*examples \./examples$", _dockerfile(), re.M)
+
+
+def test_the_bytecode_compile_step_uses_exec_form() -> None:
+    """The hardened runtime image ships no /bin/sh.
+
+    A shell-form `RUN` in that stage fails the build with
+    `stat /bin/sh: no such file or directory`, which is how this was found.
+    Exec form runs the binary directly and needs no shell.
+    """
+    compile_line = next(line for line in _dockerfile().splitlines() if "compileall" in line)
+    assert compile_line.strip().startswith("RUN ["), "compileall must use exec-form RUN; the runtime image has no shell"

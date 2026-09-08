@@ -32,7 +32,39 @@ def _selected_headers(response: httpx.Response, names: list[str]) -> dict[str, s
     return {name.lower(): headers.get(name.lower(), "") for name in names}
 
 
+def _compare_case(client: httpx.Client, case: dict, *, simulator_base_url: str, azure_base_url: str) -> str | None:
+    """Replay one case against both gateways. Returns a failure line, or None.
+
+    Comparison stops at the first difference, because a status mismatch makes
+    the header and body comparisons meaningless rather than additionally
+    informative.
+    """
+    method = str(case.get("method") or "GET").upper()
+    path = str(case.get("path") or "/")
+    query = case.get("query") or {}
+    headers = case.get("headers") or {}
+    body = case.get("body_text")
+    compare_headers = list(case.get("compare_headers") or [])
+
+    simulator = client.request(method, f"{simulator_base_url}{path}", params=query, headers=headers, content=body)
+    azure = client.request(method, f"{azure_base_url}{path}", params=query, headers=headers, content=body)
+
+    if simulator.status_code != azure.status_code:
+        return f"{path}: status {simulator.status_code} != {azure.status_code}"
+
+    if compare_headers:
+        simulator_headers = _selected_headers(simulator, compare_headers)
+        azure_headers = _selected_headers(azure, compare_headers)
+        if simulator_headers != azure_headers:
+            return f"{path}: header mismatch {simulator_headers} != {azure_headers}"
+
+    if _response_body(simulator) != _response_body(azure):
+        return f"{path}: response body mismatch"
+    return None
+
+
 def main() -> int:
+    """Replay recorded cases against the simulator and a live Azure APIM."""
     cases_path = os.environ.get("VERIFY_CASES", "").strip()
     if not cases_path:
         print("VERIFY_CASES must point to a JSON file describing replay cases.", file=sys.stderr)
@@ -44,34 +76,17 @@ def main() -> int:
         print("AZURE_APIM_BASE_URL must be set for live verification.", file=sys.stderr)
         return 2
 
-    failures: list[str] = []
     with httpx.Client(timeout=60.0) as client:
-        for case in _load_cases(cases_path):
-            method = str(case.get("method") or "GET").upper()
-            path = str(case.get("path") or "/")
-            query = case.get("query") or {}
-            headers = case.get("headers") or {}
-            body = case.get("body_text")
-            compare_headers = list(case.get("compare_headers") or [])
-
-            simulator = client.request(
-                method, f"{simulator_base_url}{path}", params=query, headers=headers, content=body
+        failures = [
+            failure
+            for case in _load_cases(cases_path)
+            if (
+                failure := _compare_case(
+                    client, case, simulator_base_url=simulator_base_url, azure_base_url=azure_base_url
+                )
             )
-            azure = client.request(method, f"{azure_base_url}{path}", params=query, headers=headers, content=body)
-
-            if simulator.status_code != azure.status_code:
-                failures.append(f"{path}: status {simulator.status_code} != {azure.status_code}")
-                continue
-
-            if compare_headers:
-                simulator_headers = _selected_headers(simulator, compare_headers)
-                azure_headers = _selected_headers(azure, compare_headers)
-                if simulator_headers != azure_headers:
-                    failures.append(f"{path}: header mismatch {simulator_headers} != {azure_headers}")
-                    continue
-
-            if _response_body(simulator) != _response_body(azure):
-                failures.append(f"{path}: response body mismatch")
+            is not None
+        ]
 
     if failures:
         print("Verification failures:")

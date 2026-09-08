@@ -24,7 +24,10 @@ test("lets a user jump from the todo flow into the Grafana OTEL dashboard", asyn
   await dashboard.waitForLoadState("domcontentloaded");
   await expect(dashboard).toHaveURL(`${grafanaBaseUrl}/d/apim-simulator-overview/apim-simulator-overview`);
   await expect(dashboard).not.toHaveURL(/\/login/);
-  await expect(dashboard.getByText("APIM Simulator Overview")).toBeVisible();
+  // Grafana renders the dashboard title twice, as a breadcrumb and as the
+  // heading, so a plain text locator is a strict-mode violation. Match the
+  // heading: it is the one that proves the dashboard itself rendered.
+  await expect(dashboard.getByRole("heading", { name: "APIM Simulator Overview" })).toBeVisible();
   await expect(dashboard.getByText("Gateway Request Rate")).toBeVisible();
   const tracePanel = dashboard.getByText("Trace Span Throughput");
   await tracePanel.scrollIntoViewIfNeeded();

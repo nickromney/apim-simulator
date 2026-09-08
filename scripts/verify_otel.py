@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from smoke_mcp import resolve_tls_verify
+from tls_verify import resolve_tls_verify
 
 DEFAULT_CA_CERT = Path(__file__).resolve().parent.parent / "examples" / "edge" / "certs" / "dev-root-ca.crt"
 
