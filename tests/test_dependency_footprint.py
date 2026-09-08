@@ -5,6 +5,11 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import pytest
+
+# Marked `repo`: asserts on pyproject packaging, not on app behaviour.
+pytestmark = pytest.mark.repo
+
 APP_DIR = Path(__file__).resolve().parent.parent
 
 

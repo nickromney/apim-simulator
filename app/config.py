@@ -508,92 +508,104 @@ class GatewayConfig(BaseModel):
     routes: list[RouteConfig] = Field(default_factory=list)
 
     def materialize_routes(self) -> list[RouteConfig]:
+        """Flatten the API catalogue into the flat route table the gateway matches.
+
+        An API with no operations becomes one route at its base path. An API with
+        operations becomes one route per operation, each inheriting from the API
+        whatever it does not state for itself.
+        """
         if not self.apis:
             return list(self.routes)
 
         out: list[RouteConfig] = []
-
-        def _url_template_prefix(url_template: str) -> str:
-            templ = (url_template or "").strip()
-            if not templ:
-                return ""
-            if not templ.startswith("/"):
-                templ = "/" + templ
-            prefix = templ.split("{", 1)[0]
-            return prefix.rstrip("/")
-
         for api_id, api in self.apis.items():
-            api_base = ("/" + (api.path or "").strip("/")).rstrip("/")
-            api_base = api_base or "/"
-            api_policy_docs: list[str] = []
-            if api.policies_xml:
-                api_policy_docs.append(api.policies_xml)
+            api_base = ("/" + (api.path or "").strip("/")).rstrip("/") or "/"
+            api_policy_docs = [api.policies_xml] if api.policies_xml else []
 
             if not api.operations:
-                out.append(
-                    RouteConfig(
-                        name=api.name,
-                        path_prefix=api_base,
-                        api_id=api_id,
-                        upstream_base_url=api.upstream_base_url,
-                        upstream_path_prefix=api.upstream_path_prefix,
-                        backend=api.backend,
-                        products=list(api.products),
-                        api_version_set=api.api_version_set,
-                        api_version=api.api_version,
-                        subscription_header_names=api.subscription_header_names,
-                        subscription_query_param_names=api.subscription_query_param_names,
-                        policies_xml_documents=api_policy_docs,
-                    )
-                )
+                out.append(_api_route(api_id, api, api_base, api_policy_docs))
                 continue
 
-            for operation_id, op in api.operations.items():
-                op_prefix = _url_template_prefix(op.url_template)
-                full_prefix = api_base.rstrip("/")
-                if op_prefix and op_prefix != "/":
-                    full_prefix = full_prefix + op_prefix
-                if full_prefix == "":
-                    full_prefix = "/"
-
-                policies = list(api_policy_docs)
-                if op.policies_xml:
-                    policies.append(op.policies_xml)
-
-                upstream_base_url = op.upstream_base_url or api.upstream_base_url
-
-                if op.upstream_path_prefix is not None:
-                    upstream_path_prefix = op.upstream_path_prefix
-                else:
-                    api_upstream_prefix = api.upstream_path_prefix.rstrip("/")
-                    upstream_path_prefix = api_upstream_prefix
-                    if op_prefix and op_prefix != "/":
-                        upstream_path_prefix = f"{api_upstream_prefix}{op_prefix}" if api_upstream_prefix else op_prefix
-                op_products = op.products if op.products is not None else api.products
-                backend = op.backend or api.backend
-
-                out.append(
-                    RouteConfig(
-                        name=f"{api.name}:{op.name}",
-                        path_prefix=full_prefix,
-                        methods=[op.method],
-                        api_id=api_id,
-                        operation_id=operation_id,
-                        upstream_base_url=upstream_base_url,
-                        upstream_path_prefix=upstream_path_prefix,
-                        backend=backend,
-                        products=list(op_products or []),
-                        api_version_set=op.api_version_set or api.api_version_set,
-                        api_version=op.api_version or api.api_version,
-                        subscription_header_names=op.subscription_header_names or api.subscription_header_names,
-                        subscription_query_param_names=op.subscription_query_param_names
-                        or api.subscription_query_param_names,
-                        authz=op.authz,
-                        policies_xml_documents=policies,
-                    )
-                )
-
+            out.extend(
+                _operation_route(api_id, api, operation_id, op, api_base, api_policy_docs)
+                for operation_id, op in api.operations.items()
+            )
         return out
+
+
+def _url_template_prefix(url_template: str) -> str:
+    """The fixed leading path of an operation template, before its first `{param}`."""
+    templ = (url_template or "").strip()
+    if not templ:
+        return ""
+    if not templ.startswith("/"):
+        templ = "/" + templ
+    return templ.split("{", 1)[0].rstrip("/")
+
+
+def _api_route(api_id: str, api: Any, api_base: str, api_policy_docs: list[str]) -> RouteConfig:
+    """The single route an API with no declared operations serves."""
+    return RouteConfig(
+        name=api.name,
+        path_prefix=api_base,
+        api_id=api_id,
+        upstream_base_url=api.upstream_base_url,
+        upstream_path_prefix=api.upstream_path_prefix,
+        backend=api.backend,
+        products=list(api.products),
+        api_version_set=api.api_version_set,
+        api_version=api.api_version,
+        subscription_header_names=api.subscription_header_names,
+        subscription_query_param_names=api.subscription_query_param_names,
+        policies_xml_documents=api_policy_docs,
+    )
+
+
+def _operation_upstream_prefix(api: Any, op: Any, op_prefix: str) -> str:
+    """Where the operation lands upstream.
+
+    An operation that states its own prefix wins outright. Otherwise it extends
+    the API's prefix by its own template prefix, so /orders under an API mapped
+    to /v1 becomes /v1/orders.
+    """
+    if op.upstream_path_prefix is not None:
+        return op.upstream_path_prefix
+    api_prefix = api.upstream_path_prefix.rstrip("/")
+    if not op_prefix or op_prefix == "/":
+        return api_prefix
+    return f"{api_prefix}{op_prefix}" if api_prefix else op_prefix
+
+
+def _operation_route(
+    api_id: str, api: Any, operation_id: str, op: Any, api_base: str, api_policy_docs: list[str]
+) -> RouteConfig:
+    """One route for one operation, inheriting anything it does not state itself."""
+    op_prefix = _url_template_prefix(op.url_template)
+    full_prefix = api_base.rstrip("/")
+    if op_prefix and op_prefix != "/":
+        full_prefix += op_prefix
+    full_prefix = full_prefix or "/"
+
+    policies = [*api_policy_docs, op.policies_xml] if op.policies_xml else list(api_policy_docs)
+    op_products = op.products if op.products is not None else api.products
+
+    return RouteConfig(
+        name=f"{api.name}:{op.name}",
+        path_prefix=full_prefix,
+        methods=[op.method],
+        api_id=api_id,
+        operation_id=operation_id,
+        upstream_base_url=op.upstream_base_url or api.upstream_base_url,
+        upstream_path_prefix=_operation_upstream_prefix(api, op, op_prefix),
+        backend=op.backend or api.backend,
+        products=list(op_products or []),
+        api_version_set=op.api_version_set or api.api_version_set,
+        api_version=op.api_version or api.api_version,
+        subscription_header_names=op.subscription_header_names or api.subscription_header_names,
+        subscription_query_param_names=op.subscription_query_param_names or api.subscription_query_param_names,
+        authz=op.authz,
+        policies_xml_documents=policies,
+    )
 
 
 class OperationConfig(BaseModel):

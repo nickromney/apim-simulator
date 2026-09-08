@@ -124,13 +124,19 @@ class TodoStore:
             return todo.model_copy(deep=True)
 
 
-def create_app() -> FastAPI:
-    telemetry = configure_observability(service_name=TODO_SERVICE_NAME, service_version=TODO_SERVICE_VERSION)
-    store = TodoStore()
+def _record_request_metrics(app: FastAPI, request: Request, *, status_code: int, duration_seconds: float) -> None:
+    """One count and one duration per request, whatever the outcome."""
+    attrs = {
+        "http.request.method": request.method,
+        "http.response.status_code": status_code,
+        "http.route": _request_route_label(request),
+    }
+    app.state.todo_metrics.requests.add(1, attrs)
+    app.state.todo_metrics.request_duration.record(duration_seconds, attrs)
 
-    app = FastAPI(title="Todo API", version=TODO_SERVICE_VERSION)
-    app.state.telemetry = telemetry
-    app.state.todo_metrics = _get_todo_metrics(telemetry)
+
+def _add_observability_middleware(app: FastAPI, telemetry) -> None:
+    """Record a metric and one access log line for every request, success or not."""
 
     @app.middleware("http")
     async def observe_requests(request: Request, call_next):
@@ -143,22 +149,7 @@ def create_app() -> FastAPI:
             response = await call_next(request)
         except Exception:
             duration_seconds = time.perf_counter() - start
-            app.state.todo_metrics.requests.add(
-                1,
-                {
-                    "http.request.method": request.method,
-                    "http.response.status_code": 500,
-                    "http.route": _request_route_label(request),
-                },
-            )
-            app.state.todo_metrics.request_duration.record(
-                duration_seconds,
-                {
-                    "http.request.method": request.method,
-                    "http.response.status_code": 500,
-                    "http.route": _request_route_label(request),
-                },
-            )
+            _record_request_metrics(app, request, status_code=500, duration_seconds=duration_seconds)
             telemetry.logger.exception(
                 "request failed",
                 extra=_access_log_fields(request, status_code=500, duration_seconds=duration_seconds),
@@ -167,13 +158,7 @@ def create_app() -> FastAPI:
         else:
             response.headers.setdefault("x-correlation-id", correlation_id)
             duration_seconds = time.perf_counter() - start
-            attrs = {
-                "http.request.method": request.method,
-                "http.response.status_code": response.status_code,
-                "http.route": _request_route_label(request),
-            }
-            app.state.todo_metrics.requests.add(1, attrs)
-            app.state.todo_metrics.request_duration.record(duration_seconds, attrs)
+            _record_request_metrics(app, request, status_code=response.status_code, duration_seconds=duration_seconds)
             telemetry.logger.info(
                 "request completed",
                 extra=_access_log_fields(request, status_code=response.status_code, duration_seconds=duration_seconds),
@@ -181,6 +166,17 @@ def create_app() -> FastAPI:
             return response
         finally:
             reset_correlation_id(token)
+
+
+def create_app() -> FastAPI:
+    telemetry = configure_observability(service_name=TODO_SERVICE_NAME, service_version=TODO_SERVICE_VERSION)
+    store = TodoStore()
+
+    app = FastAPI(title="Todo API", version=TODO_SERVICE_VERSION)
+    app.state.telemetry = telemetry
+    app.state.todo_metrics = _get_todo_metrics(telemetry)
+
+    _add_observability_middleware(app, telemetry)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:

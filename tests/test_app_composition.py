@@ -135,3 +135,22 @@ def test_route_inventory_is_stable() -> None:
     extra = actual - EXPECTED_ROUTES
     assert not missing, f"routes lost by refactor: {sorted(missing)}"
     assert not extra, f"routes added unexpectedly: {sorted(extra)}"
+
+
+def test_gateway_catch_all_is_registered_last() -> None:
+    """The catch-all must stay behind every management and portal route.
+
+    Starlette matches routes in registration order, so a catch-all that drifts
+    ahead of the management surface swallows it whole while every route above
+    still reports as present. The inventory test cannot see that; this can.
+    """
+    app = create_app()
+    paths = [route.path for route in app.routes if hasattr(route, "methods")]
+    catch_all_positions = [index for index, path in enumerate(paths) if path == "/{full_path:path}"]
+
+    assert catch_all_positions, "gateway catch-all route is missing"
+    specific_positions = [index for index, path in enumerate(paths) if path.startswith("/apim/")]
+    assert specific_positions, "no /apim/ routes registered"
+    assert max(specific_positions) < min(catch_all_positions), (
+        "the gateway catch-all is registered ahead of /apim/ routes, which shadows them"
+    )

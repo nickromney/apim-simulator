@@ -1,0 +1,432 @@
+{
+  "values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "azurerm_api_management.svc",
+          "type": "azurerm_api_management",
+          "name": "svc",
+          "values": {
+            "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim",
+            "name": "apim",
+            "publisher_name": "Contoso",
+            "publisher_email": "api@contoso.test",
+            "sku_name": "Developer_1",
+            "client_certificate_enabled": true,
+            "gateway_url": "https://apim.example.test"
+          }
+        }
+      ],
+      "child_modules": [
+        {
+          "resources": [
+            {
+              "address": "azurerm_api_management_product.starter",
+              "type": "azurerm_api_management_product",
+              "name": "starter",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/products/starter",
+                "product_id": "starter",
+                "display_name": "Starter",
+                "subscription_required": true,
+                "published": true,
+                "approval_required": true
+              }
+            },
+            {
+              "address": "azurerm_api_management_product.open",
+              "type": "azurerm_api_management_product",
+              "name": "open",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/products/open",
+                "product_id": "open",
+                "display_name": "Open",
+                "subscription_required": false,
+                "published": false,
+                "approval_required": true
+              }
+            },
+            {
+              "address": "azurerm_api_management_group.devs",
+              "type": "azurerm_api_management_group",
+              "name": "devs",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/groups/devs",
+                "name": "devs",
+                "display_name": "Developers",
+                "description": "Internal developers",
+                "type": "custom"
+              }
+            },
+            {
+              "address": "azurerm_api_management_group.partners",
+              "type": "azurerm_api_management_group",
+              "name": "partners",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/groups/partners",
+                "name": "partners",
+                "display_name": "Partners",
+                "type": "external",
+                "external_id": "aad://tenant/groups/abc"
+              }
+            },
+            {
+              "address": "azurerm_api_management_user.ada",
+              "type": "azurerm_api_management_user",
+              "name": "ada",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/users/ada",
+                "user_id": "ada",
+                "email": "ada@contoso.test",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "state": "active",
+                "note": "founding user",
+                "confirmation": "signup",
+                "password": "s3cret-not-real"
+              }
+            },
+            {
+              "address": "azurerm_api_management_tag.public",
+              "type": "azurerm_api_management_tag",
+              "name": "public",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/tags/public",
+                "name": "public",
+                "display_name": "Public"
+              }
+            },
+            {
+              "address": "azurerm_api_management_subscription.starter-sub",
+              "type": "azurerm_api_management_subscription",
+              "name": "starter-sub",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/subscriptions/starter-sub",
+                "subscription_id": "starter-sub",
+                "display_name": "Starter Subscription",
+                "state": "active",
+                "primary_key": "primary-key-value",
+                "secondary_key": "secondary-key-value",
+                "product_id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/products/starter"
+              }
+            },
+            {
+              "address": "azurerm_api_management_named_value.host",
+              "type": "azurerm_api_management_named_value",
+              "name": "host",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/namedValues/host",
+                "name": "host",
+                "display_name": "backend-host",
+                "value": "backend.example.test",
+                "secret": false
+              }
+            },
+            {
+              "address": "azurerm_api_management_named_value.kv",
+              "type": "azurerm_api_management_named_value",
+              "name": "kv",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/namedValues/kv",
+                "name": "kv",
+                "display_name": "vault-secret",
+                "secret": true,
+                "value_from_key_vault": [
+                  {
+                    "secret_id": "https://vault.example.test/secrets/api",
+                    "identity_client_id": "client-1"
+                  }
+                ]
+              }
+            },
+            {
+              "address": "azurerm_api_management_logger.appinsights",
+              "type": "azurerm_api_management_logger",
+              "name": "appinsights",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/loggers/appinsights",
+                "name": "appinsights",
+                "description": "App Insights",
+                "buffered": true,
+                "resource_id": "/subscriptions/test/appinsights",
+                "application_insights": [
+                  {
+                    "instrumentation_key": "ikey-value"
+                  }
+                ]
+              }
+            },
+            {
+              "address": "azurerm_api_management_diagnostic.applicationinsights",
+              "type": "azurerm_api_management_diagnostic",
+              "name": "applicationinsights",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/diagnostics/applicationinsights",
+                "identifier": "applicationinsights",
+                "api_management_logger_id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/loggers/appinsights",
+                "always_log_errors": true,
+                "log_client_ip": true,
+                "sampling_percentage": 50.0,
+                "verbosity": "information",
+                "http_correlation_protocol": "W3C",
+                "operation_name_format": "Url",
+                "frontend_request": [
+                  {
+                    "body_bytes": 512,
+                    "headers_to_log": [
+                      "x-trace"
+                    ]
+                  }
+                ],
+                "frontend_response": [
+                  {
+                    "body_bytes": 256,
+                    "headers_to_log": [
+                      "x-result"
+                    ]
+                  }
+                ],
+                "backend_request": [
+                  {
+                    "body_bytes": 128,
+                    "headers_to_log": [
+                      "x-upstream"
+                    ]
+                  }
+                ],
+                "backend_response": [
+                  {
+                    "body_bytes": 64,
+                    "headers_to_log": [
+                      "x-backend"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "address": "azurerm_api_management_api_version_set.orders-vs",
+              "type": "azurerm_api_management_api_version_set",
+              "name": "orders-vs",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apiVersionSets/orders-vs",
+                "display_name": "Orders Version Set",
+                "description": "Orders versions",
+                "versioning_scheme": "Header",
+                "version_header_name": "x-api-version"
+              }
+            },
+            {
+              "address": "azurerm_api_management_backend.orders-be",
+              "type": "azurerm_api_management_backend",
+              "name": "orders-be",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/backends/orders-be",
+                "name": "orders-be",
+                "description": "Orders backend",
+                "url": "https://orders.example.test",
+                "protocol": "http",
+                "scheme": "https",
+                "credentials": [
+                  {
+                    "header": {
+                      "x-api-key": [
+                        "secret-header"
+                      ]
+                    },
+                    "query": {
+                      "code": [
+                        "secret-query"
+                      ]
+                    },
+                    "authorization": [
+                      {
+                        "scheme": "Bearer",
+                        "parameter": "token-value"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "address": "azurerm_api_management_api.orders",
+              "type": "azurerm_api_management_api",
+              "name": "orders",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders",
+                "name": "orders",
+                "display_name": "Orders API",
+                "path": "orders",
+                "revision": "1",
+                "service_url": "https://orders.example.test",
+                "version": "v1",
+                "version_set_id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apiVersionSets/orders-vs",
+                "version_description": "First version",
+                "revision_description": "Initial revision",
+                "is_current": true,
+                "is_online": true,
+                "protocols": [
+                  "https"
+                ]
+              }
+            },
+            {
+              "address": "azurerm_api_management_api_schema.orders-schema",
+              "type": "azurerm_api_management_api_schema",
+              "name": "orders-schema",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders/schemas/orders-schema",
+                "api_name": "orders",
+                "schema_id": "orders-schema",
+                "content_type": "application/vnd.oai.openapi.components+json",
+                "value": "{\"components\":{}}"
+              }
+            },
+            {
+              "address": "azurerm_api_management_api_operation.get-orders",
+              "type": "azurerm_api_management_api_operation",
+              "name": "get-orders",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders/operations/get-orders",
+                "api_name": "orders",
+                "operation_id": "get-orders",
+                "display_name": "Get orders",
+                "method": "GET",
+                "url_template": "/orders/{orderId}",
+                "description": "Fetch one order",
+                "template_parameter": [
+                  {
+                    "name": "orderId",
+                    "type": "string",
+                    "required": true,
+                    "description": "Order id"
+                  }
+                ],
+                "request": [
+                  {
+                    "description": "req",
+                    "query_parameter": [
+                      {
+                        "name": "expand",
+                        "type": "string"
+                      }
+                    ]
+                  }
+                ],
+                "response": [
+                  {
+                    "status_code": 200,
+                    "description": "ok"
+                  }
+                ]
+              }
+            },
+            {
+              "address": "azurerm_api_management_product_api.starter-orders",
+              "type": "azurerm_api_management_product_api",
+              "name": "starter-orders",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/products/starter/apis/orders",
+                "product_id": "starter",
+                "api_name": "orders"
+              }
+            },
+            {
+              "address": "azurerm_api_management_product_group.starter-devs",
+              "type": "azurerm_api_management_product_group",
+              "name": "starter-devs",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/products/starter/groups/devs",
+                "product_id": "starter",
+                "group_name": "devs"
+              }
+            },
+            {
+              "address": "azurerm_api_management_group_user.devs-ada",
+              "type": "azurerm_api_management_group_user",
+              "name": "devs-ada",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/groups/devs/users/ada",
+                "group_name": "devs",
+                "user_id": "ada"
+              }
+            },
+            {
+              "address": "azurerm_api_management_api_tag.orders-public",
+              "type": "azurerm_api_management_api_tag",
+              "name": "orders-public",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders/tags/public",
+                "api_id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders",
+                "name": "public"
+              }
+            },
+            {
+              "address": "azurerm_api_management_product_tag.starter-public",
+              "type": "azurerm_api_management_product_tag",
+              "name": "starter-public",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/products/starter/tags/public",
+                "api_management_product_id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/products/starter",
+                "name": "public"
+              }
+            },
+            {
+              "address": "azurerm_api_management_api_operation_tag.get-orders-public",
+              "type": "azurerm_api_management_api_operation_tag",
+              "name": "get-orders-public",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders/operations/get-orders/tags/public",
+                "api_operation_id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders/operations/get-orders",
+                "name": "public",
+                "display_name": "Public"
+              }
+            },
+            {
+              "address": "azurerm_api_management_api_release.orders-r1",
+              "type": "azurerm_api_management_api_release",
+              "name": "orders-r1",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders/releases/orders-r1",
+                "api_id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders",
+                "name": "orders-r1",
+                "notes": "First release"
+              }
+            },
+            {
+              "address": "azurerm_api_management_api_policy.orders-policy",
+              "type": "azurerm_api_management_api_policy",
+              "name": "orders-policy",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders/policies/policy",
+                "api_name": "orders",
+                "xml_content": "<policies><inbound><base /><set-header name=\"x-api\" exists-action=\"override\"><value>orders</value></set-header></inbound></policies>"
+              }
+            },
+            {
+              "address": "azurerm_api_management_api_operation_policy.get-orders-policy",
+              "type": "azurerm_api_management_api_operation_policy",
+              "name": "get-orders-policy",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/orders/operations/get-orders/policies/policy",
+                "api_name": "orders",
+                "operation_id": "get-orders",
+                "xml_content": "<policies><inbound><base /><rate-limit calls=\"5\" renewal-period=\"60\" /></inbound></policies>"
+              }
+            },
+            {
+              "address": "azurerm_api_management_policy.global",
+              "type": "azurerm_api_management_policy",
+              "name": "global",
+              "values": {
+                "id": "/subscriptions/test/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/policies/policy",
+                "xml_content": "<policies><inbound><cors><allowed-origins><origin>https://app.example.test</origin></allowed-origins></cors></inbound></policies>"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -64,6 +64,38 @@ preserved workflow on demand with:
 gh workflow run ci.yml
 ```
 
+### Test suites
+
+The Python suite separates tests of the application from tests of the
+repository's shipped artifacts:
+
+```bash
+make test-python                     # everything
+uv run --extra dev pytest -m "not repo"      # application behaviour only
+uv run --extra dev pytest -m "repo"          # Dockerfile, catalog, packaging
+```
+
+A change to `app/` has to satisfy the first of those. The `repo` suite guards
+what is shipped around the application, and is deselected for mutation runs
+because it can kill no mutant in `app/`.
+
+### Complexity and mutation testing
+
+Two quality gates sit alongside the tests. Both are documented in full at
+[docs/complexity.md](docs/complexity.md) and
+[docs/mutation-testing.md](docs/mutation-testing.md).
+
+```bash
+make complexity                      # fail if anything is over the ratchet
+make complexity-report THRESHOLD=8   # what to split next, highest first
+make mutation MODULE=app.backend_pool
+make mutation-baseline               # score the curated module list
+```
+
+Coverage says a line ran. Mutation testing says whether the suite would notice
+if that line changed, and the answer is often no: `app/backend_pool.py` read as
+88% covered while 106 of its mutants had no test that reached them at all.
+
 ## Dependency Cooldown
 
 This repository carries repo-local dependency age gates so local installs and
@@ -556,3 +588,6 @@ make test
 - Capability matrix: [docs/CAPABILITY-MATRIX.md](docs/CAPABILITY-MATRIX.md)
 - Management-surface guide: [docs/APIM-SDK-SURFACE-GUIDE.md](docs/APIM-SDK-SURFACE-GUIDE.md)
 - Roadmap: [docs/NEXT-FEATURES.md](docs/NEXT-FEATURES.md)
+- Cyclomatic complexity gate and ratchet: [docs/complexity.md](docs/complexity.md)
+- Mutation testing: [docs/mutation-testing.md](docs/mutation-testing.md)
+- Quality pass digest (2026-09-07): [docs/2026-09-07-quality-pass-digest.md](docs/2026-09-07-quality-pass-digest.md)

@@ -526,6 +526,47 @@ release-tag-dry-run:
 	@[ -n "$(VERSION)" ] || { echo "VERSION is required, e.g. make release-tag-dry-run VERSION=X.Y.Z"; exit 1; }
 	@"$(RELEASE_TAG_SCRIPT)" --dry-run "$(VERSION)"
 
+complexity:
+	@echo "Cyclomatic complexity above the ratchet in pyproject.toml:"
+	$(UV_RUN) --extra dev ruff check --select C901 app scripts tests examples
+
+# Report every function above THRESHOLD, highest first, without failing.
+# The ratchet only moves down: use this to find the next one to split.
+complexity-report:
+	@$(UV_RUN) --extra dev ruff check --select C901 \
+		--config 'lint.mccabe.max-complexity=$(or $(THRESHOLD),8)' \
+		--output-format=concise app scripts tests examples 2>&1 \
+		| sed -E 's/^([^:]+):[0-9]+:[0-9]+: C901 `([^`]+)` is too complex \(([0-9]+) > [0-9]+\)/\3\t\2\t\1/' \
+		| sort -rn
+
+# Mutation testing. Name the module: a run that drags in suites which cannot
+# kill a single mutant costs minutes and buys nothing.
+#   make mutation MODULE=app.backend_pool
+# mutmut matches mutant names with fnmatch, and a mutant is named
+# <module>.x_<function>__mutmut_<n>. A bare module name therefore matches
+# nothing, so the glob is appended here rather than left as a trap.
+mutation:
+	@[ -n "$(MODULE)" ] || { echo "MODULE is required, e.g. make mutation MODULE=app.backend_pool"; exit 1; }
+	$(UV_RUN) --extra dev mutmut run "$(MODULE)$(if $(findstring *,$(MODULE)),,.*)"
+
+# Score the curated module list in one bounded pass. Each module gets its own
+# budget through scripts/lib/timeout.sh, which works without GNU coreutils.
+mutation-baseline:
+	@./scripts/mutation-test.sh --execute --no-fail
+
+mutation-gate:
+	@./scripts/mutation-test.sh --execute
+
+mutation-results:
+	$(UV_RUN) --extra dev mutmut results
+
+mutation-show:
+	@[ -n "$(MUTANT)" ] || { echo "MUTANT is required, e.g. make mutation-show MUTANT=app.backend_pool.x_f__mutmut_1"; exit 1; }
+	$(UV_RUN) --extra dev mutmut show $(MUTANT)
+
+mutation-clean:
+	rm -rf mutants .mutmut-cache
+
 test: test-python test-shell
 
 test-python:

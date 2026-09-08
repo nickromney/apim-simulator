@@ -21,3 +21,4 @@ examples/todo-app/frontend-astro/node_modules/
 examples/todo-app/frontend-astro/dist/
 examples/todo-app/frontend-astro/playwright-report/
 examples/todo-app/frontend-astro/test-results/
+.run/

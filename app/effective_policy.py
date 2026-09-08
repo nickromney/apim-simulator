@@ -6,6 +6,7 @@ The policy engine in ``app.policy`` keeps parse and apply.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from copy import deepcopy
 from typing import Any
 from xml.etree import ElementTree as XmlTree
@@ -18,6 +19,22 @@ EMPTY_POLICY_XML = "<policies><inbound /><backend /><outbound /><on-error /></po
 POLICY_SECTION_NAMES = ("inbound", "backend", "outbound", "on-error")
 
 
+def _parsed_policy_roots(xml_documents: list[str]) -> Iterator[Any]:
+    """Yield the <policies> root of each document, skipping what cannot be one.
+
+    A document that will not parse, or that is rooted at something other than
+    <policies>, contributes nothing rather than failing the merge: the stack is
+    assembled from several independently authored scopes.
+    """
+    for xml in xml_documents:
+        try:
+            parsed = ElementTree.fromstring(xml)
+        except ElementTree.ParseError:
+            continue
+        if parsed.tag == "policies":
+            yield parsed
+
+
 def merge_policy_xml_documents(xml_documents: list[str]) -> str:
     if not xml_documents:
         return EMPTY_POLICY_XML
@@ -27,13 +44,7 @@ def merge_policy_xml_documents(xml_documents: list[str]) -> str:
     root = XmlTree.Element("policies")
     sections = {name: XmlTree.SubElement(root, name) for name in POLICY_SECTION_NAMES}
 
-    for xml in xml_documents:
-        try:
-            parsed = ElementTree.fromstring(xml)
-        except ElementTree.ParseError:
-            continue
-        if parsed.tag != "policies":
-            continue
+    for parsed in _parsed_policy_roots(xml_documents):
         for section_name in POLICY_SECTION_NAMES:
             source = parsed.find(section_name)
             if source is None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -63,17 +64,8 @@ class JsonLogFormatter(logging.Formatter):
         if correlation_id:
             payload["correlation_id"] = correlation_id
 
-        for field in ("trace_id", "span_id", "trace_sampled"):
-            value = getattr(record, field, None)
-            if value is not None and value != "":
-                payload[field] = value
-
-        for key, value in record.__dict__.items():
-            if key in _STANDARD_LOG_RECORD_ATTRS or key in payload or key.startswith("_"):
-                continue
-            if value is None:
-                continue
-            payload[key] = value
+        payload.update(_trace_fields(record))
+        payload.update(_extra_fields(record, already_present=set(payload)))
 
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
@@ -81,6 +73,33 @@ class JsonLogFormatter(logging.Formatter):
             payload["stack"] = self.formatStack(record.stack_info)
 
         return json.dumps(payload, default=str, separators=(",", ":"))
+
+
+def _trace_fields(record: logging.LogRecord) -> dict[str, Any]:
+    """The OpenTelemetry correlation fields, when the instrumentation set them.
+
+    An empty string is treated as absent: the logging instrumentation writes one
+    when there is no active span, and an empty trace id in the log is worse than
+    no key at all.
+    """
+    fields = {}
+    for name in ("trace_id", "span_id", "trace_sampled"):
+        value = getattr(record, name, None)
+        if value is not None and value != "":
+            fields[name] = value
+    return fields
+
+
+def _extra_fields(record: logging.LogRecord, *, already_present: set[str]) -> dict[str, Any]:
+    """Whatever the caller passed as `extra`, minus logging's own attributes."""
+    return {
+        key: value
+        for key, value in record.__dict__.items()
+        if key not in _STANDARD_LOG_RECORD_ATTRS
+        and key not in already_present
+        and not key.startswith("_")
+        and value is not None
+    }
 
 
 def _env_true(name: str, default: bool = False) -> bool:
@@ -145,6 +164,35 @@ def _configure_logging_instrumentor(tracer_provider: TracerProvider | None) -> N
     _LOGGING_INSTRUMENTED = True
 
 
+class _CurrentStderrHandler(logging.StreamHandler):
+    """A stderr handler that resolves the stream at emit time, not construction.
+
+    `logging.StreamHandler()` binds whatever `sys.stderr` is when it is built,
+    and this handler is built once and kept for the life of the process. So
+    anything that replaces sys.stderr afterwards leaves the gateway logging into
+    a stream nobody reads, and anything that *closes* the old one makes every
+    later log line raise `ValueError: I/O operation on closed file`.
+
+    Found by a mutation run: the clean-test check failed inside the `mutants/`
+    copy because logging was first configured under pytest's capture, which
+    closes its buffer at teardown, and every later test then tripped over it.
+    The same trap applies to any supervisor that reopens the process's streams.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    def stream(self):  # type: ignore[override]
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, value) -> None:
+        # StreamHandler.__init__ assigns the stream it resolved; ignore it and
+        # keep reading sys.stderr live.
+        return
+
+
 def _configure_named_logger(
     *,
     logger_name: str,
@@ -161,7 +209,7 @@ def _configure_named_logger(
         logger.handlers.clear()
 
     if not any(getattr(handler, "_apim_stream_handler", False) for handler in logger.handlers):
-        stream_handler = logging.StreamHandler()
+        stream_handler = _CurrentStderrHandler()
         stream_handler._apim_stream_handler = True  # type: ignore[attr-defined]
         stream_handler.setFormatter(JsonLogFormatter(service_name=service_name))
         logger.addHandler(stream_handler)

@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from tls_verify import resolve_tls_verify
 
 DEFAULT_CA_CERT = Path(__file__).resolve().parent.parent / "examples" / "edge" / "certs" / "dev-root-ca.crt"
 DEFAULT_ATTEMPTS = int(os.getenv("SMOKE_MCP_ATTEMPTS", "20"))
@@ -28,33 +29,6 @@ def make_async_client(
         verify=verify,
         trust_env=False,
     )
-
-
-def resolve_tls_verify(
-    *,
-    default_ca: Path | None = None,
-    ca_env: str,
-    verify_env: str,
-    insecure_env: str,
-) -> bool | str:
-    insecure = os.getenv(insecure_env, "false").lower() == "true"
-    if insecure:
-        return False
-
-    explicit_ca = os.getenv(ca_env, "").strip()
-    if explicit_ca:
-        return explicit_ca
-
-    legacy_verify = os.getenv(verify_env, "").strip()
-    if legacy_verify and legacy_verify.lower() not in {"true", "false"}:
-        return legacy_verify
-    if legacy_verify.lower() == "false":
-        return False
-
-    if default_ca is not None and default_ca.exists():
-        return str(default_ca)
-
-    return True
 
 
 async def run(url: str, subscription_key: str, *, verify: bool | str = True) -> None:

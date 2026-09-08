@@ -242,22 +242,63 @@ def require_subscription_products(
     return sub.products
 
 
-def authenticate_request(
-    request: Request, config: GatewayConfig, oidc_verifiers: dict[str, OIDCVerifier], route: RouteConfig | None = None
-) -> AuthContext:
-    if config.allow_anonymous:
-        subscription = get_subscription_identity_optional(request, config, route)
-        products = get_subscription_products_optional(request, config, route)
-        issuer, audience = _default_issuer_audience(config)
-        claims = {
+def _anonymous_context(request: Request, config: GatewayConfig, route: RouteConfig | None) -> AuthContext:
+    """The stand-in identity used when the gateway allows anonymous calls.
+
+    Subscriptions are still read, because a product grant can apply without any
+    bearer token being required.
+    """
+    issuer, audience = _default_issuer_audience(config)
+    return AuthContext(
+        claims={
             "sub": "anon-demo",
             "email": "demo@dev.test",
             "name": "Demo User",
             "preferred_username": "demo@dev.test",
             "iss": issuer,
             "aud": audience,
-        }
-        return AuthContext(claims=claims, subscription=subscription, subscription_products=products)
+        },
+        subscription=get_subscription_identity_optional(request, config, route),
+        subscription_products=get_subscription_products_optional(request, config, route),
+    )
+
+
+def _bearer_token(request: Request) -> str:
+    token = ""
+    auth_header = request.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    return token
+
+
+def _verifier_for_token(token: str, oidc_verifiers: dict[str, OIDCVerifier]) -> OIDCVerifier:
+    """Pick the verifier for this token's issuer.
+
+    With one configured provider there is nothing to choose. With several, the
+    token's unverified `iss` selects one; the claims are read without validating
+    them, which is safe because the chosen verifier then validates properly.
+    """
+    if not oidc_verifiers:
+        raise HTTPException(status_code=500, detail="OIDC verifier not configured")
+    if len(oidc_verifiers) == 1:
+        return next(iter(oidc_verifiers.values()))
+
+    issuer = _unverified_claims(token).get("iss")
+    if isinstance(issuer, str) and issuer:
+        for candidate in oidc_verifiers.values():
+            if candidate.issuer == issuer:
+                return candidate
+    raise HTTPException(status_code=401, detail="Invalid or expired access token")
+
+
+def authenticate_request(
+    request: Request, config: GatewayConfig, oidc_verifiers: dict[str, OIDCVerifier], route: RouteConfig | None = None
+) -> AuthContext:
+    """Establish who is calling, from a subscription key and a bearer token."""
+    if config.allow_anonymous:
+        return _anonymous_context(request, config, route)
 
     subscription = validate_subscription_key(request, config, route)
     if config.subscription.required:
@@ -265,31 +306,9 @@ def authenticate_request(
     else:
         products = get_subscription_products_optional(request, config, route)
 
-    auth_header = request.headers.get("authorization")
-    if not auth_header or not auth_header.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-    token = auth_header.split(" ", 1)[1].strip()
-
-    if not oidc_verifiers:
-        raise HTTPException(status_code=500, detail="OIDC verifier not configured")
-
-    verifier: OIDCVerifier | None = None
-    if len(oidc_verifiers) == 1:
-        verifier = next(iter(oidc_verifiers.values()))
-    else:
-        unverified = _unverified_claims(token)
-        iss = unverified.get("iss")
-        if isinstance(iss, str) and iss:
-            for candidate in oidc_verifiers.values():
-                if candidate.issuer == iss:
-                    verifier = candidate
-                    break
-
-    if verifier is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired access token")
-
-    claims = verifier.decode(token)
-    return AuthContext(claims=claims, subscription=subscription, subscription_products=products)
+    token = _bearer_token(request)
+    verifier = _verifier_for_token(token, oidc_verifiers)
+    return AuthContext(claims=verifier.decode(token), subscription=subscription, subscription_products=products)
 
 
 def _extract_client_cert_context(request: Request, cert_cfg: ClientCertificateConfig) -> ClientCertContext | None:

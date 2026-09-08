@@ -258,103 +258,119 @@ class ReplayRequestBody(BaseModel):
 OperationUpsert.model_rebuild()
 
 
-def build_management_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:
+# --- Lookups -------------------------------------------------------------
+#
+# Each raises the 404 the management API is specified to return when the
+# resource is absent, so a handler can read as the one line it really is.
+
+
+def _masked(cfg: GatewayConfig, payload: Any) -> Any:
+    return mask_secret_data(payload, cfg)
+
+
+def _summary_payload(cfg: GatewayConfig, request: Request | None = None) -> dict[str, Any]:
+    trace_store = getattr(request.app.state, "trace_store", None) if request is not None else None
+    return project_summary(cfg, trace_store=trace_store)
+
+
+def _get_api_or_404(cfg: GatewayConfig, api_id: str) -> ApiConfig:
+    api = cfg.apis.get(api_id)
+    if api is None:
+        raise HTTPException(status_code=404, detail="API not found")
+    return api
+
+
+def _get_operation_or_404(cfg: GatewayConfig, api_id: str, operation_id: str) -> OperationConfig:
+    api = _get_api_or_404(cfg, api_id)
+    operation = api.operations.get(operation_id)
+    if operation is None:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    return operation
+
+
+def _get_api_schema_or_404(cfg: GatewayConfig, api_id: str, schema_id: str) -> ApiSchemaConfig:
+    api = _get_api_or_404(cfg, api_id)
+    schema = api.schemas.get(schema_id)
+    if schema is None:
+        raise HTTPException(status_code=404, detail="API schema not found")
+    return schema
+
+
+def _get_api_revision_or_404(cfg: GatewayConfig, api_id: str, revision_id: str) -> ApiRevisionConfig:
+    api = _get_api_or_404(cfg, api_id)
+    revision = api.revisions.get(revision_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="API revision not found")
+    return revision
+
+
+def _get_api_release_or_404(cfg: GatewayConfig, api_id: str, release_id: str) -> ApiReleaseConfig:
+    api = _get_api_or_404(cfg, api_id)
+    release = api.releases.get(release_id)
+    if release is None:
+        raise HTTPException(status_code=404, detail="API release not found")
+    return release
+
+
+def _get_product_or_404(cfg: GatewayConfig, product_id: str) -> ProductConfig:
+    product = cfg.products.get(product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product
+
+
+def _get_group_or_404(cfg: GatewayConfig, group_id: str) -> GroupConfig:
+    group = cfg.groups.get(group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return group
+
+
+def _get_user_or_404(cfg: GatewayConfig, user_id: str) -> UserConfig:
+    user = cfg.users.get(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+def _get_tag_or_404(cfg: GatewayConfig, tag_id: str) -> TagConfig:
+    tag = cfg.tags.get(tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return tag
+
+
+def _get_backend_or_404(cfg: GatewayConfig, backend_id: str) -> BackendConfig:
+    backend = cfg.backends.get(backend_id)
+    if backend is None:
+        raise HTTPException(status_code=404, detail="Backend not found")
+    return backend
+
+
+def _get_logger_or_404(cfg: GatewayConfig, logger_id: str) -> LoggerConfig:
+    logger_entry = cfg.loggers.get(logger_id)
+    if logger_entry is None:
+        raise HTTPException(status_code=404, detail="Logger not found")
+    return logger_entry
+
+
+def _get_diagnostic_or_404(cfg: GatewayConfig, diagnostic_id: str) -> DiagnosticConfig:
+    diagnostic = cfg.diagnostics.get(diagnostic_id)
+    if diagnostic is None:
+        raise HTTPException(status_code=404, detail="Diagnostic not found")
+    return diagnostic
+
+
+def _get_named_value_or_404(cfg: GatewayConfig, named_value_id: str) -> NamedValueConfig:
+    named_value = cfg.named_values.get(named_value_id)
+    if named_value is None:
+        raise HTTPException(status_code=404, detail="Named value not found")
+    return named_value
+
+
+def _build_service_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for the tenant's own identity, counts and summary."""
     router = APIRouter()
-
-    def _policy_scope_target(cfg: GatewayConfig, scope_type: str, scope_name: str) -> Any:
-        return require_management_plane().policy_scope_target(cfg, scope_type, scope_name)
-
-    def _policy_xml_for_target(target: Any) -> str:
-        return require_management_plane().policy_xml_for_target(target)
-
-    def _masked(cfg: GatewayConfig, payload: Any) -> Any:
-        return mask_secret_data(payload, cfg)
-
-    def _summary_payload(cfg: GatewayConfig, request: Request | None = None) -> dict[str, Any]:
-        trace_store = getattr(request.app.state, "trace_store", None) if request is not None else None
-        return project_summary(cfg, trace_store=trace_store)
-
-    def _get_api_or_404(cfg: GatewayConfig, api_id: str) -> ApiConfig:
-        api = cfg.apis.get(api_id)
-        if api is None:
-            raise HTTPException(status_code=404, detail="API not found")
-        return api
-
-    def _get_operation_or_404(cfg: GatewayConfig, api_id: str, operation_id: str) -> OperationConfig:
-        api = _get_api_or_404(cfg, api_id)
-        operation = api.operations.get(operation_id)
-        if operation is None:
-            raise HTTPException(status_code=404, detail="Operation not found")
-        return operation
-
-    def _get_api_schema_or_404(cfg: GatewayConfig, api_id: str, schema_id: str) -> ApiSchemaConfig:
-        api = _get_api_or_404(cfg, api_id)
-        schema = api.schemas.get(schema_id)
-        if schema is None:
-            raise HTTPException(status_code=404, detail="API schema not found")
-        return schema
-
-    def _get_api_revision_or_404(cfg: GatewayConfig, api_id: str, revision_id: str) -> ApiRevisionConfig:
-        api = _get_api_or_404(cfg, api_id)
-        revision = api.revisions.get(revision_id)
-        if revision is None:
-            raise HTTPException(status_code=404, detail="API revision not found")
-        return revision
-
-    def _get_api_release_or_404(cfg: GatewayConfig, api_id: str, release_id: str) -> ApiReleaseConfig:
-        api = _get_api_or_404(cfg, api_id)
-        release = api.releases.get(release_id)
-        if release is None:
-            raise HTTPException(status_code=404, detail="API release not found")
-        return release
-
-    def _get_product_or_404(cfg: GatewayConfig, product_id: str) -> ProductConfig:
-        product = cfg.products.get(product_id)
-        if product is None:
-            raise HTTPException(status_code=404, detail="Product not found")
-        return product
-
-    def _get_group_or_404(cfg: GatewayConfig, group_id: str) -> GroupConfig:
-        group = cfg.groups.get(group_id)
-        if group is None:
-            raise HTTPException(status_code=404, detail="Group not found")
-        return group
-
-    def _get_user_or_404(cfg: GatewayConfig, user_id: str) -> UserConfig:
-        user = cfg.users.get(user_id)
-        if user is None:
-            raise HTTPException(status_code=404, detail="User not found")
-        return user
-
-    def _get_tag_or_404(cfg: GatewayConfig, tag_id: str) -> TagConfig:
-        tag = cfg.tags.get(tag_id)
-        if tag is None:
-            raise HTTPException(status_code=404, detail="Tag not found")
-        return tag
-
-    def _get_backend_or_404(cfg: GatewayConfig, backend_id: str) -> BackendConfig:
-        backend = cfg.backends.get(backend_id)
-        if backend is None:
-            raise HTTPException(status_code=404, detail="Backend not found")
-        return backend
-
-    def _get_logger_or_404(cfg: GatewayConfig, logger_id: str) -> LoggerConfig:
-        logger_entry = cfg.loggers.get(logger_id)
-        if logger_entry is None:
-            raise HTTPException(status_code=404, detail="Logger not found")
-        return logger_entry
-
-    def _get_diagnostic_or_404(cfg: GatewayConfig, diagnostic_id: str) -> DiagnosticConfig:
-        diagnostic = cfg.diagnostics.get(diagnostic_id)
-        if diagnostic is None:
-            raise HTTPException(status_code=404, detail="Diagnostic not found")
-        return diagnostic
-
-    def _get_named_value_or_404(cfg: GatewayConfig, named_value_id: str) -> NamedValueConfig:
-        named_value = cfg.named_values.get(named_value_id)
-        if named_value is None:
-            raise HTTPException(status_code=404, detail="Named value not found")
-        return named_value
 
     @router.get("/apim/management/status")
     async def management_status(request: Request) -> dict[str, Any]:
@@ -382,6 +398,13 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
         return _summary_payload(cfg, request)
+
+    return router
+
+
+def _build_apis_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for APIs and everything nested under one: operations, schemas, revisions, releases, tags."""
+    router = APIRouter()
 
     @router.get("/apim/management/apis")
     async def list_apis(request: Request) -> list[dict[str, Any]]:
@@ -642,6 +665,19 @@ def build_management_router(*, require_management_plane: Callable[[], Management
             "remaining": len(updated.apis[api_id].operations),
         }
 
+    return router
+
+
+def _build_policy_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for policy documents at each scope, plus the trace store and request replay."""
+    router = APIRouter()
+
+    def _policy_scope_target(cfg: GatewayConfig, scope_type: str, scope_name: str) -> Any:
+        return require_management_plane().policy_scope_target(cfg, scope_type, scope_name)
+
+    def _policy_xml_for_target(target: Any) -> str:
+        return require_management_plane().policy_xml_for_target(target)
+
     @router.get("/apim/management/policies/{scope_type}/{scope_name:path}")
     async def management_get_policy(scope_type: str, scope_name: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
@@ -718,6 +754,13 @@ def build_management_router(*, require_management_plane: Callable[[], Management
             "trace_id": trace_id,
             "trace": request.app.state.trace_store.get(trace_id) if trace_id else None,
         }
+
+    return router
+
+
+def _build_products_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for products, their group and tag grants, and the tag catalogue."""
+    router = APIRouter()
 
     @router.get("/apim/management/products")
     async def list_products(request: Request) -> list[dict[str, Any]]:
@@ -841,6 +884,13 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         updated = require_management_plane().delete_tag(cfg, tag_id)
         return {"deleted": True, "tag_id": tag_id, "remaining": len(updated.tags)}
 
+    return router
+
+
+def _build_subscriptions_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for subscription keys and their lifecycle."""
+    router = APIRouter()
+
     @router.get("/apim/management/subscriptions")
     async def list_subscriptions(request: Request) -> list[dict[str, Any]]:
         require_tenant_access(request)
@@ -915,6 +965,13 @@ def build_management_router(*, require_management_plane: Callable[[], Management
             "subscription": _masked(updated, project_subscription(updated, config_key, subscription)),
         }
 
+    return router
+
+
+def _build_portal_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for the developer portal's self-service surface."""
+    router = APIRouter()
+
     def _require_portal_enabled(cfg: GatewayConfig) -> None:
         if not cfg.portal.enabled:
             raise HTTPException(status_code=404, detail="Portal is not enabled")
@@ -958,6 +1015,13 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         if persisted is None:
             raise HTTPException(status_code=500, detail="Subscription persistence failed")
         return project_portal_subscription(persisted)
+
+    return router
+
+
+def _build_infrastructure_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for backends, named values, loggers and diagnostics."""
+    router = APIRouter()
 
     @router.get("/apim/management/backends")
     async def list_backends(request: Request) -> list[dict[str, Any]]:
@@ -1047,6 +1111,13 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         updated = require_management_plane().delete_named_value(cfg, named_value_id)
         return {"deleted": True, "named_value_id": named_value_id, "remaining": len(updated.named_values)}
 
+    return router
+
+
+def _build_versioning_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for API version sets and reusable policy fragments."""
+    router = APIRouter()
+
     @router.get("/apim/management/api-version-sets")
     async def list_api_version_sets(request: Request) -> list[dict[str, Any]]:
         require_tenant_access(request)
@@ -1115,6 +1186,13 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         cfg: GatewayConfig = request.app.state.gateway_config
         updated = require_management_plane().delete_policy_fragment(cfg, fragment_id)
         return {"deleted": True, "fragment_id": fragment_id, "remaining": len(updated.policy_fragments)}
+
+    return router
+
+
+def _build_identity_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for users, groups and group membership."""
+    router = APIRouter()
 
     @router.get("/apim/management/users")
     async def list_users(request: Request) -> list[dict[str, Any]]:
@@ -1205,6 +1283,13 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         updated = require_management_plane().delete_group(cfg, group_id)
         return {"deleted": True, "group_id": group_id, "remaining": len(updated.groups)}
 
+    return router
+
+
+def _build_imports_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for bulk import of an OpenTofu state document."""
+    router = APIRouter()
+
     @router.post("/apim/management/import/tofu-show")
     async def import_tofu_show_json(request: Request, tf: dict[str, Any]) -> dict:
         require_tenant_access(request)
@@ -1225,4 +1310,28 @@ def build_management_router(*, require_management_plane: Callable[[], Management
             "diagnostics": [item.__dict__ for item in result.diagnostics],
         }
 
+    return router
+
+
+def build_management_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:
+    """Compose the management plane from one router per resource area.
+
+    Order matters and is asserted by tests/test_app_composition.py: these
+    routes must all be registered ahead of the gateway catch-all, which would
+    otherwise shadow every one of them.
+    """
+    router = APIRouter()
+    for build in (
+        _build_service_router,
+        _build_apis_router,
+        _build_policy_router,
+        _build_products_router,
+        _build_subscriptions_router,
+        _build_portal_router,
+        _build_infrastructure_router,
+        _build_versioning_router,
+        _build_identity_router,
+        _build_imports_router,
+    ):
+        router.include_router(build(require_management_plane=require_management_plane))
     return router
