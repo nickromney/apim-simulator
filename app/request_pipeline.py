@@ -1013,11 +1013,11 @@ def _gateway_cache_key(
     if not cfg.cache_enabled or request.method != "GET" or cfg.proxy_streaming or policy_response_cache_active:
         return None
     return request_cache_key(
-        method=request.method,
+        method=policy_req.method,
         upstream_url=upstream_url,
         query=policy_req.query,
-        authorization=request.headers.get("authorization", ""),
-        subscription_key=request.headers.get("ocp-apim-subscription-key", ""),
+        authorization=policy_req.headers.get("authorization", ""),
+        subscription_key=policy_req.headers.get("ocp-apim-subscription-key", ""),
     )
 
 

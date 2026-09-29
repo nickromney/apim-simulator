@@ -419,6 +419,91 @@ def test_golden_policy_parses_policy_parity_v2_nodes() -> None:
     assert isinstance(doc.outbound[1], CacheStoreValue)
 
 
+@pytest.mark.parametrize("attribute", ["vary-by-developer", "vary-by-developer-groups"])
+def test_cache_lookup_requires_developer_variation_attributes(attribute: str) -> None:
+    """The cache-lookup developer variation attributes are required by APIM.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    """
+    other = "vary-by-developer-groups" if attribute == "vary-by-developer" else "vary-by-developer"
+    with pytest.raises(HTTPException, match=f"cache-lookup requires {attribute}"):
+        parse_policies_xml(
+            f"""\
+<policies>
+  <inbound><cache-lookup {other}="false" /></inbound>
+</policies>
+"""
+        )
+
+
+@pytest.mark.parametrize(
+    ("element", "attribute", "value", "message"),
+    [
+        ("cache-lookup-value", "caching-type", "unknown", "Unsupported caching-type unknown"),
+        ("cache-store-value", "caching-type", "unknown", "Unsupported caching-type unknown"),
+        ("cache-remove-value", "caching-type", "unknown", "Unsupported caching-type unknown"),
+        ("cache-lookup", "downstream-caching-type", "unknown", "Unsupported downstream-caching-type unknown"),
+    ],
+)
+def test_cache_policies_reject_unknown_enum_values(element: str, attribute: str, value: str, message: str) -> None:
+    """Cache policy enum attributes accept only the documented values.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-value-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-store-value-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-remove-value-policy
+    """
+    if element == "cache-lookup":
+        attrs = f'{attribute}="{value}" vary-by-developer="false" vary-by-developer-groups="false"'
+    elif element == "cache-lookup-value":
+        attrs = f'{attribute}="{value}" key="key" variable-name="value"'
+    elif element == "cache-store-value":
+        attrs = f'{attribute}="{value}" key="key" value="value" duration="60"'
+    else:
+        attrs = f'{attribute}="{value}" key="key"'
+    with pytest.raises(HTTPException, match=message):
+        parse_policies_xml(f"<policies><inbound><{element} {attrs} /></inbound></policies>")
+
+
+def test_cache_remove_value_honours_fail_on_removal_error() -> None:
+    """cache-remove-value can fail the request when cache removal fails.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-remove-value-policy
+    """
+
+    class FailingCache(dict[str, object]):
+        def pop(self, key: str, default: object = None) -> object:
+            raise RuntimeError(f"cannot remove {key}")
+
+    req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
+    runtime = PolicyRuntime(value_cache=FailingCache())
+    with pytest.raises(RuntimeError, match="cannot remove key"):
+        CacheRemoveValue(key="key", fail_on_cache_removal_error="true").apply(req, runtime)
+    assert CacheRemoveValue(key="key", fail_on_cache_removal_error="false").apply(req, runtime) is None
+
+
+def test_cache_store_value_duration_is_seconds_and_expires_at_boundary() -> None:
+    """cache-store-value duration is measured in seconds.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-store-value-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-value-policy
+    """
+    now = [100.0]
+    runtime = PolicyRuntime(value_cache={}, clock=lambda: now[0])
+    store_request = PolicyRequest(method="POST", path="/", query={}, headers={}, variables={})
+    CacheStoreValue(key="key", value="value", duration="2", caching_type="internal").apply(store_request, runtime)
+
+    now[0] = 101.0
+    hit_request = PolicyRequest(method="POST", path="/", query={}, headers={}, variables={})
+    CacheLookupValue(key="key", variable_name="cached", caching_type="internal").apply(hit_request, runtime)
+    assert hit_request.variables["cached"] == "value"
+
+    now[0] = 102.0
+    expired_request = PolicyRequest(method="POST", path="/", query={}, headers={}, variables={})
+    CacheLookupValue(key="key", variable_name="cached", caching_type="internal").apply(expired_request, runtime)
+    assert "cached" not in expired_request.variables
+
+
 @pytest.mark.contract("POLICY-EMIT-METRIC")
 def test_golden_policy_emit_metric_uses_dimensions_and_value() -> None:
     doc = parse_policies_xml(
