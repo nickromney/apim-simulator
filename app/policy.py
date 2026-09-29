@@ -85,6 +85,7 @@ class PolicyRuntime:
     openid_cache: dict[str, tuple[float, dict[str, Any], dict[str, Any]]] = field(default_factory=dict)
     response_cache: dict[str, Any] = field(default_factory=dict)
     value_cache: dict[str, Any] = field(default_factory=dict)
+    backend_variable_initializers: list[tuple[str, Any]] = field(default_factory=list)
     deferred_actions: list[Any] = field(default_factory=list)
     llm_metric_emitter: Any = None
     custom_metric_emitter: Any = None
@@ -1723,6 +1724,16 @@ def _llm_prompt_text(body: bytes) -> str:
     return "\n".join(chunk for chunk in chunks if chunk)
 
 
+def _llm_request_is_streaming(body: bytes) -> bool:
+    if not body:
+        return False
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("stream") is True
+
+
 def _llm_usage_from_response(body: bytes) -> dict[str, int] | None:
     if not body:
         return None
@@ -1732,7 +1743,7 @@ def _llm_usage_from_response(body: bytes) -> dict[str, int] | None:
         return None
     if not isinstance(payload, dict):
         return None
-    return _llm_usage_counts(payload.get("usage"))
+    return _llm_usage_counts(payload.get("usage") or payload.get("usageMetadata"))
 
 
 def _llm_usage_counts(usage: Any) -> dict[str, int] | None:
@@ -1746,8 +1757,8 @@ def _llm_usage_counts(usage: Any) -> dict[str, int] | None:
                 return int(value)
         return None
 
-    prompt = _usage_int("prompt_tokens", "input_tokens")
-    completion = _usage_int("completion_tokens", "output_tokens")
+    prompt = _usage_int("prompt_tokens", "input_tokens", "promptTokenCount")
+    completion = _usage_int("completion_tokens", "output_tokens", "candidatesTokenCount")
     total = _usage_int("total_tokens")
     if total is None and prompt is None and completion is None:
         return None
@@ -1809,7 +1820,7 @@ def _llm_usage_from_sse(body: bytes) -> tuple[dict[str, int] | None, str]:
     usage: dict[str, int] | None = None
     delta_parts: list[str] = []
     for payload in _sse_json_payloads(body):
-        chunk_usage = _llm_usage_counts(payload.get("usage"))
+        chunk_usage = _llm_usage_counts(payload.get("usage") or payload.get("usageMetadata"))
         if chunk_usage is not None:
             usage = chunk_usage
         delta_parts.extend(_sse_delta_texts(payload))
@@ -2092,6 +2103,8 @@ class LlmTokenLimit(PolicyNode):
         """Queue the real token accounting for after the response is known."""
         if runtime is None:
             return
+        if self.tokens_consumed_variable_name:
+            runtime.backend_variable_initializers.append((self.tokens_consumed_variable_name, estimated_prompt_tokens))
         runtime.deferred_actions.append(
             LlmTokenLimitDeferred(
                 counter_key=counter_key,
@@ -2129,7 +2142,8 @@ class LlmTokenLimit(PolicyNode):
         if token_quota > 0 and token_quota_period not in LLM_QUOTA_PERIODS:
             raise HTTPException(status_code=500, detail="llm-token-limit token-quota-period is invalid")
 
-        estimated_prompt_tokens = _estimate_llm_tokens_from_text(_llm_prompt_text(req.body)) if estimate else 0
+        estimate_prompt = estimate or _llm_request_is_streaming(req.body)
+        estimated_prompt_tokens = _estimate_llm_tokens_from_text(_llm_prompt_text(req.body)) if estimate_prompt else 0
         now = time.time()
 
         used_quota, refusal = self._quota_block(
@@ -2161,8 +2175,6 @@ class LlmTokenLimit(PolicyNode):
 
         # The deferred accounting reads the response body, so it must be buffered.
         req.variables["_policy_response_buffering_required"] = True
-        if self.tokens_consumed_variable_name:
-            req.variables[self.tokens_consumed_variable_name] = estimated_prompt_tokens
         self._defer(
             runtime,
             counter_key=counter_key,
@@ -2203,26 +2215,36 @@ class LlmTokenLimit(PolicyNode):
             "llm-token-limit",
             {"counter_key": counter_key, "blocked": True, "status_code": status_code, "retry_after": retry_after},
         )
+        # The LLM policy pages specify the status and retry header, but not
+        # the human-readable refusal text. Reuse the APIM JSON envelope and
+        # the simulator's existing rate/quota wording.
         headers = {
-            "content-type": "text/plain",
+            "content-type": "application/json",
             header_name.lower(): str(retry_after),
         }
-        return ResponseSpec(status_code=status_code, headers=headers, body=body.encode("utf-8"))
+        return ResponseSpec(status_code=status_code, headers=headers, body=_json_throttle_body(status_code, body))
 
 
-_LLM_DEFAULT_DIMENSION_SOURCES = {
+_DEFAULT_DIMENSION_SOURCES = {
     "api id": "api_id",
     "operation id": "operation_id",
     "subscription id": "subscription_id",
     "product id": "product_id",
-    "product": "product_id",
-    "client ip address": "client_ip",
+    "user id": "user_id",
+    "location": "location",
+    "gateway id": "gateway_id",
+    "backend id": "backend_id",
 }
 
 
 def _default_llm_dimension_value(req: PolicyRequest, name: str) -> str:
-    source = _LLM_DEFAULT_DIMENSION_SOURCES.get(name.strip().lower())
+    normalized_name = name.strip().lower()
+    source = _DEFAULT_DIMENSION_SOURCES.get(normalized_name)
     if source is None:
+        raise HTTPException(status_code=500, detail=f"Dimension value is required for {name}")
+    if normalized_name == "backend id" and req.section != "outbound":
+        # The Learn reference restricts Backend ID to outbound policies. The
+        # local gateway has no backend selection before its backend stage.
         return ""
     return _stringify_policy_value(req.variables.get(source))
 
@@ -2264,7 +2286,8 @@ class LlmEmitTokenMetric(PolicyNode):
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         resolved: list[tuple[str, str]] = []
-        for name, value in self.dimensions:
+        for name_template, value in self.dimensions:
+            name = render_policy_value(name_template, req, runtime)
             if value is None:
                 resolved.append((name, _default_llm_dimension_value(req, name)))
             else:
@@ -2295,15 +2318,16 @@ class EmitMetric(PolicyNode):
     dimensions: tuple[tuple[str, str | None], ...]
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        amount = _policy_int(self.value, req, runtime, default=1) if self.value else 1
+        amount = _policy_float(self.value, req, runtime, default=1.0) if self.value else 1.0
         resolved: dict[str, str] = {}
-        for dim_name, dim_value in self.dimensions:
+        for dim_name_template, dim_value in self.dimensions:
+            dim_name = render_policy_value(dim_name_template, req, runtime)
             if dim_value is None:
                 resolved[dim_name] = _default_llm_dimension_value(req, dim_name)
             else:
                 resolved[dim_name] = render_policy_value(dim_value, req, runtime)
         emitter = runtime.custom_metric_emitter if runtime is not None else None
-        if emitter is not None and amount:
+        if emitter is not None:
             attributes = {
                 "apim.metric.name": self.name,
                 "apim.metric.namespace": self.namespace,
@@ -3988,9 +4012,22 @@ def _parse_llm_emit_token_metric(el: ElementTree.Element) -> LlmEmitTokenMetric:
         name = (child.attrib.get("name") or "").strip()
         if not name:
             raise HTTPException(status_code=500, detail="llm-emit-token-metric dimension missing name")
+        if (
+            child.attrib.get("value") is None
+            and not is_apim_expression(name)
+            and name.lower() not in _DEFAULT_DIMENSION_SOURCES
+        ):
+            # The reference requires a value for non-default dimensions but
+            # does not define the configuration error text.
+            raise HTTPException(status_code=500, detail=f"Dimension value is required for {name}")
         dimensions.append((name, child.attrib.get("value")))
+    if len(dimensions) > 5:
+        # Learn documents the limit but not the policy-configuration error.
+        # It does not exempt dimensions whose values come from APIM defaults,
+        # so every configured dimension child counts toward the five.
+        raise HTTPException(status_code=500, detail="llm-emit-token-metric allows at most 5 dimensions")
     return LlmEmitTokenMetric(
-        namespace=(el.attrib.get("namespace") or "llm").strip() or "llm",
+        namespace=(el.attrib.get("namespace") or "API Management").strip() or "API Management",
         dimensions=tuple(dimensions),
     )
 
@@ -4004,12 +4041,25 @@ def _parse_emit_metric(el: ElementTree.Element) -> EmitMetric:
         dim_name = (child.attrib.get("name") or "").strip()
         if not dim_name:
             raise HTTPException(status_code=500, detail="emit-metric dimension missing name")
+        if (
+            child.attrib.get("value") is None
+            and not is_apim_expression(dim_name)
+            and dim_name.lower() not in _DEFAULT_DIMENSION_SOURCES
+        ):
+            # The reference requires a value for non-default dimensions but
+            # does not define the configuration error text.
+            raise HTTPException(status_code=500, detail=f"Dimension value is required for {dim_name}")
         dimensions.append((dim_name, child.attrib.get("value")))
     if not dimensions:
         raise HTTPException(status_code=500, detail="emit-metric requires at least one dimension")
+    if len(dimensions) > 5:
+        # Learn documents the limit but not the policy-configuration error.
+        # It does not exempt dimensions whose values come from APIM defaults,
+        # so every configured dimension child counts toward the five.
+        raise HTTPException(status_code=500, detail="emit-metric allows at most 5 dimensions")
     return EmitMetric(
         name=name,
-        namespace=(el.attrib.get("namespace") or "apim").strip() or "apim",
+        namespace=(el.attrib.get("namespace") or "API Management").strip() or "API Management",
         value=el.attrib.get("value"),
         dimensions=tuple(dimensions),
     )
@@ -4672,6 +4722,7 @@ async def apply_inbound_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
+    req.section = "inbound"
     return await _apply_section_async(docs, "inbound", req, runtime)
 
 
@@ -4680,6 +4731,12 @@ async def apply_backend_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
+    req.section = "backend"
+    if runtime is not None:
+        for name, value in runtime.backend_variable_initializers:
+            req.variables[name] = value
+            _record_variable_write(runtime, name, value, "llm-token-limit")
+        runtime.backend_variable_initializers.clear()
     return await _apply_section_async(docs, "backend", req, runtime)
 
 

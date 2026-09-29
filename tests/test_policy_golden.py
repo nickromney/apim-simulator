@@ -616,7 +616,137 @@ def test_golden_policy_emit_metric_uses_dimensions_and_value() -> None:
 
 @pytest.mark.contract("POLICY-EMIT-METRIC")
 def test_golden_policy_emit_metric_requires_name_and_dimension() -> None:
+    """emit-metric requires a name, dimensions, and values for custom dimensions.
+
+    https://learn.microsoft.com/en-us/azure/api-management/emit-metric-policy
+    """
     with pytest.raises(HTTPException):
         parse_policies_xml("<policies><inbound><emit-metric name='x' /></inbound></policies>")
     with pytest.raises(HTTPException):
         parse_policies_xml("<policies><inbound><emit-metric><dimension name='d' /></emit-metric></inbound></policies>")
+
+
+def test_emit_metric_uses_double_values_including_zero() -> None:
+    """emit-metric value is a double and zero is still emitted.
+
+    https://learn.microsoft.com/en-us/azure/api-management/emit-metric-policy
+    """
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <emit-metric name="fractional" value="0.5">
+      <dimension name="API ID" />
+    </emit-metric>
+    <emit-metric name="zero" value="0">
+      <dimension name="API ID" />
+    </emit-metric>
+  </inbound>
+</policies>
+"""
+    )
+    emitted: list[tuple[float, dict[str, str]]] = []
+    runtime = PolicyRuntime(custom_metric_emitter=lambda amount, attributes: emitted.append((amount, attributes)))
+    req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={"api_id": "demo-api"})
+
+    assert apply_inbound([doc], req, runtime) is None
+    assert [amount for amount, _ in emitted] == [0.5, 0.0]
+
+
+def test_emit_metric_enforces_five_custom_dimensions_and_evaluates_names() -> None:
+    """emit-metric supports expression dimension names and caps configured dimensions at five.
+
+    https://learn.microsoft.com/en-us/azure/api-management/emit-metric-policy
+    """
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <emit-metric name="named">
+      <dimension name='@(context.Variables["dimension_name"])' value="value" />
+    </emit-metric>
+  </inbound>
+</policies>
+"""
+    )
+    emitted: list[tuple[float, dict[str, str]]] = []
+    runtime = PolicyRuntime(custom_metric_emitter=lambda amount, attributes: emitted.append((amount, attributes)))
+    req = PolicyRequest(
+        method="GET",
+        path="/",
+        query={},
+        headers={},
+        variables={"api_id": "demo-api", "dimension_name": "dynamic-name"},
+    )
+
+    assert apply_inbound([doc], req, runtime) is None
+    assert emitted[0][1]["apim.metric.dimension.dynamic-name"] == "value"
+
+    dimensions = "".join(f'<dimension name="d{i}" value="{i}" />' for i in range(6))
+    with pytest.raises(HTTPException):
+        parse_policies_xml(f'<policies><inbound><emit-metric name="x">{dimensions}</emit-metric></inbound></policies>')
+
+
+def test_emit_metric_populates_default_dimensions_from_request_context() -> None:
+    """emit-metric resolves all documented default dimensions from request context.
+
+    https://learn.microsoft.com/en-us/azure/api-management/emit-metric-policy
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <outbound>
+    <emit-metric name="request">
+      <dimension name="API ID" />
+      <dimension name="Operation ID" />
+      <dimension name="Product ID" />
+      <dimension name="User ID" />
+      <dimension name="Subscription ID" />
+    </emit-metric>
+    <emit-metric name="deployment">
+      <dimension name="Location" />
+      <dimension name="Gateway ID" />
+      <dimension name="Backend ID" />
+    </emit-metric>
+  </outbound>
+</policies>
+"""
+    )
+    emitted: list[tuple[float, dict[str, str]]] = []
+    runtime = PolicyRuntime(custom_metric_emitter=lambda amount, attributes: emitted.append((amount, attributes)))
+    req = PolicyRequest(
+        method="GET",
+        path="/",
+        query={},
+        headers={},
+        variables={
+            "api_id": "demo-api",
+            "operation_id": "get",
+            "product_id": "demo-product",
+            "user_id": "demo-user",
+            "subscription_id": "demo-subscription",
+            "location": "local",
+            "gateway_id": "local",
+            "backend_id": "demo-backend",
+        },
+    )
+    req.section = "outbound"
+
+    assert apply_outbound([doc], headers={}, variables=req.variables, runtime=runtime) is None
+    assert emitted[0][1] == {
+        "apim.metric.name": "request",
+        "apim.metric.namespace": "API Management",
+        "apim.metric.dimension.API ID": "demo-api",
+        "apim.metric.dimension.Operation ID": "get",
+        "apim.metric.dimension.Product ID": "demo-product",
+        "apim.metric.dimension.User ID": "demo-user",
+        "apim.metric.dimension.Subscription ID": "demo-subscription",
+    }
+    assert emitted[1][1] == {
+        "apim.metric.name": "deployment",
+        "apim.metric.namespace": "API Management",
+        "apim.metric.dimension.Location": "local",
+        "apim.metric.dimension.Gateway ID": "local",
+        "apim.metric.dimension.Backend ID": "demo-backend",
+    }

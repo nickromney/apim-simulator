@@ -1447,6 +1447,12 @@ def _build_policy_request(
             "subscription_id": auth.subscription.id if auth.subscription else "",
             "products": auth.subscription_products,
             "product_id": effective_product_id,
+            "user_id": str(auth.claims.get("sub") or (subscription_owner or "").removeprefix("portal:")),
+            # APIM's deployment dimensions have no equivalent local service
+            # metadata; these stable local values are the simulator mapping.
+            "location": "local",
+            "gateway_id": "local",
+            "backend_id": route.backend or "",
             "client_ip": forwarding.client_ip,
             "correlation_id": correlation_id,
             "incoming_host": forwarding.incoming_host,
@@ -2029,6 +2035,7 @@ async def execute_gateway_request(request: Request) -> Response:
     pool_backend = choice.pool.pool_backend
     pool_backend_id = choice.pool.pool_backend_id
     backend_health = choice.pool.backend_health
+    policy_req.variables["backend_id"] = backend_id or ""
 
     request.state.apim_backend_id = backend_id or "direct"
     set_current_span_attributes(
@@ -2091,6 +2098,7 @@ async def execute_gateway_request(request: Request) -> Response:
     backend = attempt_result.pool.backend
     upstream_url = attempt_result.upstream_url
     elapsed_seconds = attempt_result.elapsed_seconds
+    policy_req.variables["backend_id"] = backend_id or ""
 
     request.state.apim_upstream_attempts = attempts_used
 
