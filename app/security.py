@@ -18,7 +18,7 @@ from app.config import (
     SubscriptionState,
     TrustedClientCertificateConfig,
 )
-from app.gateway_errors import subscription_key_error
+from app.gateway_errors import GatewayError, subscription_key_error
 
 
 @dataclass(frozen=True)
@@ -156,7 +156,10 @@ def _get_subscription_key_optional(
 ) -> str | None:
     for header_name in _subscription_header_names(config, route):
         provided = request.headers.get(header_name)
-        if provided:
+        # A present header wins even when empty: the query parameter is
+        # "checked only if the header isn't present".
+        # https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+        if provided is not None:
             return provided
     for query_name in _subscription_query_param_names(config, route):
         provided = request.query_params.get(query_name)
@@ -186,6 +189,8 @@ def validate_subscription_key(
 
     provided = _get_subscription_key_optional(request, config, route)
     if not provided:
+        # The docs are silent on an empty key value; it carries no key, so it
+        # reads as missing rather than invalid.
         raise subscription_key_error(request, config, route, missing=True)
 
     _require_active_subscription(request, config, route, provided)
@@ -253,6 +258,11 @@ def _anonymous_context(request: Request, config: GatewayConfig, route: RouteConf
     bearer token being required.
     """
     issuer, audience = _default_issuer_audience(config)
+    if route_has_open_product(config, route):
+        subscription, products = _lenient_subscription(request, config, route)
+    else:
+        subscription = get_subscription_identity_optional(request, config, route)
+        products = get_subscription_products_optional(request, config, route)
     return AuthContext(
         claims={
             "sub": "anon-demo",
@@ -262,8 +272,8 @@ def _anonymous_context(request: Request, config: GatewayConfig, route: RouteConf
             "iss": issuer,
             "aud": audience,
         },
-        subscription=get_subscription_identity_optional(request, config, route),
-        subscription_products=get_subscription_products_optional(request, config, route),
+        subscription=subscription,
+        subscription_products=products,
     )
 
 
@@ -297,6 +307,32 @@ def _verifier_for_token(token: str, oidc_verifiers: dict[str, OIDCVerifier]) -> 
     raise HTTPException(status_code=401, detail="Invalid or expired access token")
 
 
+def route_has_open_product(config: GatewayConfig, route: RouteConfig | None) -> bool:
+    """Whether the route's API is in a product that doesn't require a subscription.
+
+    With an open product, APIM ignores a key it can't accept and serves the
+    request in that product's context:
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    if route is None:
+        return False
+    ids = list(route.products) if route.products else ([route.product] if route.product else [])
+    return any((p := config.products.get(pid)) is not None and not p.require_subscription for pid in ids)
+
+
+def _lenient_subscription(
+    request: Request, config: GatewayConfig, route: RouteConfig | None
+) -> tuple[SubscriptionIdentity | None, list[str]]:
+    """Read a subscription key, dropping one that can't be accepted (open product)."""
+    try:
+        return (
+            get_subscription_identity_optional(request, config, route),
+            get_subscription_products_optional(request, config, route),
+        )
+    except GatewayError:
+        return None, []
+
+
 def authenticate_request(
     request: Request, config: GatewayConfig, oidc_verifiers: dict[str, OIDCVerifier], route: RouteConfig | None = None
 ) -> AuthContext:
@@ -304,15 +340,26 @@ def authenticate_request(
     if config.allow_anonymous:
         return _anonymous_context(request, config, route)
 
+    if route_has_open_product(config, route):
+        subscription, products = _lenient_subscription(request, config, route)
+    else:
+        subscription, products = _strict_subscription(request, config, route)
+
+    token = _bearer_token(request)
+    verifier = _verifier_for_token(token, oidc_verifiers)
+    return AuthContext(claims=verifier.decode(token), subscription=subscription, subscription_products=products)
+
+
+def _strict_subscription(
+    request: Request, config: GatewayConfig, route: RouteConfig | None
+) -> tuple[SubscriptionIdentity | None, list[str]]:
+    """Read a subscription key, rejecting a missing or invalid one when required."""
     subscription = validate_subscription_key(request, config, route)
     if config.subscription.required:
         products = require_subscription_products(request, config, route)
     else:
         products = get_subscription_products_optional(request, config, route)
-
-    token = _bearer_token(request)
-    verifier = _verifier_for_token(token, oidc_verifiers)
-    return AuthContext(claims=verifier.decode(token), subscription=subscription, subscription_products=products)
+    return subscription, products
 
 
 def _extract_client_cert_context(request: Request, cert_cfg: ClientCertificateConfig) -> ClientCertContext | None:

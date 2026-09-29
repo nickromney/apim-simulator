@@ -75,7 +75,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Subscription state | Yes | `azurerm_api_management_subscription.state` | `active`, `suspended`, `cancelled`, `submitted`, `rejected`, `expired`; only `active` keys authenticate, and inactive keys return APIM's 401 invalid-key envelope |
 | Subscription key names and forwarding | Yes | `azurerm_api_management_api.subscription_key_parameter_names` | Defaults are `Ocp-Apim-Subscription-Key` and `subscription-key`; keys are forwarded to backends by default and can be removed by inbound policy |
 | Key rotation | Yes | - | `/apim/management/subscriptions/{id}/rotate` |
-| Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle |
+| Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle. When an API is in an open product, a key that can't be accepted is ignored and no key is needed; the request is served in the open product's context (a valid key still supplies the subscription context). The key header wins over the query parameter even when empty; an empty value counts as a missing key. See [subscriptions](https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions) |
 | Subscription bypass | Yes | - | Header conditions |
 | Approval required | Yes | `azurerm_api_management_product.approval_required` | `approval_required` on products; pending subscriptions stay `submitted` until approved |
 | Subscription limits | Partial | `azurerm_api_management_product.subscriptions_limit` | Enforced at portal sign-up (409 when reached; 0 disables self-serve) |
