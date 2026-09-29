@@ -32,19 +32,40 @@ class ExpressionMap(dict[str, Any]):
             return default
 
     def GetValueOrDefault(self, key: str, default: Any = "") -> Any:
-        return self.get(key, default)
+        value = self.get(key, default)
+        if isinstance(value, (list, tuple)):
+            return ",".join(str(item) for item in value)
+        return value
 
     def ContainsKey(self, key: str) -> bool:
-        return key in self
+        return self._find_key(key) is not None
+
+    def _find_key(self, key: str) -> str | None:
+        lowered = str(key).lower()
+        return next((existing for existing in self if existing.lower() == lowered), None)
+
+    def __contains__(self, key: object) -> bool:
+        return self._find_key(str(key)) is not None
 
 
 class CalloutBody:
-    def __init__(self, content: bytes):
+    def __init__(self, content: bytes, consume: Any = None):
         self._content = content
+        self._consume = consume
+        self._consumed = False
 
-    def AsJObject(self) -> dict[str, Any]:
+    def _read(self, preserve_content: bool) -> bytes:
+        if self._consumed:
+            return b""
+        if not preserve_content:
+            if self._consume is not None:
+                self._consume()
+            self._consumed = True
+        return self._content
+
+    def AsJObject(self, preserve_content: bool = False) -> dict[str, Any]:
         try:
-            payload = json.loads(self._content.decode("utf-8"))
+            payload = json.loads(self._read(preserve_content).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             # Microsoft documents the runtime exception, but not its exact message.
             raise ValueError("The body is not valid JSON.") from None
@@ -53,8 +74,8 @@ class CalloutBody:
             raise ValueError("The body is not valid JSON.")
         return payload
 
-    def AsString(self) -> str:
-        return self._content.decode("utf-8", errors="replace")
+    def AsString(self, preserve_content: bool = False) -> str:
+        return self._read(preserve_content).decode("utf-8", errors="replace")
 
 
 class CalloutResponse:
@@ -95,12 +116,13 @@ class _ExpressionRequest:
     matched_parameters: ExpressionMap
     original_host: str
     ip_address: str
+    body: CalloutBody | None = None
 
     def headers_get(self, key: str, default: Any = "") -> Any:
-        return self.headers.get(key, default)
+        return self.headers.GetValueOrDefault(key, default)
 
     def query_get(self, key: str, default: Any = "") -> Any:
-        return self.query.get(key, default)
+        return self.query.GetValueOrDefault(key, default)
 
     def matched_parameters_get(self, key: str, default: Any = "") -> Any:
         return self.matched_parameters.get(key, default)
@@ -110,9 +132,10 @@ class _ExpressionRequest:
 class _ExpressionResponse:
     status_code: int
     headers: ExpressionMap
+    body: CalloutBody | None = None
 
     def headers_get(self, key: str, default: Any = "") -> Any:
-        return self.headers.get(key, default)
+        return self.headers.GetValueOrDefault(key, default)
 
 
 @dataclass(frozen=True)
@@ -198,23 +221,34 @@ def _normalize_request(req: PolicyRequest) -> _ExpressionRequest:
     if ":" in host and not host.startswith("["):
         host = host.rsplit(":", 1)[0]
     request_headers = req.variables.get("_request_headers")
-    if not isinstance(request_headers, dict):
+    if request_headers is None or (
+        not isinstance(request_headers, dict) and not hasattr(request_headers, "as_dict_lists")
+    ):
         request_headers = req.headers
     request_query = req.variables.get("_request_query")
-    if not isinstance(request_query, dict):
+    if request_query is None or (not isinstance(request_query, dict) and not hasattr(request_query, "as_dict_lists")):
         request_query = req.query
     matched_parameters = req.variables.get("_matched_parameters")
     if not isinstance(matched_parameters, dict):
         matched_parameters = {}
     return _ExpressionRequest(
         method=req.method,
-        path=req.path,
-        headers=ExpressionMap(request_headers),
-        query=ExpressionMap(request_query),
+        path=str(req.variables.get("_request_path") or req.path),
+        headers=ExpressionMap(_as_value_lists(request_headers)),
+        query=ExpressionMap(_as_value_lists(request_query)),
         matched_parameters=ExpressionMap(matched_parameters),
         original_host=host,
         ip_address=str(req.variables.get("client_ip") or ""),
+        body=CalloutBody(req.body, lambda: setattr(req, "body", b"")) if req.body else None,
     )
+
+
+def _as_value_lists(values: Any) -> dict[str, Any]:
+    if hasattr(values, "as_dict_lists"):
+        return values.as_dict_lists()
+    if not isinstance(values, dict):
+        return {}
+    return {str(key): value for key, value in values.items()}
 
 
 def build_expression_context(req: PolicyRequest) -> ExpressionContext:
@@ -224,7 +258,14 @@ def build_expression_context(req: PolicyRequest) -> ExpressionContext:
         request=_normalize_request(req),
         response=_ExpressionResponse(
             status_code=req.response_status_code or 0,
-            headers=ExpressionMap(req.response_headers or req.variables.get("_response_headers") or {}),
+            headers=ExpressionMap(
+                _as_value_lists(req.response_headers or req.variables.get("_response_headers") or {})
+            ),
+            body=(
+                CalloutBody(req.response_body, lambda: setattr(req, "response_body", b""))
+                if req.response_body
+                else None
+            ),
         ),
         subscription=_ExpressionSubscription(id=str(req.variables.get("subscription_id") or "")),
         variables=ExpressionMap(req.variables),
@@ -360,6 +401,7 @@ def _translate_code_fragment(fragment: str) -> str:
     translated = translated.replace("!=", " != ")
     translated = re.sub(r"(?<![=!<>])!(?!=)", " not ", translated)
     replacements = (
+        ("context.Request.Body", "context.request.body"),
         ("context.Request.Headers.GetValueOrDefault", "context.request.headers_get"),
         ("context.Request.Url.Query.GetValueOrDefault", "context.request.query_get"),
         ("context.Request.MatchedParameters.GetValueOrDefault", "context.request.matched_parameters_get"),
@@ -368,6 +410,7 @@ def _translate_code_fragment(fragment: str) -> str:
         ("context.Request.IpAddress", "context.request.ip_address"),
         ("context.Request.Url.Path", "context.request.path"),
         ("context.Request.Method", "context.request.method"),
+        ("context.Response.Body", "context.response.body"),
         ("context.Response.Headers.GetValueOrDefault", "context.response.headers_get"),
         ("context.Response.StatusCode", "context.response.status_code"),
         ("context.Subscription.Id", "context.subscription.id"),

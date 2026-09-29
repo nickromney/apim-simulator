@@ -1091,7 +1091,7 @@ def test_policy_choose_when_selects_branch() -> None:
 <policies>
   <inbound>
     <choose>
-      <when condition="header('X-Debug') == '1'">
+      <when condition='@(context.Request.Headers.GetValueOrDefault("X-Debug", "") == "1")'>
         <set-header name="x-mode" exists-action="override"><value>debug</value></set-header>
       </when>
       <otherwise>
@@ -4879,7 +4879,7 @@ def test_cache_lookup_value_store_and_remove_value() -> None:
 <policies>
   <inbound>
     <choose>
-      <when condition="header('x-mode') == 'drop'">
+      <when condition='@(context.Request.Headers.GetValueOrDefault("x-mode", "") == "drop")'>
         <cache-remove-value key="@(context.Request.Headers.GetValueOrDefault(&quot;x-user&quot;,&quot;&quot;))" />
         <return-response>
           <set-status code="200" reason="ok" />

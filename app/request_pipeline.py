@@ -37,6 +37,7 @@ from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
 from app.policy import (
+    MultiValueMap,
     PolicyRequest,
     PolicyRuntime,
     PolicyTraceCollector,
@@ -50,7 +51,7 @@ from app.policy import (
     parse_policies_xml,
 )
 from app.policy_errors import build_last_error, exception_last_error, response_last_error
-from app.proxy import apply_claim_headers, build_upstream_headers, filter_response_headers, resolve_route
+from app.proxy import HOP_BY_HOP_HEADERS, apply_claim_headers, build_upstream_headers, resolve_route
 from app.security import AuthContext, authenticate_request, subscription_bypassed, validate_client_certificate
 
 APIM_ROUTE_NAME_ATTR = "apim.route.name"
@@ -364,6 +365,25 @@ def attach_trace(
     _store_trace(trace_store, trace_id, trace)
 
 
+def _response_with_headers(
+    *, content: bytes, status_code: int, headers: dict[str, str] | MultiValueMap, media_type: str | None
+) -> Response:
+    response = Response(content=content, status_code=status_code, media_type=media_type)
+    pairs = headers.as_header_pairs() if isinstance(headers, MultiValueMap) else list(headers.items())
+    if (
+        not any(name.lower() == "content-length" for name, _ in pairs)
+        and status_code not in {204, 304}
+        and not 100 <= status_code < 200
+    ):
+        pairs.append(("content-length", str(len(content))))
+    response.raw_headers = [(name.lower().encode("latin-1"), value.encode("latin-1")) for name, value in pairs]
+    return response
+
+
+def _copy_headers(headers: dict[str, str] | MultiValueMap) -> dict[str, str] | MultiValueMap:
+    return headers.copy() if isinstance(headers, MultiValueMap) else dict(headers)
+
+
 def cached_gateway_response(
     *,
     cached: tuple[float, int, dict[str, str], str | None, bytes] | None,
@@ -389,7 +409,7 @@ def cached_gateway_response(
         return None
 
     body_bytes = bytes(cached_body)
-    out_headers = dict(cached_headers)
+    out_headers = _copy_headers(cached_headers)
     media_type = (
         cached_media_type if cached_media_type is None or isinstance(cached_media_type, str) else str(cached_media_type)
     )
@@ -417,8 +437,8 @@ def cached_gateway_response(
     final_req = PolicyRequest(
         method=policy_req.method,
         path=policy_req.path,
-        query=dict(policy_req.query),
-        headers=dict(policy_req.headers),
+        query=policy_req.query.copy(),
+        headers=policy_req.headers.copy(),
         variables=policy_req.variables,
         body=policy_req.body,
         response_status_code=cached_status,
@@ -443,11 +463,8 @@ def cached_gateway_response(
             "cache": "hit",
         },
     )
-    return Response(
-        content=body_bytes,
-        status_code=cached_status,
-        headers=out_headers,
-        media_type=media_type,
+    return _response_with_headers(
+        content=body_bytes, status_code=cached_status, headers=out_headers, media_type=media_type
     )
 
 
@@ -480,8 +497,8 @@ def _policy_response(
         PolicyRequest(
             method=policy_req.method,
             path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=dict(policy_req.headers),
+            query=policy_req.query.copy(),
+            headers=policy_req.headers.copy(),
             variables=policy_req.variables,
             body=policy_req.body,
             response_status_code=status_code,
@@ -501,7 +518,7 @@ def _policy_response(
         cfg=cfg,
         extra=extra,
     )
-    return Response(content=body, status_code=status_code, headers=headers, media_type=media_type)
+    return _response_with_headers(content=body, status_code=status_code, headers=headers, media_type=media_type)
 
 
 @dataclass
@@ -509,7 +526,7 @@ class _UpstreamPayload:
     """The upstream response, normalised and buffered if anything needs the body."""
 
     status_code: int
-    headers: dict[str, str]
+    headers: dict[str, str] | MultiValueMap
     media_type: str | None
     content: bytes
     buffered: bool
@@ -531,7 +548,10 @@ async def _read_upstream_response(
     when something downstream must see all of it: the cache, a policy that
     asked to buffer, or a non-streaming configuration.
     """
-    headers = filter_response_headers(dict(upstream_response.headers))
+    headers = MultiValueMap()
+    for name, value in upstream_response.headers.multi_items():
+        if name.lower() not in HOP_BY_HOP_HEADERS:
+            headers.set_list(name, headers.get_list(name, []) + [value])
     _add_simulator_response_headers(headers, cfg, correlation_id)
     if pool.pool_backend is not None:
         headers["x-apim-backend-pool"] = pool.pool_backend_id
@@ -594,8 +614,8 @@ async def _handle_backend_error_status(
     failure_req = PolicyRequest(
         method=request.method,
         path=policy_req.path,
-        query=dict(policy_req.query),
-        headers=dict(policy_req.headers),
+        query=policy_req.query.copy(),
+        headers=policy_req.headers.copy(),
         variables={
             **policy_req.variables,
             "error": "backend_response_failure",
@@ -611,7 +631,7 @@ async def _handle_backend_error_status(
         },
         body=policy_req.body,
         response_status_code=status_code,
-        response_headers=dict(upstream.headers),
+        response_headers=_copy_headers(upstream.headers),
         response_body=upstream.content,
         response_media_type=upstream.media_type,
     )
@@ -621,7 +641,7 @@ async def _handle_backend_error_status(
         return _policy_response(
             body=override.body,
             status_code=override.status_code,
-            headers=dict(override.headers),
+            headers=_copy_headers(override.headers),
             media_type=override.media_type,
             correlation_id=correlation_id,
             trace_id=trace_id,
@@ -695,7 +715,7 @@ async def _apply_outbound_policies(
     outbound_req = PolicyRequest(
         method=request.method,
         path=policy_req.path,
-        query=dict(policy_req.query),
+        query=policy_req.query.copy(),
         headers=response_headers,
         variables=policy_req.variables,
         body=policy_req.body,
@@ -980,8 +1000,8 @@ async def _fail_upstream_unavailable(
         failure_req = PolicyRequest(
             method=request.method,
             path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=dict(policy_req.headers),
+            query=policy_req.query.copy(),
+            headers=policy_req.headers.copy(),
             variables={
                 **policy_req.variables,
                 "error": "upstream_unavailable",
@@ -1030,7 +1050,7 @@ async def _fail_upstream_unavailable(
     return _policy_response(
         body=override.body,
         status_code=override.status_code,
-        headers=dict(override.headers),
+        headers=_copy_headers(override.headers),
         media_type=override.media_type,
         correlation_id=correlation_id,
         trace_id=trace_id,
@@ -1090,7 +1110,7 @@ def _gateway_cache_key(
     return request_cache_key(
         method=policy_req.method,
         upstream_url=upstream_url,
-        query=policy_req.query,
+        query=dict(policy_req.query),
         authorization=policy_req.headers.get("authorization", ""),
         subscription_key=policy_req.headers.get("ocp-apim-subscription-key", ""),
     )
@@ -1361,8 +1381,8 @@ async def _send_upstream_with_retries(
             method,
             upstream_url,
             content=policy_req.body if attempt == 1 or buffer_request_body else b"",
-            headers=policy_req.headers,
-            params=policy_req.query,
+            headers=policy_req.headers.as_header_pairs(),
+            params=policy_req.query.as_pairs(),
             timeout=timeout,
         )
         try:
@@ -1493,14 +1513,22 @@ def _uncached_response(
         )
 
     if streaming:
-        return StreamingResponse(
+        response = StreamingResponse(
             upstream_response.aiter_bytes(),
             status_code=status_code,
-            headers=response_headers,
             media_type=media_type,
             background=BackgroundTask(upstream_response.aclose),
         )
-    return Response(content=content, status_code=status_code, headers=response_headers, media_type=media_type)
+        pairs = (
+            response_headers.as_header_pairs()
+            if isinstance(response_headers, MultiValueMap)
+            else list(response_headers.items())
+        )
+        response.raw_headers = [(name.lower().encode("latin-1"), value.encode("latin-1")) for name, value in pairs]
+        return response
+    return _response_with_headers(
+        content=content, status_code=status_code, headers=response_headers, media_type=media_type
+    )
 
 
 @dataclass(frozen=True)
@@ -1555,9 +1583,22 @@ def _build_policy_request(
     address by name, plus the underscore-prefixed entries the pipeline uses to
     pass state between its own stages.
     """
-    upstream_query = dict(request.query_params)
+    upstream_query = MultiValueMap()
+    for name, value in request.query_params.multi_items():
+        upstream_query.set_list(name, upstream_query.get_list(name, []) + [value])
     api = cfg.apis.get(route.api_id or "")
     operation = api.operations.get(route.operation_id or "") if api is not None else None
+    expression_headers = headers.copy()
+    incoming_values: dict[str, list[str]] = {}
+    for name_bytes, value_bytes in request.scope.get("headers", []):
+        name = name_bytes.decode("latin-1")
+        lowered = name.lower()
+        incoming_values.setdefault(lowered, []).append(value_bytes.decode("latin-1"))
+    for lowered, values in incoming_values.items():
+        expression_headers.set_list(
+            lowered,
+            values if expression_headers.get_list(lowered) is None else expression_headers.get_list(lowered, []),
+        )
     return PolicyRequest(
         method=request.method,
         path=resolved.upstream_path,
@@ -1589,8 +1630,9 @@ def _build_policy_request(
             "rate_limit_store": request.app.state.rate_limit_store,
             "quota_store": request.app.state.quota_store,
             "original_request_url": str(request.url),
-            "_request_headers": dict(headers),
-            "_request_query": dict(upstream_query),
+            "_request_headers": expression_headers,
+            "_request_query": upstream_query,
+            "_request_path": request.url.path,
             "_matched_parameters": dict(resolved.matched_parameters),
         },
         body=body,
@@ -1648,7 +1690,7 @@ def _store_and_respond(
     request.app.state.cache[cache_key] = (
         time.time() + cfg.cache_ttl_seconds,
         status_code,
-        dict(response_headers),
+        _copy_headers(response_headers),
         media_type,
         content,
     )
@@ -1697,7 +1739,7 @@ async def _run_on_error(
     failure_req = PolicyRequest(
         method=policy_req.method,
         path=policy_req.path,
-        query=dict(policy_req.query),
+        query=policy_req.query.copy(),
         headers=headers,
         variables={**policy_req.variables, "_last_error": last_error},
         body=policy_req.body,
@@ -1709,6 +1751,9 @@ async def _run_on_error(
     override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
     if override is not None:
         return override
+    headers.clear()
+    if isinstance(failure_req.headers, MultiValueMap):
+        headers.update(dict(failure_req.headers))
     return ResponseSpec(
         status_code=failure_req.response_status_code or status_code,
         headers=headers,
@@ -1832,7 +1877,7 @@ async def _guarded_outbound(
     return _policy_response(
         body=spec.body,
         status_code=spec.status_code,
-        headers=dict(spec.headers),
+        headers=_copy_headers(spec.headers),
         media_type=spec.media_type,
         correlation_id=correlation_id,
         trace_id=trace_id,
@@ -1905,8 +1950,8 @@ async def _respond_without_backend(
         PolicyRequest(
             method=policy_req.method,
             path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=dict(policy_req.headers),
+            query=policy_req.query.copy(),
+            headers=policy_req.headers.copy(),
             variables=policy_req.variables,
             body=policy_req.body,
             response_status_code=outbound.status_code,
@@ -1987,7 +2032,7 @@ async def _short_circuit_policy_stages(
         return _policy_response(
             body=early.body,
             status_code=early.status_code,
-            headers=dict(early.headers),
+            headers=_copy_headers(early.headers),
             media_type=early.media_type,
             correlation_id=correlation_id,
             trace_id=trace_id,
@@ -2020,20 +2065,30 @@ def _record_selected_backend(trace_collector: Any, backend_id: str | None, upstr
 
 def _initial_upstream_headers(
     request: Request, auth: AuthContext, cfg: GatewayConfig, correlation_id: str | None
-) -> dict[str, str]:
+) -> MultiValueMap:
     """The backend request headers before any policy runs, keyed in lower case.
 
     Simulator identity and correlation headers are added only when the config
     opts in; APIM itself adds neither.
     """
-    headers = {
-        key.lower(): value
-        for key, value in build_upstream_headers(
-            request,
-            auth,
-            inject_simulator_identity_headers=cfg.inject_simulator_identity_headers,
-        ).items()
-    }
+    headers = MultiValueMap(
+        {
+            key.lower(): value
+            for key, value in build_upstream_headers(
+                request,
+                auth,
+                inject_simulator_identity_headers=cfg.inject_simulator_identity_headers,
+            ).items()
+        }
+    )
+    raw_headers = [
+        (name.decode("latin-1"), value.decode("latin-1")) for name, value in request.scope.get("headers", [])
+    ]
+    for name in {key.lower() for key, _ in raw_headers}:
+        if name == "x-forwarded-for" or headers.get_list(name) is None:
+            continue
+        values = [value for key, value in raw_headers if key.lower() == name]
+        headers.set_list(name, values)
     if cfg.propagate_simulator_correlation_id and correlation_id:
         headers.setdefault("x-correlation-id", correlation_id)
     return headers
@@ -2311,8 +2366,8 @@ async def execute_gateway_request(request: Request) -> Response:
         PolicyRequest(
             method=policy_req.method,
             path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=dict(policy_req.headers),
+            query=policy_req.query.copy(),
+            headers=policy_req.headers.copy(),
             variables=policy_req.variables,
             body=policy_req.body,
             response_status_code=upstream_status_code,

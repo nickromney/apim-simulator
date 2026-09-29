@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException, Request
 
@@ -12,7 +14,15 @@ from app.config import (
     SubscriptionKeyPair,
     SubscriptionScope,
 )
-from app.request_pipeline import enforce_product_grant, enforce_route_authz, extract_roles, extract_scopes
+from app.request_pipeline import (
+    _build_policy_request,
+    _ForwardingContext,
+    _initial_upstream_headers,
+    enforce_product_grant,
+    enforce_route_authz,
+    extract_roles,
+    extract_scopes,
+)
 from app.security import AuthContext, authenticate_request
 from app.urls import http_url
 
@@ -32,6 +42,49 @@ def _auth(
         subscription_scope=scope,
         subscription_api_id=api_id,
     )
+
+
+def test_build_policy_request_retains_repeated_headers_and_query_parameters() -> None:
+    """APIM request collections retain repeated values for policy expressions and forwarding.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/items",
+            "raw_path": b"/api/items",
+            "query_string": b"q=a&q=b",
+            "headers": [(b"x-test", b"one"), (b"x-test", b"two"), (b"host", b"testserver")],
+            "client": ("127.0.0.1", 1234),
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "app": SimpleNamespace(
+                state=SimpleNamespace(rate_limit_store={}, quota_store={}),
+            ),
+        }
+    )
+    cfg = GatewayConfig()
+    route = RouteConfig(name="r1", path_prefix="/api", upstream_base_url=http_url("upstream"))
+    auth = _auth(subscription=False)
+    policy_request = _build_policy_request(
+        cfg=cfg,
+        request=request,
+        route=route,
+        auth=auth,
+        resolved=SimpleNamespace(upstream_path="/api/items", matched_parameters={}),
+        headers=_initial_upstream_headers(request, auth, cfg, None),
+        body=b"",
+        effective_product_id="",
+        correlation_id=None,
+        forwarding=_ForwardingContext.read(request),
+        subscription_owner=None,
+        subscription_groups=[],
+    )
+    assert policy_request.headers.get_list("x-test") == ["one", "two"]
+    assert policy_request.query.get_list("q") == ["a", "b"]
+    assert policy_request.query.as_pairs() == [("q", "a"), ("q", "b")]
 
 
 def test_enforce_product_grant_returns_empty_when_route_has_no_products() -> None:

@@ -41,6 +41,75 @@ def test_golden_policy_set_header_override() -> None:
     assert req.headers["x-a"] == "1"
 
 
+def test_set_header_uses_all_values_and_appends_case_insensitively() -> None:
+    """set-header emits all value elements and append adds to an existing name.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-header-policy
+    """
+    doc = parse_policies_xml(
+        """\
+<policies><inbound>
+  <set-header name="X-Test" exists-action="override"><value>one</value><value>two</value></set-header>
+  <set-header name="x-test" exists-action="append"><value>three</value><value>four</value></set-header>
+</inbound></policies>
+"""
+    )
+    req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
+    assert apply_inbound([doc], req) is None
+    assert req.headers.get_list("X-TEST") == ["one", "two", "three", "four"]
+
+
+def test_set_query_parameter_preserves_repeated_values_and_evaluates_name() -> None:
+    """set-query-parameter supports repeated value elements and expression names.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-query-parameter-policy
+    """
+    doc = parse_policies_xml(
+        """\
+<policies><inbound>
+  <set-query-parameter name='@(context.Variables.GetValueOrDefault("name", ""))' exists-action="override">
+    <value>one</value><value>two</value>
+  </set-query-parameter>
+</inbound></policies>
+"""
+    )
+    req = PolicyRequest(
+        method="GET", path="/", query={"name": ["old"], "target": ["old"]}, headers={}, variables={"name": "target"}
+    )
+    assert apply_inbound([doc], req) is None
+    assert req.query.get_list("target") == ["one", "two"]
+
+
+def test_set_header_rejects_invalid_exists_action_at_parse_time() -> None:
+    """exists-action is restricted to the four documented values.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-header-policy
+    """
+    with pytest.raises(HTTPException, match="exists-action"):
+        parse_policies_xml(
+            '<policies><inbound><set-header name="x" exists-action="merge"><value>1</value></set-header></inbound></policies>'
+        )
+
+
+def test_set_header_does_not_change_protected_headers_and_separates_exception_values() -> None:
+    """APIM protects hop-by-hop headers and sends Set-Cookie values separately.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-header-policy
+    """
+    doc = parse_policies_xml(
+        """\
+<policies><inbound>
+  <set-header name="Content-Length" exists-action="override"><value>99</value></set-header>
+  <set-header name="Set-Cookie" exists-action="override"><value>a=1</value><value>b=2</value></set-header>
+</inbound></policies>
+"""
+    )
+    req = PolicyRequest(method="GET", path="/", query={}, headers={"Content-Length": "5"}, variables={})
+    assert apply_inbound([doc], req) is None
+    assert req.headers.get("content-length") == "5"
+    assert req.headers.as_header_pairs()[-2:] == [("Set-Cookie", "a=1"), ("Set-Cookie", "b=2")]
+
+
 @pytest.mark.contract("POLICY-RETURN-RESPONSE")
 def test_golden_policy_return_response() -> None:
     doc = parse_policies_xml(
@@ -73,7 +142,7 @@ def test_golden_policy_choose_when() -> None:
 <policies>
   <inbound>
     <choose>
-      <when condition="query('mode') == 'debug'">
+      <when condition='@(context.Request.Url.Query.GetValueOrDefault("mode", "") == "debug")'>
         <set-header name="x-mode" exists-action="override"><value>debug</value></set-header>
       </when>
       <otherwise>

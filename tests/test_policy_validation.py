@@ -46,6 +46,30 @@ def _request(
     )
 
 
+def test_choose_rejects_simulator_only_shortcut_conditions() -> None:
+    """APIM choose conditions are policy expressions or Boolean constants.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    with pytest.raises(Exception, match="Unsupported policy condition"):
+        parse_policies_xml(
+            "<policies><inbound><choose><when condition=\"method == 'GET'\"><set-body>ok</set-body></when>"
+            "</choose></inbound></policies>"
+        )
+
+
+@pytest.mark.parametrize("condition", ["true", "false"])
+def test_choose_accepts_boolean_constants(condition: str) -> None:
+    """Boolean constants are valid APIM policy conditions.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    parse_policies_xml(
+        f'<policies><inbound><choose><when condition="{condition}"><set-body>ok</set-body></when>'
+        "</choose></inbound></policies>"
+    )
+
+
 @pytest.mark.contract("POLICY-VALIDATE-CONTENT")
 def test_validate_content_prevents_invalid_json() -> None:
     doc = _doc(
