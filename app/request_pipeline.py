@@ -126,9 +126,47 @@ def effective_product_id_for_call(
         matched = next((p for p in published if p in granted), "")
         if matched:
             return matched
+    # Without an accepted key APIM serves an open product's context.
+    open_products = [p for p in published if (cfg.products.get(p) and not cfg.products[p].require_subscription)]
+    if open_products:
+        return open_products[0]
     if published:
         return published[0]
     return ""
+
+
+def _subscription_required(cfg: GatewayConfig, published_products: list[str], bypassed: bool) -> bool:
+    """Whether a call must present a key: only when every published product requires one.
+
+    One open product is enough to serve a keyless request (APIM: "An API can be
+    associated with at most one open product"):
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    if bypassed:
+        return False
+    return all((cfg.products.get(p).require_subscription if cfg.products.get(p) else True) for p in published_products)
+
+
+def _reject_key_scoped_elsewhere(
+    cfg: GatewayConfig,
+    route: RouteConfig,
+    auth: AuthContext,
+    allowed_products: list[str],
+    request: Request | None,
+) -> None:
+    """Deny a valid key for a product the API isn't in, even beside an open product.
+
+    APIM ignores a key that isn't valid at all when an open product exists, but
+    while the API itself requires a subscription it denies a real key scoped to
+    some other product (third row of the summary table):
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    Keys with no product list (identity-only keys) carry no scope to check.
+    """
+    granted = set(auth.subscription_products)
+    if auth.subscription is None or not granted or not cfg.subscription.required:
+        return
+    if not granted.intersection(allowed_products):
+        raise subscription_key_error(request, cfg, route, missing=False)
 
 
 def enforce_product_grant(
@@ -151,11 +189,9 @@ def enforce_product_grant(
         # https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
         raise HTTPException(status_code=403, detail="Product is not published")
 
-    require_sub = any(
-        (cfg.products.get(p).require_subscription if cfg.products.get(p) else True) for p in published_products
-    )
-    if require_sub and subscription_is_bypassed:
-        require_sub = False
+    require_sub = _subscription_required(cfg, published_products, subscription_is_bypassed)
+    if not require_sub:
+        _reject_key_scoped_elsewhere(cfg, route, auth, allowed_products, request)
     if require_sub:
         if auth.subscription is None:
             raise subscription_key_error(request, cfg, route, missing=True)
