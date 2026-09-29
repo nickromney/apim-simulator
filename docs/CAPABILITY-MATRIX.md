@@ -57,7 +57,8 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Path routing | Yes | - | Operations match their full URL template segment by segment: `{param}` takes one segment, `{*param}` and `/*` take the rest, query-string template parts must match, literal segments beat parameters, and the API URL suffix matches case-insensitively. An unmatched request is `404 {"statusCode":404,"message":"Resource not found"}`. An API with no operations serves nothing, as in APIM. Tie-breaking between equally specific templates is not documented by Microsoft; declaration order decides. Routes declared directly under `routes` (outside `apis`) keep simulator prefix matching |
 | Method routing | Yes | - | Per-operation `method` |
 | Template parameters | Yes | - | Matched values are exposed as `context.Request.MatchedParameters` |
-| API Version Sets | Yes | `azurerm_api_management_api_version_set` | Header/Query/Segment schemes |
+| API Version Sets | Yes | `azurerm_api_management_api_version_set` | Header/Query/Segment schemes; a version identifier is required, except an API with `api_version: null` models APIM's unversioned Original API. No simulator-only default-version fallback |
+| API protocols | Yes | `azurerm_api_management_api.protocols` | `ApiConfig.protocols` accepts `http`/`https`; the request scheme uses the first `X-Forwarded-Proto` value when present, and a disallowed scheme returns the existing 404 Resource not found envelope because Learn documents the property but not the rejection response |
 | OpenAPI import | Partial | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu and `/apim/management/apis/{api_id}/import`; full schema/request/response extraction is narrower than explicit APIM resources |
 | GraphQL | No | `azurerm_api_management_api` | Not implemented |
 | WebSocket | No | `azurerm_api_management_api` | Not implemented |
@@ -174,8 +175,8 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Basic auth | Yes | - | `auth_type: basic` |
 | Client cert auth | Partial | - | `auth_type: client_certificate` |
 | Managed identity | Partial | - | `auth_type: managed_identity` |
-| Circuit breaker | Partial | - | Adapted per-member breaker on pool backends (failure count/interval/trip duration); see ADR 0003 |
-| Load balancing | Partial | - | `type: pool` backends with deterministic weighted round-robin and priority failover |
+| Circuit breaker | Partial | - | Adapted per-member breaker on pool backends with `failureCondition.count`, `interval`, `statusCodeRanges`, `errorReasons`, `tripDuration`, and `acceptRetryAfter`; legacy `error_statuses` remains supported. Retry statuses outside the failure condition do not trip a breaker. See [backends](https://learn.microsoft.com/en-us/azure/api-management/backends) and ADR 0003 |
+| Load balancing | Partial | - | `type: pool` backends with deterministic weighted round-robin, priority failover, and cookie-based `session_affinity`; cookie attributes are adapted because Learn documents the mechanism but not the exact emitted value/attributes |
 
 ## Management Plane
 
@@ -258,7 +259,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
 | CA certificates | Partial | `azurerm_api_management_certificate` | Trusted cert config |
-| Client certificates | Partial | - | Via proxy headers |
+| Client certificates | Partial | - | Via proxy headers; each trusted identity requires all configured thumbprint/subject/issuer claims to match exactly, while identities are ORed. The `validate-client-certificate` policy's certificate-chain, revocation, and validity attributes are not yet implemented |
 | Gateway certificates | No | `azurerm_api_management_gateway_certificate_authority` | Use TLS terminator |
 
 ## Not Planned

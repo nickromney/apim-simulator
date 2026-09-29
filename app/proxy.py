@@ -144,6 +144,26 @@ def _version_matches(candidate: RouteConfig, requested_version: str, scheme: Api
     return candidate.api_version == requested_version
 
 
+def _request_scheme(request: Request) -> str:
+    """Read the externally visible scheme, including the first proxy hop."""
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return (forwarded.split(",", 1)[0].strip() or request.url.scheme).casefold()
+
+
+def _route_protocol_allowed(route: RouteConfig, request: Request) -> bool:
+    """Check an API's HTTP protocol restriction.
+
+    The API resource reference documents the protocols field but not the
+    gateway's rejected-request status or message. The gateway therefore uses
+    its existing 404 Resource not found envelope for a route that is not
+    exposed on the request scheme.
+    https://learn.microsoft.com/en-us/rest/api/apimanagement/apis/create-or-update
+    """
+    if route.api_protocols is None:
+        return True
+    return _request_scheme(request) in {protocol.casefold() for protocol in route.api_protocols}
+
+
 def _read_version(request: Request, *, config: GatewayConfig, route: RouteConfig, path: str) -> tuple[str | None, str]:
     # Returns (version, upstream_path).
     version_set_id = route.api_version_set
@@ -157,12 +177,12 @@ def _read_version(request: Request, *, config: GatewayConfig, route: RouteConfig
     if version_set.versioning_scheme == ApiVersioningScheme.Header:
         header_name = version_set.version_header_name or ""
         version = request.headers.get(header_name)
-        return version, path
+        return version or None, path
 
     if version_set.versioning_scheme == ApiVersioningScheme.Query:
         query_name = version_set.version_query_name or ""
         version = request.query_params.get(query_name)
-        return version, path
+        return version or None, path
 
     # Segment scheme: treat the first segment after the API path as the version.
     prefix = (route.api_path_prefix or route.path_prefix).rstrip("/")
@@ -190,7 +210,7 @@ def _match_versioned_candidate(
     *,
     version_set_id: str,
     scheme: ApiVersioningScheme,
-    requested_version: str,
+    requested_version: str | None,
     path: str,
     upstream_path: str,
     request: Request,
@@ -198,7 +218,9 @@ def _match_versioned_candidate(
 ) -> RouteMatch | None:
     if candidate.api_version_set != version_set_id:
         return None
-    if not _version_matches(candidate, requested_version, scheme):
+    if requested_version is None and candidate.api_version is not None:
+        return None
+    if requested_version is not None and not _version_matches(candidate, requested_version, scheme):
         return None
     if not candidate.matches_api_path(path) or not _route_matches_host(candidate, request_hosts):
         return None
@@ -215,9 +237,9 @@ def _resolve_versioned_route(
 ) -> ResolvedRoute | None:
     """Pick the route for the API version this request asked for.
 
-    A version set that does not exist, a request naming no version where the set
-    declares no default, and a version with no matching route are all "no route"
-    rather than a fall-through to the unversioned match.
+    A version set that does not exist, a request naming an unknown version, and
+    a request without a version when no Original API exists are all "no route"
+    rather than a fall-through to another version.
     """
     version_set_id = route.api_version_set
     version_set = config.api_version_sets.get(version_set_id)
@@ -225,10 +247,6 @@ def _resolve_versioned_route(
         return None
 
     requested_version, upstream_path = _read_version(request, config=config, route=route, path=path)
-    requested_version = requested_version or version_set.default_version
-    if not requested_version:
-        return None
-
     best: tuple[RouteMatch, RouteConfig] | None = None
     for candidate in config.routes:
         match = _match_versioned_candidate(
@@ -265,7 +283,7 @@ def _resolve_route_candidate(
     path: str,
     request_hosts: list[str],
 ) -> tuple[RouteMatch, ResolvedRoute] | None:
-    if not _route_matches_host(route, request_hosts):
+    if not _route_matches_host(route, request_hosts) or not _route_protocol_allowed(route, request):
         return None
     if not route.api_version_set:
         match = route.match(method=request.method, path=path, query=request.query_params)

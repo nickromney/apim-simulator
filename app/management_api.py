@@ -26,6 +26,7 @@ from app.config import (
     BackendCircuitBreakerConfig,
     BackendConfig,
     BackendPoolMemberConfig,
+    BackendSessionAffinityConfig,
     DiagnosticConfig,
     GatewayConfig,
     GroupConfig,
@@ -128,6 +129,7 @@ class ApiUpsert(BaseModel):
     path: str
     upstream_base_url: str
     upstream_path_prefix: str = ""
+    protocols: list[str] = Field(default_factory=lambda: ["http", "https"])
     backend: str | None = None
     products: list[str] = Field(default_factory=list)
     api_version_set: str | None = None
@@ -165,6 +167,7 @@ class ApiImportRequest(BaseModel):
     content_value: str
     upstream_base_url: str | None = None
     upstream_path_prefix: str = ""
+    protocols: list[str] | None = None
     backend: str | None = None
     products: list[str] | None = None
     api_version_set: str | None = None
@@ -180,7 +183,6 @@ class ApiVersionSetUpsert(BaseModel):
     versioning_scheme: str
     version_header_name: str | None = None
     version_query_name: str | None = None
-    default_version: str | None = None
 
 
 class ApiRevisionUpsert(BaseModel):
@@ -235,6 +237,7 @@ class BackendUpsert(BaseModel):
     description: str | None = None
     type: str = "single"
     pool: list[BackendPoolMemberConfig] = Field(default_factory=list)
+    session_affinity: BackendSessionAffinityConfig | None = None
     circuit_breaker: BackendCircuitBreakerConfig | None = None
     auth_type: str = "none"
     basic_username: str | None = None
