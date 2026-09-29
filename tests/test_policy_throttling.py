@@ -388,3 +388,79 @@ def test_quota_by_key_shared_key_increments_once_per_request() -> None:
     assert apply_inbound([_doc(policy), _doc(policy)], request, _runtime(1_000_000.0)) is None
 
     assert store["quota-by-key:shared"]["count"] == 1
+
+
+def _throttled_gateway(*, product_policy: str | None, api_policies: dict[str, str]):
+    import httpx
+    from fastapi.testclient import TestClient
+
+    from app.config import (
+        ApiConfig,
+        GatewayConfig,
+        OperationConfig,
+        ProductConfig,
+        Subscription,
+        SubscriptionConfig,
+        SubscriptionKeyPair,
+    )
+    from app.main import create_app
+
+    def wrap(inner: str) -> str:
+        return f"<policies><inbound><base />{inner}</inbound><backend><base /></backend><outbound><base /></outbound></policies>"
+
+    config = GatewayConfig(
+        allow_anonymous=True,
+        products={
+            "p": ProductConfig(
+                name="p", require_subscription=True, policies_xml=wrap(product_policy) if product_policy else None
+            )
+        },
+        subscription=SubscriptionConfig(
+            required=True,
+            subscriptions={
+                "s1": Subscription(
+                    id="s1", name="s1", keys=SubscriptionKeyPair(primary="k1", secondary="k2"), products=["p"]
+                )
+            },
+        ),
+        apis={
+            api_id: ApiConfig(
+                name=api_id,
+                path=api_id,
+                upstream_base_url="http://backend.test",
+                products=["p"],
+                policies_xml=wrap(policy),
+                operations={"op": OperationConfig(name="op", method="GET", url_template="/x")},
+            )
+            for api_id, policy in api_policies.items()
+        },
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"ok": True}))
+    return TestClient(create_app(config=config, http_client=httpx.AsyncClient(transport=transport)))
+
+
+def test_product_and_api_rate_limits_count_independently() -> None:
+    """Product and API call rate limits are applied independently.
+
+    https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy
+    """
+    limit = '<rate-limit calls="3" renewal-period="60" />'
+    with _throttled_gateway(product_policy=limit, api_policies={"a": limit}) as client:
+        statuses = [client.get("/a/x", headers={"Ocp-Apim-Subscription-Key": "k1"}).status_code for _ in range(4)]
+
+    assert statuses == [200, 200, 200, 429]
+
+
+def test_the_same_api_rate_limit_counts_separately_per_api() -> None:
+    """Each API's rate-limit keeps its own per-subscription counter.
+
+    https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy
+    """
+    limit = '<rate-limit calls="2" renewal-period="60" />'
+    with _throttled_gateway(product_policy=None, api_policies={"a": limit, "b": limit}) as client:
+        statuses = [
+            client.get(path, headers={"Ocp-Apim-Subscription-Key": "k1"}).status_code
+            for path in ("/a/x", "/b/x", "/a/x", "/b/x", "/a/x")
+        ]
+
+    assert statuses == [200, 200, 200, 200, 429]

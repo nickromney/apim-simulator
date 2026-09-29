@@ -935,10 +935,18 @@ def _rate_limit_retry_after(bucket: list[float], now: float, renewal_period: int
 
 
 def _subscription_throttle_key(req: PolicyRequest, prefix: str) -> str | None:
+    """The counter for a subscription-scoped throttle, or None without a subscription.
+
+    Product, API and operation limits are applied independently
+    (https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy),
+    so the counter is keyed by the scope that authored the policy as well as by
+    the subscription.
+    """
     subscription_id = str(req.variables.get("subscription_id") or "")
     if not subscription_id:
         return None
-    return f"{prefix}:subscription:{subscription_id}"
+    scope = str(req.variables.get("_policy_scope") or "")
+    return f"{prefix}:{scope}:subscription:{subscription_id}"
 
 
 def _throttle_rule_key(base_key: str, rule: ThrottleRule) -> str:
@@ -3000,6 +3008,9 @@ class PolicyDocument:
     outbound: list[PolicyNode]
     on_error: list[PolicyNode]
     sections_present: frozenset[str] = frozenset()
+    # Where the document was authored (global, product:<id>, api:<id>,
+    # operation:<api>/<op>). Subscription throttles count per scope.
+    scope: str = ""
 
 
 POLICY_VALUE_PATTERN = re.compile(r"\{([^{}]+)\}")
@@ -4012,20 +4023,26 @@ async def _apply_steps_async(
     return None
 
 
-def _replace_base_steps(local: list[PolicyNode], parent: list[PolicyNode]) -> list[PolicyNode]:
+ScopedStep = tuple[str, PolicyNode]
+
+
+def _replace_base_steps(local: list[PolicyNode], parent: list[ScopedStep], scope: str) -> list[ScopedStep]:
     """Replace each direct base marker with the effective parent steps."""
-    out: list[PolicyNode] = []
+    out: list[ScopedStep] = []
     for step in local:
         if isinstance(step, NoOp):
             out.extend(parent)
         else:
-            out.append(step)
+            out.append((scope, step))
     return out
 
 
-def _effective_section_steps(docs: list[PolicyDocument], section_name: str) -> list[PolicyNode]:
-    """Resolve one section across the broad-to-narrow document stack."""
-    effective: list[PolicyNode] = []
+def _effective_section_steps(docs: list[PolicyDocument], section_name: str) -> list[ScopedStep]:
+    """Resolve one section across the broad-to-narrow document stack.
+
+    Each step keeps the scope of the document that authored it.
+    """
+    effective: list[ScopedStep] = []
     section_key = "on-error" if section_name == "on_error" else section_name
     for doc in docs:
         # APIM documents explicitly describe omitted base as dropping the
@@ -4036,9 +4053,9 @@ def _effective_section_steps(docs: list[PolicyDocument], section_name: str) -> l
             continue
         local = getattr(doc, section_name.replace("-", "_"))
         if any(isinstance(step, NoOp) for step in local):
-            effective = _replace_base_steps(local, effective)
+            effective = _replace_base_steps(local, effective, doc.scope)
         else:
-            effective = list(local)
+            effective = [(doc.scope, step) for step in local]
     return effective
 
 
@@ -4048,7 +4065,12 @@ async def _apply_section_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
-    return await _apply_steps_async(_effective_section_steps(docs, section_name), req, runtime)
+    for scope, step in _effective_section_steps(docs, section_name):
+        req.variables["_policy_scope"] = scope
+        out = await step.apply_async(req, runtime)
+        if out is not None:
+            return out
+    return None
 
 
 async def apply_inbound_async(

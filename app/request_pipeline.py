@@ -7,6 +7,7 @@ live here. ``create_app`` stays the composer; the HTTP catch-all is an adapter.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import hashlib
 import json
 import logging
@@ -29,7 +30,7 @@ from app.backend_pool import (
     select_pool_member,
 )
 from app.config import GatewayConfig, ProductState, RouteConfig
-from app.effective_policy import stacked_policy_xml_documents
+from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
 from app.policy import (
@@ -709,7 +710,10 @@ def _policy_document_stack(
         return doc
 
     effective_product = cfg.products.get(effective_product_id) if effective_product_id else None
-    return [_doc_for(xml) for xml in stacked_policy_xml_documents(cfg, route, effective_product)]
+    return [
+        dataclasses.replace(_doc_for(xml), scope=scope)
+        for scope, xml in stacked_policy_scopes(cfg, route, effective_product, effective_product_id)
+    ]
 
 
 async def _read_body_within_limit(request: Request, cfg: GatewayConfig) -> bytes:

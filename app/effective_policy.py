@@ -120,18 +120,49 @@ def policy_xml_documents_for_target(target: Any) -> list[str]:
     return docs
 
 
+def _route_policy_scopes(cfg: GatewayConfig, route: RouteConfig) -> list[tuple[str, str]]:
+    """Label a route's own documents as API or operation scope.
+
+    An operation route carries its API's document (when there is one) followed
+    by the operation's. Routes declared directly, outside the API catalogue,
+    are labelled by route name.
+    """
+    documents = list(route.policies_xml_documents)
+    if route.policies_xml:
+        documents.append(route.policies_xml)
+    api = cfg.apis.get(route.api_id or "")
+    if api is None:
+        return [(f"route:{route.name}", xml) for xml in documents]
+    labelled: list[tuple[str, str]] = []
+    api_pending = bool(api.policies_xml)
+    for xml in documents:
+        if api_pending and xml == api.policies_xml:
+            labelled.append((f"api:{route.api_id}", xml))
+            api_pending = False
+        else:
+            labelled.append((f"operation:{route.api_id}/{route.operation_id or ''}", xml))
+    return labelled
+
+
+def stacked_policy_scopes(
+    cfg: GatewayConfig,
+    route: RouteConfig,
+    effective_product: ProductConfig | None,
+    effective_product_id: str = "",
+) -> list[tuple[str, str]]:
+    """The global -> product -> API -> operation documents, each with its scope label."""
+    scoped: list[tuple[str, str]] = [("global", xml) for xml in cfg.policies_xml_documents]
+    if cfg.policies_xml:
+        scoped.append(("global", cfg.policies_xml))
+    if effective_product is not None and effective_product.policies_xml:
+        scoped.append((f"product:{effective_product_id}", effective_product.policies_xml))
+    scoped.extend(_route_policy_scopes(cfg, route))
+    return [(scope, xml) for scope, xml in scoped if xml]
+
+
 def stacked_policy_xml_documents(
     cfg: GatewayConfig,
     route: RouteConfig,
     effective_product: ProductConfig | None,
 ) -> list[str]:
-    documents: list[str] = []
-    documents.extend(cfg.policies_xml_documents)
-    if cfg.policies_xml:
-        documents.append(cfg.policies_xml)
-    if effective_product is not None and effective_product.policies_xml:
-        documents.append(effective_product.policies_xml)
-    documents.extend(route.policies_xml_documents)
-    if route.policies_xml:
-        documents.append(route.policies_xml)
-    return [item for item in documents if item]
+    return [xml for _, xml in stacked_policy_scopes(cfg, route, effective_product)]
