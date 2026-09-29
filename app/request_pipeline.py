@@ -1099,6 +1099,7 @@ def _build_policy_request(
             "original_request_url": str(request.url),
             "_request_headers": dict(headers),
             "_request_query": dict(upstream_query),
+            "_matched_parameters": dict(resolved.matched_parameters),
         },
         body=body,
     )
