@@ -61,7 +61,7 @@
       "authz": {
         "required_roles": ["admin"]
       },
-      "policies_xml": "<policies>\n  <inbound>\n    <rate-limit calls=\"2\" renewal-period=\"60\" scope=\"subscription\" />\n  </inbound>\n  <backend />\n  <outbound />\n  <on-error />\n</policies>"
+      "policies_xml": "<policies>\n  <inbound>\n    <rate-limit calls=\"2\" renewal-period=\"60\" />\n  </inbound>\n  <backend />\n  <outbound />\n  <on-error />\n</policies>"
     }
   ]
 }

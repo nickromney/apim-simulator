@@ -1055,6 +1055,7 @@ class _ForwardingContext:
 
 def _build_policy_request(
     *,
+    cfg: GatewayConfig,
     request: Request,
     route: Any,
     auth: AuthContext,
@@ -1074,6 +1075,8 @@ def _build_policy_request(
     pass state between its own stages.
     """
     upstream_query = dict(request.query_params)
+    api = cfg.apis.get(route.api_id or "")
+    operation = api.operations.get(route.operation_id or "") if api is not None else None
     return PolicyRequest(
         method=request.method,
         path=resolved.upstream_path,
@@ -1082,7 +1085,9 @@ def _build_policy_request(
         variables={
             "route": route.name,
             "api_id": route.api_id or "",
+            "api_name": api.name if api is not None else "",
             "operation_id": route.operation_id or "",
+            "operation_name": operation.name if operation is not None else "",
             "subscription_id": auth.subscription.id if auth.subscription else "",
             "products": auth.subscription_products,
             "product_id": effective_product_id,
@@ -1271,6 +1276,7 @@ async def execute_gateway_request(request: Request) -> Response:
     subscription_owner, subscription_groups = _subscription_context(cfg, auth)
 
     policy_req = _build_policy_request(
+        cfg=cfg,
         request=request,
         route=route,
         auth=auth,

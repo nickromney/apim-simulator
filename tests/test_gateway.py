@@ -763,10 +763,11 @@ def test_backend_basic_auth_is_applied_and_url_is_used() -> None:
 
 
 def test_rate_limit_policy_returns_429_on_second_call() -> None:
+    """https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy"""
     policy = """\
 <policies>
   <inbound>
-    <rate-limit calls="1" renewal-period="999999" scope="subscription" />
+    <rate-limit calls="1" renewal-period="300" />
   </inbound>
   <backend />
   <outbound />
@@ -807,6 +808,8 @@ def test_rate_limit_policy_returns_429_on_second_call() -> None:
 
     assert r1.status_code == 200
     assert r2.status_code == 429
+    assert r2.headers["retry-after"] == "300"
+    assert r2.json() == {"statusCode": 429, "message": "Rate limit is exceeded. Try again in 300 seconds."}
     assert calls == 1
 
 
@@ -4133,7 +4136,9 @@ def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> N
     assert second.headers["x-retry"]
     assert seen_urls == [_http_url("upstream/items")]
     assert first_trace.json()["policy_variable_writes"][-1]["name"] == "remaining_calls"
-    assert second_trace.json()["policy_variable_writes"][-1]["name"] == "retry_after"
+    blocked_writes = {write["name"]: write["value"] for write in second_trace.json()["policy_variable_writes"]}
+    assert blocked_writes["retry_after"]
+    assert blocked_writes["remaining_calls"] == 0
 
 
 def test_rate_limit_by_key_supports_context_subscription_id_expression() -> None:
