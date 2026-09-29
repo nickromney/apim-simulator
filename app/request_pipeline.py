@@ -37,6 +37,7 @@ from app.policy import (
     PolicyRequest,
     PolicyRuntime,
     PolicyTraceCollector,
+    ResponseSpec,
     apply_backend_async,
     apply_inbound_async,
     apply_on_error_async,
@@ -44,6 +45,7 @@ from app.policy import (
     finalize_deferred_actions,
     parse_policies_xml,
 )
+from app.policy_errors import build_last_error, exception_last_error, response_last_error
 from app.proxy import apply_claim_headers, build_upstream_headers, filter_response_headers, resolve_route
 from app.security import AuthContext, authenticate_request, subscription_bypassed, validate_client_certificate
 
@@ -487,15 +489,13 @@ async def _handle_backend_error_status(
         variables={
             **policy_req.variables,
             "error": "backend_response_failure",
-            "_last_error": {
-                "Source": "forward-request",
-                "Reason": "BackendResponseFailure",
-                "Message": f"Backend returned HTTP {status_code}",
-                "Scope": "",
-                "Section": "backend",
-                "Path": "",
-                "PolicyId": "",
-            },
+            "_last_error": build_last_error(
+                source="forward-request",
+                reason="BackendResponseFailure",
+                message=f"Backend returned HTTP {status_code}",
+                scope=str(policy_req.variables.get("_policy_scope") or ""),
+                section="backend",
+            ),
         },
         body=policy_req.body,
         response_status_code=status_code,
@@ -731,15 +731,12 @@ async def _read_body_within_limit(request: Request, cfg: GatewayConfig) -> bytes
 def _upstream_last_error(last_exc: Exception | None) -> dict[str, str]:
     """Map transport failures to APIM's documented LastError vocabulary."""
     timed_out = isinstance(last_exc, httpx.TimeoutException)
-    return {
-        "Source": "forward-request" if timed_out else "multiple",
-        "Reason": "Timeout" if timed_out else "BackendConnectionFailure",
-        "Message": str(last_exc) or ("Backend timeout" if timed_out else "Backend connection failure"),
-        "Scope": "",
-        "Section": "backend",
-        "Path": "",
-        "PolicyId": "",
-    }
+    return build_last_error(
+        source="forward-request" if timed_out else "multiple",
+        reason="Timeout" if timed_out else "BackendConnectionFailure",
+        message=str(last_exc) or ("Backend timeout" if timed_out else "Backend connection failure"),
+        section="backend",
+    )
 
 
 async def _fail_upstream_unavailable(
@@ -1345,6 +1342,189 @@ def _store_and_respond(
     return Response(content=content, status_code=status_code, headers=response_headers, media_type=media_type)
 
 
+def _apim_500_response() -> ResponseSpec:
+    """APIM's generic 500 for an unexpected failure (shape documented in _fail_upstream_unavailable)."""
+    body = json.dumps({"statusCode": 500, "message": "Internal server error", "activityId": str(uuid.uuid4())})
+    return ResponseSpec(status_code=500, headers={"content-type": "application/json"}, body=body.encode())
+
+
+async def _run_on_error(
+    *,
+    policy_docs: list[Any],
+    policy_req: PolicyRequest,
+    policy_runtime: Any,
+    last_error: dict[str, str],
+    status_code: int,
+    default: ResponseSpec,
+) -> ResponseSpec:
+    """Run the effective on-error section for an error and return what the caller gets.
+
+    Docs: https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    on-error sees the error as context.LastError and the error's status as
+    context.Response.StatusCode. A return-response there is the response;
+    otherwise the caller receives the error's own response, carrying whatever
+    headers on-error set (the docs' example sets headers and shows the response).
+    """
+    headers = dict(default.headers)
+    failure_req = PolicyRequest(
+        method=policy_req.method,
+        path=policy_req.path,
+        query=dict(policy_req.query),
+        headers=headers,
+        variables={**policy_req.variables, "_last_error": last_error},
+        body=policy_req.body,
+        response_status_code=status_code,
+        response_headers=headers,
+        response_body=default.body,
+        response_media_type=default.media_type,
+    )
+    override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
+    if override is not None:
+        return override
+    return ResponseSpec(
+        status_code=failure_req.response_status_code or status_code,
+        headers=headers,
+        body=failure_req.response_body,
+        media_type=failure_req.response_media_type,
+    )
+
+
+async def _on_error_for_exception(
+    *, exc: Exception, section: str, policy_docs: list[Any], policy_req: PolicyRequest, policy_runtime: Any
+) -> ResponseSpec:
+    """An exception from a policy stops processing and jumps to on-error.
+
+    With no on-error effect the failure surfaces as before: an HTTPException
+    is re-raised for the HTTP adapter, anything else becomes APIM's 500.
+    """
+    status_code, last_error = exception_last_error(
+        exc,
+        str(policy_req.variables.get("_policy_step") or "multiple"),
+        scope=str(policy_req.variables.get("_policy_scope") or ""),
+        section=section,
+    )
+    default = _apim_500_response()
+    if isinstance(exc, HTTPException):
+        default = ResponseSpec(
+            status_code=status_code,
+            headers={"content-type": "application/json"},
+            body=json.dumps({"detail": exc.detail}).encode(),
+        )
+    result = await _run_on_error(
+        policy_docs=policy_docs,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        last_error=last_error,
+        status_code=status_code,
+        default=default,
+    )
+    if isinstance(exc, HTTPException) and result == default:
+        raise exc
+    return result
+
+
+async def _guarded_stage(
+    *, section: str, apply_stage: Any, policy_docs: list[Any], policy_req: PolicyRequest, policy_runtime: Any
+) -> tuple[ResponseSpec | None, bool]:
+    """Run inbound or backend policy; errors go through on-error.
+
+    Returns the response that ends the call (or None) and whether on-error was
+    consulted. A deliberate refusal from rate-limit, quota, ip-filter,
+    check-header or validate-jwt is one of the docs' predefined errors, so it
+    enters on-error too; return-response and mock-response do not.
+    """
+    try:
+        early = await apply_stage(policy_docs, policy_req, policy_runtime)
+    except Exception as exc:
+        return await _on_error_for_exception(
+            exc=exc, section=section, policy_docs=policy_docs, policy_req=policy_req, policy_runtime=policy_runtime
+        ), True
+    if early is None:
+        return None, False
+    source = str(policy_req.variables.get("_policy_step") or "")
+    # validate-jwt's body may be the configured failed-validation message; the
+    # predefined Reason follows the underlying failure it recorded.
+    detail = policy_req.variables.get("_policy_error_detail") if source == "validate-jwt" else None
+    last_error = response_last_error(
+        source,
+        str(detail).encode() if detail else early.body,
+        scope=str(policy_req.variables.get("_policy_scope") or ""),
+        section=section,
+    )
+    if last_error is None:
+        return early, False
+    result = await _run_on_error(
+        policy_docs=policy_docs,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        last_error=last_error,
+        status_code=early.status_code,
+        default=early,
+    )
+    return result, True
+
+
+async def _guarded_outbound(
+    *,
+    policy_docs: list[Any],
+    policy_runtime: Any,
+    request: Request,
+    policy_req: PolicyRequest,
+    response_headers: dict[str, str],
+    content: bytes,
+    media_type: str | None,
+    upstream_status_code: int,
+    cfg: GatewayConfig,
+    correlation_id: str | None,
+    trace_id: str | None,
+    trace_store: dict[str, Any],
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+    attempts_used: int,
+    elapsed_seconds: float,
+) -> tuple[dict[str, str], bytes, str | None] | Response:
+    """Run outbound policy; an exception in it jumps to on-error and replaces the response."""
+    if not policy_docs:
+        return response_headers, content, media_type
+    try:
+        return await _apply_outbound_policies(
+            policy_docs=policy_docs,
+            policy_runtime=policy_runtime,
+            request=request,
+            policy_req=policy_req,
+            response_headers=response_headers,
+            content=content,
+            media_type=media_type,
+            upstream_status_code=upstream_status_code,
+        )
+    except Exception as exc:
+        spec = await _on_error_for_exception(
+            exc=exc, section="outbound", policy_docs=policy_docs, policy_req=policy_req, policy_runtime=policy_runtime
+        )
+    request.state.apim_result_reason = "policy_on_error_override"
+    return _policy_response(
+        body=spec.body,
+        status_code=spec.status_code,
+        headers=dict(spec.headers),
+        media_type=spec.media_type,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        trace_store=trace_store,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        cfg=cfg,
+        extra={
+            "attempts": attempts_used,
+            "status": spec.status_code,
+            "elapsed_ms": int(elapsed_seconds * 1000),
+            "cache": None,
+            "reason": "policy_on_error_override",
+        },
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+    )
+
+
 async def _short_circuit_policy_stages(
     *,
     policy_docs: list[Any],
@@ -1371,10 +1551,16 @@ async def _short_circuit_policy_stages(
         return None
 
     for stage, apply_stage in (("inbound", apply_inbound_async), ("backend", apply_backend_async)):
-        early = await apply_stage(policy_docs, policy_req, policy_runtime)
+        early, on_error_ran = await _guarded_stage(
+            section=stage,
+            apply_stage=apply_stage,
+            policy_docs=policy_docs,
+            policy_req=policy_req,
+            policy_runtime=policy_runtime,
+        )
         if early is None:
             continue
-        reason = f"policy_{stage}_short_circuit"
+        reason = "policy_on_error_override" if on_error_ran else f"policy_{stage}_short_circuit"
         request.state.apim_result_reason = reason
         request.state.apim_upstream_attempts = 0
         gateway_metrics.policy_short_circuits.add(
@@ -1659,17 +1845,27 @@ async def execute_gateway_request(request: Request) -> Response:
     if backend_error_response is not None:
         return backend_error_response
 
-    if policy_docs:
-        response_headers, content, media_type = await _apply_outbound_policies(
-            policy_docs=policy_docs,
-            policy_runtime=policy_runtime,
-            request=request,
-            policy_req=policy_req,
-            response_headers=response_headers,
-            content=content,
-            media_type=media_type,
-            upstream_status_code=upstream_status_code,
-        )
+    outbound = await _guarded_outbound(
+        policy_docs=policy_docs,
+        policy_runtime=policy_runtime,
+        request=request,
+        policy_req=policy_req,
+        response_headers=response_headers,
+        content=content,
+        media_type=media_type,
+        upstream_status_code=upstream_status_code,
+        cfg=cfg,
+        correlation_id=correlation_id,
+        trace_id=trace_id if trace_requested else None,
+        trace_store=trace_store,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        attempts_used=attempts_used,
+        elapsed_seconds=elapsed_seconds,
+    )
+    if isinstance(outbound, Response):
+        return outbound
+    response_headers, content, media_type = outbound
 
     finalize_deferred_actions(
         PolicyRequest(

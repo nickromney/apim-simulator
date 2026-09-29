@@ -26,6 +26,7 @@ from app.apim_expr import (
 )
 from app.config import GatewayConfig
 from app.named_values import mask_secret_data, resolve_named_values_in_text
+from app.policy_errors import element_name
 
 
 @dataclass(frozen=True)
@@ -354,6 +355,7 @@ class ReturnResponse(PolicyNode):
             headers=out_headers,
             variables=req.variables,
             body=req.body,
+            response_status_code=req.response_status_code,
         )
         for header in self.headers:
             header.apply(temp_req, runtime)
@@ -2680,6 +2682,7 @@ class ValidateJwt(PolicyNode):
             self._validate_claims(claims, req, runtime)
         except HTTPException as exc:
             _record_jwt_validation(runtime, {"status": "invalid", "detail": exc.detail})
+            req.variables["_policy_error_detail"] = str(exc.detail)
             return ResponseSpec(
                 status_code=self.failed_validation_httpcode,
                 headers={"content-type": "text/plain"},
@@ -2691,6 +2694,7 @@ class ValidateJwt(PolicyNode):
 
     def _failure(self, req: PolicyRequest, runtime: PolicyRuntime | None, detail: str) -> ResponseSpec:
         _record_jwt_validation(runtime, {"status": "invalid", "detail": detail})
+        req.variables["_policy_error_detail"] = detail
         return ResponseSpec(
             status_code=self.failed_validation_httpcode,
             headers={"content-type": "text/plain"},
@@ -4017,6 +4021,7 @@ async def _apply_steps_async(
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
     for step in steps:
+        req.variables["_policy_step"] = element_name(step)
         out = await step.apply_async(req, runtime)
         if out is not None:
             return out
@@ -4067,6 +4072,7 @@ async def _apply_section_async(
 ) -> ResponseSpec | None:
     for scope, step in _effective_section_steps(docs, section_name):
         req.variables["_policy_scope"] = scope
+        req.variables["_policy_step"] = element_name(step)
         out = await step.apply_async(req, runtime)
         if out is not None:
             return out
