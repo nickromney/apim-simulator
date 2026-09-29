@@ -7,7 +7,7 @@ import ipaddress
 import json
 import math
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -40,9 +40,93 @@ from app.policy_errors import element_name
 @dataclass(frozen=True)
 class ResponseSpec:
     status_code: int
-    headers: dict[str, str]
+    headers: dict[str, str] | MultiValueMap
     body: bytes = b""
     media_type: str | None = None
+
+
+class MultiValueMap(MutableMapping[str, str]):
+    """Case-insensitive HTTP collection retaining every value.
+
+    APIM exposes headers and query values as ``string[]``. Policy code still
+    needs a convenient scalar view for existing gateway plumbing, so indexing
+    and ``get`` return the APIM comma-joined representation while expressions
+    use ``as_dict_lists`` and see the underlying arrays.
+    """
+
+    def __init__(self, values: MutableMapping[str, Any] | dict[str, Any] | None = None):
+        self._values: dict[str, tuple[str, list[str]]] = {}
+        for key, value in (values or {}).items():
+            self[key] = value
+
+    def _stored_key(self, key: str) -> str | None:
+        lowered = str(key).lower()
+        return next((stored for stored in self._values if stored.lower() == lowered), None)
+
+    def __getitem__(self, key: str) -> str:
+        stored = self._stored_key(key)
+        if stored is None:
+            raise KeyError(key)
+        return ",".join(self._values[stored][1])
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        name = str(key)
+        stored = self._stored_key(name) or name
+        values = value if isinstance(value, (list, tuple)) else [value]
+        self._values[stored] = (stored, [str(item) for item in values])
+
+    def __delitem__(self, key: str) -> None:
+        stored = self._stored_key(key)
+        if stored is None:
+            raise KeyError(key)
+        del self._values[stored]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def get_list(self, key: str, default: list[str] | None = None) -> list[str] | None:
+        stored = self._stored_key(key)
+        if stored is None:
+            return default
+        return list(self._values[stored][1])
+
+    def set_list(self, key: str, values: list[str]) -> None:
+        self[key] = values
+
+    def as_dict_lists(self) -> dict[str, list[str]]:
+        return {name: list(values) for name, (_, values) in self._values.items()}
+
+    def as_pairs(self) -> list[tuple[str, str]]:
+        return [(name, value) for name, (_, values) in self._values.items() for value in values]
+
+    def as_header_pairs(self) -> list[tuple[str, str]]:
+        separate = {
+            "cookie",
+            "date",
+            "expires",
+            "if-modified-since",
+            "if-unmodified-since",
+            "last-modified",
+            "proxy-authenticate",
+            "retry-after",
+            "set-cookie",
+            "user-agent",
+            "warning",
+            "www-authenticate",
+        }
+        pairs: list[tuple[str, str]] = []
+        for name, (_, values) in self._values.items():
+            if name.lower() in separate:
+                pairs.extend((name, value) for value in values)
+            else:
+                pairs.append((name, ",".join(values)))
+        return pairs
+
+    def copy(self) -> MultiValueMap:
+        return MultiValueMap(self.as_dict_lists())
 
 
 @dataclass
@@ -60,6 +144,12 @@ class PolicyRequest:
     # Which policy section is executing. Policies that act on "the message"
     # (set-body, validate-content) act on the response in outbound.
     section: str = "inbound"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.query, MultiValueMap):
+            self.query = MultiValueMap(self.query)
+        if not isinstance(self.headers, MultiValueMap):
+            self.headers = MultiValueMap(self.headers)
 
     @property
     def in_outbound(self) -> bool:
@@ -131,12 +221,20 @@ class Always(Condition):
 
 
 @dataclass(frozen=True)
+class BooleanConstant(Condition):
+    value: bool
+
+    def __call__(self, req: PolicyRequest) -> bool:
+        return self.value
+
+
+@dataclass(frozen=True)
 class HeaderEquals(Condition):
     name: str
     value: str
 
     def __call__(self, req: PolicyRequest) -> bool:
-        return req.headers.get(self.name.lower(), "") == self.value
+        return req.headers.get(self.name, "") == self.value
 
 
 @dataclass(frozen=True)
@@ -145,7 +243,7 @@ class HeaderStartsWith(Condition):
     prefix: str
 
     def __call__(self, req: PolicyRequest) -> bool:
-        return req.headers.get(self.name.lower(), "").startswith(self.prefix)
+        return req.headers.get(self.name, "").startswith(self.prefix)
 
 
 @dataclass(frozen=True)
@@ -181,60 +279,12 @@ class ExpressionCondition(Condition):
         return evaluate_apim_condition(self.expression, build_expression_context(req))
 
 
-def _strip_condition_quotes(value: str) -> str:
-    """Drop one matched pair of surrounding quotes, single or double."""
-    value = value.strip()
-    if (value.startswith("'") and value.endswith("'")) or (value.startswith('"') and value.endswith('"')):
-        return value[1:-1]
-    return value
-
-
-def _condition_call_argument(expr: str, opener: str) -> str:
-    """The argument of a `name(...)` call at the head of a condition expression."""
-    return _strip_condition_quotes(expr.split(opener, 1)[1].split(")", 1)[0])
-
-
-def _parse_header_starts_with(expr: str) -> Condition:
-    prefix = _strip_condition_quotes(expr.split(".startswith(", 1)[1].rsplit(")", 1)[0])
-    return HeaderStartsWith(name=_condition_call_argument(expr, "header(").lower(), prefix=prefix)
-
-
-def _parse_header_equals(expr: str) -> Condition:
-    left, right = expr.split("==", 1)
-    return HeaderEquals(name=_condition_call_argument(left, "header(").lower(), value=_strip_condition_quotes(right))
-
-
-def _parse_query_equals(expr: str) -> Condition:
-    left, right = expr.split("==", 1)
-    return QueryEquals(name=_condition_call_argument(left, "query("), value=_strip_condition_quotes(right))
-
-
-def _parse_method_is(expr: str) -> Condition:
-    return MethodIs(method=_strip_condition_quotes(expr.split("==", 1)[1]))
-
-
-def _parse_path_starts_with(expr: str) -> Condition:
-    return PathStartsWith(prefix=_strip_condition_quotes(expr.split("path.startswith(", 1)[1].rsplit(")", 1)[0]))
-
-
-# Recognisers for the condition mini-language, in precedence order. The
-# startswith form must be tried before the equality form, because a
-# `header(x).startswith(y)` expression can also contain "==" inside its prefix.
-_CONDITION_FORMS: tuple[tuple[Callable[[str], bool], Callable[[str], Condition]], ...] = (
-    (lambda e: e.startswith("header(") and ").startswith(" in e, _parse_header_starts_with),
-    (lambda e: e.startswith("header(") and "==" in e, _parse_header_equals),
-    (lambda e: e.startswith("query(") and "==" in e, _parse_query_equals),
-    (lambda e: e.startswith("method") and "==" in e, _parse_method_is),
-    (lambda e: e.startswith("path.startswith("), _parse_path_starts_with),
-)
-
-
 def parse_condition(expr: str | None) -> Condition:
     """Parse a `<when condition="...">` expression.
 
     An empty condition always fires. An `@`-prefixed one is a full policy
-    expression evaluated at request time; everything else is the small
-    comparison language recognised by _CONDITION_FORMS.
+    expression evaluated at request time. APIM also accepts Boolean constants;
+    the old simulator-only comparison mini-language is intentionally rejected.
     """
     if not expr:
         return Always()
@@ -242,11 +292,8 @@ def parse_condition(expr: str | None) -> Condition:
     expr = expr.strip()
     if expr.startswith("@"):
         return ExpressionCondition(expression=expr)
-
-    for matches, build in _CONDITION_FORMS:
-        if matches(expr):
-            return build(expr)
-
+    if expr.lower() in {"true", "false"}:
+        return BooleanConstant(expr.lower() == "true")
     raise HTTPException(status_code=500, detail=f"Unsupported policy condition: {expr}")
 
 
@@ -266,31 +313,72 @@ class NoOp(PolicyNode):
         return None
 
 
+_SET_HEADER_ACTIONS = {"override", "skip", "append", "delete"}
+_IMMUTABLE_HEADERS = {"connection", "content-length", "keep-alive", "transfer-encoding"}
+
+
+def _render_exists_action(value: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> str:
+    action = render_policy_value(value or "override", req, runtime).lower()
+    if action not in _SET_HEADER_ACTIONS:
+        raise HTTPException(status_code=500, detail=f"unsupported exists-action: {action}")
+    return action
+
+
+def _protected_header_action(req: PolicyRequest, name: str, action: str) -> bool:
+    # Learn specifies these mutation limitations, but not whether a forbidden
+    # mutation is ignored or raises; preserve the existing header locally.
+    lowered = name.lower()
+    if lowered in _IMMUTABLE_HEADERS:
+        return True
+    if action == "delete" and lowered == "x-forwarded-for":
+        return True
+    return req.in_outbound and action == "delete" and lowered == "server"
+
+
+def _sync_expression_header(req: PolicyRequest, name: str, values: list[str] | None) -> None:
+    expression_headers = req.variables.get("_request_headers")
+    if not isinstance(expression_headers, MultiValueMap) or expression_headers is req.headers:
+        return
+    if values is None:
+        expression_headers.pop(name, None)
+    else:
+        expression_headers.set_list(name, values)
+
+
 @dataclass(frozen=True)
 class SetHeader(PolicyNode):
     name: str
     value: str
     exists_action: str = "override"
+    values: tuple[str, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        key = self.name
-        action = (self.exists_action or "override").lower()
-        rendered = render_policy_value(self.value, req, runtime)
+        key = render_policy_value(self.name, req, runtime).strip()
+        action = _render_exists_action(self.exists_action, req, runtime)
+        rendered_values = tuple(render_policy_value(value, req, runtime) for value in (self.values or (self.value,)))
         if action == "delete":
+            if _protected_header_action(req, key, action):
+                return None
             req.headers.pop(key, None)
+            _sync_expression_header(req, key, None)
             _record_step(runtime, "set-header", {"name": key, "action": "delete"})
             return None
 
-        if action == "skip" and key in req.headers:
+        if action == "skip" and req.headers.get_list(key) is not None:
             _record_step(runtime, "set-header", {"name": key, "action": "skip"})
             return None
 
-        if action == "append" and key in req.headers:
-            req.headers[key] = f"{req.headers[key]},{rendered}"
+        if _protected_header_action(req, key, action):
+            return None
+        if action == "append" and req.headers.get_list(key) is not None:
+            values = req.headers.get_list(key, []) + list(rendered_values)
+            req.headers.set_list(key, values)
         else:
-            req.headers[key] = rendered
+            values = list(rendered_values)
+            req.headers.set_list(key, values)
+        _sync_expression_header(req, key, values)
 
-        _record_step(runtime, "set-header", {"name": key, "action": action, "value": rendered})
+        _record_step(runtime, "set-header", {"name": key, "action": action, "value": ",".join(rendered_values)})
         return None
 
 
@@ -321,26 +409,29 @@ class SetQueryParameter(PolicyNode):
     name: str
     value: str
     exists_action: str = "override"
+    values: tuple[str, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        key = self.name
-        action = (self.exists_action or "override").lower()
-        rendered = render_policy_value(self.value, req, runtime)
+        key = render_policy_value(self.name, req, runtime).strip()
+        action = _render_exists_action(self.exists_action, req, runtime)
+        rendered_values = tuple(render_policy_value(value, req, runtime) for value in (self.values or (self.value,)))
         if action == "delete":
             req.query.pop(key, None)
             _record_step(runtime, "set-query-parameter", {"name": key, "action": "delete"})
             return None
 
-        if action == "skip" and key in req.query:
+        if action == "skip" and req.query.get_list(key) is not None:
             _record_step(runtime, "set-query-parameter", {"name": key, "action": "skip"})
             return None
 
-        if action == "append" and key in req.query:
-            req.query[key] = f"{req.query[key]},{rendered}"
+        if action == "append" and req.query.get_list(key) is not None:
+            req.query.set_list(key, req.query.get_list(key, []) + list(rendered_values))
         else:
-            req.query[key] = rendered
+            req.query.set_list(key, list(rendered_values))
 
-        _record_step(runtime, "set-query-parameter", {"name": key, "action": action, "value": rendered})
+        _record_step(
+            runtime, "set-query-parameter", {"name": key, "action": action, "value": ",".join(rendered_values)}
+        )
         return None
 
 
@@ -369,7 +460,7 @@ class ReturnResponse(PolicyNode):
     media_type: str | None = None
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        out_headers: dict[str, str] = {}
+        out_headers = MultiValueMap()
         temp_req = PolicyRequest(
             method=req.method,
             path=req.path,
@@ -378,6 +469,7 @@ class ReturnResponse(PolicyNode):
             variables=req.variables,
             body=req.body,
             response_status_code=req.response_status_code,
+            section=req.section,
         )
         for header in self.headers:
             header.apply(temp_req, runtime)
@@ -3523,13 +3615,27 @@ def _policy_value_or_empty(el: ElementTree.Element) -> str:
     return _text_or_empty(el)
 
 
+def _policy_values(el: ElementTree.Element) -> tuple[str, ...]:
+    values = tuple(_text_or_empty(item) for item in el.findall("value"))
+    return values or (_policy_value_or_empty(el),)
+
+
+def _parse_exists_action(el: ElementTree.Element, policy_name: str) -> str:
+    action = el.attrib.get("exists-action", "override").strip()
+    if not is_apim_expression(action) and action.lower() not in _SET_HEADER_ACTIONS:
+        # Learn lists the allowed values but not the configuration-error
+        # status or message for an invalid value.
+        raise HTTPException(status_code=500, detail=f"{policy_name} unsupported exists-action: {action}")
+    return action
+
+
 def _parse_set_header(el: ElementTree.Element) -> SetHeader:
     name = el.attrib.get("name")
     if not name:
         raise HTTPException(status_code=500, detail="set-header missing name")
-    exists_action = el.attrib.get("exists-action", "override")
-    value = _policy_value_or_empty(el)
-    return SetHeader(name=name.lower(), value=value, exists_action=exists_action)
+    exists_action = _parse_exists_action(el, "set-header")
+    values = _policy_values(el)
+    return SetHeader(name=name.strip(), value=values[0], exists_action=exists_action, values=values)
 
 
 def _parse_set_variable(el: ElementTree.Element) -> SetVariable:
@@ -3543,8 +3649,9 @@ def _parse_set_query_parameter(el: ElementTree.Element) -> SetQueryParameter:
     name = (el.attrib.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=500, detail="set-query-parameter missing name")
-    exists_action = el.attrib.get("exists-action", "override")
-    return SetQueryParameter(name=name, value=_policy_value_or_empty(el), exists_action=exists_action)
+    exists_action = _parse_exists_action(el, "set-query-parameter")
+    values = _policy_values(el)
+    return SetQueryParameter(name=name, value=values[0], exists_action=exists_action, values=values)
 
 
 def _parse_set_body(el: ElementTree.Element) -> SetBody:
@@ -4751,6 +4858,12 @@ def apply_outbound(
     )
     asyncio.run(apply_outbound_async(docs, req, runtime))
     finalize_deferred_actions(req, runtime)
+    headers.clear()
+    if isinstance(headers, MultiValueMap):
+        for name, values in req.headers.as_dict_lists().items():
+            headers.set_list(name, values)
+    else:
+        headers.update(dict(req.headers))
 
 
 def apply_on_error(

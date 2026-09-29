@@ -286,7 +286,7 @@ def test_base_inside_choose_is_rejected() -> None:
     with pytest.raises(HTTPException, match="base element is only allowed directly"):
         parse_policies_xml(
             """\
-<policies><inbound><choose><when condition="method == 'GET'"><base /></when></choose></inbound></policies>
+<policies><inbound><choose><when condition='@(context.Request.Method == "GET")'><base /></when></choose></inbound></policies>
 """
         )
 
