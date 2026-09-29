@@ -871,13 +871,11 @@ class Quota(PolicyNode):
 
 
 def _request_headers(req: PolicyRequest) -> dict[str, str]:
-    headers = req.variables.get("_request_headers")
-    return headers if isinstance(headers, dict) else req.headers
+    return req.headers
 
 
 def _request_query(req: PolicyRequest) -> dict[str, str]:
-    query = req.variables.get("_request_query")
-    return query if isinstance(query, dict) else req.query
+    return req.query
 
 
 def _response_header_target(req: PolicyRequest) -> dict[str, str]:
@@ -1022,16 +1020,38 @@ def _normalize_cache_caching_type(caching_type: str | None) -> tuple[str, bool]:
     normalized = (caching_type or "prefer-external").strip().lower() or "prefer-external"
     if normalized == "external":
         raise HTTPException(status_code=500, detail="Unsupported caching-type external")
+    if normalized not in {"internal", "prefer-external"}:
+        raise HTTPException(status_code=500, detail=f"Unsupported caching-type {normalized}")
     if normalized == "prefer-external":
         return "internal", True
     return "internal", False
+
+
+def _normalize_downstream_caching_type(caching_type: str | None) -> str:
+    mode = (caching_type or "none").strip().lower() or "none"
+    if mode not in {"none", "private", "public"}:
+        raise HTTPException(status_code=500, detail=f"Unsupported downstream-caching-type {mode}")
+    return mode
+
+
+def _validate_cache_enum(value: str | None, *, name: str, allowed: set[str], allow_expression: bool = False) -> None:
+    # Learn documents the allowed values but not the gateway's validation
+    # status/message; the simulator keeps its policy-configuration 500 shape.
+    if value is None or not value.strip():
+        return
+    normalized = value.strip().lower()
+    if allow_expression and is_apim_expression(value):
+        return
+    if normalized in allowed:
+        return
+    raise HTTPException(status_code=500, detail=f"Unsupported {name} {normalized}")
 
 
 def _cleanup_value_cache(store: dict[str, Any], key: str, now: float) -> ValueCacheEntry | None:
     entry = store.get(key)
     if not isinstance(entry, ValueCacheEntry):
         return None
-    if entry.expires_at < now:
+    if entry.expires_at <= now:
         store.pop(key, None)
         return None
     return entry
@@ -1060,7 +1080,7 @@ def _build_response_cache_key(
     query_names = vary_by_query_parameters or sorted(request_query.keys())
     query_part = {name: request_query.get(name, "") for name in query_names}
     header_part = {name.lower(): request_headers.get(name.lower(), "") for name in vary_by_headers}
-    developer = str(req.variables.get("subscription_id") or "anonymous") if vary_by_developer else ""
+    developer = str(req.variables.get("subscription_owner") or "anonymous") if vary_by_developer else ""
     groups = req.variables.get("subscription_groups")
     group_part = sorted(str(item) for item in groups) if vary_by_developer_groups and isinstance(groups, list) else []
     return json.dumps(
@@ -1084,7 +1104,9 @@ def _apply_downstream_cache_headers(
     downstream_caching_type: str,
     must_revalidate: bool,
 ) -> None:
-    mode = (downstream_caching_type or "none").strip().lower()
+    # Learn defines the modes and must-revalidate directive, but not the
+    # exact serialized Cache-Control value; retain the local header contract.
+    mode = _normalize_downstream_caching_type(downstream_caching_type)
     if mode == "none":
         headers["cache-control"] = "no-store"
         return
@@ -2644,6 +2666,8 @@ class CacheLookup(PolicyNode):
             return None
         _, adapted = _normalize_cache_caching_type(self.caching_type)
         req.variables["_policy_response_cache_active"] = True
+        # Learn specifies GET-only lookup but is silent on GET request bodies;
+        # the local adaptation checks the method and does not add body filtering.
         if req.method.upper() != "GET":
             _record_step(runtime, "cache-lookup", {"status": "skipped", "reason": "method_not_get"})
             return None
@@ -2654,7 +2678,9 @@ class CacheLookup(PolicyNode):
             return None
         vary_by_developer = _policy_bool(self.vary_by_developer, req, runtime, default=False)
         vary_by_developer_groups = _policy_bool(self.vary_by_developer_groups, req, runtime, default=False)
-        downstream_caching_type = render_policy_value(self.downstream_caching_type or "none", req, runtime).lower()
+        downstream_caching_type = _normalize_downstream_caching_type(
+            render_policy_value(self.downstream_caching_type or "none", req, runtime)
+        )
         must_revalidate = _policy_bool(self.must_revalidate, req, runtime, default=True)
         cache_key = _build_response_cache_key(
             req,
@@ -2671,7 +2697,7 @@ class CacheLookup(PolicyNode):
         )
         entry = runtime.response_cache.get(cache_key)
         if isinstance(entry, ResponseCacheEntry):
-            if entry.expires_at < time.time():
+            if entry.expires_at <= _policy_now(runtime):
                 runtime.response_cache.pop(cache_key, None)
             else:
                 headers = dict(entry.headers)
@@ -2724,7 +2750,7 @@ class CacheStore(PolicyNode):
             must_revalidate=context.must_revalidate,
         )
         runtime.response_cache[context.cache_key] = ResponseCacheEntry(
-            expires_at=time.time() + ttl,
+            expires_at=_policy_now(runtime) + ttl,
             status_code=req.response_status_code or 200,
             headers=headers,
             body=req.response_body,
@@ -2746,7 +2772,7 @@ class CacheLookupValue(PolicyNode):
             return None
         _, adapted = _normalize_cache_caching_type(self.caching_type)
         key = render_policy_value(self.key, req, runtime)
-        now = time.time()
+        now = _policy_now(runtime)
         entry = _cleanup_value_cache(runtime.value_cache, key, now)
         if entry is not None:
             req.variables[self.variable_name] = entry.value
@@ -2775,7 +2801,9 @@ class CacheStoreValue(PolicyNode):
         key = render_policy_value(self.key, req, runtime)
         value = evaluate_policy_value(self.value, req, runtime)
         ttl = max(0, _policy_int(self.duration, req, runtime, default=0))
-        runtime.value_cache[key] = ValueCacheEntry(expires_at=time.time() + ttl, value=value)
+        # APIM stores this value asynchronously; the local in-memory adaptation
+        # writes it synchronously and deliberately does not emulate latency.
+        runtime.value_cache[key] = ValueCacheEntry(expires_at=_policy_now(runtime) + ttl, value=value)
         _record_step(
             runtime, "cache-store-value", {"status": "stored", "cache_key": key, "ttl_seconds": ttl, "adapted": adapted}
         )
@@ -2786,13 +2814,26 @@ class CacheStoreValue(PolicyNode):
 class CacheRemoveValue(PolicyNode):
     key: str
     caching_type: str = "prefer-external"
+    fail_on_cache_removal_error: str = "false"
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         if runtime is None:
             return None
         _, adapted = _normalize_cache_caching_type(self.caching_type)
         key = render_policy_value(self.key, req, runtime)
-        removed = runtime.value_cache.pop(key, None) is not None
+        fail_on_error = _policy_bool(self.fail_on_cache_removal_error, req, runtime, default=False)
+        try:
+            removed = runtime.value_cache.pop(key, None) is not None
+        except Exception:
+            # The local dictionary has no removal failure path in normal use.
+            if fail_on_error:
+                raise
+            _record_step(
+                runtime,
+                "cache-remove-value",
+                {"status": "ignored-removal-error", "cache_key": key, "adapted": adapted},
+            )
+            return None
         _record_step(
             runtime,
             "cache-remove-value",
@@ -3897,6 +3938,22 @@ def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
 
 
 def _parse_cache_lookup(el: ElementTree.Element) -> CacheLookup:
+    for attribute in ("vary-by-developer", "vary-by-developer-groups"):
+        if attribute not in el.attrib:
+            # Learn marks both attributes required but does not define the
+            # policy-configuration error status/message.
+            raise HTTPException(status_code=500, detail=f"cache-lookup requires {attribute}")
+    _validate_cache_enum(
+        el.attrib.get("caching-type"),
+        name="caching-type",
+        allowed={"internal", "external", "prefer-external"},
+    )
+    _validate_cache_enum(
+        el.attrib.get("downstream-caching-type"),
+        name="downstream-caching-type",
+        allowed={"none", "private", "public"},
+        allow_expression=True,
+    )
     return CacheLookup(
         vary_by_headers=_vary_values(
             [_text_or_empty(item) for item in el.findall("vary-by-header") if _text_or_empty(item)]
@@ -3927,6 +3984,11 @@ def _parse_cache_lookup_value(el: ElementTree.Element) -> CacheLookupValue:
         raise HTTPException(status_code=500, detail="cache-lookup-value requires key")
     if not variable_name:
         raise HTTPException(status_code=500, detail="cache-lookup-value requires variable-name")
+    _validate_cache_enum(
+        el.attrib.get("caching-type"),
+        name="caching-type",
+        allowed={"internal", "external", "prefer-external"},
+    )
     return CacheLookupValue(
         key=key,
         variable_name=variable_name,
@@ -3945,6 +4007,11 @@ def _parse_cache_store_value(el: ElementTree.Element) -> CacheStoreValue:
         raise HTTPException(status_code=500, detail="cache-store-value requires value")
     if not duration:
         raise HTTPException(status_code=500, detail="cache-store-value requires duration")
+    _validate_cache_enum(
+        el.attrib.get("caching-type"),
+        name="caching-type",
+        allowed={"internal", "external", "prefer-external"},
+    )
     return CacheStoreValue(
         key=key,
         value=value,
@@ -3957,7 +4024,16 @@ def _parse_cache_remove_value(el: ElementTree.Element) -> CacheRemoveValue:
     key = (el.attrib.get("key") or "").strip()
     if not key:
         raise HTTPException(status_code=500, detail="cache-remove-value requires key")
-    return CacheRemoveValue(key=key, caching_type=str(el.attrib.get("caching-type") or "prefer-external"))
+    _validate_cache_enum(
+        el.attrib.get("caching-type"),
+        name="caching-type",
+        allowed={"internal", "external", "prefer-external"},
+    )
+    return CacheRemoveValue(
+        key=key,
+        caching_type=str(el.attrib.get("caching-type") or "prefer-external"),
+        fail_on_cache_removal_error=str(el.attrib.get("fail-on-cache-removal-error") or "false"),
+    )
 
 
 def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
