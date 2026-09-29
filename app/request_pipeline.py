@@ -1769,6 +1769,7 @@ async def execute_gateway_request(request: Request) -> Response:
         http_client=client,
         timeout_seconds=cfg.proxy_timeout_seconds,
         trace=trace_collector,
+        openid_cache=request.app.state.policy_openid_cache,
         response_cache=request.app.state.policy_response_cache,
         value_cache=request.app.state.policy_value_cache,
         llm_metric_emitter=lambda amount, attributes: gateway_metrics.llm_tokens.add(amount, attributes),
