@@ -505,64 +505,104 @@ class Choose(PolicyNode):
         return await _apply_steps_async(self.otherwise, req, runtime)
 
 
+def _json_error_response(status_code: int, message: str) -> ResponseSpec:
+    """APIM's JSON error envelope, as the other policies in this module return."""
+    return ResponseSpec(
+        status_code=status_code,
+        headers={"content-type": "application/json"},
+        body=_json_throttle_body(status_code, message),
+    )
+
+
 @dataclass(frozen=True)
 class CheckHeader(PolicyNode):
+    """Require a request header, optionally with one of a set of values.
+
+    https://learn.microsoft.com/en-us/azure/api-management/check-header-policy
+    name, failed-check-httpcode, failed-check-error-message and ignore-case are
+    all required and may be policy expressions. The docs do not say how a header
+    sent several times is compared; the value is compared as the gateway
+    received it (repeated headers already joined by the HTTP layer).
+    The docs also do not show the error body; the caller gets the configured
+    message in the JSON envelope the other policies use.
+    """
+
     name: str
-    expected: str | None
-    status_code: int
+    status_code: str
     message: str
+    ignore_case: str
+    values: tuple[str, ...]
+
+    def _resolve_status(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> int:
+        raw = str(render_policy_value(self.status_code, req, runtime)).strip()
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=500, detail="check-header failed-check-httpcode must be an integer"
+            ) from exc
+
+    def _resolve_ignore_case(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> bool:
+        raw = str(render_policy_value(self.ignore_case, req, runtime)).strip().lower()
+        if raw not in {"true", "false"}:
+            raise HTTPException(status_code=500, detail="check-header ignore-case must be true or false")
+        return raw == "true"
+
+    def _value_allowed(self, actual: str, ignore_case: bool) -> bool:
+        if not self.values:
+            return True
+        if ignore_case:
+            return actual.lower() in {value.lower() for value in self.values}
+        return actual in self.values
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        actual = req.headers.get(self.name.lower())
-        if actual is None or (self.expected is not None and actual != self.expected):
-            return ResponseSpec(
-                status_code=self.status_code,
-                headers={"content-type": "text/plain"},
-                body=self.message.encode("utf-8"),
-            )
-        return None
+        name = render_policy_value(self.name, req, runtime).strip().lower()
+        actual = req.headers.get(name)
+        if actual is not None and self._value_allowed(actual, self._resolve_ignore_case(req, runtime)):
+            return None
+        return _json_error_response(self._resolve_status(req, runtime), render_policy_value(self.message, req, runtime))
+
+
+IpAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
 @dataclass(frozen=True)
 class IpFilter(PolicyNode):
+    """Allow or forbid calls by caller address.
+
+    https://learn.microsoft.com/en-us/azure/api-management/ip-filter-policy
+    Error messages are the predefined ones in
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    The docs do not state the status code or body the caller sees; 403 with the
+    JSON error envelope is used, carrying the predefined message.
+    """
+
     action: str
-    allow: set[str]
+    ranges: tuple[tuple[IpAddress, IpAddress], ...]
 
-    def _matches_any_entry(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-        """Is this address in the allow list, as a network or a literal?
+    def _matches(self, ip: IpAddress) -> bool:
+        return any(low.version == ip.version and low <= ip <= high for low, high in self.ranges)
 
-        An entry that will not parse is skipped rather than failing the request:
-        one malformed line in a list must not take the whole filter down.
-        """
-        for entry in self.allow:
-            try:
-                if "/" in entry:
-                    if ip in ipaddress.ip_network(entry, strict=False):
-                        return True
-                elif ip == ipaddress.ip_address(entry):
-                    return True
-            except ValueError:
-                continue
-        return False
+    def _resolve_action(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> str:
+        action = render_policy_value(self.action, req, runtime).strip().lower()
+        if action not in {"allow", "forbid"}:
+            raise HTTPException(status_code=500, detail="ip-filter action must be allow or forbid")
+        return action
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        """Allow or forbid by client address.
-
-        An unknown or unparseable client address is not filtered on: the policy
-        has nothing to decide against, and guessing would be worse than passing.
-        """
+        action = self._resolve_action(req, runtime)
         ip_raw = req.variables.get("client_ip")
-        if not isinstance(ip_raw, str) or not ip_raw:
-            return None
         try:
-            ip = ipaddress.ip_address(ip_raw)
+            ip = ipaddress.ip_address(ip_raw.strip()) if isinstance(ip_raw, str) else None
         except ValueError:
-            return None
-
-        allowed = self._matches_any_entry(ip)
-        action = (self.action or "allow").lower()
-        if (action == "allow" and not allowed) or (action == "forbid" and allowed):
-            return ResponseSpec(status_code=403, headers={"content-type": "text/plain"}, body=b"IP not allowed")
+            ip = None
+        if ip is None:
+            return _json_error_response(403, "Failed to establish IP address for the caller. Access denied.")
+        matched = self._matches(ip)
+        if action == "allow" and not matched:
+            return _json_error_response(403, f"Caller IP address {ip} is not allowed. Access denied.")
+        if action == "forbid" and matched:
+            return _json_error_response(403, "Caller IP address is blocked. Access denied.")
         return None
 
 
@@ -3186,33 +3226,64 @@ def _parse_mock_response(el: ElementTree.Element) -> MockResponse:
     return MockResponse(status_code=status_code, content_type=content_type)
 
 
+def _required_attr(el: ElementTree.Element, name: str, policy_name: str) -> str:
+    value = el.attrib.get(name)
+    if value is None or not value.strip():
+        raise HTTPException(status_code=500, detail=f"{policy_name} requires {name}")
+    return value
+
+
 def _parse_check_header(el: ElementTree.Element) -> CheckHeader:
-    name = (el.attrib.get("name") or "").strip().lower()
-    if not name:
-        raise HTTPException(status_code=500, detail="check-header missing name")
-    expected = el.attrib.get("value")
-    status_code = int(el.attrib.get("failed-check-httpcode") or "401")
-    message = str(el.attrib.get("failed-check-error-message") or "Missing or invalid header")
-    return CheckHeader(name=name, expected=expected, status_code=status_code, message=message)
+    _reject_unknown_attributes(
+        el, {"name", "failed-check-httpcode", "failed-check-error-message", "ignore-case"}, "check-header"
+    )
+    name = _required_attr(el, "name", "check-header").strip()
+    status_code = _required_attr(el, "failed-check-httpcode", "check-header").strip()
+    ignore_case = _required_attr(el, "ignore-case", "check-header").strip()
+    if not is_apim_expression(status_code) and not status_code.isdigit():
+        raise HTTPException(status_code=500, detail="check-header failed-check-httpcode must be an integer")
+    if not is_apim_expression(ignore_case) and ignore_case.lower() not in {"true", "false"}:
+        raise HTTPException(status_code=500, detail="check-header ignore-case must be true or false")
+    message = el.attrib.get("failed-check-error-message")
+    if message is None:
+        raise HTTPException(status_code=500, detail="check-header requires failed-check-error-message")
+    values = tuple(_text_or_empty(item) for item in el.findall("value"))
+    return CheckHeader(name=name, status_code=status_code, message=message, ignore_case=ignore_case, values=values)
+
+
+def _parse_ip_range(el: ElementTree.Element) -> tuple[IpAddress, IpAddress]:
+    try:
+        low = ipaddress.ip_address((el.attrib.get("from") or "").strip())
+        high = ipaddress.ip_address((el.attrib.get("to") or "").strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="ip-filter address-range needs valid from and to") from exc
+    if low.version != high.version or low > high:
+        raise HTTPException(status_code=500, detail="ip-filter address-range from must not exceed to")
+    return low, high
+
+
+def _parse_ip_address(el: ElementTree.Element) -> tuple[IpAddress, IpAddress]:
+    try:
+        ip = ipaddress.ip_address(_text_or_empty(el))
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="ip-filter address must be a single IP address") from exc
+    return ip, ip
 
 
 def _parse_ip_filter(el: ElementTree.Element) -> IpFilter:
-    action = str(el.attrib.get("action") or "allow")
-    allow: set[str] = set()
-    for addr in el.findall("address"):
-        value = _text_or_empty(addr)
-        if value:
-            allow.add(value)
-    for cidr in el.findall("cidr"):
-        value = _text_or_empty(cidr)
-        if value:
-            allow.add(value)
-    for ar in el.findall("address-range"):
-        frm = (ar.attrib.get("from") or "").strip()
-        to = (ar.attrib.get("to") or "").strip()
-        if frm and to and frm == to:
-            allow.add(frm)
-    return IpFilter(action=action, allow=allow)
+    _reject_unknown_attributes(el, {"action"}, "ip-filter")
+    action = _required_attr(el, "action", "ip-filter").strip()
+    if not is_apim_expression(action) and action.lower() not in {"allow", "forbid"}:
+        raise HTTPException(status_code=500, detail="ip-filter action must be allow or forbid")
+    unsupported = [child.tag for child in el if child.tag not in {"address", "address-range"}]
+    if unsupported:
+        raise HTTPException(status_code=500, detail=f"ip-filter unsupported element: {unsupported[0]}")
+    ranges = tuple(_parse_ip_address(child) for child in el.findall("address")) + tuple(
+        _parse_ip_range(child) for child in el.findall("address-range")
+    )
+    if not ranges:
+        raise HTTPException(status_code=500, detail="ip-filter requires an address or address-range")
+    return IpFilter(action=action, ranges=ranges)
 
 
 def _reject_unknown_attributes(el: ElementTree.Element, allowed: set[str], policy_name: str) -> None:
