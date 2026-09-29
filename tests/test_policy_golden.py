@@ -140,7 +140,7 @@ def test_golden_policy_check_header_denies_when_missing() -> None:
         """\
 <policies>
   <inbound>
-    <check-header name="x-required" failed-check-httpcode="401" failed-check-error-message="nope" />
+    <check-header name="x-required" failed-check-httpcode="401" failed-check-error-message="nope" ignore-case="false" />
   </inbound>
   <backend />
   <outbound />
@@ -152,7 +152,7 @@ def test_golden_policy_check_header_denies_when_missing() -> None:
     early = apply_inbound([doc], req)
     assert early is not None
     assert early.status_code == 401
-    assert early.body == b"nope"
+    assert early.body == b'{"statusCode":401,"message":"nope"}'
 
 
 def test_golden_policy_ip_filter_denies() -> None:
@@ -181,7 +181,7 @@ def test_golden_policy_rate_limit_enforces_429() -> None:
         """\
 <policies>
   <inbound>
-    <rate-limit calls="1" renewal-period="999999" scope="subscription" />
+    <rate-limit calls="1" renewal-period="300" />
   </inbound>
   <backend />
   <outbound />
@@ -209,12 +209,13 @@ def test_golden_policy_rate_limit_enforces_429() -> None:
     assert early.status_code == 429
 
 
-def test_golden_policy_quota_enforces_429() -> None:
+def test_golden_policy_quota_enforces_403() -> None:
+    """https://learn.microsoft.com/en-us/azure/api-management/quota-policy: over quota is 403 Forbidden."""
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
-    <quota calls="1" renewal-period="999999" scope="subscription" />
+    <quota calls="1" renewal-period="999999" />
   </inbound>
   <backend />
   <outbound />
@@ -239,7 +240,7 @@ def test_golden_policy_quota_enforces_429() -> None:
     assert apply_inbound([doc], req) is None
     early = apply_inbound([doc], req)
     assert early is not None
-    assert early.status_code == 429
+    assert early.status_code == 403
 
 
 def test_golden_policy_set_variable_renders_into_later_policy_values() -> None:

@@ -128,6 +128,81 @@ def test_health() -> None:
     assert resp.json() == {"status": "healthy"}
 
 
+def test_gateway_errors_use_apim_envelope_without_changing_management_errors() -> None:
+    """Gateway callers receive APIM's error shape; management keeps FastAPI's shape.
+
+    https://learn.microsoft.com/en-us/samples/azure/azure-quickstart-templates/front-door-standard-premium-api-management-external/
+    """
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="tenant-key"),
+        )
+    )
+
+    with TestClient(app) as client:
+        gateway_error = client.get("/not-an-api")
+        management_error = client.get("/apim/management/status")
+
+    assert gateway_error.status_code == 404
+    assert gateway_error.json() == {"statusCode": 404, "message": "Resource not found"}
+    assert gateway_error.headers["content-type"] == "application/json"
+    assert management_error.status_code == 403
+    assert management_error.json() == {"detail": "Forbidden"}
+
+
+def test_request_body_limit_returns_gateway_envelope() -> None:
+    """The simulator's request-size rejection uses the gateway envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    """
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        raise AssertionError("upstream called")
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            max_request_body_bytes=2,
+            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"))],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/submit", content=b"too large")
+
+    assert resp.status_code == 413
+    assert resp.json() == {"statusCode": 413, "message": "Request body too large"}
+
+
+def test_backend_connection_failure_returns_gateway_envelope() -> None:
+    """A backend that can't be reached is a BackendConnectionFailure, answered with 500.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=req)
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"))],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/health")
+
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["statusCode"] == 500
+    assert body["message"] == "Internal server error"
+    assert body["activityId"]
+
+
 @pytest.mark.contract("GW-ROOT-HINT")
 def test_root_hint_lists_builtin_entrypoints() -> None:
     app = create_app(
@@ -250,6 +325,7 @@ def test_trace_headers_and_trace_lookup_work() -> None:
         allow_anonymous=True,
         trace_enabled=True,
         proxy_streaming=False,
+        emit_simulator_response_headers=True,
         routes=[
             RouteConfig(
                 name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
@@ -279,6 +355,10 @@ def test_trace_headers_and_trace_lookup_work() -> None:
 
 @pytest.mark.contract("AUTH-SUBSCRIPTION-REQUIRED")
 def test_missing_subscription_key_returns_401() -> None:
+    """APIM uses its subscription-key 401 envelope and challenge header.
+
+    https://learn.microsoft.com/en-us/troubleshoot/azure/api-mgmt/availability/unauthorized-errors-invoke-apis
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -308,7 +388,48 @@ def test_missing_subscription_key_returns_401() -> None:
     with TestClient(app) as client:
         resp = client.get("/api/v1/health", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
-    assert resp.json()["detail"] == "Missing subscription key"
+    assert resp.json() == {
+        "statusCode": 401,
+        "message": "Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API.",
+    }
+    assert resp.headers["content-type"] == "application/json"
+    assert (
+        resp.headers["www-authenticate"]
+        == 'AzureApiManagementKey realm="http://testserver/api",name="Ocp-Apim-Subscription-Key",type="header"'
+    )
+
+
+def test_invalid_subscription_key_returns_apim_401() -> None:
+    """APIM uses the same 401 message for an invalid subscription key.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
+    config = GatewayConfig(
+        allow_anonymous=True,
+        subscription=SubscriptionConfig(
+            required=True,
+            subscriptions={
+                "demo": Subscription(
+                    id="sub1", name="demo", keys=SubscriptionKeyPair(primary="good", secondary="good2")
+                )
+            },
+        ),
+        routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"))],
+    )
+    app = create_app(config=config)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/health", headers={"Ocp-Apim-Subscription-Key": "wrong"})
+
+    assert resp.status_code == 401
+    assert resp.json() == {
+        "statusCode": 401,
+        "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+    }
+    assert (
+        resp.headers["www-authenticate"]
+        == 'AzureApiManagementKey realm="http://testserver/api",name="Ocp-Apim-Subscription-Key",type="header"'
+    )
 
 
 def test_bearer_only_mode_works_when_subscriptions_are_disabled() -> None:
@@ -374,7 +495,10 @@ def test_anonymous_mode_can_still_require_subscription_key_for_product() -> None
         allowed = client.post("/mcp", headers={"Ocp-Apim-Subscription-Key": "good"})
 
     assert missing.status_code == 401
-    assert missing.json()["detail"] == "Missing subscription key"
+    assert missing.json() == {
+        "statusCode": 401,
+        "message": "Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API.",
+    }
     assert allowed.status_code == 200
 
 
@@ -474,12 +598,18 @@ def test_subscription_bypass_allows_missing_key() -> None:
 
 
 def test_subscription_key_query_param_works() -> None:
+    """APIM checks the default query name when no subscription header exists.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
     token = _make_token(private_key=private_key, issuer=issuer, audience=audience)
 
-    def handler(_: httpx.Request) -> httpx.Response:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert "ocp-apim-subscription-key" not in req.headers
+        assert req.url.params["subscription-key"] == "good"
         return httpx.Response(200, json={"ok": True})
 
     config = GatewayConfig(
@@ -511,7 +641,51 @@ def test_subscription_key_query_param_works() -> None:
     assert resp.status_code == 200
 
 
-def test_suspended_subscription_returns_403() -> None:
+def test_subscription_key_query_is_ignored_when_header_is_present() -> None:
+    """APIM checks the query key only when the subscription header is absent.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    config = GatewayConfig(
+        allow_anonymous=True,
+        subscription=SubscriptionConfig(
+            required=True,
+            subscriptions={
+                "demo": Subscription(
+                    id="sub1", name="demo", keys=SubscriptionKeyPair(primary="good", secondary="good2")
+                )
+            },
+        ),
+        routes=[RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"))],
+    )
+    app = create_app(config=config)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/health?subscription-key=good", headers={"Ocp-Apim-Subscription-Key": "wrong"})
+
+    assert resp.status_code == 401
+    assert resp.json() == {
+        "statusCode": 401,
+        "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+    }
+
+
+def test_default_subscription_key_parameter_names_match_apim() -> None:
+    """APIM's default subscription key names are fixed unless an API overrides them.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    config = GatewayConfig()
+
+    assert config.subscription.header_names == ["Ocp-Apim-Subscription-Key"]
+    assert config.subscription.query_param_names == ["subscription-key"]
+
+
+def test_suspended_subscription_returns_401() -> None:
+    """Inactive subscriptions use APIM's invalid-key 401 response.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -546,8 +720,15 @@ def test_suspended_subscription_returns_403() -> None:
                 "Ocp-Apim-Subscription-Key": "good",
             },
         )
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == "Subscription is not active (state: suspended)"
+    assert resp.status_code == 401
+    assert resp.json() == {
+        "statusCode": 401,
+        "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+    }
+    assert (
+        resp.headers["www-authenticate"]
+        == 'AzureApiManagementKey realm="http://testserver/api",name="Ocp-Apim-Subscription-Key",type="header"'
+    )
 
 
 def test_backend_basic_auth_is_applied_and_url_is_used() -> None:
@@ -586,10 +767,11 @@ def test_backend_basic_auth_is_applied_and_url_is_used() -> None:
 
 
 def test_rate_limit_policy_returns_429_on_second_call() -> None:
+    """https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy"""
     policy = """\
 <policies>
   <inbound>
-    <rate-limit calls="1" renewal-period="999999" scope="subscription" />
+    <rate-limit calls="1" renewal-period="300" />
   </inbound>
   <backend />
   <outbound />
@@ -630,10 +812,16 @@ def test_rate_limit_policy_returns_429_on_second_call() -> None:
 
     assert r1.status_code == 200
     assert r2.status_code == 429
+    assert r2.headers["retry-after"] == "300"
+    assert r2.json() == {"statusCode": 429, "message": "Rate limit is exceeded. Try again in 300 seconds."}
     assert calls == 1
 
 
 def test_proxy_injects_identity_headers_and_filters_hop_by_hop() -> None:
+    """APIM forwards a supplied subscription header unless a policy removes it.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -641,6 +829,8 @@ def test_proxy_injects_identity_headers_and_filters_hop_by_hop() -> None:
 
     config = GatewayConfig(
         allow_anonymous=False,
+        inject_simulator_identity_headers=True,
+        emit_simulator_response_headers=True,
         oidc=OIDCConfig(issuer=issuer, audience=audience, jwks=jwks),
         products={"p1": ProductConfig(name="p1")},
         subscription=SubscriptionConfig(
@@ -666,6 +856,7 @@ def test_proxy_injects_identity_headers_and_filters_hop_by_hop() -> None:
     )
 
     def handler(req: httpx.Request) -> httpx.Response:
+        assert req.headers.get("ocp-apim-subscription-key") == "good"
         assert req.headers.get("x-apim-user-email") == "demo@dev.test"
         assert req.headers.get("x-apim-user-object-id") == "user-123"
         assert req.headers.get("x-ms-client-principal")
@@ -1061,6 +1252,10 @@ def test_full_model_operation_method_routing() -> None:
 
 
 def test_full_model_api_and_operation_policies_stack() -> None:
+    """A child scope inherits its parent only at an explicit base marker.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+    """
     api_policy = """\
 <policies>
   <inbound>
@@ -1075,6 +1270,7 @@ def test_full_model_api_and_operation_policies_stack() -> None:
 <policies>
   <inbound>
     <set-header name="x-op" exists-action="override"><value>1</value></set-header>
+    <base />
   </inbound>
   <backend />
   <outbound />
@@ -1162,6 +1358,10 @@ def test_route_authz_requires_scope() -> None:
 
 
 def test_route_authz_missing_scope_returns_403() -> None:
+    """Simulator-only scope checks retain 403 with the APIM gateway envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -1207,7 +1407,7 @@ def test_route_authz_missing_scope_returns_403() -> None:
             },
         )
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Missing required scope"
+    assert resp.json() == {"statusCode": 403, "message": "Missing required scope"}
 
 
 def test_route_authz_requires_claim() -> None:
@@ -1264,6 +1464,10 @@ def test_route_authz_requires_claim() -> None:
 
 
 def test_route_authz_missing_claim_returns_403() -> None:
+    """Simulator-only claim checks retain 403 with the APIM gateway envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -1309,7 +1513,7 @@ def test_route_authz_missing_claim_returns_403() -> None:
             },
         )
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Missing required claim"
+    assert resp.json() == {"statusCode": 403, "message": "Missing required claim"}
 
 
 def test_route_authz_requires_role() -> None:
@@ -1366,6 +1570,10 @@ def test_route_authz_requires_role() -> None:
 
 
 def test_route_authz_missing_role_returns_403() -> None:
+    """Simulator-only role checks retain 403 with the APIM gateway envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -1411,7 +1619,7 @@ def test_route_authz_missing_role_returns_403() -> None:
             },
         )
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Missing required role"
+    assert resp.json() == {"statusCode": 403, "message": "Missing required role"}
 
 
 def test_secondary_subscription_key_works() -> None:
@@ -1462,6 +1670,10 @@ def test_secondary_subscription_key_works() -> None:
 
 @pytest.mark.contract("AUTH-PRODUCT-GRANT")
 def test_product_access_denied_without_product_grant() -> None:
+    """A key outside the API's product scope is APIM's invalid-key 401.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -1504,8 +1716,15 @@ def test_product_access_denied_without_product_grant() -> None:
                 "Ocp-Apim-Subscription-Key": "good",
             },
         )
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == "Subscription not authorized for product"
+    assert resp.status_code == 401
+    assert resp.json() == {
+        "statusCode": 401,
+        "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+    }
+    assert (
+        resp.headers["www-authenticate"]
+        == 'AzureApiManagementKey realm="http://testserver/api",name="Ocp-Apim-Subscription-Key",type="header"'
+    )
 
 
 def _product_gate_config(
@@ -1546,6 +1765,10 @@ def _product_gate_config(
 
 @pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
 def test_unpublished_product_denies_access_even_with_grant() -> None:
+    """The simulator's product-state check keeps 403 but uses the gateway envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -1572,11 +1795,15 @@ def test_unpublished_product_denies_access_even_with_grant() -> None:
             },
         )
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Product is not published"
+    assert resp.json() == {"statusCode": 403, "message": "Product is not published"}
 
 
 @pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
 def test_grant_on_unpublished_product_does_not_authorize_published_route() -> None:
+    """The simulator's product-state check keeps 403 but uses the gateway envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -1606,7 +1833,7 @@ def test_grant_on_unpublished_product_does_not_authorize_published_route() -> No
             },
         )
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Product is not published"
+    assert resp.json() == {"statusCode": 403, "message": "Product is not published"}
 
 
 @pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
@@ -1644,6 +1871,10 @@ def test_published_product_still_authorizes_when_sibling_is_unpublished() -> Non
 
 @pytest.mark.contract("AUTH-SUBSCRIPTION-LIFECYCLE")
 def test_submitted_subscription_key_is_rejected_until_approved_via_management_plane() -> None:
+    """All inactive subscription states use APIM's invalid-key 401 response.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     issuer = _http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -1688,8 +1919,11 @@ def test_submitted_subscription_key_is_rejected_until_approved_via_management_pl
                 "Ocp-Apim-Subscription-Key": "good",
             },
         )
-        assert pending.status_code == 403
-        assert pending.json()["detail"] == "Subscription is not active (state: submitted)"
+        assert pending.status_code == 401
+        assert pending.json() == {
+            "statusCode": 401,
+            "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+        }
 
         approved = client.patch(
             "/apim/management/subscriptions/sub1",
@@ -1722,8 +1956,11 @@ def test_submitted_subscription_key_is_rejected_until_approved_via_management_pl
                 "Ocp-Apim-Subscription-Key": "good",
             },
         )
-        assert denied.status_code == 403
-        assert denied.json()["detail"] == "Subscription is not active (state: rejected)"
+        assert denied.status_code == 401
+        assert denied.json() == {
+            "statusCode": 401,
+            "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+        }
 
 
 def test_rotate_subscription_key_updates_gateway_lookup() -> None:
@@ -1799,6 +2036,7 @@ def test_management_plane_requires_tenant_key() -> None:
     with TestClient(app) as client:
         resp = client.get("/apim/management/status")
         assert resp.status_code == 403
+        assert resp.json() == {"detail": "Forbidden"}
 
         ok = client.get("/apim/management/status", headers={"X-Apim-Tenant-Key": "t1"})
         assert ok.status_code == 200
@@ -3275,7 +3513,10 @@ def test_mtls_mode_disabled_allows_requests_without_cert() -> None:
 
 
 def test_mtls_mode_required_rejects_request_without_cert() -> None:
-    """When client_certificate mode is required, requests without certs are rejected."""
+    """Gateway authentication errors use the APIM envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
@@ -3293,7 +3534,7 @@ def test_mtls_mode_required_rejects_request_without_cert() -> None:
     with TestClient(app) as client:
         resp = client.get("/api/test")
         assert resp.status_code == 401
-        assert "Client certificate required" in resp.json()["detail"]
+        assert resp.json() == {"statusCode": 401, "message": "Client certificate required"}
 
 
 def test_mtls_mode_required_accepts_request_with_cert() -> None:
@@ -3382,7 +3623,7 @@ def test_mtls_trusted_cert_by_thumbprint() -> None:
             headers={"X-Client-Cert-Thumbprint": "wrong-thumbprint"},
         )
         assert resp.status_code == 403
-        assert "not trusted" in resp.json()["detail"]
+        assert resp.json() == {"statusCode": 403, "message": "Client certificate not trusted"}
 
 
 def test_mtls_trusted_cert_by_subject() -> None:
@@ -3719,6 +3960,7 @@ def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> N
             allow_anonymous=True,
             trace_enabled=True,
             proxy_streaming=False,
+            inject_simulator_identity_headers=True,
             routes=[
                 RouteConfig(
                     name="r1",
@@ -3901,7 +4143,9 @@ def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> N
     assert second.headers["x-retry"]
     assert seen_urls == [_http_url("upstream/items")]
     assert first_trace.json()["policy_variable_writes"][-1]["name"] == "remaining_calls"
-    assert second_trace.json()["policy_variable_writes"][-1]["name"] == "retry_after"
+    blocked_writes = {write["name"]: write["value"] for write in second_trace.json()["policy_variable_writes"]}
+    assert blocked_writes["retry_after"]
+    assert blocked_writes["remaining_calls"] == 0
 
 
 def test_rate_limit_by_key_supports_context_subscription_id_expression() -> None:
@@ -4201,7 +4445,7 @@ def test_cached_gateway_response_populates_trace_headers_and_trace_store() -> No
         policy_runtime=PolicyRuntime(gateway_config=GatewayConfig(trace_enabled=True)),
         trace_base={"route_name": "r1"},
         trace_collector=None,
-        cfg=GatewayConfig(trace_enabled=True),
+        cfg=GatewayConfig(trace_enabled=True, emit_simulator_response_headers=True),
         gateway_metrics=SimpleNamespace(cache_events=SimpleNamespace(add=lambda *args, **kwargs: None)),
         correlation_id="corr-123",
         trace_id="trace-123",
@@ -4221,6 +4465,11 @@ def test_cached_gateway_response_populates_trace_headers_and_trace_store() -> No
 
 
 def test_gateway_rejects_invalid_upstream_status_code() -> None:
+    """Gateway-generated backend errors use the APIM JSON envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
+
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(700, json={"error": "invalid"})
 
@@ -4236,7 +4485,7 @@ def test_gateway_rejects_invalid_upstream_status_code() -> None:
         resp = client.get("/api/catalog")
 
     assert resp.status_code == 502
-    assert resp.json()["detail"] == "Backend API returned invalid status code"
+    assert resp.json() == {"statusCode": 502, "message": "Backend API returned invalid status code"}
 
 
 def test_cache_lookup_value_store_and_remove_value() -> None:
@@ -4301,6 +4550,10 @@ def test_cache_lookup_value_store_and_remove_value() -> None:
 
 
 def test_external_cache_policy_is_unsupported_at_runtime() -> None:
+    """Policy evaluation failures on gateway routes use the APIM JSON envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     policy = """\
 <policies>
   <inbound>
@@ -4326,7 +4579,7 @@ def test_external_cache_policy_is_unsupported_at_runtime() -> None:
         resp = client.get("/api/value")
 
     assert resp.status_code == 500
-    assert resp.json()["detail"] == "Unsupported caching-type external"
+    assert resp.json() == {"statusCode": 500, "message": "Unsupported caching-type external"}
 
 
 def test_require_manager_returns_the_service_when_it_exists() -> None:

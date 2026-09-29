@@ -245,7 +245,10 @@ class ManagementService:
     def validate_policy_xml(self, cfg: GatewayConfig, xml: str | None) -> None:
         if xml is None:
             return
-        parse_policies_xml(xml.strip() or EMPTY_POLICY_XML, policy_fragments=cfg.policy_fragments)
+        try:
+            parse_policies_xml(xml.strip() or EMPTY_POLICY_XML, policy_fragments=cfg.policy_fragments)
+        except HTTPException as exc:
+            raise HTTPException(status_code=400, detail=exc.detail) from exc
 
     def validate_fragment_xml(self, xml: str) -> None:
         from defusedxml import ElementTree
@@ -318,7 +321,10 @@ class ManagementService:
         return resolver(cfg, scope_name)
 
     def policy_xml_for_target(self, target: Any) -> str:
-        return effective_policy_xml(policy_xml_documents_for_target(target))
+        documents = policy_xml_documents_for_target(target)
+        if len(documents) == 1:
+            return documents[0]
+        return effective_policy_xml(*([document] for document in documents))
 
     def set_policy_xml(self, target: Any, xml: str) -> None:
         target.policies_xml = xml
@@ -327,7 +333,7 @@ class ManagementService:
 
     def put_policy(self, cfg: GatewayConfig, scope_type: str, scope_name: str, xml: str) -> GatewayConfig:
         cleaned = xml.strip() or EMPTY_POLICY_XML
-        parse_policies_xml(cleaned, policy_fragments=cfg.policy_fragments)
+        self.validate_policy_xml(cfg, cleaned)
         target = self.policy_scope_target(cfg, scope_type, scope_name)
         self.set_policy_xml(target, cleaned)
         return self.persist_or_apply_config(cfg)

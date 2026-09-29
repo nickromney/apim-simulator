@@ -41,6 +41,7 @@
       {"header": "X-Forwarded-For", "starts_with": "10.100.0"}
     ]
   },
+  "policies_xml": "<policies><inbound><cors><allowed-origins><origin>http://localhost:3007</origin><origin>http://localhost:3008</origin></allowed-origins><allowed-methods preflight-result-max-age=\"300\"><method>GET</method><method>POST</method></allowed-methods><allowed-headers><header>*</header></allowed-headers></cors></inbound><backend /><outbound /><on-error /></policies>",
   "routes": [
     {
       "name": "subnet-calculator-api",
@@ -61,7 +62,7 @@
       "authz": {
         "required_roles": ["admin"]
       },
-      "policies_xml": "<policies>\n  <inbound>\n    <rate-limit calls=\"2\" renewal-period=\"60\" scope=\"subscription\" />\n  </inbound>\n  <backend />\n  <outbound />\n  <on-error />\n</policies>"
+      "policies_xml": "<policies>\n  <inbound>\n    <base />\n    <rate-limit calls=\"2\" renewal-period=\"60\" />\n  </inbound>\n  <backend />\n  <outbound />\n  <on-error />\n</policies>"
     }
   ]
 }

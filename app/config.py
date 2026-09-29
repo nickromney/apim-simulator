@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -97,9 +101,7 @@ class Subscription(BaseModel):
 
 class SubscriptionConfig(BaseModel):
     required: bool = True
-    header_names: list[str] = Field(
-        default_factory=lambda: ["Ocp-Apim-Subscription-Key", "X-Ocp-Apim-Subscription-Key"]
-    )
+    header_names: list[str] = Field(default_factory=lambda: ["Ocp-Apim-Subscription-Key"])
     query_param_names: list[str] = Field(default_factory=lambda: ["subscription-key"])
     # Back-compat/simple mode: direct map of key -> identity
     keys: dict[str, SubscriptionIdentity] = Field(default_factory=dict)
@@ -423,6 +425,170 @@ class BackendConfig(BaseModel):
         return self
 
 
+@dataclass(frozen=True)
+class RouteMatch:
+    parameters: dict[str, str]
+    precedence: tuple[int, ...]
+
+
+_TEMPLATE_PARAMETER = re.compile(r"^\{(\*?[^{}]+)\}$")
+
+
+def _normalize_path(path: str) -> str:
+    value = path or "/"
+    if not value.startswith("/"):
+        value = "/" + value
+    return value.rstrip("/") or "/"
+
+
+def _path_segments(path: str) -> list[str]:
+    normalized = _normalize_path(path)
+    return [] if normalized == "/" else normalized.lstrip("/").split("/")
+
+
+def _template_parts(url_template: str) -> tuple[str, list[tuple[str, str]]]:
+    value = (url_template or "").strip()
+    if not value.startswith("/"):
+        value = "/" + value
+    parsed = urlsplit(value)
+    path = parsed.path or "/"
+    return path, parse_qsl(parsed.query, keep_blank_values=True)
+
+
+def _template_parameter(segment: str) -> tuple[str, bool] | None:
+    if segment == "*":
+        return "*", True
+    match = _TEMPLATE_PARAMETER.fullmatch(segment)
+    if match is None:
+        return None
+    value = match.group(1)
+    wildcard = value.startswith("*")
+    name = value[1:] if wildcard else value
+    return (name, wildcard) if name else None
+
+
+def _match_nonwildcard_segment(expected: str, actual: str) -> tuple[str | None, int] | None:
+    parameter = _template_parameter(expected)
+    if parameter:
+        return (parameter[0], 2) if actual else None
+    if expected.casefold() != actual.casefold():
+        return None
+    return None, 3
+
+
+def _match_segments(template: list[str], request: list[str]) -> tuple[dict[str, str], tuple[int, ...]] | None:
+    parameters: dict[str, str] = {}
+    precedence: list[int] = []
+    wildcard = False
+
+    for index, expected in enumerate(template):
+        parameter = _template_parameter(expected)
+        if parameter and parameter[1]:
+            if index != len(template) - 1:
+                return None
+            parameters[parameter[0]] = "/".join(request[index:])
+            precedence.append(1)
+            wildcard = True
+            break
+        if index >= len(request):
+            return None
+        actual = request[index]
+        segment_match = _match_nonwildcard_segment(expected, actual)
+        if segment_match is None:
+            return None
+        parameter_name, segment_precedence = segment_match
+        if parameter_name is not None:
+            parameters[parameter_name] = actual
+        precedence.append(segment_precedence)
+
+    if not wildcard and len(template) != len(request):
+        return None
+    return parameters, tuple(precedence)
+
+
+def _query_items(query: Any) -> list[tuple[str, str]]:
+    multi_items = getattr(query, "multi_items", None)
+    if callable(multi_items):
+        return [(str(key), str(value)) for key, value in multi_items()]
+    if not isinstance(query, Mapping):
+        return []
+    return [(str(key), str(value)) for key, value in query.items()]
+
+
+def _match_query_parts(template: list[tuple[str, str]], query: Any) -> tuple[dict[str, str], tuple[int, ...]] | None:
+    values: dict[str, list[str]] = {}
+    for key, value in _query_items(query):
+        values.setdefault(key.casefold(), []).append(value)
+
+    parameters: dict[str, str] = {}
+    precedence: list[int] = []
+    for name, expected in template:
+        actual_values = values.get(name.casefold(), [])
+        if not actual_values:
+            return None
+        parameter = _template_parameter(expected)
+        actual = actual_values[0]
+        if parameter:
+            parameters[parameter[0]] = actual
+            precedence.append(2)
+        elif actual != expected:
+            return None
+        else:
+            precedence.append(3)
+    return parameters, tuple(precedence)
+
+
+def _match_operation(api_path: str, url_template: str, path: str, query: Any) -> RouteMatch | None:
+    template_path, query_template = _template_parts(url_template)
+    template_segments = _path_segments(api_path) + _path_segments(template_path)
+    path_match = _match_segments(template_segments, _path_segments(path))
+    if path_match is None:
+        return None
+    query_match = _match_query_parts(query_template, query)
+    if query_match is None:
+        return None
+    path_parameters, path_precedence = path_match
+    query_parameters, query_precedence = query_match
+    path_parameters.update(query_parameters)
+    precedence = (
+        len(template_segments),
+        *path_precedence,
+        len(query_template),
+        *query_precedence,
+    )
+    return RouteMatch(parameters=path_parameters, precedence=precedence)
+
+
+def _match_path_prefix(prefix: str, path: str) -> RouteMatch | None:
+    prefix_segments = _path_segments(prefix)
+    request_segments = _path_segments(path)
+    if len(request_segments) < len(prefix_segments):
+        return None
+    if any(
+        expected.casefold() != actual.casefold()
+        for expected, actual in zip(prefix_segments, request_segments, strict=False)
+    ):
+        return None
+    return RouteMatch(
+        parameters={},
+        precedence=(len(prefix_segments), *([3] * len(prefix_segments)), 0),
+    )
+
+
+def _remove_path_prefix(path: str, prefix: str) -> str:
+    normalized_prefix = _normalize_path(prefix)
+    incoming = path or "/"
+    if normalized_prefix == "/":
+        return incoming
+    lowered_path = incoming.casefold()
+    lowered_prefix = normalized_prefix.casefold()
+    if lowered_path == lowered_prefix:
+        return ""
+    if lowered_path.startswith(lowered_prefix + "/"):
+        return incoming[len(normalized_prefix) :]
+    return incoming
+
+
 class RouteConfig(BaseModel):
     name: str
     path_prefix: str
@@ -442,28 +608,53 @@ class RouteConfig(BaseModel):
     authz: RouteAuthzConfig | None = None
     policies_xml: str | None = None
     policies_xml_documents: list[str] = Field(default_factory=list)
+    url_template: str | None = Field(default=None, exclude=True, repr=False)
+    api_path_prefix: str | None = Field(default=None, exclude=True, repr=False)
+    api_upstream_path_prefix: str | None = Field(default=None, exclude=True, repr=False)
+    upstream_path_uses_operation_prefix: bool = Field(default=False, exclude=True, repr=False)
 
-    def matches(self, *, method: str, path: str) -> bool:
-        if not self.matches_path(path):
-            return False
-        if not self.methods:
-            return True
-        return method.upper() in {m.upper() for m in self.methods}
+    def matches(self, *, method: str, path: str, query: Any = None) -> bool:
+        return self.match(method=method, path=path, query=query) is not None
 
-    def matches_path(self, path: str) -> bool:
-        prefix = self.path_prefix.rstrip("/")
-        if not prefix:
-            return True
-        return path == prefix or path.startswith(prefix + "/")
+    def match(self, *, method: str, path: str, query: Any = None) -> RouteMatch | None:
+        if self.url_template is not None:
+            path_match = _match_operation(self.api_path_prefix or self.path_prefix, self.url_template, path, query)
+        else:
+            path_match = _match_path_prefix(self.path_prefix, path)
+        if path_match is None:
+            return None
+        if self.methods and method.upper() not in {item.upper() for item in self.methods}:
+            return None
+        # APIM's public docs describe template forms but not tie-breaking. This
+        # score follows observed APIM precedence: literals, then parameters,
+        # then wildcards; declaration order is used only for exact ties.
+        method_precedence = 1 if self.methods else 0
+        return RouteMatch(path_match.parameters, (*path_match.precedence, method_precedence))
+
+    def matches_path(self, path: str, query: Any = None) -> bool:
+        return self._path_match(path, query=query) is not None
+
+    def matches_api_path(self, path: str) -> bool:
+        prefix = self.api_path_prefix or self.path_prefix
+        return _match_path_prefix(prefix, path) is not None
+
+    def _path_match(self, path: str, *, query: Any = None) -> RouteMatch | None:
+        if self.url_template is not None:
+            return _match_operation(self.api_path_prefix or self.path_prefix, self.url_template, path, query)
+        return _match_path_prefix(self.path_prefix, path)
 
     def build_upstream_url(self, path: str, *, upstream_base_url: str | None = None) -> str:
-        prefix = self.path_prefix.rstrip("/")
-        remainder = path
-        if prefix and (path == prefix or path.startswith(prefix + "/")):
-            remainder = path[len(prefix) :]
+        source_prefix = self.path_prefix
+        if self.url_template is not None and not self.upstream_path_uses_operation_prefix:
+            source_prefix = self.api_path_prefix or self.path_prefix
+        remainder = _remove_path_prefix(path, source_prefix)
         if remainder and not remainder.startswith("/"):
             remainder = "/" + remainder
-        upstream_prefix = self.upstream_path_prefix.rstrip("/")
+        upstream_prefix_value = self.upstream_path_prefix
+        if self.url_template is not None and not self.upstream_path_uses_operation_prefix:
+            if self.api_upstream_path_prefix is not None:
+                upstream_prefix_value = self.api_upstream_path_prefix
+        upstream_prefix = upstream_prefix_value.rstrip("/")
         upstream_path = (upstream_prefix + remainder) if upstream_prefix else remainder
         if not upstream_path:
             upstream_path = "/"
@@ -494,6 +685,11 @@ class GatewayConfig(BaseModel):
     proxy_max_attempts: int = 1
     proxy_retry_statuses: list[int] = Field(default_factory=lambda: [502, 503, 504])
     proxy_streaming: bool = True
+    # These headers describe the simulator, not Azure API Management. They are
+    # compatibility switches for demos that explicitly depend on them.
+    inject_simulator_identity_headers: bool = False
+    emit_simulator_response_headers: bool = False
+    propagate_simulator_correlation_id: bool = False
     max_request_body_bytes: int = 1_048_576
     cache_enabled: bool = False
     cache_ttl_seconds: float = 5.0
@@ -510,9 +706,9 @@ class GatewayConfig(BaseModel):
     def materialize_routes(self) -> list[RouteConfig]:
         """Flatten the API catalogue into the flat route table the gateway matches.
 
-        An API with no operations becomes one route at its base path. An API with
-        operations becomes one route per operation, each inheriting from the API
-        whatever it does not state for itself.
+        An API with operations becomes one route per operation, each inheriting
+        from the API whatever it does not state for itself. An API with no
+        operations has no gateway route.
         """
         if not self.apis:
             return list(self.routes)
@@ -523,7 +719,6 @@ class GatewayConfig(BaseModel):
             api_policy_docs = [api.policies_xml] if api.policies_xml else []
 
             if not api.operations:
-                out.append(_api_route(api_id, api, api_base, api_policy_docs))
                 continue
 
             out.extend(
@@ -533,40 +728,81 @@ class GatewayConfig(BaseModel):
         return out
 
 
+def _api_policy_xml_entries(api_id: str, api: ApiConfig) -> list[tuple[str, str]]:
+    """Policy XML values authored by one API and its operations."""
+    entries: list[tuple[str, str]] = []
+    if api.policies_xml:
+        entries.append((f"API {api_id}", api.policies_xml))
+    for operation_id, operation in api.operations.items():
+        if operation.policies_xml:
+            entries.append((f"operation {api_id}:{operation_id}", operation.policies_xml))
+    return entries
+
+
+def _route_policy_xml_entries(route: RouteConfig) -> list[tuple[str, str]]:
+    """Policy XML values authored by one legacy route."""
+    entries: list[tuple[str, str]] = []
+    for index, xml in enumerate(route.policies_xml_documents):
+        if xml:
+            entries.append((f"route {route.name} document {index}", xml))
+    if route.policies_xml:
+        entries.append((f"route {route.name}", route.policies_xml))
+    return entries
+
+
+def _policy_xml_entries(cfg: GatewayConfig) -> list[tuple[str, str]]:
+    """Policy XML values authored in the gateway document and its scopes."""
+    entries: list[tuple[str, str]] = []
+    for index, xml in enumerate(cfg.policies_xml_documents):
+        if xml:
+            entries.append((f"gateway document {index}", xml))
+    if cfg.policies_xml:
+        entries.append(("gateway", cfg.policies_xml))
+    for product_id, product in cfg.products.items():
+        if product.policies_xml:
+            entries.append((f"product {product_id}", product.policies_xml))
+    for api_id, api in cfg.apis.items():
+        entries.extend(_api_policy_xml_entries(api_id, api))
+    for route in cfg.routes:
+        entries.extend(_route_policy_xml_entries(route))
+    return entries
+
+
+def validate_policy_config(cfg: GatewayConfig) -> GatewayConfig:
+    """Reject malformed policy documents before the gateway can serve them."""
+    from defusedxml import ElementTree
+
+    from app.effective_policy import validate_policy_xml_syntax
+
+    for fragment_id, xml in cfg.policy_fragments.items():
+        try:
+            ElementTree.fromstring(f"<fragment>{xml}</fragment>")
+        except ElementTree.ParseError as exc:
+            raise ValueError(f"Invalid policy fragment XML at {fragment_id}") from exc
+
+    for location, xml in _policy_xml_entries(cfg):
+        try:
+            validate_policy_xml_syntax(xml)
+        except ValueError as exc:
+            raise ValueError(f"Invalid policy XML at {location}: {exc}") from exc
+    return cfg
+
+
 def _url_template_prefix(url_template: str) -> str:
-    """The fixed leading path of an operation template, before its first `{param}`."""
-    templ = (url_template or "").strip()
-    if not templ:
-        return ""
-    if not templ.startswith("/"):
-        templ = "/" + templ
-    return templ.split("{", 1)[0].rstrip("/")
-
-
-def _api_route(api_id: str, api: Any, api_base: str, api_policy_docs: list[str]) -> RouteConfig:
-    """The single route an API with no declared operations serves."""
-    return RouteConfig(
-        name=api.name,
-        path_prefix=api_base,
-        api_id=api_id,
-        upstream_base_url=api.upstream_base_url,
-        upstream_path_prefix=api.upstream_path_prefix,
-        backend=api.backend,
-        products=list(api.products),
-        api_version_set=api.api_version_set,
-        api_version=api.api_version,
-        subscription_header_names=api.subscription_header_names,
-        subscription_query_param_names=api.subscription_query_param_names,
-        policies_xml_documents=api_policy_docs,
-    )
+    """The fixed leading path of an operation template."""
+    path, _ = _template_parts(url_template)
+    marker_positions = [position for position in (path.find("{"), path.find("*")) if position >= 0]
+    if marker_positions:
+        path = path[: min(marker_positions)]
+    return path.rstrip("/")
 
 
 def _operation_upstream_prefix(api: Any, op: Any, op_prefix: str) -> str:
     """Where the operation lands upstream.
 
-    An operation that states its own prefix wins outright. Otherwise it extends
-    the API's prefix by its own template prefix, so /orders under an API mapped
-    to /v1 becomes /v1/orders.
+    An operation that states its own prefix wins outright. Otherwise it keeps
+    the legacy materialized prefix for projections; matching uses the API path
+    and the request remainder to compose the actual upstream URL.
     """
     if op.upstream_path_prefix is not None:
         return op.upstream_path_prefix
@@ -597,6 +833,10 @@ def _operation_route(
         operation_id=operation_id,
         upstream_base_url=op.upstream_base_url or api.upstream_base_url,
         upstream_path_prefix=_operation_upstream_prefix(api, op, op_prefix),
+        url_template=op.url_template,
+        api_path_prefix=api_base,
+        api_upstream_path_prefix=api.upstream_path_prefix,
+        upstream_path_uses_operation_prefix=op.upstream_path_prefix is not None,
         backend=op.backend or api.backend,
         products=list(op_products or []),
         api_version_set=op.api_version_set or api.api_version_set,
@@ -731,4 +971,4 @@ def load_config() -> GatewayConfig:
         return _default_config_from_env()
     with open(config_path, encoding="utf-8") as f:
         data = json.load(f)
-    return GatewayConfig.model_validate(data)
+    return validate_policy_config(GatewayConfig.model_validate(data))

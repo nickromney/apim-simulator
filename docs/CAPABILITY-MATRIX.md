@@ -19,14 +19,18 @@ The management surface below is available when `tenant_access.enabled` is `true`
 |---------|-----------|-------------------|-------|
 | Health endpoint | Yes | N/A | `/apim/health` |
 | Startup probe | Yes | N/A | `/apim/startup` |
+| Gateway error envelope | Yes | N/A | Public API routes return `{"statusCode": <int>, "message": "<text>"}` with `application/json`; `/apim/management`, `/apim/portal`, and health/probe routes retain their local FastAPI response shapes |
 | Config reload | Yes | N/A | `/apim/reload` + file watcher |
-| CORS | Yes | `azurerm_api_management` | `allowed_origins` in config |
+| CORS | Yes | `azurerm_api_management` | Gateway API CORS comes only from the `cors` policy; `allowed_origins` in config now only covers the simulator's own `/apim/*` endpoints |
 | Public network access | Partial | `azurerm_api_management.public_network_access_enabled` / AzAPI `properties.publicNetworkAccess` | Imported into service metadata only; local reachability is not enforced |
 | Client cert (mTLS) | Yes | `azurerm_api_management.client_certificate_enabled` | `client_certificate.mode` |
 | Negotiate client cert | Yes | `azurerm_api_management.hostname_configuration.negotiate_client_certificate` | Via proxy headers |
 | SKU selection | N/A | `azurerm_api_management.sku_name` | Simulator is single-instance |
 | Zones / HA | N/A | `azurerm_api_management.zones` | Not applicable |
 | Virtual network type | Partial | `azurerm_api_management.virtual_network_type` / AzAPI `properties.virtualNetworkType` | Imported into service metadata only; use docker/k8s networking for actual topology |
+| Gateway error responses | Yes | N/A | Errors raised by the gateway itself use APIM's `{"statusCode","message"}` body. Missing and invalid subscription keys, keys for inactive subscriptions, and keys that don't cover the API all return 401 with APIM's messages and a `WWW-Authenticate: AzureApiManagementKey` challenge. An unreachable backend returns `500 Internal server error` |
+| Backend request headers | Yes | N/A | The backend gets its own `Host` and an `X-Forwarded-For` with the client address appended. The subscription key is forwarded, as in APIM. Simulator identity headers (`x-apim-user-*`, `x-ms-client-principal*`, `x-user-*`, `x-apim-products`) are sent only with `inject_simulator_identity_headers: true` |
+| Simulator response headers | Adapted | N/A | `x-apim-simulator` and `x-correlation-id` are sent only with `emit_simulator_response_headers` / `propagate_simulator_correlation_id`; APIM sends neither |
 | Custom domains / hostnames | Partial | `azurerm_api_management.hostname_configuration` / AzAPI `properties.hostnameConfigurations` | Imported as service hostname metadata; TLS termination remains external |
 
 ## Runtime Scenarios
@@ -50,8 +54,9 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Operation descriptions and template params | Yes | `azurerm_api_management_api_operation` | Imported from operation metadata blocks and projected through management APIs |
 | Operation request metadata | Partial | `azurerm_api_management_api_operation.request` | Imported and projected through management APIs, and can be authored on operation PUT; request validation is not enforced at runtime |
 | Operation response metadata | Partial | `azurerm_api_management_api_operation.response` | Imported and projected through management APIs, and can be authored on operation PUT; runtime uses them for `mock-response` examples but not full schema enforcement |
-| Path routing | Yes | - | `path_prefix` matching |
+| Path routing | Yes | - | Operations match their full URL template segment by segment: `{param}` takes one segment, `{*param}` and `/*` take the rest, query-string template parts must match, literal segments beat parameters, and the API URL suffix matches case-insensitively. An unmatched request is `404 {"statusCode":404,"message":"Resource not found"}`. An API with no operations serves nothing, as in APIM. Tie-breaking between equally specific templates is not documented by Microsoft; declaration order decides. Routes declared directly under `routes` (outside `apis`) keep simulator prefix matching |
 | Method routing | Yes | - | Per-operation `method` |
+| Template parameters | Yes | - | Matched values are exposed as `context.Request.MatchedParameters` |
 | API Version Sets | Yes | `azurerm_api_management_api_version_set` | Header/Query/Segment schemes |
 | OpenAPI import | Partial | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu and `/apim/management/apis/{api_id}/import`; full schema/request/response extraction is narrower than explicit APIM resources |
 | GraphQL | No | `azurerm_api_management_api` | Not implemented |
@@ -64,12 +69,13 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Products | Yes | `azurerm_api_management_product` | `products` map |
 | Product-API association | Yes | `azurerm_api_management_product_api` | `products` list on route/API |
 | Product-group association | Yes | `azurerm_api_management_product_group` | Descriptive link resources under `/apim/management/products/{product_id}/groups` |
-| Product publish state | Yes | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; only published products authorize gateway traffic. Adapted: config-authored products default to `published` (Azure portal defaults new products to not published) |
+| Product publish state | Adapted | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; the simulator still rejects a route whose only configured products are unpublished with an enveloped 403. APIM documents that unpublishing hides a product from the developer portal but does not invalidate existing keys or product-context access. Config-authored products default to `published` |
 | Subscriptions | Yes | `azurerm_api_management_subscription` | `subscription.subscriptions` |
 | Primary/secondary keys | Yes | - | `keys.primary`, `keys.secondary` |
-| Subscription state | Yes | `azurerm_api_management_subscription.state` | `active`, `suspended`, `cancelled`, `submitted`, `rejected`, `expired`; only `active` keys authenticate |
+| Subscription state | Yes | `azurerm_api_management_subscription.state` | `active`, `suspended`, `cancelled`, `submitted`, `rejected`, `expired`; only `active` keys authenticate, and inactive keys return APIM's 401 invalid-key envelope |
+| Subscription key names and forwarding | Yes | `azurerm_api_management_api.subscription_key_parameter_names` | Defaults are `Ocp-Apim-Subscription-Key` and `subscription-key`; keys are forwarded to backends by default and can be removed by inbound policy |
 | Key rotation | Yes | - | `/apim/management/subscriptions/{id}/rotate` |
-| Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle |
+| Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle. When an API is in an open product, a key that can't be accepted is ignored and no key is needed; the request is served in the open product's context (a valid key still supplies the subscription context). The key header wins over the query parameter even when empty; an empty value counts as a missing key. See [subscriptions](https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions) |
 | Subscription bypass | Yes | - | Header conditions |
 | Approval required | Yes | `azurerm_api_management_product.approval_required` | `approval_required` on products; pending subscriptions stay `submitted` until approved |
 | Subscription limits | Partial | `azurerm_api_management_product.subscriptions_limit` | Enforced at portal sign-up (409 when reached; 0 disables self-serve) |
@@ -115,34 +121,35 @@ The management surface below is available when `tenant_access.enabled` is `true`
 |---------|-----------|-------------------|-------|
 | Inbound policies | Yes | `azurerm_api_management_api_policy` | XML format |
 | Outbound policies | Yes | - | `<outbound>` section |
-| On-error policies | Yes | - | `<on-error>` section |
-| Policy inheritance | Yes | - | Gateway -> Product -> API -> Operation (product scope is adapted; see ADR 0003) |
+| On-error policies | Partial | - | Inbound and backend policy errors, outbound exceptions, expression failures, backend connection failures and `fail-on-error-status-code` jump to `on-error` with `context.LastError` (`Source`, `Reason`, `Message`, `Scope`, `Section`) and the error status in `context.Response.StatusCode`. Refusals from `rate-limit`, `quota`, `ip-filter`, `check-header` and `validate-jwt` count as errors. Without a `return-response`, the caller gets the error's own response plus headers set in `on-error`. Not modelled: `LastError.Path` and `PolicyId`; refusal `Reason` is inferred from the message; outbound refusal responses do not enter `on-error`. See [error handling](https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies) |
+| Policy inheritance | Yes | - | Per-section global -> product -> API -> operation; each child `<base />` is replaced in place by the parent section, while omitting it (including an empty/absent configured section) suppresses that parent section. A scope with no document is skipped. Workspace scope is not modeled; product selection is adapted (see ADR 0003). Based on [policy scopes](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-policies) and [`base`](https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies). |
 | `set-header` | Yes | - | Add/override/delete modes |
 | `rewrite-uri` | Yes | - | Path rewriting |
 | `set-variable` | Yes | - | Writes to request-scoped `variables` |
 | `set-query-parameter` | Yes | - | Mutates outbound upstream query only |
-| `set-body` | Yes | - | Literal or templated request/short-circuit body replacement |
+| `set-body` | Yes | - | Literal or templated body: the request body in inbound/backend, the response body in outbound ([set-body](https://learn.microsoft.com/en-us/azure/api-management/set-body-policy)) |
 | `include-fragment` | Yes | - | Config-backed via `policy_fragments` |
-| `return-response` | Yes | - | Short-circuit with custom response |
+| `return-response` | Yes | - | Short-circuit with custom response; in outbound it replaces the response and ends the section ([return-response](https://learn.microsoft.com/en-us/azure/api-management/return-response-policy)) |
 | `choose`/`when`/`otherwise` | Yes | - | Conditional logic |
-| `check-header` | Yes | - | Required header validation |
-| `ip-filter` | Yes | - | Allow/deny IP ranges |
-| `cors` | Partial | - | Basic CORS headers |
-| `rate-limit` | Yes | - | Calls per period |
-| `rate-limit-by-key` | Yes | - | Supports literal and response-aware increment evaluation plus custom remaining/retry headers |
-| `quota` | Yes | - | Calls per renewal period |
-| `quota-by-key` | Partial | - | Supports call quotas and `first-period-start`; `bandwidth` remains unsupported |
+| `check-header` | Yes | - | Requires the header; with `<value>` children, any one match passes (`ignore-case` selects case-insensitive compare); no children means presence only. `name`, `failed-check-httpcode`, `failed-check-error-message` and `ignore-case` are all required and may be expressions; the non-APIM `value` attribute is rejected. Failure: the configured status with `{"statusCode":N,"message":"<failed-check-error-message>"}` as `application/json`. The docs are silent on the body envelope (it follows the other policies) and on how a repeated header is compared (compared as the gateway received it). See [check-header](https://learn.microsoft.com/en-us/azure/api-management/check-header-policy) |
+| `ip-filter` | Yes | - | `action` (required, `allow`\|`forbid`, may be an expression) with `<address>` (single IPv4/IPv6 address) and inclusive IPv4/IPv6 `<address-range from to>`; at least one is required, and the non-APIM `<cidr>` element and CIDR text in `<address>` are rejected. Fails closed with `403` when the caller address is missing or unparseable (`Failed to establish IP address for the caller. Access denied.`); otherwise `Caller IP address {ip} is not allowed. Access denied.` (allow, no match) or `Caller IP address is blocked. Access denied.` (forbid, match), as `{"statusCode":403,"message":...}` JSON. Status and body are not stated in the ip-filter docs; messages come from the [predefined policy errors](https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies). See [ip-filter](https://learn.microsoft.com/en-us/azure/api-management/ip-filter-policy) |
+| `cors` | Yes | - | Origins (incl. `*`), methods, headers, expose-headers, `allow-credentials`, `preflight-result-max-age`, `terminate-unmatched-request` (default `true`; the docs contradict themselves), preflight answered from the policy before auth/backend, bypassed when an operation defines `OPTIONS`; `allowed-headers` not enforced as required; requested method/headers not checked on preflight (docs silent); product-scope `cors` is not consulted on preflight (APIM consults it when the key is in the query string) |
+| `rate-limit` | Yes | - | Sliding window per subscription and per policy scope; skipped without a subscription key. Over the limit: `429` with `{"statusCode":429,"message":"Rate limit is exceeded. Try again in N seconds."}` and `Retry-After`. Supports `retry-after-header-name`, `retry-after-variable-name`, `remaining-calls-header-name`, `remaining-calls-variable-name`, `total-calls-header-name`, and nested `<api>`/`<operation>` limits. `renewal-period` is capped at 300 s. Implements the classic tiers' sliding window, not the v2 token bucket. See [rate-limit](https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy) |
+| `rate-limit-by-key` | Yes | - | One sliding-window counter per `counter-key` across all scopes. Expression-valued `increment-condition`/`increment-count` are evaluated after the response, so the 429 lands one call later, as documented. Same 429 body and header attributes as `rate-limit`. See [rate-limit-by-key](https://learn.microsoft.com/en-us/azure/api-management/rate-limit-by-key-policy) |
+| `quota` | Yes | - | `calls` and/or `bandwidth` (KB of request plus response body) per subscription and per policy scope; skipped without a subscription key. `renewal-period="0"` never renews. Over quota: `403` with `{"statusCode":403,"message":"Out of call volume quota. Quota will be replenished in hh:mm:ss."}` (or `Out of bandwidth quota`) and `Retry-After`. Adapted: APIM anchors periods to the subscription's start date, which the local model doesn't store, so periods start at the first counted call. See [quota](https://learn.microsoft.com/en-us/azure/api-management/quota-policy) |
+| `quota-by-key` | Partial | - | Call quotas per `counter-key`, anchored at `first-period-start`, minimum period 300 s, incremented once per request even when several policies share a key. Same 403 body as `quota`. `bandwidth` is rejected as unsupported. See [quota-by-key](https://learn.microsoft.com/en-us/azure/api-management/quota-by-key-policy) |
 | `validate-jwt` | Yes | - | OpenID config, audiences, issuers, required claims, output token variables |
 | `authentication-basic` | Partial | - | Backend auth only |
 | `authentication-certificate` | Partial | - | Backend auth config |
 | `authentication-managed-identity` | Partial | - | Backend auth config |
+| `forward-request` | Partial | - | Applies `timeout` (default 300 s), `timeout-ms`, `follow-redirects`, `buffer-request-body`, `buffer-response` and `fail-on-error-status-code`. Adapted: the backend is still called when no `forward-request` is in effect. See [forward-request](https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy) |
 | `set-backend-service` | Yes | - | Supports `backend-id` and `base-url` overrides in inbound/backend |
 | `cache-lookup` | Partial | - | Supports local internal cache; `prefer-external` is adapted to local cache and `external` is unsupported |
 | `cache-store` | Partial | - | Supports local internal response cache for GET responses |
 | `cache-lookup-value` | Partial | - | Supports local internal value cache plus default-value; `prefer-external` is adapted and `external` is unsupported |
 | `cache-store-value` | Partial | - | Stores to local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
 | `cache-remove-value` | Partial | - | Removes from local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
-| `mock-response` | Partial | - | Supports `status-code` and `content-type`, returning the first matching authored response example for the current operation |
+| `mock-response` | Partial | - | Valid in inbound and outbound (outbound replaces the response). Supports `status-code` and `content-type`, returning the first matching authored response example for the current operation |
 | `send-request` | Yes | - | Supports `new\|copy`, headers/body, timeout, ignore-error, managed identity, certificate placeholder |
 | `llm-token-limit` | Partial | - | Adapted: sliding-minute and quota-period windows, estimate/actual usage counting, 429/403 with retry and remaining headers; see [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `azure-openai-token-limit` | Partial | - | Alias of `llm-token-limit` |
@@ -151,9 +158,9 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `llm-semantic-cache-lookup`/`-store` | No | - | Policy not implemented; the sibling AI Foundry simulator provides service-side semantic caching behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `llm-content-safety` | No | - | Policy not implemented; the sibling AI Foundry simulator serves the Content Safety API behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `emit-metric` | Partial | - | Adapted: emits the OTEL counter `apim.policy.metric` with dimensions |
-| `validate-content` | Partial | - | Size, content-type map, and JSON well-formedness; JSON Schema enforcement deferred |
+| `validate-content` | Partial | - | Size, content-type map, and JSON well-formedness of the request body (inbound, 400) or response body (outbound, 502); JSON Schema enforcement deferred |
 | `validate-parameters` | Partial | - | Required/unspecified headers and query against operation metadata; path parameters deferred |
-| `validate-status-code` | Partial | - | Explicit codes plus declared operation responses; `prevent` mutates the response to 502 |
+| `validate-status-code` | Partial | - | Declared operation responses are always valid (a per-code override does not apply to them), then explicit codes, then the unspecified action; `prevent` returns 502 to the client and to the cache |
 | `log-to-eventhub` | No | - | Use observability stack |
 
 ## Backends

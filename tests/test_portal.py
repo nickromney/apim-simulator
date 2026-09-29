@@ -122,6 +122,10 @@ def test_catalog_filters_unpublished_and_group_restricted_products() -> None:
 
 @pytest.mark.contract("PORTAL-SUBSCRIPTION-SIGNUP")
 def test_subscription_signup_approval_loop_end_to_end() -> None:
+    """A submitted key gets APIM's invalid-key response at the public gateway.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     config = _portal_config()
     with _client(config) as client:
         created = client.post(
@@ -135,7 +139,11 @@ def test_subscription_signup_approval_loop_end_to_end() -> None:
         key = payload["keys"]["primary"]
 
         pending = client.get("/hello/greet", headers={"Ocp-Apim-Subscription-Key": key})
-        assert pending.status_code == 403
+        assert pending.status_code == 401
+        assert pending.json() == {
+            "statusCode": 401,
+            "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+        }
 
         approved = client.patch(
             f"/apim/management/subscriptions/{payload['id']}",

@@ -44,6 +44,10 @@ def _make_token(*, private_key: rsa.RSAPrivateKey, issuer: str, audience: str, s
 
 
 def test_scenario_multi_app_products_and_scopes() -> None:
+    """A key scoped to another product is APIM's invalid-key 401 response.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     issuer = http_url("issuer.example")
     audience = "api"
     jwks, private_key = _make_rsa_jwks()
@@ -112,5 +116,8 @@ def test_scenario_multi_app_products_and_scopes() -> None:
             "/app-b/health",
             headers={"Authorization": f"Bearer {token}", "Ocp-Apim-Subscription-Key": "good"},
         )
-        assert denied.status_code == 403
-        assert denied.json()["detail"] == "Subscription not authorized for product"
+        assert denied.status_code == 401
+        assert denied.json() == {
+            "statusCode": 401,
+            "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+        }

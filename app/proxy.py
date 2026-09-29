@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from typing import Any
 
 from fastapi import Request
 
-from app.config import ApiVersioningScheme, GatewayConfig, RouteConfig
+from app.config import ApiVersioningScheme, GatewayConfig, RouteConfig, RouteMatch
 from app.security import AuthContext, build_client_principal
 
 HOP_BY_HOP_HEADERS = {
@@ -44,6 +44,7 @@ class ResolvedRoute:
     route: RouteConfig
     upstream_path: str
     api_version: str | None = None
+    matched_parameters: dict[str, str] = field(default_factory=dict)
 
 
 def _normalize_host(host: str) -> str:
@@ -125,16 +126,22 @@ def _route_matches_host(route: RouteConfig, request_hosts: list[str]) -> bool:
     return any(_host_pattern_matches(pattern, request_host) for pattern in patterns for request_host in request_hosts)
 
 
-def _available_versions(config: GatewayConfig, *, method: str, path: str, version_set: str) -> set[str]:
+def _available_versions(config: GatewayConfig, *, path: str, version_set: str) -> set[str]:
     versions: set[str] = set()
     for route in config.routes:
         if route.api_version_set != version_set:
             continue
-        if not route.matches(method=method, path=path):
+        if not route.matches_api_path(path):
             continue
         if route.api_version:
             versions.add(route.api_version)
     return versions
+
+
+def _version_matches(candidate: RouteConfig, requested_version: str, scheme: ApiVersioningScheme) -> bool:
+    if scheme == ApiVersioningScheme.Segment:
+        return bool(candidate.api_version and candidate.api_version.casefold() == requested_version.casefold())
+    return candidate.api_version == requested_version
 
 
 def _read_version(request: Request, *, config: GatewayConfig, route: RouteConfig, path: str) -> tuple[str | None, str]:
@@ -157,21 +164,45 @@ def _read_version(request: Request, *, config: GatewayConfig, route: RouteConfig
         version = request.query_params.get(query_name)
         return version, path
 
-    # Segment scheme: by default treat the first segment after path_prefix as the version.
-    prefix = route.path_prefix.rstrip("/")
+    # Segment scheme: treat the first segment after the API path as the version.
+    prefix = (route.api_path_prefix or route.path_prefix).rstrip("/")
     remainder = path
-    if prefix and (path == prefix or path.startswith(prefix + "/")):
+    lowered_path = path.casefold()
+    lowered_prefix = prefix.casefold()
+    if prefix and (lowered_path == lowered_prefix or lowered_path.startswith(lowered_prefix + "/")):
         remainder = path[len(prefix) :]
     remainder = remainder.lstrip("/")
     first = remainder.split("/", 1)[0] if remainder else ""
 
-    candidates = _available_versions(config, method=request.method, path=path, version_set=version_set_id)
-    if first and first in candidates:
+    candidates = _available_versions(config, path=path, version_set=version_set_id)
+    matching_version = next((candidate for candidate in candidates if candidate.casefold() == first.casefold()), None)
+    if matching_version:
         # Strip the version segment for upstream routing to keep the internal API path stable.
-        stripped = (prefix + "/" + remainder.split("/", 1)[1]) if "/" in remainder else prefix
+        rest = remainder.split("/", 1)[1] if "/" in remainder else ""
+        stripped = (prefix + "/" + rest) if rest else prefix
         stripped = stripped or "/"
-        return first, stripped
+        return matching_version, stripped
     return None, path
+
+
+def _match_versioned_candidate(
+    candidate: RouteConfig,
+    *,
+    version_set_id: str,
+    scheme: ApiVersioningScheme,
+    requested_version: str,
+    path: str,
+    upstream_path: str,
+    request: Request,
+    request_hosts: list[str],
+) -> RouteMatch | None:
+    if candidate.api_version_set != version_set_id:
+        return None
+    if not _version_matches(candidate, requested_version, scheme):
+        return None
+    if not candidate.matches_api_path(path) or not _route_matches_host(candidate, request_hosts):
+        return None
+    return candidate.match(method=request.method, path=upstream_path, query=request.query_params)
 
 
 def _resolve_versioned_route(
@@ -198,15 +229,66 @@ def _resolve_versioned_route(
     if not requested_version:
         return None
 
+    best: tuple[RouteMatch, RouteConfig] | None = None
     for candidate in config.routes:
-        if (
-            candidate.api_version_set == version_set_id
-            and candidate.api_version == requested_version
-            and candidate.matches(method=request.method, path=path)
-            and _route_matches_host(candidate, request_hosts)
-        ):
-            return ResolvedRoute(route=candidate, upstream_path=upstream_path, api_version=requested_version)
-    return None
+        match = _match_versioned_candidate(
+            candidate,
+            version_set_id=version_set_id,
+            scheme=version_set.versioning_scheme,
+            requested_version=requested_version,
+            path=path,
+            upstream_path=upstream_path,
+            request=request,
+            request_hosts=request_hosts,
+        )
+        if match is None:
+            continue
+        if best is None or match.precedence > best[0].precedence:
+            best = (match, candidate)
+
+    if best is None:
+        return None
+    match, candidate = best
+    return ResolvedRoute(
+        route=candidate,
+        upstream_path=upstream_path,
+        api_version=requested_version,
+        matched_parameters=match.parameters,
+    )
+
+
+def _resolve_route_candidate(
+    config: GatewayConfig,
+    request: Request,
+    *,
+    route: RouteConfig,
+    path: str,
+    request_hosts: list[str],
+) -> tuple[RouteMatch, ResolvedRoute] | None:
+    if not _route_matches_host(route, request_hosts):
+        return None
+    if not route.api_version_set:
+        match = route.match(method=request.method, path=path, query=request.query_params)
+        if match is None:
+            return None
+        return match, ResolvedRoute(route=route, upstream_path=path, matched_parameters=match.parameters)
+    if not route.matches_api_path(path):
+        return None
+    resolved = _resolve_versioned_route(
+        config,
+        request,
+        route=route,
+        path=path,
+        request_hosts=request_hosts,
+    )
+    if resolved is None:
+        return None
+    match = resolved.route.match(
+        method=request.method,
+        path=resolved.upstream_path,
+        query=request.query_params,
+    )
+    return (match, resolved) if match is not None else None
 
 
 def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | None:
@@ -216,15 +298,23 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
         request_host_groups = [[]]
 
     for request_hosts in request_host_groups:
-        for route in config.routes:
-            if not route.matches(method=request.method, path=path):
+        candidates: list[tuple[RouteMatch, int, ResolvedRoute]] = []
+        for index, route in enumerate(config.routes):
+            candidate = _resolve_route_candidate(
+                config,
+                request,
+                route=route,
+                path=path,
+                request_hosts=request_hosts,
+            )
+            if candidate is None:
                 continue
-            if not _route_matches_host(route, request_hosts):
-                continue
+            match, resolved = candidate
+            candidates.append((match, index, resolved))
 
-            if not route.api_version_set:
-                return ResolvedRoute(route=route, upstream_path=path)
-            return _resolve_versioned_route(config, request, route=route, path=path, request_hosts=request_hosts)
+        if candidates:
+            _, _, best_route = max(candidates, key=lambda item: (item[0].precedence, -item[1]))
+            return best_route
 
     return None
 
@@ -238,19 +328,32 @@ def apply_claim_headers(headers: dict[str, str], claims: dict[str, Any]) -> None
     headers["x-ms-client-principal-name"] = str(claims.get("preferred_username", ""))
 
 
-def build_upstream_headers(request: Request, auth: AuthContext) -> dict[str, str]:
+def build_upstream_headers(
+    request: Request,
+    auth: AuthContext,
+    *,
+    inject_simulator_identity_headers: bool = False,
+) -> dict[str, str]:
     headers: dict[str, str] = {
         key: value
         for key, value in request.headers.items()
         if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() not in INTERNAL_UPSTREAM_HEADERS
     }
-    incoming_host = request.headers.get("host")
-    if incoming_host:
-        headers["host"] = incoming_host
 
-    apply_claim_headers(headers, auth.claims)
+    client_host = request.client.host if request.client else ""
+    incoming_forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+    if client_host:
+        # Microsoft documents that APIM adds X-Forwarded-For and that a policy
+        # cannot remove the client IP. The docs do not specify exact list
+        # formatting, so use the standard comma-separated proxy form.
+        headers["x-forwarded-for"] = (
+            f"{incoming_forwarded_for}, {client_host}" if incoming_forwarded_for else client_host
+        )
 
-    if auth.subscription is not None:
+    if inject_simulator_identity_headers:
+        apply_claim_headers(headers, auth.claims)
+
+    if inject_simulator_identity_headers and auth.subscription is not None:
         headers["x-user-id"] = auth.subscription.id
         headers["x-user-name"] = auth.subscription.name
         if auth.subscription_products:
@@ -260,9 +363,7 @@ def build_upstream_headers(request: Request, auth: AuthContext) -> dict[str, str
 
 
 def filter_response_headers(upstream_headers: dict[str, str]) -> dict[str, str]:
-    headers = {key: value for key, value in upstream_headers.items() if key.lower() not in HOP_BY_HOP_HEADERS}
-    headers["x-apim-simulator"] = "apim-simulator"
-    return headers
+    return {key: value for key, value in upstream_headers.items() if key.lower() not in HOP_BY_HOP_HEADERS}
 
 
 def build_user_payload(auth: AuthContext, issuer: str | None, audience: str | None) -> dict[str, Any]:

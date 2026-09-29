@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import jwt
@@ -26,6 +27,7 @@ from app.apim_expr import (
 )
 from app.config import GatewayConfig
 from app.named_values import mask_secret_data, resolve_named_values_in_text
+from app.policy_errors import element_name
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,13 @@ class PolicyRequest:
     response_headers: dict[str, str] | None = None
     response_body: bytes = b""
     response_media_type: str | None = None
+    # Which policy section is executing. Policies that act on "the message"
+    # (set-body, validate-content) act on the response in outbound.
+    section: str = "inbound"
+
+    @property
+    def in_outbound(self) -> bool:
+        return self.section == "outbound"
 
 
 @dataclass
@@ -71,6 +80,7 @@ class PolicyRuntime:
     deferred_actions: list[Any] = field(default_factory=list)
     llm_metric_emitter: Any = None
     custom_metric_emitter: Any = None
+    clock: Callable[[], float] | None = None
 
 
 @dataclass(frozen=True)
@@ -331,8 +341,14 @@ class SetBody(PolicyNode):
     value: str
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        req.body = render_policy_value(self.value, req, runtime).encode("utf-8")
-        _record_step(runtime, "set-body", {"length": len(req.body)})
+        # https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+        # In the outbound section set-body sets the response body.
+        body = render_policy_value(self.value, req, runtime).encode("utf-8")
+        if req.in_outbound:
+            req.response_body = body
+        else:
+            req.body = body
+        _record_step(runtime, "set-body", {"length": len(body)})
         return None
 
 
@@ -353,6 +369,7 @@ class ReturnResponse(PolicyNode):
             headers=out_headers,
             variables=req.variables,
             body=req.body,
+            response_status_code=req.response_status_code,
         )
         for header in self.headers:
             header.apply(temp_req, runtime)
@@ -504,141 +521,353 @@ class Choose(PolicyNode):
         return await _apply_steps_async(self.otherwise, req, runtime)
 
 
+def _json_error_response(status_code: int, message: str) -> ResponseSpec:
+    """APIM's JSON error envelope, as the other policies in this module return."""
+    return ResponseSpec(
+        status_code=status_code,
+        headers={"content-type": "application/json"},
+        body=_json_throttle_body(status_code, message),
+    )
+
+
 @dataclass(frozen=True)
 class CheckHeader(PolicyNode):
+    """Require a request header, optionally with one of a set of values.
+
+    https://learn.microsoft.com/en-us/azure/api-management/check-header-policy
+    name, failed-check-httpcode, failed-check-error-message and ignore-case are
+    all required and may be policy expressions. The docs do not say how a header
+    sent several times is compared; the value is compared as the gateway
+    received it (repeated headers already joined by the HTTP layer).
+    The docs also do not show the error body; the caller gets the configured
+    message in the JSON envelope the other policies use.
+    """
+
     name: str
-    expected: str | None
-    status_code: int
+    status_code: str
     message: str
+    ignore_case: str
+    values: tuple[str, ...]
+
+    def _resolve_status(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> int:
+        raw = str(render_policy_value(self.status_code, req, runtime)).strip()
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=500, detail="check-header failed-check-httpcode must be an integer"
+            ) from exc
+
+    def _resolve_ignore_case(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> bool:
+        raw = str(render_policy_value(self.ignore_case, req, runtime)).strip().lower()
+        if raw not in {"true", "false"}:
+            raise HTTPException(status_code=500, detail="check-header ignore-case must be true or false")
+        return raw == "true"
+
+    def _value_allowed(self, actual: str, ignore_case: bool) -> bool:
+        if not self.values:
+            return True
+        if ignore_case:
+            return actual.lower() in {value.lower() for value in self.values}
+        return actual in self.values
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        actual = req.headers.get(self.name.lower())
-        if actual is None or (self.expected is not None and actual != self.expected):
-            return ResponseSpec(
-                status_code=self.status_code,
-                headers={"content-type": "text/plain"},
-                body=self.message.encode("utf-8"),
-            )
-        return None
+        name = render_policy_value(self.name, req, runtime).strip().lower()
+        actual = req.headers.get(name)
+        if actual is not None and self._value_allowed(actual, self._resolve_ignore_case(req, runtime)):
+            return None
+        req.variables["_policy_error_reason"] = "HeaderNotFound" if actual is None else "HeaderValueNotAllowed"
+        return _json_error_response(self._resolve_status(req, runtime), render_policy_value(self.message, req, runtime))
+
+
+IpAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
 @dataclass(frozen=True)
 class IpFilter(PolicyNode):
+    """Allow or forbid calls by caller address.
+
+    https://learn.microsoft.com/en-us/azure/api-management/ip-filter-policy
+    Error messages are the predefined ones in
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    The docs do not state the status code or body the caller sees; 403 with the
+    JSON error envelope is used, carrying the predefined message.
+    """
+
     action: str
-    allow: set[str]
+    ranges: tuple[tuple[IpAddress, IpAddress], ...]
 
-    def _matches_any_entry(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-        """Is this address in the allow list, as a network or a literal?
+    def _matches(self, ip: IpAddress) -> bool:
+        return any(low.version == ip.version and low <= ip <= high for low, high in self.ranges)
 
-        An entry that will not parse is skipped rather than failing the request:
-        one malformed line in a list must not take the whole filter down.
-        """
-        for entry in self.allow:
-            try:
-                if "/" in entry:
-                    if ip in ipaddress.ip_network(entry, strict=False):
-                        return True
-                elif ip == ipaddress.ip_address(entry):
-                    return True
-            except ValueError:
-                continue
-        return False
+    def _resolve_action(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> str:
+        action = render_policy_value(self.action, req, runtime).strip().lower()
+        if action not in {"allow", "forbid"}:
+            raise HTTPException(status_code=500, detail="ip-filter action must be allow or forbid")
+        return action
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        """Allow or forbid by client address.
-
-        An unknown or unparseable client address is not filtered on: the policy
-        has nothing to decide against, and guessing would be worse than passing.
-        """
+        action = self._resolve_action(req, runtime)
         ip_raw = req.variables.get("client_ip")
-        if not isinstance(ip_raw, str) or not ip_raw:
-            return None
         try:
-            ip = ipaddress.ip_address(ip_raw)
+            ip = ipaddress.ip_address(ip_raw.strip()) if isinstance(ip_raw, str) else None
         except ValueError:
-            return None
-
-        allowed = self._matches_any_entry(ip)
-        action = (self.action or "allow").lower()
-        if (action == "allow" and not allowed) or (action == "forbid" and allowed):
-            return ResponseSpec(status_code=403, headers={"content-type": "text/plain"}, body=b"IP not allowed")
+            ip = None
+        if ip is None:
+            req.variables["_policy_error_reason"] = "FailedToParseCallerIP"
+            return _json_error_response(403, "Failed to establish IP address for the caller. Access denied.")
+        matched = self._matches(ip)
+        if action == "allow" and not matched:
+            req.variables["_policy_error_reason"] = "CallerIpNotAllowed"
+            return _json_error_response(403, f"Caller IP address {ip} is not allowed. Access denied.")
+        if action == "forbid" and matched:
+            req.variables["_policy_error_reason"] = "CallerIpBlocked"
+            return _json_error_response(403, "Caller IP address is blocked. Access denied.")
         return None
+
+
+_CORS_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _cors_origin_key(value: str) -> str:
+    """Comparable form of an origin: lower case, default port made explicit.
+
+    The docs say an omitted port means 80 for HTTP and 443 for HTTPS, and their
+    own example lists origins with a trailing slash, while browsers send none.
+    """
+    text = value.strip().rstrip("/").lower()
+    try:
+        parts = urlsplit(text)
+        port = parts.port
+    except ValueError:
+        return text
+    if not parts.scheme or not parts.hostname:
+        return text
+    return f"{parts.scheme}://{parts.hostname}:{port or _CORS_DEFAULT_PORTS.get(parts.scheme, 0)}"
+
+
+def _header_ci(headers: dict[str, str], name: str) -> str | None:
+    for key, value in headers.items():
+        if key.lower() == name:
+            return value
+    return None
 
 
 @dataclass(frozen=True)
 class Cors(PolicyNode):
+    """The `cors` policy.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cors-policy
+
+    The gateway answers a preflight through `apply_preflight` before the normal
+    pipeline runs; `apply` handles the actual (simple or approved) request.
+
+    Documentation gaps, chosen deliberately:
+    - `terminate-unmatched-request`: the attributes table says the default is
+      `false`, while "Common configuration issues" says the default is `true`.
+      We follow the latter, which describes the observed empty 200 OK.
+    - The docs say `allow-credentials` shapes the preflight response only; we
+      also send it on actual responses, since a browser needs it there.
+    - With `*` origins and `allow-credentials="true"` the docs are silent. We
+      echo the request origin (a literal `*` is rejected by browsers when
+      credentials are on). `*` methods/headers echo the requested ones likewise.
+    - Whether a preflight's requested method/headers are checked against the
+      lists is undocumented; we advertise the lists and leave enforcement to
+      the browser. The required `allowed-headers` element is not enforced.
+    """
+
+    origins: tuple[str, ...] = ()
+    methods: tuple[str, ...] = ("GET", "POST")
+    headers: tuple[str, ...] = ()
+    expose_headers: tuple[str, ...] = ()
+    allow_credentials: str | None = None
+    terminate_unmatched_request: str | None = None
+    preflight_max_age: str | None = None
+
+    def _origin_matches(self, origin: str) -> bool:
+        key = _cors_origin_key(origin)
+        return any(item.strip() == "*" or _cors_origin_key(item) == key for item in self.origins)
+
+    def _terminates_unmatched(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> bool:
+        return _policy_bool(self.terminate_unmatched_request, req, runtime, default=True)
+
+    def _allow_origin_value(self, origin: str, credentials: bool) -> str:
+        wildcard = any(item.strip() == "*" for item in self.origins)
+        return "*" if wildcard and not credentials else origin
+
+    def _common_headers(self, origin: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> dict[str, str]:
+        credentials = _policy_bool(self.allow_credentials, req, runtime)
+        out = {"access-control-allow-origin": self._allow_origin_value(origin, credentials)}
+        if out["access-control-allow-origin"] != "*":
+            out["vary"] = "Origin"
+        if credentials:
+            out["access-control-allow-credentials"] = "true"
+        return out
+
+    def preflight_headers(self, origin: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> dict[str, str]:
+        out = self._common_headers(origin, req, runtime)
+        requested_method = _header_ci(req.headers, "access-control-request-method") or "*"
+        requested_headers = _header_ci(req.headers, "access-control-request-headers") or "*"
+        methods = [str(render_policy_value(m, req, runtime)).upper() for m in self.methods]
+        out["access-control-allow-methods"] = requested_method if "*" in methods else ", ".join(methods)
+        if self.headers:
+            out["access-control-allow-headers"] = requested_headers if "*" in self.headers else ", ".join(self.headers)
+        out["access-control-max-age"] = str(_policy_int(self.preflight_max_age, req, runtime, default=0))
+        return out
+
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        origin = _header_ci(req.headers, "origin")
+        if origin is None:
+            return None
+        if self._origin_matches(origin):
+            for name, value in self._common_headers(origin, req, runtime).items():
+                _queue_response_header(req, name, value)
+            if self.expose_headers:
+                _queue_response_header(req, "access-control-expose-headers", ", ".join(self.expose_headers))
+            _record_step(runtime, "cors", {"origin": origin, "matched": True})
+            return None
+        _record_step(runtime, "cors", {"origin": origin, "matched": False})
+        if req.method.upper() in {"GET", "HEAD"} and self._terminates_unmatched(req, runtime):
+            return ResponseSpec(status_code=200, headers={})
         return None
+
+
+async def apply_preflight(
+    docs: list[PolicyDocument], req: PolicyRequest, runtime: PolicyRuntime | None = None
+) -> ResponseSpec | None:
+    """Answer a CORS preflight from the in-scope `cors` policies.
+
+    Returns None when no `cors` policy is in scope (the caller then treats the
+    request as an ordinary OPTIONS). Only cors is evaluated; the other policies
+    run on the approved request.
+    """
+    origin = _header_ci(req.headers, "origin") or ""
+    policies = [step for _, step in _effective_section_steps(docs, "inbound") if isinstance(step, Cors)]
+    if not policies:
+        return None
+    for policy in policies:
+        if policy._origin_matches(origin):
+            return ResponseSpec(status_code=200, headers=policy.preflight_headers(origin, req, runtime))
+        if policy._terminates_unmatched(req, runtime):
+            break
+    return ResponseSpec(status_code=200, headers={})
+
+
+@dataclass(frozen=True)
+class ThrottleRule:
+    target_kind: str | None
+    target_name: str | None
+    target_id: str | None
+    calls: int | None
+    renewal_period: int
+    bandwidth: int | None = None
 
 
 @dataclass(frozen=True)
 class RateLimit(PolicyNode):
     calls: int
     renewal_period: int
-    scope: str = "subscription"
+    retry_after_header_name: str | None = None
+    retry_after_variable_name: str | None = None
+    remaining_calls_header_name: str | None = None
+    remaining_calls_variable_name: str | None = None
+    total_calls_header_name: str | None = None
+    rules: tuple[ThrottleRule, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         store = req.variables.get("rate_limit_store")
-        if not isinstance(store, dict):
+        key = _subscription_throttle_key(req, "rate-limit")
+        if not isinstance(store, dict) or key is None:
             return None
 
-        key = _rate_limit_key(req, scope=self.scope)
-        now = int(time.time())
-        window = now - (now % self.renewal_period)
-        count = 0
-        if isinstance(store.get(key), dict):
-            entry = store[key]
-            if entry.get("window") == window:
-                count = int(entry.get("count") or 0)
-        count += 1
-        store[key] = {"window": window, "count": count}
+        now = _policy_now(runtime)
+        rules = self._applicable_rules(req)
+        buckets: list[tuple[ThrottleRule, list[float], str]] = []
+        for rule in rules:
+            rule_key = _throttle_rule_key(key, rule)
+            bucket = _rate_limit_bucket(store, rule_key)
+            _prune_rate_limit_bucket(bucket, now, rule.renewal_period)
+            if len(bucket) >= rule.calls:
+                remaining = max(0, rule.calls - len(bucket))
+                return _rate_limit_response(
+                    req,
+                    runtime,
+                    calls=rule.calls,
+                    retry_after=_rate_limit_retry_after(bucket, now, rule.renewal_period),
+                    remaining=remaining,
+                    retry_after_header_name=self.retry_after_header_name,
+                    retry_after_variable_name=self.retry_after_variable_name,
+                    remaining_calls_header_name=self.remaining_calls_header_name,
+                    remaining_calls_variable_name=self.remaining_calls_variable_name,
+                    total_calls_header_name=self.total_calls_header_name,
+                )
+            buckets.append((rule, bucket, rule_key))
 
-        remaining = max(0, self.calls - count)
-        headers = {
-            "content-type": "text/plain",
-            "x-ratelimit-limit": str(self.calls),
-            "x-ratelimit-remaining": str(remaining),
-            "x-ratelimit-reset": str(window + self.renewal_period),
-        }
-        if count > self.calls:
-            return ResponseSpec(status_code=429, headers=headers, body=b"Rate limit exceeded")
+        for _, bucket, _ in buckets:
+            bucket.append(now)
+        root_bucket = buckets[0][1]
+        remaining = max(0, self.calls - len(root_bucket))
+        _publish_rate_counts(
+            req,
+            runtime,
+            remaining=remaining,
+            calls=self.calls,
+            remaining_calls_header_name=self.remaining_calls_header_name,
+            remaining_calls_variable_name=self.remaining_calls_variable_name,
+            total_calls_header_name=self.total_calls_header_name,
+        )
+        _record_step(runtime, "rate-limit", {"count": len(root_bucket), "remaining": remaining})
         return None
+
+    def _applicable_rules(self, req: PolicyRequest) -> tuple[ThrottleRule, ...]:
+        root = ThrottleRule(None, None, None, self.calls, self.renewal_period)
+        return (root, *(rule for rule in self.rules if _throttle_rule_matches(rule, req)))
 
 
 @dataclass(frozen=True)
 class Quota(PolicyNode):
-    calls: int
+    calls: int | None
     renewal_period: int
-    scope: str = "subscription"
+    bandwidth: int | None = None
+    rules: tuple[ThrottleRule, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         store = req.variables.get("quota_store")
-        if not isinstance(store, dict):
-            store = req.variables.get("rate_limit_store")
-        if not isinstance(store, dict):
+        key = _subscription_throttle_key(req, "quota")
+        if not isinstance(store, dict) or key is None:
             return None
 
-        key = f"quota:{_rate_limit_key(req, scope=self.scope)}"
-        now = int(time.time())
-        window = now - (now % self.renewal_period)
-        count = 0
-        if isinstance(store.get(key), dict):
-            entry = store[key]
-            if entry.get("window") == window:
-                count = int(entry.get("count") or 0)
-        count += 1
-        store[key] = {"window": window, "count": count}
+        now = _policy_now(runtime)
+        rules = self._applicable_rules(req)
+        entries: list[tuple[ThrottleRule, dict[str, Any], int | None, str]] = []
+        for rule in rules:
+            rule_key = _throttle_rule_key(key, rule)
+            entry, reset_at = _quota_window_state(
+                store,
+                rule_key,
+                now=now,
+                renewal_period=self.renewal_period if rule.target_kind is None else rule.renewal_period,
+                first_period_start=None,
+            )
+            if _quota_limit_exceeded(entry, rule):
+                return _quota_response(
+                    now=now,
+                    reset_at=reset_at,
+                    bandwidth_exceeded=_quota_bandwidth_exceeded(entry, rule),
+                )
+            entries.append((rule, entry, reset_at, rule_key))
 
-        remaining = max(0, self.calls - count)
-        headers = {
-            "content-type": "text/plain",
-            "x-quota-limit": str(self.calls),
-            "x-quota-remaining": str(remaining),
-            "x-quota-reset": str(window + self.renewal_period),
-        }
-        if count > self.calls:
-            return ResponseSpec(status_code=429, headers=headers, body=b"Quota exceeded")
+        for rule, entry, _, rule_key in entries:
+            if rule.calls is not None:
+                entry["count"] = int(entry.get("count") or 0) + 1
+            if rule.bandwidth is not None:
+                _queue_quota_finalization(req, runtime, rule, rule_key)
+        _record_step(runtime, "quota", {"count": entries[0][1].get("count", 0)})
         return None
+
+    def _applicable_rules(self, req: PolicyRequest) -> tuple[ThrottleRule, ...]:
+        root = ThrottleRule(None, None, None, self.calls, self.renewal_period, self.bandwidth)
+        return (root, *(rule for rule in self.rules if _throttle_rule_matches(rule, req)))
 
 
 def _request_headers(req: PolicyRequest) -> dict[str, str]:
@@ -718,8 +947,75 @@ def _policy_int(
     return int(float(text))
 
 
+def _validated_policy_int(
+    value: str | None,
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    name: str,
+    minimum: int,
+) -> int:
+    try:
+        number = _policy_int(value, req, runtime, default=0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"{name} must be an integer") from exc
+    if number < minimum:
+        raise HTTPException(status_code=500, detail=f"{name} must be >= {minimum}")
+    return number
+
+
+def _positive_policy_int(value: str | None, req: PolicyRequest, runtime: PolicyRuntime | None, *, name: str) -> int:
+    return _validated_policy_int(value, req, runtime, name=name, minimum=1)
+
+
+def _nonnegative_policy_int(
+    value: str | None,
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    name: str,
+    default: int = 1,
+) -> int:
+    return _validated_policy_int(value or str(default), req, runtime, name=name, minimum=0)
+
+
+def _rate_period(value: str | None, req: PolicyRequest, runtime: PolicyRuntime | None) -> int:
+    period = _validated_policy_int(value, req, runtime, name="rate-limit-by-key renewal-period", minimum=1)
+    if period > 300:
+        raise HTTPException(status_code=500, detail="rate-limit-by-key renewal-period must be <= 300")
+    return period
+
+
+def _policy_float(
+    value: str | None,
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None = None,
+    *,
+    default: float = 0.0,
+) -> float:
+    if value is None:
+        return default
+    resolved = evaluate_policy_value(value, req, runtime)
+    if isinstance(resolved, bool):
+        return float(resolved)
+    if isinstance(resolved, (int, float)):
+        return float(resolved)
+    text = _stringify_policy_value(resolved).strip()
+    if not text:
+        return default
+    try:
+        return float(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid numeric policy value: {text}") from exc
+
+
 def _is_deferred_expression(value: str | None) -> bool:
     return value is not None and is_apim_expression(value)
+
+
+def _policy_now(runtime: PolicyRuntime | None) -> float:
+    """Read the runtime clock, falling back to wall time for normal requests."""
+    return runtime.clock() if runtime is not None and runtime.clock is not None else time.time()
 
 
 def _normalize_cache_caching_type(caching_type: str | None) -> tuple[str, bool]:
@@ -816,7 +1112,154 @@ def _rate_limit_retry_after(bucket: list[float], now: float, renewal_period: int
     if not bucket:
         return renewal_period
     earliest = bucket[0]
-    return max(1, int((earliest + renewal_period) - now))
+    return max(1, math.ceil((earliest + renewal_period) - now))
+
+
+def _subscription_throttle_key(req: PolicyRequest, prefix: str) -> str | None:
+    """The counter for a subscription-scoped throttle, or None without a subscription.
+
+    Product, API and operation limits are applied independently
+    (https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy),
+    so the counter is keyed by the scope that authored the policy as well as by
+    the subscription.
+    """
+    subscription_id = str(req.variables.get("subscription_id") or "")
+    if not subscription_id:
+        return None
+    scope = str(req.variables.get("_policy_scope") or "")
+    return f"{prefix}:{scope}:subscription:{subscription_id}"
+
+
+def _throttle_rule_key(base_key: str, rule: ThrottleRule) -> str:
+    if rule.target_kind is None:
+        return base_key
+    target = rule.target_id or rule.target_name or ""
+    return f"{base_key}:{rule.target_kind}:{target}"
+
+
+def _throttle_rule_matches(rule: ThrottleRule, req: PolicyRequest) -> bool:
+    if rule.target_kind is None:
+        return True
+    if rule.target_id is not None:
+        return str(req.variables.get(f"{rule.target_kind}_id") or "") == rule.target_id
+    values = (
+        req.variables.get(f"{rule.target_kind}_name"),
+        req.variables.get(f"{rule.target_kind}_id"),
+    )
+    return rule.target_name in {str(value) for value in values if value is not None}
+
+
+def _json_throttle_body(status_code: int, message: str) -> bytes:
+    return json.dumps({"statusCode": status_code, "message": message}, separators=(",", ":")).encode("utf-8")
+
+
+def _rate_limit_response(
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    calls: int,
+    retry_after: int,
+    remaining: int,
+    retry_after_header_name: str | None,
+    retry_after_variable_name: str | None,
+    remaining_calls_header_name: str | None,
+    remaining_calls_variable_name: str | None,
+    total_calls_header_name: str | None,
+) -> ResponseSpec:
+    if retry_after_variable_name:
+        req.variables[retry_after_variable_name] = retry_after
+        _record_variable_write(runtime, retry_after_variable_name, retry_after, "rate-limit")
+    if remaining_calls_variable_name:
+        req.variables[remaining_calls_variable_name] = remaining
+        _record_variable_write(runtime, remaining_calls_variable_name, remaining, "rate-limit")
+    headers = {
+        "content-type": "application/json",
+        (retry_after_header_name or "Retry-After").lower(): str(retry_after),
+    }
+    if remaining_calls_header_name:
+        headers[remaining_calls_header_name.lower()] = str(remaining)
+    if total_calls_header_name:
+        headers[total_calls_header_name.lower()] = str(calls)
+    message = f"Rate limit is exceeded. Try again in {retry_after} seconds."
+    return ResponseSpec(status_code=429, headers=headers, body=_json_throttle_body(429, message))
+
+
+def _publish_rate_counts(
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    remaining: int,
+    calls: int,
+    remaining_calls_header_name: str | None,
+    remaining_calls_variable_name: str | None,
+    total_calls_header_name: str | None,
+) -> None:
+    if remaining_calls_variable_name:
+        req.variables[remaining_calls_variable_name] = remaining
+        _record_variable_write(runtime, remaining_calls_variable_name, remaining, "rate-limit")
+    if remaining_calls_header_name:
+        _queue_response_header(req, remaining_calls_header_name, remaining)
+    if total_calls_header_name:
+        _queue_response_header(req, total_calls_header_name, calls)
+
+
+def _quota_limit_exceeded(entry: dict[str, Any], rule: ThrottleRule) -> bool:
+    if rule.calls is not None and int(entry.get("count") or 0) >= rule.calls:
+        return True
+    return _quota_bandwidth_exceeded(entry, rule)
+
+
+def _quota_bandwidth_exceeded(entry: dict[str, Any], rule: ThrottleRule) -> bool:
+    return rule.bandwidth is not None and int(entry.get("bandwidth") or 0) >= rule.bandwidth
+
+
+def _timespan(total_seconds: int) -> str:
+    """Seconds in .NET TimeSpan's default form: hh:mm:ss, prefixed by d. past a day.
+
+    The Learn error table shows the replenish time as xx:xx:xx; APIM renders a
+    .NET TimeSpan, which adds a day component once the interval passes 24 hours.
+    """
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    clock = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{days}.{clock}" if days else clock
+
+
+def _quota_response(*, now: float, reset_at: int | None, bandwidth_exceeded: bool) -> ResponseSpec:
+    retry_after = max(0, math.ceil(reset_at - now)) if reset_at is not None else 0
+    kind = "bandwidth" if bandwidth_exceeded else "call volume"
+    message = f"Out of {kind} quota. Quota will be replenished in {_timespan(retry_after)}."
+    return ResponseSpec(
+        status_code=403,
+        headers={"content-type": "application/json", "retry-after": str(retry_after)},
+        body=_json_throttle_body(403, message),
+    )
+
+
+def _quota_bandwidth_kilobytes(req: PolicyRequest) -> int:
+    # The Learn policy references define the unit but not the rounding rule;
+    # the simulator counts the request and response bodies in whole KB, rounding
+    # up so a non-empty partial kilobyte is not silently free.
+    total_bytes = len(req.body) + len(req.response_body)
+    return math.ceil(total_bytes / 1024) if total_bytes else 0
+
+
+def _queue_quota_finalization(
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    rule: ThrottleRule,
+    key: str,
+) -> None:
+    if runtime is None:
+        return
+    runtime.deferred_actions.append(
+        QuotaDeferred(
+            key=key,
+            renewal_period=rule.renewal_period,
+            bandwidth=rule.bandwidth or 0,
+        )
+    )
 
 
 def _quota_window_state(
@@ -830,14 +1273,20 @@ def _quota_window_state(
     if renewal_period == 0:
         entry = store.get(key)
         if not isinstance(entry, dict):
-            entry = {"window_start": None, "count": 0}
+            entry = {"window_start": None, "count": 0, "bandwidth": 0}
             store[key] = entry
         return entry, None
 
     if renewal_period < 0:
-        raise HTTPException(status_code=500, detail="quota-by-key renewal-period must be >= 0")
+        raise HTTPException(status_code=500, detail="quota renewal-period must be >= 0")
 
-    if first_period_start and first_period_start != "0001-01-01T00:00:00Z":
+    previous = store.get(key)
+    if first_period_start is None:
+        # The local subscription model has no creation timestamp. APIM anchors
+        # quota windows to that timestamp; first observation is the deterministic
+        # fallback until the model can carry the real subscription start.
+        anchor = float(previous.get("anchor", now)) if isinstance(previous, dict) else now
+    elif first_period_start != "0001-01-01T00:00:00Z":
         anchor = datetime.strptime(first_period_start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
     else:
         anchor = 0.0
@@ -849,12 +1298,39 @@ def _quota_window_state(
         window_start = anchor + (window_index * renewal_period)
 
     entry = store.get(key)
-    if not isinstance(entry, dict) or entry.get("window_start") != window_start:
-        entry = {"window_start": window_start, "count": 0}
+    if not isinstance(previous, dict) or previous.get("window_start") != window_start:
+        entry = {"window_start": window_start, "anchor": anchor, "count": 0, "bandwidth": 0}
         store[key] = entry
+    else:
+        entry = previous
 
     reset_at = int(window_start + renewal_period)
     return entry, reset_at
+
+
+@dataclass(frozen=True)
+class QuotaDeferred(DeferredPolicyAction):
+    key: str
+    renewal_period: int
+    bandwidth: int
+
+    def finalize(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:
+        store = req.variables.get("quota_store")
+        if not isinstance(store, dict):
+            return
+        entry, _ = _quota_window_state(
+            store,
+            self.key,
+            now=_policy_now(runtime),
+            renewal_period=self.renewal_period,
+            first_period_start=None,
+        )
+        entry["bandwidth"] = int(entry.get("bandwidth") or 0) + _quota_bandwidth_kilobytes(req)
+        _record_step(
+            runtime,
+            "quota",
+            {"deferred": True, "bandwidth": entry["bandwidth"], "key": self.key},
+        )
 
 
 @dataclass(frozen=True)
@@ -874,16 +1350,16 @@ class RateLimitByKeyDeferred(DeferredPolicyAction):
         store = req.variables.get("rate_limit_store")
         if not isinstance(store, dict):
             return
-        calls = max(1, _policy_int(self.calls, req, runtime, default=1))
-        renewal_period = max(1, _policy_int(self.renewal_period, req, runtime, default=60))
+        calls = _positive_policy_int(self.calls, req, runtime, name="rate-limit-by-key calls")
+        renewal_period = _rate_period(self.renewal_period, req, runtime)
         counter_key = render_policy_value(self.counter_key, req, runtime)
-        if not counter_key:
-            return
-        now = time.time()
+        now = _policy_now(runtime)
         bucket = _rate_limit_bucket(store, f"rate-limit-by-key:{counter_key}")
         _prune_rate_limit_bucket(bucket, now, renewal_period)
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
-        increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
+        increment = _nonnegative_policy_int(
+            self.increment_count, req, runtime, name="rate-limit-by-key increment-count"
+        )
         if should_increment and increment:
             bucket.extend([now] * increment)
         remaining = max(0, calls - len(bucket))
@@ -891,9 +1367,9 @@ class RateLimitByKeyDeferred(DeferredPolicyAction):
             req.variables[self.remaining_calls_variable_name] = remaining
             _record_variable_write(runtime, self.remaining_calls_variable_name, remaining, "rate-limit-by-key")
         if self.remaining_calls_header_name:
-            _response_header_target(req)[self.remaining_calls_header_name.lower()] = str(remaining)
+            _queue_response_header(req, self.remaining_calls_header_name, remaining)
         if self.total_calls_header_name:
-            _response_header_target(req)[self.total_calls_header_name.lower()] = str(calls)
+            _queue_response_header(req, self.total_calls_header_name, calls)
         _record_step(
             runtime,
             "rate-limit-by-key",
@@ -906,10 +1382,23 @@ class RateLimitByKeyDeferred(DeferredPolicyAction):
         )
 
 
+def _claim_quota_key_increment(req: PolicyRequest, counter_key: str) -> bool:
+    """True the first time this request increments a quota-by-key counter.
+
+    https://learn.microsoft.com/en-us/azure/api-management/quota-by-key-policy
+    says a key shared by several policies is incremented only once per request.
+    """
+    claimed = req.variables.setdefault("_quota_by_key_incremented", set())
+    if counter_key in claimed:
+        return False
+    claimed.add(counter_key)
+    return True
+
+
 @dataclass(frozen=True)
 class QuotaByKeyDeferred(DeferredPolicyAction):
-    calls: str
-    renewal_period: str
+    calls: int
+    renewal_period: int
     counter_key: str
     increment_condition: str | None
     increment_count: str | None
@@ -919,11 +1408,9 @@ class QuotaByKeyDeferred(DeferredPolicyAction):
         store = req.variables.get("quota_store")
         if not isinstance(store, dict):
             return
-        renewal_period = _policy_int(self.renewal_period, req, runtime, default=3600)
+        renewal_period = self.renewal_period
         counter_key = render_policy_value(self.counter_key, req, runtime)
-        if not counter_key:
-            return
-        now = time.time()
+        now = _policy_now(runtime)
         entry, _ = _quota_window_state(
             store,
             f"quota-by-key:{counter_key}",
@@ -932,8 +1419,8 @@ class QuotaByKeyDeferred(DeferredPolicyAction):
             first_period_start=self.first_period_start,
         )
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
-        increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
-        if should_increment and increment:
+        increment = _nonnegative_policy_int(self.increment_count, req, runtime, name="quota-by-key increment-count")
+        if should_increment and increment and _claim_quota_key_increment(req, counter_key):
             entry["count"] = int(entry.get("count") or 0) + increment
         _record_step(
             runtime,
@@ -997,13 +1484,11 @@ class RateLimitByKey(PolicyNode):
         store = req.variables.get("rate_limit_store")
         if not isinstance(store, dict):
             return None
-        calls = max(1, _policy_int(self.calls, req, runtime, default=1))
-        renewal_period = max(1, _policy_int(self.renewal_period, req, runtime, default=60))
+        calls = _positive_policy_int(self.calls, req, runtime, name="rate-limit-by-key calls")
+        renewal_period = _rate_period(self.renewal_period, req, runtime)
         counter_key = render_policy_value(self.counter_key, req, runtime)
-        if not counter_key:
-            raise HTTPException(status_code=500, detail="rate-limit-by-key requires counter-key")
 
-        now = time.time()
+        now = _policy_now(runtime)
         bucket = _rate_limit_bucket(store, f"rate-limit-by-key:{counter_key}")
         _prune_rate_limit_bucket(bucket, now, renewal_period)
 
@@ -1030,8 +1515,11 @@ class RateLimitByKey(PolicyNode):
             return None
 
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
-        increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
-        if should_increment and increment:
+        increment = _nonnegative_policy_int(
+            self.increment_count, req, runtime, name="rate-limit-by-key increment-count"
+        )
+        would_exceed = should_increment and len(bucket) + increment > calls
+        if should_increment and increment and not would_exceed:
             bucket.extend([now] * increment)
 
         remaining = max(0, calls - len(bucket))
@@ -1041,7 +1529,7 @@ class RateLimitByKey(PolicyNode):
             "rate-limit-by-key",
             {"counter_key": counter_key, "count": len(bucket), "remaining": remaining},
         )
-        if len(bucket) > calls:
+        if would_exceed:
             return self._limit_response(
                 req,
                 runtime,
@@ -1064,21 +1552,22 @@ class RateLimitByKey(PolicyNode):
         if self.retry_after_variable_name:
             req.variables[self.retry_after_variable_name] = retry_after
             _record_variable_write(runtime, self.retry_after_variable_name, retry_after, "rate-limit-by-key")
-        headers = {
-            "content-type": "text/plain",
-            header_name.lower(): str(retry_after),
-        }
+        if self.remaining_calls_variable_name:
+            req.variables[self.remaining_calls_variable_name] = remaining
+            _record_variable_write(runtime, self.remaining_calls_variable_name, remaining, "rate-limit-by-key")
+        headers = {"content-type": "application/json", header_name.lower(): str(retry_after)}
         if self.remaining_calls_header_name:
             headers[self.remaining_calls_header_name.lower()] = str(remaining)
         if self.total_calls_header_name:
             headers[self.total_calls_header_name.lower()] = str(calls)
-        return ResponseSpec(status_code=429, headers=headers, body=b"Rate limit exceeded")
+        message = f"Rate limit is exceeded. Try again in {retry_after} seconds."
+        return ResponseSpec(status_code=429, headers=headers, body=_json_throttle_body(429, message))
 
 
 @dataclass(frozen=True)
 class QuotaByKey(PolicyNode):
-    calls: str
-    renewal_period: str
+    calls: int
+    renewal_period: int
     counter_key: str
     increment_condition: str | None = None
     increment_count: str | None = None
@@ -1088,12 +1577,10 @@ class QuotaByKey(PolicyNode):
         store = req.variables.get("quota_store")
         if not isinstance(store, dict):
             return None
-        calls = max(1, _policy_int(self.calls, req, runtime, default=1))
-        renewal_period = _policy_int(self.renewal_period, req, runtime, default=3600)
+        calls = self.calls
+        renewal_period = self.renewal_period
         counter_key = render_policy_value(self.counter_key, req, runtime)
-        if not counter_key:
-            raise HTTPException(status_code=500, detail="quota-by-key requires counter-key")
-        now = time.time()
+        now = _policy_now(runtime)
         entry, reset_at = _quota_window_state(
             store,
             f"quota-by-key:{counter_key}",
@@ -1104,7 +1591,7 @@ class QuotaByKey(PolicyNode):
         current = int(entry.get("count") or 0)
         if _is_deferred_expression(self.increment_condition) or _is_deferred_expression(self.increment_count):
             if current >= calls:
-                return self._quota_response(now=now, reset_at=reset_at)
+                return _quota_response(now=now, reset_at=reset_at, bandwidth_exceeded=False)
             if runtime is not None:
                 runtime.deferred_actions.append(
                     QuotaByKeyDeferred(
@@ -1120,20 +1607,15 @@ class QuotaByKey(PolicyNode):
             return None
 
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
-        increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
-        if should_increment and increment:
+        increment = _nonnegative_policy_int(self.increment_count, req, runtime, name="quota-by-key increment-count")
+        would_exceed = should_increment and current + increment > calls
+        if should_increment and increment and not would_exceed and _claim_quota_key_increment(req, counter_key):
             current += increment
             entry["count"] = current
         _record_step(runtime, "quota-by-key", {"counter_key": counter_key, "count": current})
-        if current > calls:
-            return self._quota_response(now=now, reset_at=reset_at)
+        if would_exceed:
+            return _quota_response(now=now, reset_at=reset_at, bandwidth_exceeded=False)
         return None
-
-    def _quota_response(self, *, now: float, reset_at: int | None) -> ResponseSpec:
-        headers = {"content-type": "text/plain"}
-        if reset_at is not None:
-            headers["retry-after"] = str(max(1, reset_at - int(now)))
-        return ResponseSpec(status_code=403, headers=headers, body=b"Quota exceeded")
 
 
 LLM_RATE_WINDOW_SECONDS = 60
@@ -1838,6 +2320,11 @@ def _operation_request_metadata(req: PolicyRequest, runtime: PolicyRuntime | Non
     return operation
 
 
+# Public response for a validation failure on a response
+# https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+_INTERNAL_ERROR_PUBLIC_MESSAGE = "The request could not be processed due to an internal error. Contact the API owner."
+
+
 @dataclass(frozen=True)
 class ValidateContentType:
     content_type: str
@@ -1853,68 +2340,84 @@ class ValidateContent(PolicyNode):
     errors_variable_name: str | None = None
     content_types: tuple[ValidateContentType, ...] = ()
 
-    def _size_failure(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> ResponseSpec | None:
-        if self.max_size is None or len(req.body) <= self.max_size:
+    @staticmethod
+    def _message(req: PolicyRequest) -> tuple[bytes, str, str]:
+        """The body, content type and noun this policy validates in this section.
+
+        https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+        Inbound validates the request; outbound validates the response.
+        """
+        if req.in_outbound:
+            headers = req.response_headers if req.response_headers is not None else req.headers
+            content_type = headers.get("content-type") or req.response_media_type or ""
+            return req.response_body, content_type, "Response"
+        return req.body, req.headers.get("content-type") or "", "Request"
+
+    def _size_failure(
+        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, body: bytes, noun: str
+    ) -> ResponseSpec | None:
+        if self.max_size is None or len(body) <= self.max_size:
             return None
         return self._fail(
             req,
             runtime,
             action=self.size_exceeded_action,
-            message=f"Request body is larger than max-size ({self.max_size} bytes)",
+            message=f"{noun} body is larger than max-size ({self.max_size} bytes)",
         )
 
     def _json_failure(
-        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, matched: Any, request_content_type: str
+        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, matched: Any, body: bytes, content_type: str
     ) -> ResponseSpec | None:
         if matched.validate_as != "json":
             return None
         try:
-            json.loads(req.body.decode("utf-8"))
+            json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return self._fail(
                 req,
                 runtime,
                 action=matched.action,
-                message=f"Body is not valid JSON for content type {request_content_type}",
+                message=f"Body is not valid JSON for content type {content_type}",
             )
         return None
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        """Validate the request body against the declared content types.
+        """Validate the request (inbound) or response (outbound) body.
 
         An empty body is never validated. A content type the policy does not
         declare is handled by unspecified-content-type-action, which may well be
         to ignore it.
         """
-        if not req.body:
+        body, raw_content_type, noun = self._message(req)
+        if not body:
             return None
 
-        outcome = self._size_failure(req, runtime)
+        outcome = self._size_failure(req, runtime, body=body, noun=noun)
         if outcome is not None:
             return outcome
 
-        request_content_type = (req.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        content_type = raw_content_type.split(";", 1)[0].strip().lower()
         matched = next(
-            (item for item in self.content_types if item.content_type.lower() == request_content_type),
+            (item for item in self.content_types if item.content_type.lower() == content_type),
             None,
         )
         if matched is None:
-            if request_content_type and self.unspecified_content_type_action != "ignore":
+            if content_type and self.unspecified_content_type_action != "ignore":
                 return self._fail(
                     req,
                     runtime,
                     action=self.unspecified_content_type_action,
-                    message=f"Content type {request_content_type} is not specified for validation",
+                    message=f"Content type {content_type} is not specified for validation",
                 )
             return None
         if matched.action == "ignore":
             return None
 
-        outcome = self._json_failure(req, runtime, matched=matched, request_content_type=request_content_type)
+        outcome = self._json_failure(req, runtime, matched=matched, body=body, content_type=content_type)
         if outcome is not None:
             return outcome
 
-        _record_step(runtime, "validate-content", {"content_type": request_content_type, "valid": True})
+        _record_step(runtime, "validate-content", {"content_type": content_type, "valid": True})
         return None
 
     def _fail(
@@ -1930,13 +2433,20 @@ class ValidateContent(PolicyNode):
         _record_validation_error(
             req, runtime, policy="validate-content", errors_variable_name=self.errors_variable_name, message=message
         )
-        if action == "prevent":
+        if action != "prevent":
+            return None
+        if req.in_outbound:
+            # 502 in outbound, with the detail withheld from the client.
             return ResponseSpec(
-                status_code=400,
+                status_code=502,
                 headers={"content-type": "text/plain"},
-                body=message.encode("utf-8"),
+                body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             )
-        return None
+        return ResponseSpec(
+            status_code=400,
+            headers={"content-type": "text/plain"},
+            body=message.encode("utf-8"),
+        )
 
 
 # Headers every HTTP client sends. validate-parameters must not reject these as
@@ -2089,16 +2599,15 @@ class ValidateStatusCode(PolicyNode):
         status = req.response_status_code
         if status is None:
             return None
-        explicit = dict(self.status_codes)
-        if status in explicit:
-            action = explicit[status]
-        else:
-            operation = _operation_request_metadata(req, runtime)
-            declared = {resp.status_code for resp in getattr(operation, "responses", []) or []}
-            if status in declared:
-                _record_step(runtime, "validate-status-code", {"status_code": status, "declared": True})
-                return None
-            action = self.unspecified_status_code_action
+        # A status declared for the operation is valid; the per-code override
+        # "doesn't take effect" for it.
+        # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+        operation = _operation_request_metadata(req, runtime)
+        declared = {resp.status_code for resp in getattr(operation, "responses", []) or []}
+        if status in declared:
+            _record_step(runtime, "validate-status-code", {"status_code": status, "declared": True})
+            return None
+        action = dict(self.status_codes).get(status, self.unspecified_status_code_action)
         if action == "ignore":
             return None
         _record_validation_error(
@@ -2108,15 +2617,15 @@ class ValidateStatusCode(PolicyNode):
             errors_variable_name=self.errors_variable_name,
             message=f"Response status code {status} is not specified for this operation",
         )
-        if action == "prevent":
-            # Outbound policies cannot short-circuit in this engine, so
-            # prevent mutates the response in place instead.
-            req.response_status_code = 502
-            req.response_body = b"Response status code validation failed"
-            req.response_media_type = "text/plain"
-            if req.response_headers is not None:
-                req.response_headers["content-type"] = "text/plain"
-        return None
+        if action != "prevent":
+            return None
+        # prevent in outbound answers 502 and never leaks the backend response.
+        return ResponseSpec(
+            status_code=502,
+            headers={"content-type": "text/plain"},
+            body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
+            media_type="text/plain",
+        )
 
 
 @dataclass(frozen=True)
@@ -2379,6 +2888,7 @@ class ValidateJwt(PolicyNode):
             self._validate_claims(claims, req, runtime)
         except HTTPException as exc:
             _record_jwt_validation(runtime, {"status": "invalid", "detail": exc.detail})
+            req.variables["_policy_error_detail"] = str(exc.detail)
             return ResponseSpec(
                 status_code=self.failed_validation_httpcode,
                 headers={"content-type": "text/plain"},
@@ -2390,6 +2900,7 @@ class ValidateJwt(PolicyNode):
 
     def _failure(self, req: PolicyRequest, runtime: PolicyRuntime | None, detail: str) -> ResponseSpec:
         _record_jwt_validation(runtime, {"status": "invalid", "detail": detail})
+        req.variables["_policy_error_detail"] = detail
         return ResponseSpec(
             status_code=self.failed_validation_httpcode,
             headers={"content-type": "text/plain"},
@@ -2516,6 +3027,60 @@ class SetBackendService(PolicyNode):
         if runtime and runtime.trace is not None:
             runtime.trace.selected_backend = {"base_url": resolved_base_url}
         _record_step(runtime, "set-backend-service", {"base_url": resolved_base_url})
+        return None
+
+
+@dataclass(frozen=True)
+class ForwardRequest(PolicyNode):
+    """Configure the backend forward operation for this policy request."""
+
+    timeout: str | None = None
+    timeout_ms: str | None = None
+    follow_redirects: str | None = None
+    buffer_request_body: str | None = None
+    buffer_response: str | None = None
+    fail_on_error_status_code: str | None = None
+    http_version: str | None = None
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        if self.timeout_ms is not None:
+            timeout_seconds = _policy_float(self.timeout_ms, req, runtime) / 1000
+        else:
+            timeout_seconds = _policy_float(self.timeout, req, runtime, default=300.0)
+        if timeout_seconds < 0:
+            raise HTTPException(status_code=500, detail="forward-request timeout must be non-negative")
+
+        http_version = render_policy_value(self.http_version or "1", req, runtime).strip().lower()
+        if http_version not in {"1", "2", "2or1"}:
+            raise HTTPException(status_code=500, detail=f"Unsupported forward-request http-version: {http_version}")
+
+        req.variables["_forward_request_timeout_seconds"] = timeout_seconds
+        req.variables["_forward_request_follow_redirects"] = _policy_bool(
+            self.follow_redirects, req, runtime, default=False
+        )
+        req.variables["_forward_request_buffer_request_body"] = _policy_bool(
+            self.buffer_request_body, req, runtime, default=False
+        )
+        req.variables["_forward_request_buffer_response"] = _policy_bool(
+            self.buffer_response, req, runtime, default=True
+        )
+        req.variables["_forward_request_fail_on_error_status_code"] = _policy_bool(
+            self.fail_on_error_status_code, req, runtime, default=False
+        )
+        req.variables["_forward_request_http_version"] = http_version
+        req.variables["_forward_request_present"] = True
+        _record_step(
+            runtime,
+            "forward-request",
+            {
+                "timeout_seconds": timeout_seconds,
+                "follow_redirects": req.variables["_forward_request_follow_redirects"],
+                "buffer_request_body": req.variables["_forward_request_buffer_request_body"],
+                "buffer_response": req.variables["_forward_request_buffer_response"],
+                "fail_on_error_status_code": req.variables["_forward_request_fail_on_error_status_code"],
+                "http_version": http_version,
+            },
+        )
         return None
 
 
@@ -2652,6 +3217,10 @@ class PolicyDocument:
     backend: list[PolicyNode]
     outbound: list[PolicyNode]
     on_error: list[PolicyNode]
+    sections_present: frozenset[str] = frozenset()
+    # Where the document was authored (global, product:<id>, api:<id>,
+    # operation:<api>/<op>). Subscription throttles count per scope.
+    scope: str = ""
 
 
 POLICY_VALUE_PATTERN = re.compile(r"\{([^{}]+)\}")
@@ -2827,54 +3396,292 @@ def _parse_mock_response(el: ElementTree.Element) -> MockResponse:
     return MockResponse(status_code=status_code, content_type=content_type)
 
 
+def _required_attr(el: ElementTree.Element, name: str, policy_name: str) -> str:
+    value = el.attrib.get(name)
+    if value is None or not value.strip():
+        raise HTTPException(status_code=500, detail=f"{policy_name} requires {name}")
+    return value
+
+
 def _parse_check_header(el: ElementTree.Element) -> CheckHeader:
-    name = (el.attrib.get("name") or "").strip().lower()
-    if not name:
-        raise HTTPException(status_code=500, detail="check-header missing name")
-    expected = el.attrib.get("value")
-    status_code = int(el.attrib.get("failed-check-httpcode") or "401")
-    message = str(el.attrib.get("failed-check-error-message") or "Missing or invalid header")
-    return CheckHeader(name=name, expected=expected, status_code=status_code, message=message)
+    _reject_unknown_attributes(
+        el, {"name", "failed-check-httpcode", "failed-check-error-message", "ignore-case"}, "check-header"
+    )
+    name = _required_attr(el, "name", "check-header").strip()
+    status_code = _required_attr(el, "failed-check-httpcode", "check-header").strip()
+    ignore_case = _required_attr(el, "ignore-case", "check-header").strip()
+    if not is_apim_expression(status_code) and not status_code.isdigit():
+        raise HTTPException(status_code=500, detail="check-header failed-check-httpcode must be an integer")
+    if not is_apim_expression(ignore_case) and ignore_case.lower() not in {"true", "false"}:
+        raise HTTPException(status_code=500, detail="check-header ignore-case must be true or false")
+    message = el.attrib.get("failed-check-error-message")
+    if message is None:
+        raise HTTPException(status_code=500, detail="check-header requires failed-check-error-message")
+    values = tuple(_text_or_empty(item) for item in el.findall("value"))
+    return CheckHeader(name=name, status_code=status_code, message=message, ignore_case=ignore_case, values=values)
+
+
+def _parse_ip_range(el: ElementTree.Element) -> tuple[IpAddress, IpAddress]:
+    try:
+        low = ipaddress.ip_address((el.attrib.get("from") or "").strip())
+        high = ipaddress.ip_address((el.attrib.get("to") or "").strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="ip-filter address-range needs valid from and to") from exc
+    if low.version != high.version or low > high:
+        raise HTTPException(status_code=500, detail="ip-filter address-range from must not exceed to")
+    return low, high
+
+
+def _parse_ip_address(el: ElementTree.Element) -> tuple[IpAddress, IpAddress]:
+    try:
+        ip = ipaddress.ip_address(_text_or_empty(el))
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="ip-filter address must be a single IP address") from exc
+    return ip, ip
+
+
+def _cors_values(el: ElementTree.Element, section: str, child: str) -> tuple[str, ...]:
+    parent = el.find(section)
+    if parent is None:
+        return ()
+    return tuple(value for item in parent.findall(child) if (value := _text_or_empty(item)))
+
+
+def _parse_cors(el: ElementTree.Element) -> Cors:
+    methods_el = el.find("allowed-methods")
+    methods = _cors_values(el, "allowed-methods", "method") or ("GET", "POST")
+    return Cors(
+        origins=_cors_values(el, "allowed-origins", "origin"),
+        methods=methods,
+        headers=_cors_values(el, "allowed-headers", "header"),
+        expose_headers=_cors_values(el, "expose-headers", "header"),
+        allow_credentials=el.attrib.get("allow-credentials"),
+        terminate_unmatched_request=el.attrib.get("terminate-unmatched-request"),
+        preflight_max_age=methods_el.attrib.get("preflight-result-max-age") if methods_el is not None else None,
+    )
 
 
 def _parse_ip_filter(el: ElementTree.Element) -> IpFilter:
-    action = str(el.attrib.get("action") or "allow")
-    allow: set[str] = set()
-    for addr in el.findall("address"):
-        value = _text_or_empty(addr)
-        if value:
-            allow.add(value)
-    for cidr in el.findall("cidr"):
-        value = _text_or_empty(cidr)
-        if value:
-            allow.add(value)
-    for ar in el.findall("address-range"):
-        frm = (ar.attrib.get("from") or "").strip()
-        to = (ar.attrib.get("to") or "").strip()
-        if frm and to and frm == to:
-            allow.add(frm)
-    return IpFilter(action=action, allow=allow)
+    _reject_unknown_attributes(el, {"action"}, "ip-filter")
+    action = _required_attr(el, "action", "ip-filter").strip()
+    if not is_apim_expression(action) and action.lower() not in {"allow", "forbid"}:
+        raise HTTPException(status_code=500, detail="ip-filter action must be allow or forbid")
+    unsupported = [child.tag for child in el if child.tag not in {"address", "address-range"}]
+    if unsupported:
+        raise HTTPException(status_code=500, detail=f"ip-filter unsupported element: {unsupported[0]}")
+    ranges = tuple(_parse_ip_address(child) for child in el.findall("address")) + tuple(
+        _parse_ip_range(child) for child in el.findall("address-range")
+    )
+    if not ranges:
+        raise HTTPException(status_code=500, detail="ip-filter requires an address or address-range")
+    return IpFilter(action=action, ranges=ranges)
+
+
+def _reject_unknown_attributes(el: ElementTree.Element, allowed: set[str], policy_name: str) -> None:
+    unknown = sorted(set(el.attrib) - allowed)
+    if unknown:
+        raise HTTPException(status_code=500, detail=f"{policy_name} unsupported attribute: {unknown[0]}")
+
+
+def _static_policy_name(el: ElementTree.Element, name: str, policy_name: str) -> str | None:
+    value = el.attrib.get(name)
+    if value is not None and is_apim_expression(value):
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} does not allow policy expressions")
+    return value.strip() if value is not None else None
+
+
+def _static_positive_int(
+    el: ElementTree.Element,
+    name: str,
+    policy_name: str,
+    *,
+    required: bool = True,
+    maximum: int | None = None,
+) -> int | None:
+    value = el.attrib.get(name)
+    if value is None:
+        if required:
+            raise HTTPException(status_code=500, detail=f"{policy_name} requires {name}")
+        return None
+    if is_apim_expression(value):
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} does not allow policy expressions")
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} must be an integer") from exc
+    if number <= 0:
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} must be > 0")
+    if maximum is not None and number > maximum:
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} must be <= {maximum}")
+    return number
+
+
+def _static_period(
+    el: ElementTree.Element,
+    policy_name: str,
+    *,
+    minimum: int = 1,
+    allow_zero: bool = False,
+    maximum: int | None = None,
+) -> int:
+    value = el.attrib.get("renewal-period")
+    if value is None:
+        raise HTTPException(status_code=500, detail=f"{policy_name} requires renewal-period")
+    if is_apim_expression(value):
+        raise HTTPException(status_code=500, detail=f"{policy_name} renewal-period does not allow policy expressions")
+    try:
+        period = int(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"{policy_name} renewal-period must be an integer") from exc
+    if (period == 0 and allow_zero) or period >= minimum:
+        if maximum is None or period <= maximum:
+            return period
+    if maximum is not None:
+        raise HTTPException(
+            status_code=500, detail=f"{policy_name} renewal-period must be between {minimum} and {maximum}"
+        )
+    raise HTTPException(status_code=500, detail=f"{policy_name} renewal-period must be >= {minimum}")
+
+
+def _throttle_target(
+    el: ElementTree.Element,
+    kind: str,
+    policy_name: str,
+    *,
+    allow_bandwidth: bool,
+) -> tuple[str | None, str | None]:
+    allowed = {"name", "id", "calls", "renewal-period"}
+    if allow_bandwidth:
+        allowed.add("bandwidth")
+    _reject_unknown_attributes(
+        el,
+        allowed,
+        policy_name,
+    )
+    target_id = (el.attrib.get("id") or "").strip() or None
+    target_name = (el.attrib.get("name") or "").strip() or None
+    if target_id is None and target_name is None:
+        raise HTTPException(status_code=500, detail=f"{policy_name} {kind} requires name or id")
+    return target_name, target_id
+
+
+def _rate_limit_nested_rules(el: ElementTree.Element) -> tuple[ThrottleRule, ...]:
+    rules: list[ThrottleRule] = []
+    for api in el:
+        if api.tag != "api":
+            raise HTTPException(status_code=500, detail=f"rate-limit unsupported child element: {api.tag}")
+        api_name, api_id = _throttle_target(api, "api", "rate-limit", allow_bandwidth=False)
+        api_calls = _static_positive_int(api, "calls", "rate-limit", maximum=None)
+        api_period = _static_period(api, "rate-limit", maximum=300)
+        rules.append(ThrottleRule("api", api_name, api_id, api_calls or 0, api_period))
+        for operation in api:
+            if operation.tag != "operation":
+                raise HTTPException(status_code=500, detail=f"rate-limit unsupported child element: {operation.tag}")
+            operation_name, operation_id = _throttle_target(operation, "operation", "rate-limit", allow_bandwidth=False)
+            operation_calls = _static_positive_int(operation, "calls", "rate-limit", maximum=None)
+            operation_period = _static_period(operation, "rate-limit", maximum=300)
+            rules.append(
+                ThrottleRule("operation", operation_name, operation_id, operation_calls or 0, operation_period)
+            )
+    return tuple(rules)
 
 
 def _parse_rate_limit(el: ElementTree.Element) -> RateLimit:
-    calls = int(el.attrib.get("calls") or "0")
-    renewal = int(el.attrib.get("renewal-period") or el.attrib.get("renewal_period") or "60")
-    scope = str(el.attrib.get("scope") or "subscription")
-    if calls <= 0:
-        raise HTTPException(status_code=500, detail="rate-limit requires calls > 0")
-    return RateLimit(calls=calls, renewal_period=renewal, scope=scope)
+    _reject_unknown_attributes(
+        el,
+        {
+            "id",
+            "calls",
+            "renewal-period",
+            "retry-after-header-name",
+            "retry-after-variable-name",
+            "remaining-calls-header-name",
+            "remaining-calls-variable-name",
+            "total-calls-header-name",
+        },
+        "rate-limit",
+    )
+    calls = _static_positive_int(el, "calls", "rate-limit") or 0
+    renewal = _static_period(el, "rate-limit", maximum=300)
+    names = {
+        name: _static_policy_name(el, name, "rate-limit")
+        for name in (
+            "retry-after-header-name",
+            "retry-after-variable-name",
+            "remaining-calls-header-name",
+            "remaining-calls-variable-name",
+            "total-calls-header-name",
+        )
+    }
+    return RateLimit(
+        calls=calls,
+        renewal_period=renewal,
+        retry_after_header_name=names["retry-after-header-name"],
+        retry_after_variable_name=names["retry-after-variable-name"],
+        remaining_calls_header_name=names["remaining-calls-header-name"],
+        remaining_calls_variable_name=names["remaining-calls-variable-name"],
+        total_calls_header_name=names["total-calls-header-name"],
+        rules=_rate_limit_nested_rules(el),
+    )
+
+
+def _quota_nested_rules(el: ElementTree.Element) -> tuple[ThrottleRule, ...]:
+    rules: list[ThrottleRule] = []
+    for api in el:
+        if api.tag != "api":
+            raise HTTPException(status_code=500, detail=f"quota unsupported child element: {api.tag}")
+        api_name, api_id = _throttle_target(api, "api", "quota", allow_bandwidth=True)
+        api_calls = _static_positive_int(api, "calls", "quota", required=False)
+        api_bandwidth = _static_positive_int(api, "bandwidth", "quota", required=False)
+        if api_calls is None and api_bandwidth is None:
+            raise HTTPException(status_code=500, detail="quota api requires calls or bandwidth")
+        api_period = _static_period(api, "quota", allow_zero=True)
+        rules.append(ThrottleRule("api", api_name, api_id, api_calls, api_period, api_bandwidth))
+        for operation in api:
+            if operation.tag != "operation":
+                raise HTTPException(status_code=500, detail=f"quota unsupported child element: {operation.tag}")
+            operation_name, operation_id = _throttle_target(operation, "operation", "quota", allow_bandwidth=True)
+            operation_calls = _static_positive_int(operation, "calls", "quota", required=False)
+            operation_bandwidth = _static_positive_int(operation, "bandwidth", "quota", required=False)
+            if operation_calls is None and operation_bandwidth is None:
+                raise HTTPException(status_code=500, detail="quota operation requires calls or bandwidth")
+            operation_period = _static_period(operation, "quota", allow_zero=True)
+            rules.append(
+                ThrottleRule(
+                    "operation", operation_name, operation_id, operation_calls, operation_period, operation_bandwidth
+                )
+            )
+    return tuple(rules)
 
 
 def _parse_quota(el: ElementTree.Element) -> Quota:
-    calls = int(el.attrib.get("calls") or "0")
-    renewal = int(el.attrib.get("renewal-period") or el.attrib.get("renewal_period") or "3600")
-    scope = str(el.attrib.get("scope") or "subscription")
-    if calls <= 0:
-        raise HTTPException(status_code=500, detail="quota requires calls > 0")
-    return Quota(calls=calls, renewal_period=renewal, scope=scope)
+    _reject_unknown_attributes(el, {"id", "calls", "bandwidth", "renewal-period"}, "quota")
+    calls = _static_positive_int(el, "calls", "quota", required=False)
+    bandwidth = _static_positive_int(el, "bandwidth", "quota", required=False)
+    if calls is None and bandwidth is None:
+        raise HTTPException(status_code=500, detail="quota requires calls or bandwidth")
+    renewal = _static_period(el, "quota", allow_zero=True)
+    return Quota(calls=calls, bandwidth=bandwidth, renewal_period=renewal, rules=_quota_nested_rules(el))
 
 
 def _parse_rate_limit_by_key(el: ElementTree.Element) -> RateLimitByKey:
+    _reject_unknown_attributes(
+        el,
+        {
+            "id",
+            "calls",
+            "renewal-period",
+            "increment-condition",
+            "increment-count",
+            "counter-key",
+            "retry-after-header-name",
+            "retry-after-variable-name",
+            "remaining-calls-header-name",
+            "remaining-calls-variable-name",
+            "total-calls-header-name",
+        },
+        "rate-limit-by-key",
+    )
     calls = (el.attrib.get("calls") or "").strip()
     renewal_period = (el.attrib.get("renewal-period") or "").strip()
     counter_key = (el.attrib.get("counter-key") or "").strip()
@@ -2884,22 +3691,50 @@ def _parse_rate_limit_by_key(el: ElementTree.Element) -> RateLimitByKey:
         raise HTTPException(status_code=500, detail="rate-limit-by-key requires renewal-period")
     if not counter_key:
         raise HTTPException(status_code=500, detail="rate-limit-by-key requires counter-key")
+    if not is_apim_expression(calls):
+        _static_positive_int(el, "calls", "rate-limit-by-key")
+    if not is_apim_expression(renewal_period):
+        _static_period(el, "rate-limit-by-key", maximum=300)
+    names = {
+        name: _static_policy_name(el, name, "rate-limit-by-key")
+        for name in (
+            "retry-after-header-name",
+            "retry-after-variable-name",
+            "remaining-calls-header-name",
+            "remaining-calls-variable-name",
+            "total-calls-header-name",
+        )
+    }
     return RateLimitByKey(
         calls=calls,
         renewal_period=renewal_period,
         counter_key=counter_key,
         increment_condition=el.attrib.get("increment-condition"),
         increment_count=el.attrib.get("increment-count"),
-        retry_after_header_name=el.attrib.get("retry-after-header-name"),
-        retry_after_variable_name=el.attrib.get("retry-after-variable-name"),
-        remaining_calls_header_name=el.attrib.get("remaining-calls-header-name"),
-        remaining_calls_variable_name=el.attrib.get("remaining-calls-variable-name"),
-        total_calls_header_name=el.attrib.get("total-calls-header-name"),
+        retry_after_header_name=names["retry-after-header-name"],
+        retry_after_variable_name=names["retry-after-variable-name"],
+        remaining_calls_header_name=names["remaining-calls-header-name"],
+        remaining_calls_variable_name=names["remaining-calls-variable-name"],
+        total_calls_header_name=names["total-calls-header-name"],
     )
 
 
 def _parse_quota_by_key(el: ElementTree.Element) -> QuotaByKey:
-    if el.attrib.get("bandwidth"):
+    _reject_unknown_attributes(
+        el,
+        {
+            "id",
+            "calls",
+            "bandwidth",
+            "renewal-period",
+            "increment-condition",
+            "increment-count",
+            "counter-key",
+            "first-period-start",
+        },
+        "quota-by-key",
+    )
+    if "bandwidth" in el.attrib:
         raise HTTPException(status_code=500, detail="quota-by-key bandwidth is not supported")
     calls = (el.attrib.get("calls") or "").strip()
     renewal_period = (el.attrib.get("renewal-period") or "").strip()
@@ -2910,13 +3745,21 @@ def _parse_quota_by_key(el: ElementTree.Element) -> QuotaByKey:
         raise HTTPException(status_code=500, detail="quota-by-key requires renewal-period")
     if not counter_key:
         raise HTTPException(status_code=500, detail="quota-by-key requires counter-key")
+    calls_value = _static_positive_int(el, "calls", "quota-by-key")
+    renewal_value = _static_period(el, "quota-by-key", allow_zero=True, minimum=300)
+    first_period_start = el.attrib.get("first-period-start") or "0001-01-01T00:00:00Z"
+    if first_period_start:
+        try:
+            datetime.strptime(first_period_start, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail="quota-by-key first-period-start must be UTC ISO-8601") from exc
     return QuotaByKey(
-        calls=calls,
-        renewal_period=renewal_period,
+        calls=calls_value or 0,
+        renewal_period=renewal_value,
         counter_key=counter_key,
         increment_condition=el.attrib.get("increment-condition"),
         increment_count=el.attrib.get("increment-count"),
-        first_period_start=el.attrib.get("first-period-start"),
+        first_period_start=first_period_start,
     )
 
 
@@ -3163,6 +4006,22 @@ def _parse_set_backend_service(el: ElementTree.Element) -> SetBackendService:
     return SetBackendService(base_url=base_url, backend_id=backend_id)
 
 
+def _parse_forward_request(el: ElementTree.Element) -> ForwardRequest:
+    timeout = el.attrib.get("timeout")
+    timeout_ms = el.attrib.get("timeout-ms")
+    if timeout is not None and timeout_ms is not None:
+        raise HTTPException(status_code=500, detail="forward-request cannot specify both timeout and timeout-ms")
+    return ForwardRequest(
+        timeout=timeout,
+        timeout_ms=timeout_ms,
+        follow_redirects=el.attrib.get("follow-redirects"),
+        buffer_request_body=el.attrib.get("buffer-request-body"),
+        buffer_response=el.attrib.get("buffer-response"),
+        fail_on_error_status_code=el.attrib.get("fail-on-error-status-code"),
+        http_version=el.attrib.get("http-version"),
+    )
+
+
 def _parse_send_request(el: ElementTree.Element) -> SendRequest:
     response_variable_name = (el.attrib.get("response-variable-name") or "").strip()
     if not response_variable_name:
@@ -3191,20 +4050,9 @@ def _parse_send_request(el: ElementTree.Element) -> SendRequest:
     )
 
 
-def _rate_limit_key(req: PolicyRequest, *, scope: str) -> str:
-    scope = (scope or "subscription").lower()
-    route = str(req.variables.get("route") or "")
-    subscription_id = str(req.variables.get("subscription_id") or "")
-    products = req.variables.get("products")
-    product_part = ",".join(sorted(str(item) for item in products)) if isinstance(products, list) else ""
-    client_ip = str(req.variables.get("client_ip") or "")
-    if scope == "subscription":
-        return f"sub:{subscription_id}|route:{route}|products:{product_part}"
-    if scope == "product":
-        return f"product:{product_part}|sub:{subscription_id}|route:{route}"
-    if scope == "ip":
-        return f"ip:{client_ip}|route:{route}"
-    return f"route:{route}|sub:{subscription_id}|products:{product_part}"
+def _rate_limit_key(req: PolicyRequest) -> str | None:
+    """Return the subscription counter key used by the subscription rate policy."""
+    return _subscription_throttle_key(req, "rate-limit")
 
 
 def _parse_choose(
@@ -3222,6 +4070,7 @@ def _parse_choose(
             policy_fragments=policy_fragments,
             section_name=section_name,
             seen_fragments=set(seen_fragments),
+            allow_base=False,
         )
         branches.append((cond, steps))
     otherwise_el = el.find("otherwise")
@@ -3231,6 +4080,7 @@ def _parse_choose(
             policy_fragments=policy_fragments,
             section_name=section_name,
             seen_fragments=set(seen_fragments),
+            allow_base=False,
         )
         if otherwise_el is not None
         else []
@@ -3261,9 +4111,14 @@ def _parse_children(
     policy_fragments: dict[str, str],
     section_name: str,
     seen_fragments: set[str],
+    allow_base: bool = True,
 ) -> list[PolicyNode]:
     out: list[PolicyNode] = []
     for child in children:
+        # APIM's base marker controls the containing section; it is not a
+        # policy statement that can be deferred inside choose branches.
+        if child.tag == "base" and not allow_base:
+            raise HTTPException(status_code=500, detail="base element is only allowed directly inside a policy section")
         if child.tag == "include-fragment":
             fragment_id = (
                 child.attrib.get("fragment-id") or child.attrib.get("name") or child.attrib.get("id") or ""
@@ -3282,6 +4137,7 @@ def _parse_children(
                     policy_fragments=policy_fragments,
                     section_name=section_name,
                     seen_fragments=seen_fragments | {fragment_id},
+                    allow_base=allow_base,
                 )
             )
             continue
@@ -3307,6 +4163,7 @@ _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "rewrite-uri": _parse_rewrite_uri,
     "check-header": _parse_check_header,
     "ip-filter": _parse_ip_filter,
+    "cors": _parse_cors,
     "rate-limit": _parse_rate_limit,
     "rate-limit-by-key": _parse_rate_limit_by_key,
     "quota": _parse_quota,
@@ -3328,13 +4185,13 @@ _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "mock-response": _parse_mock_response,
     "validate-jwt": _parse_validate_jwt,
     "set-backend-service": _parse_set_backend_service,
+    "forward-request": _parse_forward_request,
     "send-request": _parse_send_request,
 }
 
 # Elements that carry no attributes worth reading.
 _CONSTANT_ELEMENTS: dict[str, Callable[[], PolicyNode]] = {
     "base": NoOp,
-    "cors": Cors,
 }
 
 
@@ -3351,6 +4208,8 @@ def _parse_node(
     only one that needs the fragment table and the recursion guard.
     """
     tag = el.tag
+    if tag == "forward-request" and section_name != "backend":
+        raise HTTPException(status_code=500, detail="forward-request is only supported in the backend section")
     constant = _CONSTANT_ELEMENTS.get(tag)
     if constant is not None:
         return constant()
@@ -3376,11 +4235,13 @@ def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = No
         raise HTTPException(status_code=500, detail="Policies XML must have <policies> root")
 
     fragments = policy_fragments or {}
+    sections_present: set[str] = set()
 
     def section(name: str) -> list[PolicyNode]:
         sec = root.find(name)
         if sec is None:
             return []
+        sections_present.add(name)
         return _parse_children(list(sec), policy_fragments=fragments, section_name=name, seen_fragments=set())
 
     return PolicyDocument(
@@ -3388,6 +4249,7 @@ def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = No
         backend=section("backend"),
         outbound=section("outbound"),
         on_error=section("on-error"),
+        sections_present=frozenset(sections_present),
     )
 
 
@@ -3417,10 +4279,78 @@ async def _apply_steps_async(
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
     for step in steps:
+        req.variables["_policy_step"] = element_name(step)
         out = await step.apply_async(req, runtime)
         if out is not None:
             return out
     return None
+
+
+ScopedStep = tuple[str, PolicyNode]
+
+
+def _replace_base_steps(local: list[PolicyNode], parent: list[ScopedStep], scope: str) -> list[ScopedStep]:
+    """Replace each direct base marker with the effective parent steps."""
+    out: list[ScopedStep] = []
+    for step in local:
+        if isinstance(step, NoOp):
+            out.extend(parent)
+        else:
+            out.append((scope, step))
+    return out
+
+
+def _effective_section_steps(docs: list[PolicyDocument], section_name: str) -> list[ScopedStep]:
+    """Resolve one section across the broad-to-narrow document stack.
+
+    Each step keeps the scope of the document that authored it.
+    """
+    effective: list[ScopedStep] = []
+    section_key = "on-error" if section_name == "on_error" else section_name
+    for doc in docs:
+        # APIM documents explicitly describe omitted base as dropping the
+        # parent. The docs do not distinguish a missing section from an empty
+        # one, so both are treated as a configured section with no base.
+        if section_key not in doc.sections_present:
+            effective = []
+            continue
+        local = getattr(doc, section_name.replace("-", "_"))
+        if any(isinstance(step, NoOp) for step in local):
+            effective = _replace_base_steps(local, effective, doc.scope)
+        else:
+            effective = [(doc.scope, step) for step in local]
+    return effective
+
+
+async def _apply_section_async(
+    docs: list[PolicyDocument],
+    section_name: str,
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None = None,
+) -> ResponseSpec | None:
+    for scope, step in _effective_section_steps(docs, section_name):
+        req.variables["_policy_scope"] = scope
+        req.variables["_policy_step"] = element_name(step)
+        out = await step.apply_async(req, runtime)
+        if out is not None:
+            return out
+    return None
+
+
+def _reads_response_body(step: PolicyNode) -> bool:
+    if isinstance(step, Choose):
+        nested = [item for _cond, steps in step.branches for item in steps] + list(step.otherwise)
+        return any(_reads_response_body(item) for item in nested)
+    return isinstance(step, SetBody | ValidateContent)
+
+
+def outbound_reads_response_body(docs: list[PolicyDocument]) -> bool:
+    """Whether an outbound step needs the response body in memory.
+
+    Streaming leaves the body unread, so set-body and validate-content would see
+    nothing unless the gateway buffers first.
+    """
+    return any(_reads_response_body(step) for _scope, step in _effective_section_steps(docs, "outbound"))
 
 
 async def apply_inbound_async(
@@ -3428,11 +4358,7 @@ async def apply_inbound_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
-    for doc in docs:
-        out = await _apply_steps_async(doc.inbound, req, runtime)
-        if out is not None:
-            return out
-    return None
+    return await _apply_section_async(docs, "inbound", req, runtime)
 
 
 async def apply_backend_async(
@@ -3440,24 +4366,21 @@ async def apply_backend_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
-    for doc in docs:
-        out = await _apply_steps_async(doc.backend, req, runtime)
-        if out is not None:
-            return out
-    return None
+    return await _apply_section_async(docs, "backend", req, runtime)
 
 
 async def apply_outbound_async(
     docs: list[PolicyDocument],
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
-) -> None:
-    for doc in docs:
-        out = await _apply_steps_async(doc.outbound, req, runtime)
-        if out is not None:
-            raise HTTPException(
-                status_code=500, detail="Outbound policies cannot short-circuit responses in the simulator"
-            )
+) -> ResponseSpec | None:
+    """Run the outbound section; a returned spec replaces the response.
+
+    return-response and mock-response are valid in outbound and end the section.
+    https://learn.microsoft.com/en-us/azure/api-management/return-response-policy
+    """
+    req.section = "outbound"
+    return await _apply_section_async(docs, "outbound", req, runtime)
 
 
 async def apply_on_error_async(
@@ -3465,11 +4388,7 @@ async def apply_on_error_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
-    for doc in docs:
-        out = await _apply_steps_async(doc.on_error, req, runtime)
-        if out is not None:
-            return out
-    return None
+    return await _apply_section_async(docs, "on_error", req, runtime)
 
 
 def finalize_deferred_actions(req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:

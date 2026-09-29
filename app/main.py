@@ -16,7 +16,9 @@ import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import GatewayConfig, load_config
+from app.config import GatewayConfig, load_config, validate_policy_config
+from app.cors_preflight import answer_preflight
+from app.gateway_errors import GatewayError, gateway_error_handler
 from app.management_api import build_management_router
 from app.management_service import ManagementService
 from app.proxy import build_user_payload
@@ -413,9 +415,15 @@ def _build_catch_all_router() -> APIRouter:  # noqa: C901 - one branch per route
 
     @router.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
     async def gateway_proxy(full_path: str, request: Request) -> Response:
-        if request.method == "OPTIONS":
-            return Response(status_code=204)
-        return await execute_gateway_request(request)
+        preflight = await answer_preflight(request)
+        if preflight is not None:
+            return preflight
+        try:
+            return await execute_gateway_request(request)
+        except GatewayError:
+            raise
+        except HTTPException as exc:
+            raise GatewayError.from_http_exception(exc) from exc
 
     return router
 
@@ -441,7 +449,8 @@ def _add_observability_middleware(app: FastAPI, telemetry: ObservabilityRuntime)
             )
             raise
         else:
-            response.headers.setdefault("x-correlation-id", correlation_id)
+            if request.app.state.gateway_config.emit_simulator_response_headers:
+                response.headers.setdefault("x-correlation-id", correlation_id)
             duration_seconds = time.perf_counter() - start
             _record_request_observation(request, status_code=response.status_code, duration_seconds=duration_seconds)
             telemetry.logger.info(
@@ -503,9 +512,24 @@ def _build_lifespan(
     return lifespan
 
 
+class _SimulatorCORSMiddleware(CORSMiddleware):
+    """CORS for the simulator's own /apim/* endpoints only.
+
+    Gateway API responses get CORS headers solely from a `cors` policy, as in
+    APIM: https://learn.microsoft.com/en-us/azure/api-management/cors-policy
+    """
+
+    async def __call__(self, scope, receive, send) -> None:
+        path = scope.get("path", "")
+        if scope["type"] == "http" and path != "/apim" and not path.startswith("/apim/"):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
+
 def _add_cors_middleware(app: FastAPI, gateway_config: GatewayConfig) -> None:
     app.add_middleware(
-        CORSMiddleware,
+        _SimulatorCORSMiddleware,
         allow_origins=gateway_config.allowed_origins or ["*"],
         allow_credentials=True,
         allow_methods=["*"],
@@ -533,7 +557,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     is included last and everything else has to be included before it.
     """
     telemetry = configure_observability(service_name=APIM_SERVICE_NAME, service_version=APIM_SERVICE_VERSION)
-    gateway_config = config or load_config()
+    gateway_config = validate_policy_config(config or load_config())
     gateway_config.routes = gateway_config.materialize_routes()
 
     management_plane: ManagementService | None = None
@@ -555,6 +579,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             resolve_manager=_resolve_manager,
         ),
     )
+    app.add_exception_handler(GatewayError, gateway_error_handler)
     management_plane = ManagementService(
         app=app,
         serialize_gateway_config=_serialize_gateway_config,
