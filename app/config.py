@@ -13,6 +13,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.urls import http_url
 
+# APIM creates this global backend policy when no global policy document exists.
+# https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+DEFAULT_GLOBAL_POLICY_XML = "<policies><backend><forward-request /></backend></policies>"
+
 
 class ApiVersioningScheme(StrEnum):
     Header = "Header"

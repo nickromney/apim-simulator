@@ -17,13 +17,13 @@ from app.main import create_app
 from app.urls import http_url
 
 PRODUCT_HEADER_POLICY = (
-    "<policies><inbound /><backend /><outbound>"
+    "<policies><inbound /><backend><forward-request /></backend><outbound>"
     '<set-header name="x-scope" exists-action="override"><value>product</value></set-header>'
     "</outbound><on-error /></policies>"
 )
 
 ROUTE_HEADER_POLICY = (
-    "<policies><inbound /><backend /><outbound>"
+    "<policies><inbound /><backend><forward-request /></backend><outbound>"
     '<set-header name="x-scope" exists-action="override"><value>api</value></set-header>'
     "</outbound><on-error /></policies>"
 )
@@ -31,19 +31,19 @@ ROUTE_HEADER_POLICY = (
 GLOBAL_INBOUND_APPEND_POLICY = (
     "<policies><inbound>"
     '<set-header name="x-scope-order" exists-action="append"><value>global</value></set-header>'
-    "</inbound><backend /><outbound /><on-error /></policies>"
+    "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
 )
 
 API_INBOUND_APPEND_POLICY = (
     "<policies><inbound>"
     '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header>'
-    "</inbound><backend /><outbound /><on-error /></policies>"
+    "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
 )
 
 API_INBOUND_APPEND_WITH_BASE_POLICY = (
     "<policies><inbound>"
     '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header><base />'
-    "</inbound><backend /><outbound /><on-error /></policies>"
+    "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
 )
 
 
@@ -115,12 +115,12 @@ def test_product_policy_runs_before_api_when_api_calls_base_first() -> None:
     product_policy = (
         "<policies><inbound>"
         '<set-header name="x-scope-order" exists-action="append"><value>product</value></set-header>'
-        "</inbound><backend /><outbound /><on-error /></policies>"
+        "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
     )
     api_policy = (
         "<policies><inbound><base />"
         '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header>'
-        "</inbound><backend /><outbound /><on-error /></policies>"
+        "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
     )
     seen: list[str | None] = []
 

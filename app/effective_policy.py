@@ -12,7 +12,7 @@ from xml.etree import ElementTree as XmlTree
 
 from defusedxml import ElementTree
 
-from app.config import GatewayConfig, ProductConfig, RouteConfig
+from app.config import DEFAULT_GLOBAL_POLICY_XML, GatewayConfig, ProductConfig, RouteConfig
 
 EMPTY_POLICY_XML = "<policies><inbound /><backend /><outbound /><on-error /></policies>"
 POLICY_SECTION_NAMES = ("inbound", "backend", "outbound", "on-error")
@@ -44,9 +44,12 @@ def _validate_direct_base(section: Any) -> None:
 
 
 def _merge_section_children(parent: list[Any], source: Any | None) -> list[Any]:
-    """Replace each direct base marker with the already-effective parent."""
+    """Replace each direct base marker with the already-effective parent.
+
+    An omitted section inherits the parent unchanged, as if it held base.
+    """
     if source is None:
-        return []
+        return list(parent)
 
     _validate_direct_base(source)
     merged: list[Any] = []
@@ -151,9 +154,16 @@ def stacked_policy_scopes(
     effective_product_id: str = "",
 ) -> list[tuple[str, str]]:
     """The global -> product -> API -> operation documents, each with its scope label."""
-    scoped: list[tuple[str, str]] = [("global", xml) for xml in cfg.policies_xml_documents]
+    global_documents = [xml for xml in cfg.policies_xml_documents if xml]
     if cfg.policies_xml:
-        scoped.append(("global", cfg.policies_xml))
+        global_documents.append(cfg.policies_xml)
+    scoped: list[tuple[str, str]] = (
+        [("global", xml) for xml in global_documents]
+        if global_documents
+        # APIM creates a global <forward-request /> by default. A config with
+        # no global policy document therefore inherits this backend policy.
+        else [("global", DEFAULT_GLOBAL_POLICY_XML)]
+    )
     if effective_product is not None and effective_product.policies_xml:
         scoped.append((f"product:{effective_product_id}", effective_product.policies_xml))
     scoped.extend(_route_policy_scopes(cfg, route))

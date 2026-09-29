@@ -2,7 +2,7 @@
   <inbound>
     <set-body>{"method":"{method}","path":"{path}"}</set-body>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

@@ -9,7 +9,7 @@
       remaining-calls-header-name="X-Remaining"
       total-calls-header-name="X-Total" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

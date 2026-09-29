@@ -5,7 +5,7 @@
       <value>{var:mode}</value>
     </set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

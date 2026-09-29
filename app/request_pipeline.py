@@ -737,6 +737,38 @@ def _serve_from_cache(
     return cached_response
 
 
+def _serve_cached_exchange(
+    *,
+    cache_key: str | None,
+    request: Request,
+    route: Any,
+    policy_req: PolicyRequest,
+    policy_runtime: Any,
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+    cfg: GatewayConfig,
+    gateway_metrics: Any,
+    correlation_id: str | None,
+    trace_id: str | None,
+) -> Response | None:
+    """Return a cached response when this request has a gateway cache key."""
+    if cache_key is None:
+        return None
+    return _serve_from_cache(
+        cache_key=cache_key,
+        request=request,
+        route=route,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        cfg=cfg,
+        gateway_metrics=gateway_metrics,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+    )
+
+
 @dataclass(frozen=True)
 class _AdmittedRequest:
     """A request that passed the gate: it has a route, an identity and a product."""
@@ -1620,6 +1652,91 @@ async def _guarded_outbound(
     )
 
 
+async def _respond_without_backend(
+    *,
+    policy_docs: list[Any],
+    policy_runtime: Any,
+    request: Request,
+    policy_req: PolicyRequest,
+    cfg: GatewayConfig,
+    correlation_id: str | None,
+    trace_id: str | None,
+    trace_store: dict[str, Any],
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+) -> Response:
+    """Run outbound policies after backend forwarding was intentionally skipped.
+
+    APIM documents that outbound starts after inbound succeeds when no
+    ``forward-request`` is present, but does not document the response when
+    outbound has no ``return-response``. Use the documented default
+    ``return-response`` result: 200 OK with no body.
+    https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy
+    https://learn.microsoft.com/en-us/azure/api-management/return-response-policy
+    """
+    synthetic_response = httpx.Response(200, request=httpx.Request(policy_req.method, "http://apim.local"))
+    synthetic_upstream = _UpstreamPayload(
+        status_code=200,
+        headers={},
+        media_type=None,
+        content=b"",
+        buffered=True,
+    )
+    outbound = await _guarded_outbound(
+        policy_docs=policy_docs,
+        policy_runtime=policy_runtime,
+        request=request,
+        policy_req=policy_req,
+        upstream_response=synthetic_response,
+        upstream=synthetic_upstream,
+        cfg=cfg,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        trace_store=trace_store,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        attempts_used=0,
+        elapsed_seconds=0,
+    )
+    if isinstance(outbound, Response):
+        return outbound
+
+    finalize_deferred_actions(
+        PolicyRequest(
+            method=policy_req.method,
+            path=policy_req.path,
+            query=dict(policy_req.query),
+            headers=dict(policy_req.headers),
+            variables=policy_req.variables,
+            body=policy_req.body,
+            response_status_code=outbound.status_code,
+            response_headers=outbound.headers,
+            response_body=outbound.content,
+            response_media_type=outbound.media_type,
+        ),
+        policy_runtime,
+    )
+    return _uncached_response(
+        request=request,
+        cfg=cfg,
+        upstream_response=synthetic_response,
+        streaming=False,
+        status_code=outbound.status_code,
+        response_headers=outbound.headers,
+        media_type=outbound.media_type,
+        content=outbound.content,
+        attempts_used=0,
+        elapsed_seconds=0,
+        trace=_TraceContext(
+            requested=trace_id is not None,
+            trace_id=trace_id,
+            collector=trace_collector,
+        ),
+        trace_store=trace_store,
+        trace_base=trace_base,
+    )
+
+
 async def _short_circuit_policy_stages(
     *,
     policy_docs: list[Any],
@@ -1809,6 +1926,29 @@ async def execute_gateway_request(request: Request) -> Response:
 
     _enforce_authz_with_policy_claims(request=request, route=route, auth=auth, policy_req=policy_req, cfg=cfg)
 
+    if not policy_req.variables.get("_forward_request_present"):
+        request.state.apim_backend_id = "none"
+        request.state.apim_upstream_attempts = 0
+        request.state.apim_upstream_duration_seconds = 0.0
+        set_current_span_attributes(
+            **{
+                APIM_BACKEND_ID_ATTR: "none",
+                "apim.policy.documents": len(policy_docs),
+            }
+        )
+        return await _respond_without_backend(
+            policy_docs=policy_docs,
+            policy_runtime=policy_runtime,
+            request=request,
+            policy_req=policy_req,
+            cfg=cfg,
+            correlation_id=correlation_id,
+            trace_id=trace_id if trace_requested else None,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
+        )
+
     choice = _choose_backend(
         cfg=cfg,
         route=route,
@@ -1846,22 +1986,21 @@ async def execute_gateway_request(request: Request) -> Response:
         policy_req=policy_req,
         policy_response_cache_active=policy_response_cache_active,
     )
-    if cache_key is not None:
-        hit = _serve_from_cache(
-            cache_key=cache_key,
-            request=request,
-            route=route,
-            policy_req=policy_req,
-            policy_runtime=policy_runtime,
-            trace_base=trace_base,
-            trace_collector=trace_collector,
-            cfg=cfg,
-            gateway_metrics=gateway_metrics,
-            correlation_id=correlation_id,
-            trace_id=trace_id,
-        )
-        if hit is not None:
-            return hit
+    hit = _serve_cached_exchange(
+        cache_key=cache_key,
+        request=request,
+        route=route,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        cfg=cfg,
+        gateway_metrics=gateway_metrics,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+    )
+    if hit is not None:
+        return hit
 
     attempt_result = await _send_upstream_with_retries(
         client=client,
