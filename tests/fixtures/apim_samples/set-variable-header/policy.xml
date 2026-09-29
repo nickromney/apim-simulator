@@ -1,11 +1,11 @@
 <policies>
   <inbound>
-    <set-variable name="mode" value="{query:mode}" />
+    <set-variable name="mode" value="@(context.Request.Url.Query.GetValueOrDefault(&quot;mode&quot;, &quot;&quot;))" />
     <set-header name="x-mode" exists-action="override">
-      <value>{var:mode}</value>
+      <value>@(context.Variables.GetValueOrDefault(&quot;mode&quot;, &quot;&quot;))</value>
     </set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

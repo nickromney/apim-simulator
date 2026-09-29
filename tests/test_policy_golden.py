@@ -244,12 +244,16 @@ def test_golden_policy_quota_enforces_403() -> None:
 
 
 def test_golden_policy_set_variable_renders_into_later_policy_values() -> None:
+    """APIM policy expressions, not simulator-only token syntax, read request data.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+    """
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
-    <set-variable name="mode" value="{query:mode}" />
-    <set-header name="x-mode" exists-action="override"><value>{var:mode}</value></set-header>
+    <set-variable name="mode" value='@(context.Request.Url.Query.GetValueOrDefault("mode", ""))' />
+    <set-header name="x-mode" exists-action="override"><value>@(context.Variables.GetValueOrDefault("mode", ""))</value></set-header>
   </inbound>
   <backend />
   <outbound />
@@ -265,12 +269,16 @@ def test_golden_policy_set_variable_renders_into_later_policy_values() -> None:
 
 
 def test_golden_policy_set_query_parameter_mutates_upstream_query_only() -> None:
+    """APIM request path access uses a policy expression.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+    """
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
     <set-query-parameter name="source" exists-action="override">
-      <value>{path}</value>
+      <value>@(context.Request.Url.Path)</value>
     </set-query-parameter>
   </inbound>
   <backend />
@@ -285,7 +293,11 @@ def test_golden_policy_set_query_parameter_mutates_upstream_query_only() -> None
     assert req.query["source"] == "/api/health"
 
 
-def test_golden_policy_set_body_replaces_request_body() -> None:
+def test_golden_policy_set_body_keeps_literal_braces_literal() -> None:
+    """Literal set-body text is not an undocumented token template.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+    """
     doc = parse_policies_xml(
         """\
 <policies>
@@ -299,28 +311,27 @@ def test_golden_policy_set_body_replaces_request_body() -> None:
 """
     )
     req = PolicyRequest(
-        method="POST",
-        path="/api/items",
-        query={},
-        headers={},
-        variables={"subscription_id": "sub-1"},
-        body=b"original",
+        method="POST", path="/api/items", query={}, headers={}, variables={"subscription_id": "sub-1"}, body=b"original"
     )
     early = apply_inbound([doc], req)
     assert early is None
-    assert req.body == b'{"path":"/api/items","subscription":"sub-1"}'
+    assert req.body == b'{"path":"{path}","subscription":"{subscription_id}"}'
 
 
 def test_golden_policy_return_response_supports_set_body_template() -> None:
+    """Policy expressions provide variable access in literal policy text.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+    """
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
-    <set-variable name="mode" value="{query:mode}" />
+    <set-variable name="mode" value='@(context.Request.Url.Query.GetValueOrDefault("mode", ""))' />
     <return-response>
       <set-status code="200" reason="ok" />
       <set-header name="content-type" exists-action="override"><value>application/json</value></set-header>
-      <set-body>{"mode":"{var:mode}"}</set-body>
+      <set-body>@("{\\&quot;mode\\&quot;:\\&quot;" + context.Variables.GetValueOrDefault("mode", "") + "\\&quot;}")</set-body>
     </return-response>
   </inbound>
   <backend />
@@ -364,11 +375,15 @@ def test_golden_policy_include_fragment_inserts_fragment_nodes() -> None:
 
 
 def test_golden_policy_named_values_resolve_before_template_tokens() -> None:
+    """Named values are resolved in policy values before policy expressions run.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
-    <set-header name="x-backend" exists-action="override"><value>https://{{backend-host}}{path}</value></set-header>
+    <set-header name="x-backend" exists-action="override"><value>@("https://{{backend-host}}" + context.Request.Url.Path)</value></set-header>
   </inbound>
   <backend />
   <outbound />
@@ -385,6 +400,61 @@ def test_golden_policy_named_values_resolve_before_template_tokens() -> None:
 
     assert early is None
     assert req.headers["x-backend"] == "https://backend.example.test/api/health"
+
+
+def test_golden_policy_named_values_resolve_in_attribute_values() -> None:
+    """Named values are substituted in policy attributes before execution.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <set-header name="{{header-name}}" exists-action="override"><value>enabled</value></set-header>
+    <set-query-parameter name="{{query-name}}" exists-action="override"><value>yes</value></set-query-parameter>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+""",
+        gateway_config=GatewayConfig(
+            named_values={
+                "header-name": NamedValueConfig(value="x-feature"),
+                "query-name": NamedValueConfig(value="feature"),
+            }
+        ),
+    )
+    req = PolicyRequest(method="GET", path="/api/health", query={}, headers={}, variables={})
+
+    early = apply_inbound([doc], req)
+
+    assert early is None
+    assert req.headers["x-feature"] == "enabled"
+    assert req.query["feature"] == "yes"
+
+
+def test_golden_policy_named_value_expansion_is_single_pass() -> None:
+    """Named values cannot contain and expand another named value.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    cfg = GatewayConfig(
+        named_values={
+            "outer": NamedValueConfig(value="{{inner}}"),
+            "inner": NamedValueConfig(value="resolved"),
+        }
+    )
+    doc = parse_policies_xml(
+        '<policies><inbound><set-header name="x-value"><value>{{outer}}</value></set-header></inbound></policies>',
+        gateway_config=cfg,
+    )
+    req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
+
+    apply_inbound([doc], req, runtime=PolicyRuntime(gateway_config=cfg))
+
+    assert req.headers["x-value"] == "{{inner}}"
 
 
 def test_golden_policy_parses_policy_parity_v2_nodes() -> None:
@@ -417,6 +487,91 @@ def test_golden_policy_parses_policy_parity_v2_nodes() -> None:
     assert isinstance(doc.inbound[4], CacheRemoveValue)
     assert isinstance(doc.outbound[0], CacheStore)
     assert isinstance(doc.outbound[1], CacheStoreValue)
+
+
+@pytest.mark.parametrize("attribute", ["vary-by-developer", "vary-by-developer-groups"])
+def test_cache_lookup_requires_developer_variation_attributes(attribute: str) -> None:
+    """The cache-lookup developer variation attributes are required by APIM.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    """
+    other = "vary-by-developer-groups" if attribute == "vary-by-developer" else "vary-by-developer"
+    with pytest.raises(HTTPException, match=f"cache-lookup requires {attribute}"):
+        parse_policies_xml(
+            f"""\
+<policies>
+  <inbound><cache-lookup {other}="false" /></inbound>
+</policies>
+"""
+        )
+
+
+@pytest.mark.parametrize(
+    ("element", "attribute", "value", "message"),
+    [
+        ("cache-lookup-value", "caching-type", "unknown", "Unsupported caching-type unknown"),
+        ("cache-store-value", "caching-type", "unknown", "Unsupported caching-type unknown"),
+        ("cache-remove-value", "caching-type", "unknown", "Unsupported caching-type unknown"),
+        ("cache-lookup", "downstream-caching-type", "unknown", "Unsupported downstream-caching-type unknown"),
+    ],
+)
+def test_cache_policies_reject_unknown_enum_values(element: str, attribute: str, value: str, message: str) -> None:
+    """Cache policy enum attributes accept only the documented values.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-value-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-store-value-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-remove-value-policy
+    """
+    if element == "cache-lookup":
+        attrs = f'{attribute}="{value}" vary-by-developer="false" vary-by-developer-groups="false"'
+    elif element == "cache-lookup-value":
+        attrs = f'{attribute}="{value}" key="key" variable-name="value"'
+    elif element == "cache-store-value":
+        attrs = f'{attribute}="{value}" key="key" value="value" duration="60"'
+    else:
+        attrs = f'{attribute}="{value}" key="key"'
+    with pytest.raises(HTTPException, match=message):
+        parse_policies_xml(f"<policies><inbound><{element} {attrs} /></inbound></policies>")
+
+
+def test_cache_remove_value_honours_fail_on_removal_error() -> None:
+    """cache-remove-value can fail the request when cache removal fails.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-remove-value-policy
+    """
+
+    class FailingCache(dict[str, object]):
+        def pop(self, key: str, default: object = None) -> object:
+            raise RuntimeError(f"cannot remove {key}")
+
+    req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
+    runtime = PolicyRuntime(value_cache=FailingCache())
+    with pytest.raises(RuntimeError, match="cannot remove key"):
+        CacheRemoveValue(key="key", fail_on_cache_removal_error="true").apply(req, runtime)
+    assert CacheRemoveValue(key="key", fail_on_cache_removal_error="false").apply(req, runtime) is None
+
+
+def test_cache_store_value_duration_is_seconds_and_expires_at_boundary() -> None:
+    """cache-store-value duration is measured in seconds.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-store-value-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-value-policy
+    """
+    now = [100.0]
+    runtime = PolicyRuntime(value_cache={}, clock=lambda: now[0])
+    store_request = PolicyRequest(method="POST", path="/", query={}, headers={}, variables={})
+    CacheStoreValue(key="key", value="value", duration="2", caching_type="internal").apply(store_request, runtime)
+
+    now[0] = 101.0
+    hit_request = PolicyRequest(method="POST", path="/", query={}, headers={}, variables={})
+    CacheLookupValue(key="key", variable_name="cached", caching_type="internal").apply(hit_request, runtime)
+    assert hit_request.variables["cached"] == "value"
+
+    now[0] = 102.0
+    expired_request = PolicyRequest(method="POST", path="/", query={}, headers={}, variables={})
+    CacheLookupValue(key="key", variable_name="cached", caching_type="internal").apply(expired_request, runtime)
+    assert "cached" not in expired_request.variables
 
 
 @pytest.mark.contract("POLICY-EMIT-METRIC")

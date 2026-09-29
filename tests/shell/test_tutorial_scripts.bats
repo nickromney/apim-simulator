@@ -173,7 +173,7 @@ case "$url" in
     if [[ "$method" == "PUT" ]]; then
       if [[ "$data" == *"x-from-vscode"* ]]; then
         printf 'vscode\n' >"$policy_file"
-        response_body='{"scope_type":"api","scope_name":"tutorial-api","xml":"<policies><inbound /><backend /><outbound><set-header name=\"x-from-vscode\" exists-action=\"override\"><value>true</value></set-header></outbound><on-error /></policies>"}'
+    response_body='{"scope_type":"api","scope_name":"tutorial-api","xml":"<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-from-vscode\" exists-action=\"override\"><value>true</value></set-header></outbound><on-error /></policies>"}'
       else
         printf 'rate-limit\n' >"$policy_file"
         printf '0\n' >"$rate_limit_file"
@@ -181,7 +181,7 @@ case "$url" in
       fi
     else
       if [[ -f "$policy_file" ]] && [[ "$(cat "$policy_file")" == "vscode" ]]; then
-        response_body='{"scope_type":"api","scope_name":"tutorial-api","xml":"<policies><inbound /><backend /><outbound><set-header name=\"x-from-vscode\" exists-action=\"override\"><value>true</value></set-header></outbound><on-error /></policies>"}'
+        response_body='{"scope_type":"api","scope_name":"tutorial-api","xml":"<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-from-vscode\" exists-action=\"override\"><value>true</value></set-header></outbound><on-error /></policies>"}'
       else
         response_body='{"scope_type":"api","scope_name":"tutorial-api","xml":"<policies><inbound><rate-limit-by-key calls=\"3\" renewal-period=\"15\" counter-key=\"@(context.Subscription.Id)\" /><base /></inbound><backend><base /></backend><outbound><set-header name=\"Custom\" exists-action=\"override\"><value>My custom value</value></set-header><base /></outbound><on-error><base /></on-error></policies>"}'
       fi

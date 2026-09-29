@@ -773,7 +773,7 @@ def test_rate_limit_policy_returns_429_on_second_call() -> None:
   <inbound>
     <rate-limit calls="1" renewal-period="300" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1022,7 +1022,7 @@ def test_policy_inbound_set_header_modifies_upstream_request() -> None:
       <value>1</value>
     </set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1057,7 +1057,7 @@ def test_policy_inbound_rewrite_uri_modifies_upstream_path() -> None:
   <inbound>
     <rewrite-uri template="/api/v1/other" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1099,7 +1099,7 @@ def test_policy_choose_when_selects_branch() -> None:
       </otherwise>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1138,7 +1138,7 @@ def test_policy_return_response_short_circuits_upstream() -> None:
       <body>nope</body>
     </return-response>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1261,7 +1261,7 @@ def test_full_model_api_and_operation_policies_stack() -> None:
   <inbound>
     <set-header name="x-api" exists-action="override"><value>1</value></set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1272,7 +1272,7 @@ def test_full_model_api_and_operation_policies_stack() -> None:
     <set-header name="x-op" exists-action="override"><value>1</value></set-header>
     <base />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -3148,7 +3148,7 @@ def test_management_crud_persists_api_authored_resources(tmp_path: Path, monkeyp
                 "upstream_base_url": _http_url("weather-backend"),
                 "backend": "weather-backend",
                 "products": ["starter"],
-                "policies_xml": "<policies><inbound><base /></inbound><backend /><outbound /><on-error /></policies>",
+                "policies_xml": "<policies><inbound><base /></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
             },
         )
         operation = client.put(
@@ -3271,6 +3271,31 @@ def test_management_subscription_crud_endpoints_delegate_through_management_plan
     assert deleted.json() == {"deleted": True, "subscription_id": "demo", "remaining": 0}
 
 
+def test_management_subscription_payload_exposes_api_scope() -> None:
+    """Management subscription payloads expose the configured APIM scope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/apim/management/subscriptions",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={"id": "api-sub", "name": "API", "scope": "api", "api_id": "weather"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == "api"
+    assert response.json()["api_id"] == "weather"
+    assert response.json()["products"] == []
+
+
 def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monkeypatch) -> None:
     issuer = _http_url("issuer.example")
     audience = "api-app"
@@ -3350,7 +3375,7 @@ def test_management_policy_get_put_updates_route_policy_in_memory() -> None:
     policy_xml = """\
 <policies>
   <inbound />
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -3389,7 +3414,7 @@ def test_management_policy_get_put_updates_route_policy_in_memory() -> None:
   <inbound>
     <set-header name="x-managed" exists-action="override"><value>1</value></set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -3939,7 +3964,7 @@ def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> N
       </required-claims>
     </validate-jwt>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4011,7 +4036,7 @@ def test_send_request_policy_can_branch_on_response_body() -> None:
       </when>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4057,7 +4082,7 @@ def test_set_backend_service_policy_switches_backend_by_query() -> None:
       </when>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4106,7 +4131,7 @@ def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> N
       remaining-calls-variable-name="remaining_calls"
       total-calls-header-name="X-Total" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4155,7 +4180,7 @@ def test_rate_limit_by_key_supports_context_subscription_id_expression() -> None
     <rate-limit-by-key calls="1" renewal-period="60" counter-key="@(context.Subscription.Id)" />
     <base />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <set-header name="Custom" exists-action="override">
       <value>My custom value</value>
@@ -4229,7 +4254,7 @@ def test_quota_by_key_respects_first_period_start(monkeypatch: Any) -> None:
       counter-key="@(context.Request.IpAddress)"
       first-period-start="2026-04-02T10:00:00Z" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4262,6 +4287,11 @@ def test_quota_by_key_respects_first_period_start(monkeypatch: Any) -> None:
 
 
 def test_cache_lookup_and_store_hit_and_vary_by_query_parameter() -> None:
+    """Response caching varies by the configured query parameter.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    https://learn.microsoft.com/en-us/azure/api-management/cache-store-policy
+    """
     policy = """\
 <policies>
   <inbound>
@@ -4274,7 +4304,7 @@ def test_cache_lookup_and_store_hit_and_vary_by_query_parameter() -> None:
       <vary-by-query-parameter>version</vary-by-query-parameter>
     </cache-lookup>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <cache-store duration="60" />
   </outbound>
@@ -4312,6 +4342,10 @@ def test_cache_lookup_and_store_hit_and_vary_by_query_parameter() -> None:
 
 
 def test_cache_lookup_varies_by_developer_subscription() -> None:
+    """Response caching varies by the developer who owns each subscription.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    """
     policy = """\
 <policies>
   <inbound>
@@ -4322,7 +4356,7 @@ def test_cache_lookup_varies_by_developer_subscription() -> None:
       downstream-caching-type="private"
       must-revalidate="true" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <cache-store duration="60" />
   </outbound>
@@ -4343,10 +4377,16 @@ def test_cache_lookup_varies_by_developer_subscription() -> None:
                 required=True,
                 subscriptions={
                     "a": Subscription(
-                        id="sub-a", name="A", keys=SubscriptionKeyPair(primary="key-a", secondary="key-a-2")
+                        id="sub-a",
+                        name="A",
+                        keys=SubscriptionKeyPair(primary="key-a", secondary="key-a-2"),
+                        created_by="developer-a",
                     ),
                     "b": Subscription(
-                        id="sub-b", name="B", keys=SubscriptionKeyPair(primary="key-b", secondary="key-b-2")
+                        id="sub-b",
+                        name="B",
+                        keys=SubscriptionKeyPair(primary="key-b", secondary="key-b-2"),
+                        created_by="developer-b",
                     ),
                 },
             ),
@@ -4367,6 +4407,295 @@ def test_cache_lookup_varies_by_developer_subscription() -> None:
     assert third.json() == {"call": 2}
     assert call_count["value"] == 2
     assert second.headers["cache-control"] == "private, must-revalidate"
+
+
+def test_cache_lookup_same_developer_shares_subscriptions() -> None:
+    """vary-by-developer keys by the subscription owner's developer account.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    """
+    policy = """\
+<policies>
+  <inbound>
+    <cache-lookup vary-by-developer="true" vary-by-developer-groups="false" caching-type="internal" />
+  </inbound>
+  <backend><forward-request /></backend>
+  <outbound><cache-store duration="60" /></outbound>
+  <on-error />
+</policies>
+"""
+    call_count = {"value": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            subscription=SubscriptionConfig(
+                required=True,
+                subscriptions={
+                    "a": Subscription(
+                        id="sub-a",
+                        name="A",
+                        keys=SubscriptionKeyPair(primary="key-a", secondary="key-a-2"),
+                        created_by="same-developer",
+                    ),
+                    "b": Subscription(
+                        id="sub-b",
+                        name="B",
+                        keys=SubscriptionKeyPair(primary="key-b", secondary="key-b-2"),
+                        created_by="same-developer",
+                    ),
+                },
+            ),
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/catalog", headers={"Ocp-Apim-Subscription-Key": "key-a"})
+        second = client.get("/api/catalog", headers={"Ocp-Apim-Subscription-Key": "key-b"})
+
+    assert first.json() == {"call": 1}
+    assert second.json() == {"call": 1}
+    assert call_count["value"] == 1
+
+
+def test_cache_lookup_varies_by_groups_of_subscription_owner() -> None:
+    """vary-by-developer-groups uses groups belonging to the subscription owner.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    """
+    policy = """\
+<policies>
+  <inbound>
+    <cache-lookup vary-by-developer="false" vary-by-developer-groups="true" caching-type="internal" />
+  </inbound>
+  <backend><forward-request /></backend>
+  <outbound><cache-store duration="60" /></outbound>
+  <on-error />
+</policies>
+"""
+    call_count = {"value": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            groups={"team": GroupConfig(id="team", name="Team", users=["owner-a"])},
+            subscription=SubscriptionConfig(
+                required=True,
+                subscriptions={
+                    "a": Subscription(
+                        id="sub-a",
+                        name="A",
+                        keys=SubscriptionKeyPair(primary="key-a", secondary="key-a-2"),
+                        created_by="owner-a",
+                    ),
+                    "b": Subscription(
+                        id="sub-b",
+                        name="B",
+                        keys=SubscriptionKeyPair(primary="key-b", secondary="key-b-2"),
+                        created_by="owner-b",
+                    ),
+                },
+            ),
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/catalog", headers={"Ocp-Apim-Subscription-Key": "key-a"})
+        second = client.get("/api/catalog", headers={"Ocp-Apim-Subscription-Key": "key-b"})
+
+    assert first.json() == {"call": 1}
+    assert second.json() == {"call": 2}
+    assert call_count["value"] == 2
+
+
+def test_cache_lookup_uses_headers_and_query_after_inbound_mutations() -> None:
+    """Cache variation reads the request state after earlier policies run.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    https://learn.microsoft.com/en-us/azure/api-management/set-header-policy
+    https://learn.microsoft.com/en-us/azure/api-management/set-query-parameter-policy
+    """
+    policy = """\
+<policies>
+  <inbound>
+    <set-header name="x-cache-vary" exists-action="override"><value>@(context.Request.Headers.GetValueOrDefault("x-input", ""))</value></set-header>
+    <set-query-parameter name="cache-vary" exists-action="override"><value>@(context.Request.Url.Query.GetValueOrDefault("input", ""))</value></set-query-parameter>
+    <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" caching-type="internal">
+      <vary-by-header>x-cache-vary</vary-by-header>
+      <vary-by-query-parameter>cache-vary</vary-by-query-parameter>
+    </cache-lookup>
+  </inbound>
+  <backend><forward-request /></backend>
+  <outbound><cache-store duration="60" /></outbound>
+  <on-error />
+</policies>
+"""
+    call_count = {"value": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/catalog?input=one", headers={"x-input": "one"})
+        same = client.get("/api/catalog?input=one", headers={"x-input": "one"})
+        different = client.get("/api/catalog?input=two", headers={"x-input": "two"})
+
+    assert first.json() == {"call": 1}
+    assert same.json() == {"call": 1}
+    assert different.json() == {"call": 2}
+    assert call_count["value"] == 2
+
+
+def test_cache_lookup_authorization_added_by_policy_disables_private_cache() -> None:
+    """Authorization prevents caching unless private response caching is allowed.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    """
+    policy = """\
+<policies>
+  <inbound>
+    <set-header name="authorization" exists-action="override"><value>Bearer injected</value></set-header>
+    <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" caching-type="internal" />
+  </inbound>
+  <backend><forward-request /></backend>
+  <outbound><cache-store duration="60" /></outbound>
+  <on-error />
+</policies>
+"""
+    call_count = {"value": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/catalog")
+        second = client.get("/api/catalog")
+
+    assert first.json() == {"call": 1}
+    assert second.json() == {"call": 2}
+    assert call_count["value"] == 2
+
+
+@pytest.mark.parametrize("cache_response", [None, "true"])
+def test_cache_store_status_default_and_cache_response_override(cache_response: str | None) -> None:
+    """cache-store caches only 200 by default, or any response when enabled.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cache-store-policy
+    """
+    cache_attribute = "" if cache_response is None else f' cache-response="{cache_response}"'
+    policy = f"""\
+<policies>
+  <inbound>
+    <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" caching-type="internal" />
+  </inbound>
+  <backend><forward-request /></backend>
+  <outbound><cache-store duration="60"{cache_attribute} /></outbound>
+  <on-error />
+</policies>
+"""
+    call_count = {"value": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(201, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.get("/api/catalog")
+        second = client.get("/api/catalog")
+
+    assert first.json() == {"call": 1}
+    assert second.json() == {"call": 1 if cache_response else 2}
+    assert call_count["value"] == (1 if cache_response else 2)
+
+
+def test_cache_lookup_get_with_body_is_still_method_eligible() -> None:
+    """APIM documents GET-only lookup but is silent about a GET request body.
+
+    The simulator follows the documented method check and does not add an
+    undocumented body-based exclusion.
+    https://learn.microsoft.com/en-us/azure/api-management/cache-lookup-policy
+    """
+    policy = """\
+<policies>
+  <inbound>
+    <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" caching-type="internal" />
+  </inbound>
+  <backend><forward-request /></backend>
+  <outbound><cache-store duration="60" /></outbound>
+  <on-error />
+</policies>
+"""
+    call_count = {"value": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        call_count["value"] += 1
+        return httpx.Response(200, json={"call": call_count["value"]})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            routes=[
+                RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        first = client.request("GET", "/api/catalog", content=b"request-body")
+        second = client.request("GET", "/api/catalog", content=b"request-body")
+
+    assert first.json() == {"call": 1}
+    assert second.json() == {"call": 1}
+    assert call_count["value"] == 1
 
 
 def test_gateway_response_cache_hit_with_trace_headers() -> None:
@@ -4512,7 +4841,7 @@ def test_cache_lookup_value_store_and_remove_value() -> None:
       </when>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <cache-store-value key="@(context.Request.Headers.GetValueOrDefault(&quot;x-user&quot;,&quot;&quot;))" value="warm" duration="60" />
   </outbound>
@@ -4559,7 +4888,7 @@ def test_external_cache_policy_is_unsupported_at_runtime() -> None:
   <inbound>
     <cache-lookup-value key="demo" variable-name="value" caching-type="external" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

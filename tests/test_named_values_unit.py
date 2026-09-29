@@ -23,6 +23,7 @@ from app.named_values import (
     resolve_named_value,
     resolve_named_values_in_text,
     secret_named_value_map,
+    validate_named_value_references,
 )
 
 
@@ -174,6 +175,28 @@ def test_an_unknown_or_unresolved_name_is_left_exactly_as_written() -> None:
 
     assert resolve_named_values_in_text("{{absent}}", cfg) == "{{absent}}"
     assert resolve_named_values_in_text("{{token}}", cfg) == "{{token}}"
+
+
+def test_named_values_are_single_pass_and_do_not_nest() -> None:
+    """Named values containing another reference are not recursively expanded.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    cfg = _config(
+        outer=NamedValueConfig(value="{{inner}}"),
+        inner=NamedValueConfig(value="resolved"),
+    )
+
+    assert resolve_named_values_in_text("{{outer}}", cfg) == "{{inner}}"
+
+
+def test_policy_named_value_validation_rejects_unknown_references() -> None:
+    """A policy may reference only named values declared in the service.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    with pytest.raises(ValueError, match="unknown named value"):
+        validate_named_value_references("<set-body>{{missing}}</set-body>", _config())
 
 
 # --- which values count as secrets -----------------------------------------

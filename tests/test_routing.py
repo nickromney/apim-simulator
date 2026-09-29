@@ -108,7 +108,7 @@ def test_query_template_is_required_and_matched_parameters_reach_policies() -> N
       <value>@(context.Request.MatchedParameters.GetValueOrDefault("term", ""))</value>
     </set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

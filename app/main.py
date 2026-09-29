@@ -308,6 +308,7 @@ def _reset_runtime_stores(app: FastAPI) -> None:
     """Give the app the empty per-process stores the pipeline expects."""
     app.state.cache = {}
     app.state.policy_cache = {}
+    app.state.policy_openid_cache = {}
     app.state.policy_response_cache = {}
     app.state.policy_value_cache = {}
     app.state.rate_limit_store = {}

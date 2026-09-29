@@ -10,9 +10,6 @@ if TYPE_CHECKING:
     from app.policy import PolicyRequest
 
 
-CAST_PATTERN = re.compile(r"\((?:string|bool|IResponse|Jwt|JObject)\)")
-
-
 class ExpressionMap(dict[str, Any]):
     def __init__(self, data: dict[str, Any] | None = None):
         super().__init__()
@@ -37,19 +34,24 @@ class ExpressionMap(dict[str, Any]):
     def GetValueOrDefault(self, key: str, default: Any = "") -> Any:
         return self.get(key, default)
 
+    def ContainsKey(self, key: str) -> bool:
+        return key in self
+
 
 class CalloutBody:
     def __init__(self, content: bytes):
         self._content = content
 
     def AsJObject(self) -> dict[str, Any]:
-        if not self._content:
-            return {}
         try:
             payload = json.loads(self._content.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return {}
-        return payload if isinstance(payload, dict) else {}
+            # Microsoft documents the runtime exception, but not its exact message.
+            raise ValueError("The body is not valid JSON.") from None
+        if not isinstance(payload, dict):
+            # A JSON value that is not an object cannot be returned as JObject.
+            raise ValueError("The body is not valid JSON.")
+        return payload
 
     def AsString(self) -> str:
         return self._content.decode("utf-8", errors="replace")
@@ -143,6 +145,7 @@ class ExpressionContext:
 
 ALLOWED_AST_NODES = (
     ast.Expression,
+    ast.IfExp,
     ast.BoolOp,
     ast.BinOp,
     ast.UnaryOp,
@@ -176,7 +179,17 @@ ALLOWED_AST_NODES = (
     ast.UAdd,
 )
 
-ALLOWED_FUNCTIONS = {"split_last", "str", "len"}
+ALLOWED_FUNCTIONS = {
+    "split_last",
+    "str",
+    "len",
+    "_csharp_contains",
+    "_csharp_equals",
+    "_csharp_length",
+    "_csharp_tostring",
+    "_csharp_divide",
+    "_dict_contains_key",
+}
 
 
 def _normalize_request(req: PolicyRequest) -> _ExpressionRequest:
@@ -245,99 +258,507 @@ def _strip_outer_expression(text: str) -> str:
     return stripped
 
 
-def _render_interpolated(text: str, context: ExpressionContext) -> str:
+def _advance_quoted(text: str, position: int, quote: str) -> tuple[int, str]:
+    if text[position] == "\\":
+        return position + 2, quote
+    if text[position] == quote:
+        return position + 1, ""
+    return position + 1, quote
+
+
+def _interpolation_end(text: str, start: int) -> int:
+    depth = 1
+    quote = ""
+    i = start
+    while i < len(text):
+        char = text[i]
+        if quote:
+            i, quote = _advance_quoted(text, i, quote)
+            continue
+        elif char in {'"', "'"}:
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    raise ValueError("Unclosed interpolation expression")
+
+
+def _render_interpolated(text: str, context: ExpressionContext, locals_: dict[str, Any] | None = None) -> str:
     out: list[str] = []
     i = 0
     while i < len(text):
-        # Every "{" opens an expression. A "{" whose predecessor is also "{"
-        # is unreachable here: the earlier one opened an expression and moved
-        # the cursor past it. Escaped "{{" is therefore not supported.
-        if text[i] == "{":
-            depth = 1
-            j = i + 1
-            while j < len(text) and depth:
-                if text[j] == "{":
-                    depth += 1
-                elif text[j] == "}":
-                    depth -= 1
-                j += 1
-            if depth:
-                raise ValueError("Unclosed interpolation expression")
-            out.append(str(evaluate_apim_expression(text[i + 1 : j - 1], context)))
-            i = j
-            continue
-        out.append(text[i])
-        i += 1
+        if text.startswith("{{", i):
+            out.append("{")
+            i += 2
+        elif text.startswith("}}", i):
+            out.append("}")
+            i += 2
+        elif text[i] == "{":
+            end = _interpolation_end(text, i + 1)
+            out.append(str(_evaluate_expression(text[i + 1 : end], context, locals_)))
+            i = end + 1
+        else:
+            out.append(text[i])
+            i += 1
     return "".join(out)
 
 
-def _translate_expression(expr: str) -> str:
-    translated = CAST_PATTERN.sub("", expr)
+def _rewrite_outside_strings(text: str, rewrite: Any) -> str:
+    pieces: list[str] = []
+    outside: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if quote:
+            pieces.append(char)
+            if char == "\\" and i + 1 < len(text):
+                pieces.append(text[i + 1])
+                i += 2
+                continue
+            if char == quote:
+                quote = ""
+        elif char in {'"', "'"}:
+            if outside:
+                pieces.append(rewrite("".join(outside)))
+                outside = []
+            pieces.append(char)
+            quote = char
+        else:
+            outside.append(char)
+        i += 1
+    if outside:
+        pieces.append(rewrite("".join(outside)))
+    return "".join(pieces)
+
+
+def _replace_generic_call(match: re.Match[str]) -> str:
+    method = match.group(1)
+    type_name = match.group(2)
+    if method == "As" and type_name == "JObject":
+        return "AsJObject"
+    if method == "As" and type_name == "string":
+        return "AsString"
+    return method
+
+
+def _translate_code_fragment(fragment: str) -> str:
+    translated = re.sub(r"\((?:string|bool|IResponse|Jwt|JObject)\)", "", fragment)
+    translated = re.sub(r"(?<![\w.)])(-?\d+)\.ToString\(\)", r"str(\1)", translated)
+    translated = re.sub(
+        r"\b(GetValueOrDefault|As)<([A-Za-z][\w.]*)>",
+        _replace_generic_call,
+        translated,
+    )
     translated = re.sub(r"\btrue\b", "True", translated, flags=re.IGNORECASE)
     translated = re.sub(r"\bfalse\b", "False", translated, flags=re.IGNORECASE)
-    translated = translated.replace("&&", " and ")
-    translated = translated.replace("||", " or ")
-    # Spacing "!=" apart keeps the negation rewrite below from reading a
-    # following "!" as the tail of an "=". No parseable expression can tell the
-    # difference; see the note in tests/test_apim_expr_unit.py.
+    translated = translated.replace("&&", " and ").replace("||", " or ")
     translated = translated.replace("!=", " != ")
     translated = re.sub(r"(?<![=!<>])!(?!=)", " not ", translated)
-    translated = translated.replace("context.Request.Headers.GetValueOrDefault", "context.request.headers_get")
-    translated = translated.replace("context.Request.Url.Query.GetValueOrDefault", "context.request.query_get")
-    translated = translated.replace(
-        "context.Request.MatchedParameters.GetValueOrDefault", "context.request.matched_parameters_get"
+    replacements = (
+        ("context.Request.Headers.GetValueOrDefault", "context.request.headers_get"),
+        ("context.Request.Url.Query.GetValueOrDefault", "context.request.query_get"),
+        ("context.Request.MatchedParameters.GetValueOrDefault", "context.request.matched_parameters_get"),
+        ("context.Request.MatchedParameters", "context.request.matched_parameters"),
+        ("context.Request.OriginalUrl.Host", "context.request.original_host"),
+        ("context.Request.IpAddress", "context.request.ip_address"),
+        ("context.Request.Url.Path", "context.request.path"),
+        ("context.Request.Method", "context.request.method"),
+        ("context.Response.Headers.GetValueOrDefault", "context.response.headers_get"),
+        ("context.Response.StatusCode", "context.response.status_code"),
+        ("context.Subscription.Id", "context.subscription.id"),
+        ("context.Variables.GetValueOrDefault", "context.variables_get"),
+        ("context.Variables", "context.variables"),
+        (".Split(", ".split("),
+        (".Last()", "[-1]"),
     )
-    translated = translated.replace("context.Request.MatchedParameters", "context.request.matched_parameters")
-    translated = translated.replace("context.Request.OriginalUrl.Host", "context.request.original_host")
-    translated = translated.replace("context.Request.IpAddress", "context.request.ip_address")
-    translated = translated.replace("context.Request.Url.Path", "context.request.path")
-    translated = translated.replace("context.Request.Method", "context.request.method")
-    translated = translated.replace("context.Response.Headers.GetValueOrDefault", "context.response.headers_get")
-    translated = translated.replace("context.Response.StatusCode", "context.response.status_code")
-    translated = translated.replace("context.Subscription.Id", "context.subscription.id")
-    translated = translated.replace("context.Variables.GetValueOrDefault", "context.variables_get")
-    translated = translated.replace("context.Variables[", "context.variables[")
-    translated = translated.replace(".Body.As<JObject>()", ".Body.AsJObject()")
-    translated = translated.replace(".Body.As<string>()", ".Body.AsString()")
-    translated = translated.replace(".Split(", ".split(")
-    translated = translated.replace(".StartsWith(", ".startswith(")
-    translated = translated.replace(".Trim()", ".strip()")
-    translated = translated.replace(".ToString()", "")
-    translated = translated.replace(".Last()", "[-1]")
-    # A leading "!" becomes " not ", and ast.parse reads the leading space as an
-    # indent rather than as whitespace: "@(!false)" raised IndentationError.
+    for source, target in replacements:
+        translated = translated.replace(source, target)
     return translated.strip()
 
 
-def _validate_ast(expression: str) -> None:
-    tree = ast.parse(expression, mode="eval")
+def _translate_expression(expr: str) -> str:
+    translated = _rewrite_outside_strings(expr, _translate_code_fragment)
+    return _translate_ternary(translated).strip()
+
+
+def _update_levels(char: str, levels: dict[str, int]) -> bool:
+    closing = {")": "(", "]": "[", "}": "{"}
+    if char in levels:
+        levels[char] += 1
+        return True
+    if char in closing:
+        levels[closing[char]] -= 1
+        return True
+    return False
+
+
+def _find_top_level_question(expression: str) -> int:
+    levels = {"(": 0, "[": 0, "{": 0}
+    quote = ""
+    position = 0
+    while position < len(expression):
+        char = expression[position]
+        if quote:
+            position, quote = _advance_quoted(expression, position, quote)
+            continue
+        if char in {'"', "'"}:
+            quote = char
+        elif not _update_levels(char, levels) and char == "?" and not any(levels.values()):
+            return position
+        position += 1
+    return -1
+
+
+def _find_ternary_colon(expression: str, question: int) -> int:
+    nested = 0
+    quote = ""
+    position = question + 1
+    while position < len(expression):
+        char = expression[position]
+        if quote:
+            position, quote = _advance_quoted(expression, position, quote)
+            continue
+        if char in {'"', "'"}:
+            quote = char
+        elif char == "?":
+            nested += 1
+        elif char == ":":
+            if nested == 0:
+                return position
+            nested -= 1
+        position += 1
+    return -1
+
+
+def _find_ternary_parts(expression: str) -> tuple[str, str, str] | None:
+    question = _find_top_level_question(expression)
+    if question < 0:
+        return None
+    colon = _find_ternary_colon(expression, question)
+    if colon < 0:
+        raise SyntaxError("Conditional operator is missing ':'")
+    return expression[:question], expression[question + 1 : colon], expression[colon + 1 :]
+
+
+def _translate_ternary(expression: str) -> str:
+    parts = _find_ternary_parts(expression)
+    if parts is None:
+        return expression
+    condition, consequent, alternative = parts
+    return (
+        f"({_translate_ternary(consequent)} if {_translate_ternary(condition)} else {_translate_ternary(alternative)})"
+    )
+
+
+def _csharp_contains(value: Any, needle: Any) -> bool:
+    return needle in value
+
+
+def _csharp_equals(value: Any, other: Any) -> bool:
+    return value == other
+
+
+def _csharp_length(value: Any) -> int:
+    return len(value)
+
+
+def _csharp_tostring(value: Any) -> str:
+    return str(value)
+
+
+def _csharp_divide(left: Any, right: Any) -> Any:
+    if isinstance(left, int) and not isinstance(left, bool) and isinstance(right, int) and not isinstance(right, bool):
+        return int(left / right)
+    return left / right
+
+
+def _dict_contains_key(value: Any, key: Any) -> bool:
+    return key in value
+
+
+class _CSharpAstTransformer(ast.NodeTransformer):
+    _methods = {
+        "Contains": "_csharp_contains",
+        "Equals": "_csharp_equals",
+        "ToString": "_csharp_tostring",
+        "ContainsKey": "_dict_contains_key",
+    }
+    _aliases = {
+        "StartsWith": "startswith",
+        "EndsWith": "endswith",
+        "ToUpper": "upper",
+        "ToLower": "lower",
+        "Trim": "strip",
+    }
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+        node = self.generic_visit(node)
+        if node.attr != "Length":
+            return node
+        return ast.copy_location(
+            ast.Call(func=ast.Name(id="_csharp_length", ctx=ast.Load()), args=[node.value], keywords=[]),
+            node,
+        )
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        node = self.generic_visit(node)
+        if not isinstance(node.func, ast.Attribute):
+            return node
+        helper = self._methods.get(node.func.attr)
+        if helper is not None:
+            args = [node.func.value, *node.args]
+            return ast.copy_location(
+                ast.Call(func=ast.Name(id=helper, ctx=ast.Load()), args=args, keywords=[]),
+                node,
+            )
+        alias = self._aliases.get(node.func.attr)
+        if alias is not None:
+            node.func.attr = alias
+        return node
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        node = self.generic_visit(node)
+        if not isinstance(node.op, ast.Div):
+            return node
+        return ast.copy_location(
+            ast.Call(
+                func=ast.Name(id="_csharp_divide", ctx=ast.Load()),
+                args=[node.left, node.right],
+                keywords=[],
+            ),
+            node,
+        )
+
+
+def _validate_ast(expression: str, allowed_names: set[str] | None = None) -> ast.Expression:
+    tree = _CSharpAstTransformer().visit(ast.parse(expression, mode="eval"))
+    ast.fix_missing_locations(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ALLOWED_AST_NODES):
             raise ValueError(f"Unsupported expression syntax: {type(node).__name__}")
         if isinstance(node, ast.Name):
             # "True" and "False" parse as ast.Constant, never as ast.Name, so
             # they do not need naming here.
-            if node.id != "context" and node.id not in ALLOWED_FUNCTIONS:
+            names = ALLOWED_FUNCTIONS | (allowed_names or set())
+            if node.id != "context" and node.id not in names:
                 raise ValueError(f"Unsupported expression name: {node.id}")
+    return tree
+
+
+@dataclass(frozen=True)
+class _CSharpSimple:
+    text: str
+
+
+@dataclass(frozen=True)
+class _CSharpBlock:
+    statements: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class _CSharpIf:
+    condition: str
+    when_true: _CSharpBlock
+    when_false: _CSharpBlock | None
+
+
+@dataclass(frozen=True)
+class _CSharpReturn:
+    value: Any
+
+
+def _skip_space(text: str, position: int) -> int:
+    while position < len(text) and text[position].isspace():
+        position += 1
+    return position
+
+
+def _balanced_end(text: str, start: int, opening: str, closing: str) -> int:
+    depth = 1
+    quote = ""
+    position = start + 1
+    while position < len(text):
+        char = text[position]
+        if quote:
+            position, quote = _advance_quoted(text, position, quote)
+            continue
+        elif char in {'"', "'"}:
+            quote = char
+        elif char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return position
+        position += 1
+    raise SyntaxError(f"Unclosed '{opening}' in multi-statement expression")
+
+
+def _parse_statement(text: str, position: int) -> tuple[Any, int]:
+    position = _skip_space(text, position)
+    if text.startswith("if", position) and (position + 2 == len(text) or not text[position + 2].isalnum()):
+        condition_start = _skip_space(text, position + 2)
+        if condition_start >= len(text) or text[condition_start] != "(":
+            raise SyntaxError("if statement requires a condition")
+        condition_end = _balanced_end(text, condition_start, "(", ")")
+        branch, position = _parse_statement(text, condition_end + 1)
+        position = _skip_space(text, position)
+        otherwise: _CSharpBlock | None = None
+        if text.startswith("else", position):
+            alternate, position = _parse_statement(text, position + 4)
+            otherwise = alternate if isinstance(alternate, _CSharpBlock) else _CSharpBlock((alternate,))
+        selected = branch if isinstance(branch, _CSharpBlock) else _CSharpBlock((branch,))
+        return _CSharpIf(text[condition_start + 1 : condition_end], selected, otherwise), position
+    if position < len(text) and text[position] == "{":
+        statements, position = _parse_sequence(text, position + 1, "}")
+        return _CSharpBlock(tuple(statements)), position
+    end = _simple_statement_end(text, position)
+    return _CSharpSimple(text[position:end].strip()), end + (end < len(text) and text[end] == ";")
+
+
+def _simple_statement_end(text: str, start: int) -> int:
+    levels = {"(": 0, "[": 0, "{": 0}
+    quote = ""
+    position = start
+    while position < len(text):
+        char = text[position]
+        if quote:
+            position, quote = _advance_quoted(text, position, quote)
+            continue
+        elif char in {'"', "'"}:
+            quote = char
+        elif char == "}" and not any(levels.values()):
+            break
+        elif _update_levels(char, levels):
+            pass
+        elif char == ";" and not any(levels.values()):
+            break
+        position += 1
+    return position
+
+
+def _parse_sequence(text: str, position: int, stop: str | None) -> tuple[list[Any], int]:
+    statements: list[Any] = []
+    while True:
+        position = _skip_space(text, position)
+        if position >= len(text):
+            if stop is not None:
+                raise SyntaxError(f"Unclosed '{stop}' in multi-statement expression")
+            return statements, position
+        if stop is not None and text[position] == stop:
+            return statements, position + 1
+        statement, position = _parse_statement(text, position)
+        statements.append(statement)
+
+
+def _evaluate_expression(expression: str, context: ExpressionContext, locals_: dict[str, Any] | None = None) -> Any:
+    stripped = expression.strip()
+    if stripped.startswith('$"') and stripped.endswith('"'):
+        return _render_interpolated(stripped[2:-1], context, locals_)
+    translated = _translate_expression(stripped)
+    tree = _validate_ast(translated, set(locals_ or {}))
+    environment = {
+        "context": context,
+        "split_last": split_last,
+        "str": str,
+        "len": len,
+        "_csharp_contains": _csharp_contains,
+        "_csharp_equals": _csharp_equals,
+        "_csharp_length": _csharp_length,
+        "_csharp_tostring": _csharp_tostring,
+        "_csharp_divide": _csharp_divide,
+        "_dict_contains_key": _dict_contains_key,
+        **(locals_ or {}),
+    }
+    return eval(compile(tree, "<apim-expression>", "eval"), {"__builtins__": {}}, environment)
+
+
+def _execute_simple(
+    statement: _CSharpSimple, context: ExpressionContext, locals_: dict[str, Any]
+) -> _CSharpReturn | None:
+    text = statement.text
+    if text.startswith("return"):
+        value = text[6:].strip()
+        return _CSharpReturn(_evaluate_expression(value, context, locals_) if value else None)
+    declaration = re.match(
+        r"^(?:var|[A-Za-z_]\w*(?:\s*<[^>]+>)?(?:\[\])?)\s+([A-Za-z_]\w*)\s*(?:=\s*(.*))?$",
+        text,
+    )
+    if declaration:
+        locals_[declaration.group(1)] = (
+            _evaluate_expression(declaration.group(2), context, locals_) if declaration.group(2) else None
+        )
+        return None
+    assignment = re.match(r"^([A-Za-z_]\w*)\s*=\s*(.*)$", text)
+    if assignment and assignment.group(1) in locals_:
+        locals_[assignment.group(1)] = _evaluate_expression(assignment.group(2), context, locals_)
+        return None
+    raise SyntaxError(f"Unsupported statement: {text}")
+
+
+def _execute_statements(
+    statements: tuple[Any, ...], context: ExpressionContext, locals_: dict[str, Any]
+) -> _CSharpReturn | None:
+    for statement in statements:
+        if isinstance(statement, _CSharpSimple):
+            result = _execute_simple(statement, context, locals_)
+        elif isinstance(statement, _CSharpBlock):
+            result = _execute_statements(statement.statements, context, locals_)
+        else:
+            condition = _evaluate_expression(statement.condition, context, locals_)
+            if not isinstance(condition, bool):
+                raise ValueError("C# condition must evaluate to Boolean.")
+            branch = statement.when_true if condition else statement.when_false
+            result = _execute_statements(branch.statements, context, locals_) if branch else None
+        if result is not None:
+            return result
+    return None
+
+
+def _guarantees_return(statement: Any) -> bool:
+    if isinstance(statement, _CSharpSimple):
+        return statement.text.startswith("return")
+    if isinstance(statement, _CSharpBlock):
+        return any(_guarantees_return(item) for item in statement.statements)
+    return (
+        statement.when_false is not None
+        and _guarantees_return(statement.when_true)
+        and _guarantees_return(statement.when_false)
+    )
+
+
+def _evaluate_multistatement(body: str, context: ExpressionContext) -> Any:
+    if ";" not in body and not re.match(r"\s*(?:if|return|(?:var|[A-Za-z_]\w*)\s+[A-Za-z_]\w*)\b", body):
+        return _evaluate_expression(body, context)
+    statements, position = _parse_sequence(body, 0, None)
+    if _skip_space(body, position) != len(body):
+        raise SyntaxError("Unexpected text after multi-statement expression")
+    if not any(_guarantees_return(statement) for statement in statements):
+        raise ValueError("Multi-statement expression must return on all code paths.")
+    result = _execute_statements(tuple(statements), context, {})
+    if result is None:
+        raise ValueError("Multi-statement expression must return on all code paths.")
+    return result.value
 
 
 def evaluate_apim_expression(expression: str, context: ExpressionContext) -> Any:
+    original = expression.strip()
     stripped = _strip_outer_expression(expression)
-    if stripped.startswith('$"') and stripped.endswith('"'):
-        return _render_interpolated(stripped[2:-1], context)
+    if original.startswith("@{") and original.endswith("}"):
+        return _evaluate_multistatement(stripped, context)
+    return _evaluate_expression(stripped, context)
 
-    translated = _translate_expression(stripped)
-    _validate_ast(translated)
-    return eval(
-        translated,
-        {"__builtins__": {}},
-        {
-            "context": context,
-            "split_last": split_last,
-            "str": str,
-            "len": len,
-        },
-    )
+
+def evaluate_apim_condition(expression: str, context: ExpressionContext) -> bool:
+    value = evaluate_apim_expression(expression, context)
+    if not isinstance(value, bool):
+        raise ValueError("C# condition must evaluate to Boolean.")
+    return value
 
 
 def is_apim_expression(value: str) -> bool:

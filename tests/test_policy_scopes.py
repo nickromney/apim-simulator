@@ -11,19 +11,20 @@ from app.config import (
     Subscription,
     SubscriptionConfig,
     SubscriptionKeyPair,
+    SubscriptionScope,
     TenantAccessConfig,
 )
 from app.main import create_app
 from app.urls import http_url
 
 PRODUCT_HEADER_POLICY = (
-    "<policies><inbound /><backend /><outbound>"
+    "<policies><inbound /><backend><forward-request /></backend><outbound>"
     '<set-header name="x-scope" exists-action="override"><value>product</value></set-header>'
     "</outbound><on-error /></policies>"
 )
 
 ROUTE_HEADER_POLICY = (
-    "<policies><inbound /><backend /><outbound>"
+    "<policies><inbound /><backend><forward-request /></backend><outbound>"
     '<set-header name="x-scope" exists-action="override"><value>api</value></set-header>'
     "</outbound><on-error /></policies>"
 )
@@ -31,19 +32,19 @@ ROUTE_HEADER_POLICY = (
 GLOBAL_INBOUND_APPEND_POLICY = (
     "<policies><inbound>"
     '<set-header name="x-scope-order" exists-action="append"><value>global</value></set-header>'
-    "</inbound><backend /><outbound /><on-error /></policies>"
+    "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
 )
 
 API_INBOUND_APPEND_POLICY = (
     "<policies><inbound>"
     '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header>'
-    "</inbound><backend /><outbound /><on-error /></policies>"
+    "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
 )
 
 API_INBOUND_APPEND_WITH_BASE_POLICY = (
     "<policies><inbound>"
     '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header><base />'
-    "</inbound><backend /><outbound /><on-error /></policies>"
+    "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
 )
 
 
@@ -115,12 +116,12 @@ def test_product_policy_runs_before_api_when_api_calls_base_first() -> None:
     product_policy = (
         "<policies><inbound>"
         '<set-header name="x-scope-order" exists-action="append"><value>product</value></set-header>'
-        "</inbound><backend /><outbound /><on-error /></policies>"
+        "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
     )
     api_policy = (
         "<policies><inbound><base />"
         '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header>'
-        "</inbound><backend /><outbound /><on-error /></policies>"
+        "</inbound><backend><forward-request /></backend><outbound /><on-error /></policies>"
     )
     seen: list[str | None] = []
 
@@ -246,6 +247,52 @@ def test_product_policy_uses_granted_product_when_route_has_many() -> None:
     assert resp.headers["x-scope"] == "product"
 
 
+def test_api_scoped_subscription_skips_product_policy_and_keeps_context_subscription() -> None:
+    """An API-scoped key skips product policy while preserving context.Subscription.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    route_policy = (
+        "<policies><inbound /><backend /><outbound>"
+        '<set-header name="x-subscription" exists-action="override">'
+        "<value>@(context.Subscription.Id)</value>"
+        "</set-header>"
+        "</outbound><on-error /></policies>"
+    )
+    config = GatewayConfig(
+        allow_anonymous=True,
+        products={"p1": ProductConfig(name="p1", policies_xml=PRODUCT_HEADER_POLICY)},
+        subscription=SubscriptionConfig(
+            required=True,
+            subscriptions={
+                "demo": Subscription(
+                    id="sub1",
+                    name="demo",
+                    keys=SubscriptionKeyPair(primary="good", secondary="good2"),
+                    scope=SubscriptionScope.Api,
+                    api_id="weather",
+                )
+            },
+        ),
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                api_id="weather",
+                upstream_base_url=http_url("upstream"),
+                upstream_path_prefix="/api",
+                products=["p1"],
+                policies_xml=route_policy,
+            )
+        ],
+    )
+    with _client(config) as client:
+        resp = client.get("/api/health", headers={"Ocp-Apim-Subscription-Key": "good"})
+    assert resp.status_code == 200
+    assert "x-scope" not in resp.headers
+    assert resp.headers["x-subscription"] == "sub1"
+
+
 @pytest.mark.contract("POLICY-PRODUCT-SCOPE")
 def test_open_product_policy_applies_without_subscription() -> None:
     """An open product supplies the product context for an anonymous request.
@@ -324,3 +371,26 @@ def test_management_policy_save_rejects_malformed_xml() -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid policies XML"
+
+
+def test_management_policy_save_rejects_unknown_named_value() -> None:
+    """Saving a policy with an unknown named value returns a client error.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    config = _subscribed_config(
+        products={"p1": ProductConfig(name="p1")},
+        subscription_products=["p1"],
+        route_products=["p1"],
+    )
+    config.tenant_access = TenantAccessConfig(enabled=True, primary_key="t1")
+
+    with _client(config) as client:
+        response = client.put(
+            "/apim/management/policies/product/p1",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={"xml": "<policies><inbound><set-body>{{missing}}</set-body></inbound></policies>"},
+        )
+
+    assert response.status_code == 400
+    assert "unknown named value" in response.json()["detail"]

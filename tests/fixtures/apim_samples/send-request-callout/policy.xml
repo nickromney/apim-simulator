@@ -23,7 +23,7 @@
       </when>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

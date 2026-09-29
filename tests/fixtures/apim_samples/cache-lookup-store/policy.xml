@@ -9,7 +9,7 @@
       <vary-by-query-parameter>version</vary-by-query-parameter>
     </cache-lookup>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <cache-store duration="60" />
   </outbound>

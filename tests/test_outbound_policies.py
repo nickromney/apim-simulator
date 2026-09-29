@@ -19,7 +19,7 @@ from app.main import create_app
 
 
 def _policy(outbound: str) -> str:
-    return f"<policies><inbound /><backend /><outbound>{outbound}</outbound><on-error /></policies>"
+    return f"<policies><inbound /><backend><forward-request /></backend><outbound>{outbound}</outbound><on-error /></policies>"
 
 
 def _run(

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import ipaddress
 import json
 import math
-import re
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -16,17 +17,23 @@ import httpx
 import jwt
 from defusedxml import ElementTree
 from fastapi import HTTPException
-from jwt.algorithms import RSAAlgorithm
+from jwt.algorithms import ECAlgorithm, HMACAlgorithm, RSAAlgorithm
+from jwt.exceptions import ExpiredSignatureError, ImmatureSignatureError, InvalidSignatureError, InvalidTokenError
 
 from app.apim_expr import (
     CalloutResponse,
     JwtValue,
     build_expression_context,
+    evaluate_apim_condition,
     evaluate_apim_expression,
     is_apim_expression,
 )
 from app.config import GatewayConfig
-from app.named_values import mask_secret_data, resolve_named_values_in_text
+from app.named_values import (
+    mask_secret_data,
+    resolve_named_values_in_text,
+    validate_named_value_references,
+)
 from app.policy_errors import element_name
 
 
@@ -71,10 +78,11 @@ class PolicyTraceCollector:
 @dataclass
 class PolicyRuntime:
     gateway_config: GatewayConfig | None = None
+    policy_named_values_resolved: bool = False
     http_client: httpx.AsyncClient | None = None
     timeout_seconds: float = 30.0
     trace: PolicyTraceCollector | None = None
-    openid_cache: dict[str, tuple[dict[str, Any], dict[str, Any]]] = field(default_factory=dict)
+    openid_cache: dict[str, tuple[float, dict[str, Any], dict[str, Any]]] = field(default_factory=dict)
     response_cache: dict[str, Any] = field(default_factory=dict)
     value_cache: dict[str, Any] = field(default_factory=dict)
     deferred_actions: list[Any] = field(default_factory=list)
@@ -170,7 +178,7 @@ class ExpressionCondition(Condition):
     expression: str
 
     def __call__(self, req: PolicyRequest) -> bool:
-        return bool(evaluate_apim_expression(self.expression, build_expression_context(req)))
+        return evaluate_apim_condition(self.expression, build_expression_context(req))
 
 
 def _strip_condition_quotes(value: str) -> str:
@@ -871,13 +879,11 @@ class Quota(PolicyNode):
 
 
 def _request_headers(req: PolicyRequest) -> dict[str, str]:
-    headers = req.variables.get("_request_headers")
-    return headers if isinstance(headers, dict) else req.headers
+    return req.headers
 
 
 def _request_query(req: PolicyRequest) -> dict[str, str]:
-    query = req.variables.get("_request_query")
-    return query if isinstance(query, dict) else req.query
+    return req.query
 
 
 def _response_header_target(req: PolicyRequest) -> dict[str, str]:
@@ -908,7 +914,7 @@ def apply_pending_response_headers(req: PolicyRequest, headers: dict[str, str]) 
 
 
 def _policy_bool(
-    value: str | None,
+    value: Any,
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
     *,
@@ -916,6 +922,8 @@ def _policy_bool(
 ) -> bool:
     if value is None:
         return default
+    if isinstance(value, bool):
+        return value
     resolved = evaluate_policy_value(value, req, runtime)
     if isinstance(resolved, bool):
         return resolved
@@ -928,7 +936,7 @@ def _policy_bool(
 
 
 def _policy_int(
-    value: str | None,
+    value: Any,
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
     *,
@@ -936,6 +944,10 @@ def _policy_int(
 ) -> int:
     if value is None:
         return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
     resolved = evaluate_policy_value(value, req, runtime)
     if isinstance(resolved, bool):
         return int(resolved)
@@ -1022,16 +1034,38 @@ def _normalize_cache_caching_type(caching_type: str | None) -> tuple[str, bool]:
     normalized = (caching_type or "prefer-external").strip().lower() or "prefer-external"
     if normalized == "external":
         raise HTTPException(status_code=500, detail="Unsupported caching-type external")
+    if normalized not in {"internal", "prefer-external"}:
+        raise HTTPException(status_code=500, detail=f"Unsupported caching-type {normalized}")
     if normalized == "prefer-external":
         return "internal", True
     return "internal", False
+
+
+def _normalize_downstream_caching_type(caching_type: str | None) -> str:
+    mode = (caching_type or "none").strip().lower() or "none"
+    if mode not in {"none", "private", "public"}:
+        raise HTTPException(status_code=500, detail=f"Unsupported downstream-caching-type {mode}")
+    return mode
+
+
+def _validate_cache_enum(value: str | None, *, name: str, allowed: set[str], allow_expression: bool = False) -> None:
+    # Learn documents the allowed values but not the gateway's validation
+    # status/message; the simulator keeps its policy-configuration 500 shape.
+    if value is None or not value.strip():
+        return
+    normalized = value.strip().lower()
+    if allow_expression and is_apim_expression(value):
+        return
+    if normalized in allowed:
+        return
+    raise HTTPException(status_code=500, detail=f"Unsupported {name} {normalized}")
 
 
 def _cleanup_value_cache(store: dict[str, Any], key: str, now: float) -> ValueCacheEntry | None:
     entry = store.get(key)
     if not isinstance(entry, ValueCacheEntry):
         return None
-    if entry.expires_at < now:
+    if entry.expires_at <= now:
         store.pop(key, None)
         return None
     return entry
@@ -1060,7 +1094,7 @@ def _build_response_cache_key(
     query_names = vary_by_query_parameters or sorted(request_query.keys())
     query_part = {name: request_query.get(name, "") for name in query_names}
     header_part = {name.lower(): request_headers.get(name.lower(), "") for name in vary_by_headers}
-    developer = str(req.variables.get("subscription_id") or "anonymous") if vary_by_developer else ""
+    developer = str(req.variables.get("subscription_owner") or "anonymous") if vary_by_developer else ""
     groups = req.variables.get("subscription_groups")
     group_part = sorted(str(item) for item in groups) if vary_by_developer_groups and isinstance(groups, list) else []
     return json.dumps(
@@ -1084,7 +1118,9 @@ def _apply_downstream_cache_headers(
     downstream_caching_type: str,
     must_revalidate: bool,
 ) -> None:
-    mode = (downstream_caching_type or "none").strip().lower()
+    # Learn defines the modes and must-revalidate directive, but not the
+    # exact serialized Cache-Control value; retain the local header contract.
+    mode = _normalize_downstream_caching_type(downstream_caching_type)
     if mode == "none":
         headers["cache-control"] = "no-store"
         return
@@ -2644,6 +2680,8 @@ class CacheLookup(PolicyNode):
             return None
         _, adapted = _normalize_cache_caching_type(self.caching_type)
         req.variables["_policy_response_cache_active"] = True
+        # Learn specifies GET-only lookup but is silent on GET request bodies;
+        # the local adaptation checks the method and does not add body filtering.
         if req.method.upper() != "GET":
             _record_step(runtime, "cache-lookup", {"status": "skipped", "reason": "method_not_get"})
             return None
@@ -2654,7 +2692,9 @@ class CacheLookup(PolicyNode):
             return None
         vary_by_developer = _policy_bool(self.vary_by_developer, req, runtime, default=False)
         vary_by_developer_groups = _policy_bool(self.vary_by_developer_groups, req, runtime, default=False)
-        downstream_caching_type = render_policy_value(self.downstream_caching_type or "none", req, runtime).lower()
+        downstream_caching_type = _normalize_downstream_caching_type(
+            render_policy_value(self.downstream_caching_type or "none", req, runtime)
+        )
         must_revalidate = _policy_bool(self.must_revalidate, req, runtime, default=True)
         cache_key = _build_response_cache_key(
             req,
@@ -2671,7 +2711,7 @@ class CacheLookup(PolicyNode):
         )
         entry = runtime.response_cache.get(cache_key)
         if isinstance(entry, ResponseCacheEntry):
-            if entry.expires_at < time.time():
+            if entry.expires_at <= _policy_now(runtime):
                 runtime.response_cache.pop(cache_key, None)
             else:
                 headers = dict(entry.headers)
@@ -2724,7 +2764,7 @@ class CacheStore(PolicyNode):
             must_revalidate=context.must_revalidate,
         )
         runtime.response_cache[context.cache_key] = ResponseCacheEntry(
-            expires_at=time.time() + ttl,
+            expires_at=_policy_now(runtime) + ttl,
             status_code=req.response_status_code or 200,
             headers=headers,
             body=req.response_body,
@@ -2746,7 +2786,7 @@ class CacheLookupValue(PolicyNode):
             return None
         _, adapted = _normalize_cache_caching_type(self.caching_type)
         key = render_policy_value(self.key, req, runtime)
-        now = time.time()
+        now = _policy_now(runtime)
         entry = _cleanup_value_cache(runtime.value_cache, key, now)
         if entry is not None:
             req.variables[self.variable_name] = entry.value
@@ -2775,7 +2815,9 @@ class CacheStoreValue(PolicyNode):
         key = render_policy_value(self.key, req, runtime)
         value = evaluate_policy_value(self.value, req, runtime)
         ttl = max(0, _policy_int(self.duration, req, runtime, default=0))
-        runtime.value_cache[key] = ValueCacheEntry(expires_at=time.time() + ttl, value=value)
+        # APIM stores this value asynchronously; the local in-memory adaptation
+        # writes it synchronously and deliberately does not emulate latency.
+        runtime.value_cache[key] = ValueCacheEntry(expires_at=_policy_now(runtime) + ttl, value=value)
         _record_step(
             runtime, "cache-store-value", {"status": "stored", "cache_key": key, "ttl_seconds": ttl, "adapted": adapted}
         )
@@ -2786,13 +2828,26 @@ class CacheStoreValue(PolicyNode):
 class CacheRemoveValue(PolicyNode):
     key: str
     caching_type: str = "prefer-external"
+    fail_on_cache_removal_error: str = "false"
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         if runtime is None:
             return None
         _, adapted = _normalize_cache_caching_type(self.caching_type)
         key = render_policy_value(self.key, req, runtime)
-        removed = runtime.value_cache.pop(key, None) is not None
+        fail_on_error = _policy_bool(self.fail_on_cache_removal_error, req, runtime, default=False)
+        try:
+            removed = runtime.value_cache.pop(key, None) is not None
+        except Exception:
+            # The local dictionary has no removal failure path in normal use.
+            if fail_on_error:
+                raise
+            _record_step(
+                runtime,
+                "cache-remove-value",
+                {"status": "ignored-removal-error", "cache_key": key, "adapted": adapted},
+            )
+            return None
         _record_step(
             runtime,
             "cache-remove-value",
@@ -2810,16 +2865,119 @@ class RequiredClaim:
 
 
 @dataclass(frozen=True)
+class IssuerSigningKey:
+    """A signing key supplied directly by the validate-jwt policy."""
+
+    key_id: str | None
+    key: Any
+
+
+class _JwtValidationError(Exception):
+    def __init__(self, reason: str, detail: str):
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+
+
+_SUPPORTED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512", "PS256", "RS256", "RS512", "ES256"})
+# The Learn error table gives exact text for a missing token, but describes most
+# other defaults as library detail plus "Access denied."; keep those defaults
+# stable while exposing the library detail through LastError.
+_DEFAULT_JWT_FAILURE_MESSAGES = {
+    "TokenNotPresent": "JWT not present.",
+    "TokenSignatureInvalid": "Signature validation failed. Access denied.",
+    "TokenAudienceNotAllowed": "Invalid audience. Access denied.",
+    "TokenIssuerNotAllowed": "Invalid issuer. Access denied.",
+    "TokenExpired": "Token expired. Access denied.",
+    "TokenSignatureKeyNotFound": "Signature key was not resolved by id. Access denied.",
+    "TokenClaimNotFound": "JWT is missing the following claims: Access denied.",
+    "TokenClaimValueNotAllowed": "Claim value is not allowed. Access denied.",
+    "JwtInvalid": "JWT validation failed",
+}
+
+
+def _jwk_to_key(jwk: dict[str, Any]) -> Any:
+    """Turn a JWKS member into the matching PyJWT key type."""
+    try:
+        key_type = jwk.get("kty")
+        if key_type == "RSA":
+            return RSAAlgorithm.from_jwk(json.dumps(jwk))
+        if key_type == "EC":
+            return ECAlgorithm.from_jwk(json.dumps(jwk))
+        if key_type == "oct":
+            return HMACAlgorithm.from_jwk(json.dumps(jwk))
+    except (InvalidTokenError, ValueError) as exc:
+        raise _JwtValidationError("JwtInvalid", "Invalid signing key") from exc
+    raise _JwtValidationError("JwtInvalid", "Unsupported signing key type")
+
+
+def _decode_signed_token(
+    token: str,
+    key: Any,
+    algorithm: str,
+    *,
+    require_expiration: bool,
+    leeway: int,
+) -> dict[str, Any]:
+    try:
+        return jwt.decode(
+            token,
+            key,
+            algorithms=[algorithm],
+            options={
+                "verify_aud": False,
+                "verify_iss": False,
+                "require": ["exp"] if require_expiration else [],
+            },
+            leeway=leeway,
+        )
+    except ExpiredSignatureError as exc:
+        raise _JwtValidationError("TokenExpired", "Token expired") from exc
+    except ImmatureSignatureError as exc:
+        raise _JwtValidationError("JwtInvalid", "Token is not yet valid") from exc
+    except InvalidSignatureError as exc:
+        raise _JwtValidationError("TokenSignatureInvalid", "Signature validation failed") from exc
+    except InvalidTokenError as exc:
+        raise _JwtValidationError("JwtInvalid", str(exc)) from exc
+
+
+def _decode_unsigned_token(token: str, *, require_expiration: bool, leeway: int) -> dict[str, Any]:
+    try:
+        return jwt.decode(
+            token,
+            options={
+                "verify_signature": False,
+                "verify_aud": False,
+                "verify_iss": False,
+                "verify_exp": True,
+                "verify_nbf": True,
+                "require": ["exp"] if require_expiration else [],
+            },
+            algorithms=["none"],
+            leeway=leeway,
+        )
+    except ExpiredSignatureError as exc:
+        raise _JwtValidationError("TokenExpired", "Token expired") from exc
+    except ImmatureSignatureError as exc:
+        raise _JwtValidationError("JwtInvalid", "Token is not yet valid") from exc
+    except InvalidTokenError as exc:
+        raise _JwtValidationError("JwtInvalid", str(exc)) from exc
+
+
+@dataclass(frozen=True)
 class ValidateJwt(PolicyNode):
     header_name: str | None
     query_parameter_name: str | None
     token_value: str | None
-    failed_validation_httpcode: int = 401
-    failed_validation_error_message: str = "JWT validation failed"
+    failed_validation_httpcode: str | int = "401"
+    failed_validation_error_message: str | None = None
     require_scheme: str | None = None
-    require_expiration_time: bool = True
+    require_expiration_time: str | bool = True
+    require_signed_tokens: str | bool = True
+    clock_skew: str | int = 0
     output_token_variable_name: str | None = None
     openid_config_urls: list[str] = field(default_factory=list)
+    issuer_signing_keys: list[IssuerSigningKey] = field(default_factory=list)
     issuers: list[str] = field(default_factory=list)
     audiences: list[str] = field(default_factory=list)
     required_claims: list[RequiredClaim] = field(default_factory=list)
@@ -2840,7 +2998,7 @@ class ValidateJwt(PolicyNode):
             if header_value is None:
                 return None
             if self.require_scheme and header_name.lower() == "authorization":
-                expected_prefix = f"{self.require_scheme} "
+                expected_prefix = f"{render_policy_value(self.require_scheme, req, runtime)} "
                 if not header_value.startswith(expected_prefix):
                     return None
                 return header_value[len(expected_prefix) :].strip()
@@ -2878,7 +3036,7 @@ class ValidateJwt(PolicyNode):
         """Validate a JWT and publish its claims, or refuse the call."""
         token = self._extract_token(req, runtime)
         if not token:
-            return self._failure(req, runtime, "JWT not present.")
+            return self._failure(req, runtime, "TokenNotPresent", "JWT not present.")
 
         if runtime is None or runtime.http_client is None:
             raise HTTPException(status_code=500, detail="validate-jwt requires an HTTP client")
@@ -2886,26 +3044,93 @@ class ValidateJwt(PolicyNode):
         try:
             claims = await self._decode_token(token, req, runtime)
             self._validate_claims(claims, req, runtime)
+        except _JwtValidationError as exc:
+            _record_jwt_validation(runtime, {"status": "invalid", "detail": exc.detail, "reason": exc.reason})
+            return self._failure(req, runtime, exc.reason, exc.detail)
         except HTTPException as exc:
             _record_jwt_validation(runtime, {"status": "invalid", "detail": exc.detail})
             req.variables["_policy_error_detail"] = str(exc.detail)
             return ResponseSpec(
-                status_code=self.failed_validation_httpcode,
+                status_code=_policy_int(self.failed_validation_httpcode, req, runtime, default=401),
                 headers={"content-type": "text/plain"},
-                body=str(self.failed_validation_error_message or exc.detail).encode("utf-8"),
+                body=self._failure_message(req, runtime, "JwtInvalid", str(exc.detail)).encode("utf-8"),
             )
 
         self._publish_claims(req, runtime, claims=claims, token=token)
         return None
 
-    def _failure(self, req: PolicyRequest, runtime: PolicyRuntime | None, detail: str) -> ResponseSpec:
-        _record_jwt_validation(runtime, {"status": "invalid", "detail": detail})
+    def _failure(self, req: PolicyRequest, runtime: PolicyRuntime | None, reason: str, detail: str) -> ResponseSpec:
+        _record_jwt_validation(runtime, {"status": "invalid", "detail": detail, "reason": reason})
         req.variables["_policy_error_detail"] = detail
+        req.variables["_policy_error_reason"] = reason
         return ResponseSpec(
-            status_code=self.failed_validation_httpcode,
+            status_code=_policy_int(self.failed_validation_httpcode, req, runtime, default=401),
             headers={"content-type": "text/plain"},
-            body=str(self.failed_validation_error_message or detail).encode("utf-8"),
+            body=self._failure_message(req, runtime, reason, detail).encode("utf-8"),
         )
+
+    def _failure_message(self, req: PolicyRequest, runtime: PolicyRuntime | None, reason: str, detail: str) -> str:
+        if self.failed_validation_error_message is not None:
+            return render_policy_value(self.failed_validation_error_message, req, runtime)
+        if reason in {"TokenClaimNotFound", "TokenClaimValueNotAllowed", "JwtInvalid"}:
+            return detail
+        return _DEFAULT_JWT_FAILURE_MESSAGES.get(reason, detail)
+
+    def _decode_settings(self, req: PolicyRequest, runtime: PolicyRuntime) -> tuple[bool, int, bool]:
+        require_signed = _policy_bool(self.require_signed_tokens, req, runtime, default=True)
+        clock_skew = _nonnegative_policy_int(
+            str(self.clock_skew), req, runtime, name="validate-jwt clock-skew", default=0
+        )
+        require_expiration = _policy_bool(self.require_expiration_time, req, runtime, default=True)
+        return require_signed, clock_skew, require_expiration
+
+    async def _candidate_signing_keys(
+        self,
+        kid: str | None,
+        req: PolicyRequest,
+        runtime: PolicyRuntime,
+    ) -> list[tuple[Any, dict[str, Any] | None]]:
+        if self.issuer_signing_keys:
+            matching = [item for item in self.issuer_signing_keys if item.key_id == kid]
+            keys = matching or self.issuer_signing_keys
+            return [(item.key, None) for item in keys]
+
+        urls = [render_policy_value(url, req, runtime) for url in self.openid_config_urls]
+        if not urls:
+            raise HTTPException(status_code=500, detail="validate-jwt requires at least one openid-config url")
+        candidates: list[tuple[Any, dict[str, Any] | None]] = []
+        for url in urls:
+            metadata, jwks = await _load_openid_configuration(url, runtime)
+            keys = [item for item in jwks.get("keys") or [] if isinstance(item, dict)]
+            if kid:
+                keys = [item for item in keys if item.get("kid") == kid] or keys
+            candidates.extend((_jwk_to_key(item), metadata) for item in keys)
+        return candidates
+
+    @staticmethod
+    def _decode_candidates(
+        token: str,
+        algorithm: str,
+        candidates: list[tuple[Any, dict[str, Any] | None]],
+        *,
+        require_expiration: bool,
+        leeway: int,
+        has_explicit_issuers: bool,
+    ) -> dict[str, Any]:
+        if not candidates:
+            raise _JwtValidationError("TokenSignatureKeyNotFound", "No signing key matched the token")
+        last_error: _JwtValidationError | None = None
+        for key, metadata in candidates:
+            try:
+                claims = _decode_signed_token(
+                    token, key, algorithm, require_expiration=require_expiration, leeway=leeway
+                )
+                if not has_explicit_issuers and metadata and metadata.get("issuer"):
+                    claims["_metadata_issuer"] = metadata.get("issuer")
+                return claims
+            except _JwtValidationError as exc:
+                last_error = exc
+        raise last_error or _JwtValidationError("JwtInvalid", "JWT validation failed")
 
     async def _decode_token(
         self,
@@ -2913,41 +3138,28 @@ class ValidateJwt(PolicyNode):
         req: PolicyRequest,
         runtime: PolicyRuntime,
     ) -> dict[str, Any]:
-        urls = [render_policy_value(url, req, runtime) for url in self.openid_config_urls]
-        if not urls:
-            raise HTTPException(status_code=500, detail="validate-jwt requires at least one openid-config url")
+        try:
+            unverified = jwt.get_unverified_header(token)
+        except InvalidTokenError as exc:
+            raise _JwtValidationError("JwtInvalid", str(exc)) from exc
 
-        unverified = jwt.get_unverified_header(token)
-        kid = unverified.get("kid")
-        last_error: Exception | None = None
-
-        for url in urls:
-            metadata, jwks = await _load_openid_configuration(url, runtime)
-            keys = jwks.get("keys") or []
-            candidates = [item for item in keys if isinstance(item, dict)]
-            if kid:
-                candidates = [item for item in candidates if item.get("kid") == kid] or candidates
-            for jwk in candidates:
-                try:
-                    key = RSAAlgorithm.from_jwk(json.dumps(jwk))
-                    claims = jwt.decode(
-                        token,
-                        key,
-                        algorithms=["RS256", "RS384", "RS512", "PS256", "ES256"],
-                        options={
-                            "verify_aud": False,
-                            "verify_iss": False,
-                            "require": ["exp"] if self.require_expiration_time else [],
-                        },
-                    )
-                    if not self.issuers and metadata.get("issuer"):
-                        claims.setdefault("_metadata_issuer", metadata.get("issuer"))
-                    return claims
-                except Exception as exc:  # pragma: no cover - exercised indirectly via failure path
-                    last_error = exc
-                    continue
-
-        raise HTTPException(status_code=401, detail="Invalid or expired access token") from last_error
+        algorithm = unverified.get("alg")
+        require_signed, clock_skew, require_expiration = self._decode_settings(req, runtime)
+        if algorithm == "none":
+            if require_signed:
+                raise _JwtValidationError("TokenSignatureInvalid", "Unsigned tokens are not allowed")
+            return _decode_unsigned_token(token, require_expiration=require_expiration, leeway=clock_skew)
+        if algorithm not in _SUPPORTED_JWT_ALGORITHMS:
+            raise _JwtValidationError("TokenSignatureInvalid", f"Unsupported JWT algorithm: {algorithm}")
+        candidates = await self._candidate_signing_keys(unverified.get("kid"), req, runtime)
+        return self._decode_candidates(
+            token,
+            algorithm,
+            candidates,
+            require_expiration=require_expiration,
+            leeway=clock_skew,
+            has_explicit_issuers=bool(self.issuers),
+        )
 
     def _check_issuer(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
         """The issuer must be one the policy names, or the one discovered from metadata."""
@@ -2955,7 +3167,7 @@ class ValidateJwt(PolicyNode):
         if not expected and claims.get("_metadata_issuer"):
             expected = [str(claims.get("_metadata_issuer"))]
         if expected and str(claims.get("iss") or "") not in expected:
-            raise HTTPException(status_code=401, detail="Issuer validation failed")
+            raise _JwtValidationError("TokenIssuerNotAllowed", "Invalid issuer")
 
     def _check_audience(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
         """`aud` may be a single value or a list; one overlap is enough."""
@@ -2968,7 +3180,7 @@ class ValidateJwt(PolicyNode):
         else:
             audiences = [str(actual_aud)] if actual_aud else []
         if not set(expected).intersection(audiences):
-            raise HTTPException(status_code=401, detail="Audience validation failed")
+            raise _JwtValidationError("TokenAudienceNotAllowed", "Invalid audience")
 
     @staticmethod
     def _claim_values(actual: Any, separator: str | None) -> list[str]:
@@ -2984,7 +3196,9 @@ class ValidateJwt(PolicyNode):
         for claim in self.required_claims:
             actual = claims.get(claim.name)
             if actual is None:
-                raise HTTPException(status_code=401, detail=f"Missing required claim: {claim.name}")
+                raise _JwtValidationError(
+                    "TokenClaimNotFound", f"JWT is missing the following claims: {claim.name}. Access denied."
+                )
 
             actual_values = set(self._claim_values(actual, claim.separator))
             expected = {render_policy_value(item, req, runtime) for item in claim.values}
@@ -2992,7 +3206,11 @@ class ValidateJwt(PolicyNode):
                 bool(expected.intersection(actual_values)) if claim.match == "any" else expected.issubset(actual_values)
             )
             if not satisfied:
-                raise HTTPException(status_code=401, detail=f"Claim validation failed: {claim.name}")
+                actual_text = ", ".join(sorted(actual_values))
+                raise _JwtValidationError(
+                    "TokenClaimValueNotAllowed",
+                    f"Claim {claim.name} value of {actual_text} is not allowed. Access denied.",
+                )
 
     def _validate_claims(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
         self._check_issuer(claims, req, runtime)
@@ -3218,12 +3436,10 @@ class PolicyDocument:
     outbound: list[PolicyNode]
     on_error: list[PolicyNode]
     sections_present: frozenset[str] = frozenset()
+    named_values_resolved: bool = False
     # Where the document was authored (global, product:<id>, api:<id>,
     # operation:<api>/<op>). Subscription throttles count per scope.
     scope: str = ""
-
-
-POLICY_VALUE_PATTERN = re.compile(r"\{([^{}]+)\}")
 
 
 def _stringify_policy_value(value: Any) -> str:
@@ -3280,42 +3496,11 @@ def _record_jwt_validation(runtime: PolicyRuntime | None, payload: dict[str, Any
     runtime.trace.jwt_validations.append(_trace_safe_value(runtime, payload))
 
 
-def _resolve_policy_token(req: PolicyRequest, token: str) -> str | None:
-    normalized = token.strip()
-    lowered = normalized.lower()
-
-    if lowered == "method":
-        return req.method
-    if lowered == "path":
-        return req.path
-    if lowered == "subscription_id":
-        return _stringify_policy_value(req.variables.get("subscription_id"))
-    if lowered.startswith("header:"):
-        name = lowered.split(":", 1)[1].strip()
-        return _stringify_policy_value(req.headers.get(name))
-    if lowered.startswith("query:"):
-        name = normalized.split(":", 1)[1].strip()
-        return _stringify_policy_value(req.query.get(name))
-    if lowered.startswith("var:") or lowered.startswith("variable:"):
-        name = normalized.split(":", 1)[1].strip()
-        return _stringify_policy_value(req.variables.get(name))
-    return None
-
-
 def evaluate_policy_value(template: str, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> Any:
     source = template or ""
-    if runtime and runtime.gateway_config:
+    if runtime and runtime.gateway_config and not runtime.policy_named_values_resolved:
         source = resolve_named_values_in_text(source, runtime.gateway_config)
-    if is_apim_expression(source):
-        return evaluate_apim_expression(source, build_expression_context(req))
-
-    def _replace(match: re.Match[str]) -> str:
-        resolved = _resolve_policy_token(req, match.group(1))
-        if resolved is None:
-            return match.group(0)
-        return resolved
-
-    return POLICY_VALUE_PATTERN.sub(_replace, source)
+    return evaluate_apim_expression(source, build_expression_context(req)) if is_apim_expression(source) else source
 
 
 def render_policy_value(template: str, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> str:
@@ -3897,6 +4082,22 @@ def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
 
 
 def _parse_cache_lookup(el: ElementTree.Element) -> CacheLookup:
+    for attribute in ("vary-by-developer", "vary-by-developer-groups"):
+        if attribute not in el.attrib:
+            # Learn marks both attributes required but does not define the
+            # policy-configuration error status/message.
+            raise HTTPException(status_code=500, detail=f"cache-lookup requires {attribute}")
+    _validate_cache_enum(
+        el.attrib.get("caching-type"),
+        name="caching-type",
+        allowed={"internal", "external", "prefer-external"},
+    )
+    _validate_cache_enum(
+        el.attrib.get("downstream-caching-type"),
+        name="downstream-caching-type",
+        allowed={"none", "private", "public"},
+        allow_expression=True,
+    )
     return CacheLookup(
         vary_by_headers=_vary_values(
             [_text_or_empty(item) for item in el.findall("vary-by-header") if _text_or_empty(item)]
@@ -3927,6 +4128,11 @@ def _parse_cache_lookup_value(el: ElementTree.Element) -> CacheLookupValue:
         raise HTTPException(status_code=500, detail="cache-lookup-value requires key")
     if not variable_name:
         raise HTTPException(status_code=500, detail="cache-lookup-value requires variable-name")
+    _validate_cache_enum(
+        el.attrib.get("caching-type"),
+        name="caching-type",
+        allowed={"internal", "external", "prefer-external"},
+    )
     return CacheLookupValue(
         key=key,
         variable_name=variable_name,
@@ -3945,6 +4151,11 @@ def _parse_cache_store_value(el: ElementTree.Element) -> CacheStoreValue:
         raise HTTPException(status_code=500, detail="cache-store-value requires value")
     if not duration:
         raise HTTPException(status_code=500, detail="cache-store-value requires duration")
+    _validate_cache_enum(
+        el.attrib.get("caching-type"),
+        name="caching-type",
+        allowed={"internal", "external", "prefer-external"},
+    )
     return CacheStoreValue(
         key=key,
         value=value,
@@ -3957,10 +4168,50 @@ def _parse_cache_remove_value(el: ElementTree.Element) -> CacheRemoveValue:
     key = (el.attrib.get("key") or "").strip()
     if not key:
         raise HTTPException(status_code=500, detail="cache-remove-value requires key")
-    return CacheRemoveValue(key=key, caching_type=str(el.attrib.get("caching-type") or "prefer-external"))
+    _validate_cache_enum(
+        el.attrib.get("caching-type"),
+        name="caching-type",
+        allowed={"internal", "external", "prefer-external"},
+    )
+    return CacheRemoveValue(
+        key=key,
+        caching_type=str(el.attrib.get("caching-type") or "prefer-external"),
+        fail_on_cache_removal_error=str(el.attrib.get("fail-on-cache-removal-error") or "false"),
+    )
+
+
+def _decode_policy_key(value: str) -> bytes:
+    try:
+        return base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(status_code=500, detail="validate-jwt issuer-signing-keys key must be Base64") from exc
+
+
+def _parse_issuer_signing_keys(el: ElementTree.Element) -> list[IssuerSigningKey]:
+    keys: list[IssuerSigningKey] = []
+    for key_el in el.findall("key"):
+        if key_el.attrib.get("certificate-id"):
+            raise HTTPException(status_code=500, detail="validate-jwt certificate-id signing keys are unsupported")
+        modulus = key_el.attrib.get("n")
+        exponent = key_el.attrib.get("e")
+        if (modulus is None) != (exponent is None):
+            raise HTTPException(status_code=500, detail="validate-jwt signing key requires both n and e")
+        if modulus is not None:
+            key: Any = RSAAlgorithm.from_jwk(json.dumps({"kty": "RSA", "n": modulus, "e": exponent}))
+        else:
+            key = _decode_policy_key(_text_or_empty(key_el))
+        keys.append(IssuerSigningKey(key_id=key_el.attrib.get("id"), key=key))
+    if not keys:
+        raise HTTPException(status_code=500, detail="validate-jwt issuer-signing-keys requires a key")
+    return keys
 
 
 def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
+    source_attributes = ("header-name", "query-parameter-name", "token-value")
+    source_count = sum(el.attrib.get(name) is not None for name in source_attributes)
+    if source_count != 1:
+        raise HTTPException(status_code=500, detail="validate-jwt requires exactly one token source")
+
     required_claims: list[RequiredClaim] = []
     required_claims_el = el.find("required-claims")
     if required_claims_el is not None:
@@ -3969,31 +4220,48 @@ def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
             if not name:
                 raise HTTPException(status_code=500, detail="validate-jwt claim missing name")
             values = [_text_or_empty(value_el) for value_el in claim_el.findall("value") if _text_or_empty(value_el)]
+            match = str(claim_el.attrib.get("match") or "all")
+            if match not in {"all", "any"}:
+                raise HTTPException(status_code=500, detail="validate-jwt claim match must be all or any")
             required_claims.append(
                 RequiredClaim(
                     name=name,
                     values=values,
-                    match=str(claim_el.attrib.get("match") or "all"),
+                    match=match,
                     separator=str(claim_el.attrib.get("separator")) if claim_el.attrib.get("separator") else None,
                 )
             )
 
+    audiences_el = el.find("audiences")
+    audiences = [_text_or_empty(item) for item in el.findall("./audiences/audience") if _text_or_empty(item)]
+    if audiences_el is not None and not audiences:
+        raise HTTPException(status_code=500, detail="validate-jwt audiences requires at least one audience")
+
+    decryption_keys_el = el.find("decryption-keys")
+    if decryption_keys_el is not None:
+        # The public policy supports JWE decryption, but the simulator has no
+        # certificate/private-key store. Reject it instead of silently ignoring
+        # the configured keys. See the validate-jwt policy reference.
+        raise HTTPException(status_code=500, detail="validate-jwt decryption-keys are unsupported")
+
+    signing_keys_el = el.find("issuer-signing-keys")
     return ValidateJwt(
         header_name=el.attrib.get("header-name"),
         query_parameter_name=el.attrib.get("query-parameter-name"),
         token_value=el.attrib.get("token-value"),
-        failed_validation_httpcode=int(el.attrib.get("failed-validation-httpcode") or "401"),
-        failed_validation_error_message=str(
-            el.attrib.get("failed-validation-error-message") or "JWT validation failed"
-        ),
+        failed_validation_httpcode=el.attrib.get("failed-validation-httpcode") or "401",
+        failed_validation_error_message=el.attrib.get("failed-validation-error-message"),
         require_scheme=el.attrib.get("require-scheme"),
-        require_expiration_time=str(el.attrib.get("require-expiration-time") or "true").lower() != "false",
+        require_expiration_time=el.attrib.get("require-expiration-time") or "true",
+        require_signed_tokens=el.attrib.get("require-signed-tokens") or "true",
+        clock_skew=el.attrib.get("clock-skew") or "0",
         output_token_variable_name=el.attrib.get("output-token-variable-name"),
         openid_config_urls=[
             str(item.attrib.get("url")) for item in el.findall("openid-config") if item.attrib.get("url")
         ],
         issuers=[_text_or_empty(item) for item in el.findall("./issuers/issuer") if _text_or_empty(item)],
-        audiences=[_text_or_empty(item) for item in el.findall("./audiences/audience") if _text_or_empty(item)],
+        audiences=audiences,
+        issuer_signing_keys=_parse_issuer_signing_keys(signing_keys_el) if signing_keys_el is not None else [],
         required_claims=required_claims,
     )
 
@@ -4053,6 +4321,18 @@ def _parse_send_request(el: ElementTree.Element) -> SendRequest:
 def _rate_limit_key(req: PolicyRequest) -> str | None:
     """Return the subscription counter key used by the subscription rate policy."""
     return _subscription_throttle_key(req, "rate-limit")
+
+
+def _resolve_policy_tree_named_values(root: ElementTree.Element, config: GatewayConfig) -> None:
+    """Apply APIM named values to every policy attribute and text node."""
+    for element in root.iter():
+        element.attrib.update(
+            {name: resolve_named_values_in_text(value, config) for name, value in element.attrib.items()}
+        )
+        if element.text is not None:
+            element.text = resolve_named_values_in_text(element.text, config)
+        if element.tail is not None:
+            element.tail = resolve_named_values_in_text(element.tail, config)
 
 
 def _parse_choose(
@@ -4226,13 +4506,40 @@ def _parse_node(
     return parser(el)
 
 
-def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = None) -> PolicyDocument:
+def _resolve_policy_fragment_named_values(policy_fragments: dict[str, str], config: GatewayConfig) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for fragment_id, fragment_xml in policy_fragments.items():
+        validate_named_value_references(fragment_xml, config)
+        try:
+            root = ElementTree.fromstring(fragment_xml)
+        except ElementTree.ParseError:
+            try:
+                root = ElementTree.fromstring(f"<fragment>{fragment_xml}</fragment>")
+            except ElementTree.ParseError:
+                resolved[fragment_id] = fragment_xml
+                continue
+        _resolve_policy_tree_named_values(root, config)
+        resolved[fragment_id] = ElementTree.tostring(root, encoding="unicode")
+    return resolved
+
+
+def parse_policies_xml(
+    xml: str,
+    *,
+    policy_fragments: dict[str, str] | None = None,
+    gateway_config: GatewayConfig | None = None,
+) -> PolicyDocument:
+    if gateway_config is not None:
+        validate_named_value_references(xml, gateway_config)
+        policy_fragments = _resolve_policy_fragment_named_values(policy_fragments or {}, gateway_config)
     try:
         root = ElementTree.fromstring(xml)
     except ElementTree.ParseError as exc:
         raise HTTPException(status_code=500, detail="Invalid policies XML") from exc
     if root.tag != "policies":
         raise HTTPException(status_code=500, detail="Policies XML must have <policies> root")
+    if gateway_config is not None:
+        _resolve_policy_tree_named_values(root, gateway_config)
 
     fragments = policy_fragments or {}
     sections_present: set[str] = set()
@@ -4250,13 +4557,18 @@ def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = No
         outbound=section("outbound"),
         on_error=section("on-error"),
         sections_present=frozenset(sections_present),
+        named_values_resolved=gateway_config is not None,
     )
 
 
 async def _load_openid_configuration(url: str, runtime: PolicyRuntime) -> tuple[dict[str, Any], dict[str, Any]]:
+    now = runtime.clock() if runtime.clock is not None else time.monotonic()
     cached = runtime.openid_cache.get(url)
     if cached is not None:
-        return cached
+        cached_at, metadata, jwks = cached
+        if now - cached_at < 3600:
+            return metadata, jwks
+        runtime.openid_cache.pop(url, None)
     if runtime.http_client is None:
         raise HTTPException(status_code=500, detail="validate-jwt requires an HTTP client")
     metadata_response = await runtime.http_client.get(url, timeout=runtime.timeout_seconds)
@@ -4269,7 +4581,7 @@ async def _load_openid_configuration(url: str, runtime: PolicyRuntime) -> tuple[
     jwks = jwks_response.json()
     if not isinstance(jwks, dict):
         raise HTTPException(status_code=500, detail="Invalid JWKS document")
-    runtime.openid_cache[url] = (metadata, jwks)
+    runtime.openid_cache[url] = (now, metadata, jwks)
     return metadata, jwks
 
 
@@ -4308,11 +4620,11 @@ def _effective_section_steps(docs: list[PolicyDocument], section_name: str) -> l
     effective: list[ScopedStep] = []
     section_key = "on-error" if section_name == "on_error" else section_name
     for doc in docs:
-        # APIM documents explicitly describe omitted base as dropping the
-        # parent. The docs do not distinguish a missing section from an empty
-        # one, so both are treated as a configured section with no base.
+        # A section present without base drops the parent. An omitted section
+        # is taken as the default, which Learn says includes base in every
+        # section; the page doesn't state the omitted case outright.
+        # https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
         if section_key not in doc.sections_present:
-            effective = []
             continue
         local = getattr(doc, section_name.replace("-", "_"))
         if any(isinstance(step, NoOp) for step in local):
@@ -4328,6 +4640,8 @@ async def _apply_section_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
+    if runtime is not None:
+        runtime.policy_named_values_resolved = bool(docs) and all(doc.named_values_resolved for doc in docs)
     for scope, step in _effective_section_steps(docs, section_name):
         req.variables["_policy_scope"] = scope
         req.variables["_policy_step"] = element_name(step)

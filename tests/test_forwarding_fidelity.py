@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from app.config import GatewayConfig, RouteConfig
+from app.config import ApiConfig, GatewayConfig, OperationConfig, RouteConfig
 from app.main import create_app
 from app.policy import ForwardRequest, PolicyRequest, PolicyRuntime, parse_policies_xml
 from app.proxy import build_upstream_headers
@@ -21,6 +21,7 @@ from app.security import AuthContext
 def _config(
     *,
     policy: str | None = None,
+    global_policy: str | None = None,
     **overrides: object,
 ) -> GatewayConfig:
     values: dict[str, object] = {
@@ -35,6 +36,8 @@ def _config(
         ],
         "proxy_streaming": False,
     }
+    if global_policy is not None:
+        values["policies_xml"] = global_policy
     values.update(overrides)
     return GatewayConfig(**values)
 
@@ -222,6 +225,96 @@ def test_forward_request_controls_redirects_and_timeout() -> None:
     assert response.status_code == 200
     assert len(seen) == 2
     assert seen[0].extensions["timeout"]["read"] == 2.5
+
+
+def test_default_global_forward_request_uses_300_second_timeout() -> None:
+    """The default global forward-request policy uses a 300-second timeout.
+
+    Docs: https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy
+    https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    with _app_client(_config(), httpx.MockTransport(handler)) as client:
+        response = client.get("/api/resource")
+
+    assert response.status_code == 200
+    assert seen[0].extensions["timeout"]["read"] == 300.0
+
+
+def test_empty_backend_section_does_not_call_backend() -> None:
+    """Removing forward-request does not call the backend and still runs outbound.
+
+    Microsoft documents that removing forward-request prevents forwarding and
+    evaluates outbound immediately. It does not document the ordinary response
+    when outbound has no return-response, so the simulator uses APIM's
+    least-surprising successful empty response.
+
+    Docs: https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy
+    https://learn.microsoft.com/en-us/azure/api-management/return-response-policy
+    """
+    calls = 0
+    policy = """
+    <policies>
+      <backend />
+      <outbound>
+        <set-header name="x-outbound-ran"><value>true</value></set-header>
+      </outbound>
+    </policies>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"unexpected": True})
+
+    with _app_client(_config(global_policy=policy), httpx.MockTransport(handler)) as client:
+        response = client.get("/api/resource")
+
+    assert response.status_code == 200
+    assert response.content == b""
+    assert response.headers["x-outbound-ran"] == "true"
+    assert calls == 0
+
+
+def test_api_backend_without_base_does_not_inherit_default_forward_request() -> None:
+    """An API backend section without base does not inherit global forwarding.
+
+    Docs: https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy
+    https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+    """
+    calls = 0
+    config = GatewayConfig(
+        allow_anonymous=True,
+        apis={
+            "api": ApiConfig(
+                name="API",
+                path="api",
+                upstream_base_url="http://backend.example:8080",
+                policies_xml="<policies><backend /></policies>",
+                operations={
+                    "get": OperationConfig(name="Get", method="GET", url_template="/resource"),
+                },
+            )
+        },
+        proxy_streaming=False,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"unexpected": True})
+
+    with _app_client(config, httpx.MockTransport(handler)) as client:
+        response = client.get("/api/resource")
+
+    assert response.status_code == 200
+    assert response.content == b""
+    assert calls == 0
 
 
 def test_fail_on_error_status_code_enters_on_error() -> None:

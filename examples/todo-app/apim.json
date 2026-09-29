@@ -33,7 +33,7 @@
       "upstream_base_url": "http://todo-api:8000",
       "upstream_path_prefix": "/api",
       "products": ["todo-demo"],
-      "policies_xml": "<policies><inbound><cors><allowed-origins><origin>${TODO_FRONTEND_ORIGIN_LOCALHOST}</origin><origin>${TODO_FRONTEND_ORIGIN_LOOPBACK}</origin><origin>http://localhost:4321</origin></allowed-origins><allowed-methods preflight-result-max-age=\"300\"><method>GET</method><method>POST</method><method>PATCH</method><method>DELETE</method></allowed-methods><allowed-headers><header>*</header></allowed-headers><expose-headers><header>x-apim-simulator</header><header>x-apim-trace-id</header><header>x-correlation-id</header><header>x-todo-demo-policy</header></expose-headers></cors></inbound><backend /><outbound><set-header name=\"x-todo-demo-policy\" exists-action=\"override\"><value>applied</value></set-header></outbound><on-error /></policies>",
+      "policies_xml": "<policies><inbound><cors><allowed-origins><origin>${TODO_FRONTEND_ORIGIN_LOCALHOST}</origin><origin>${TODO_FRONTEND_ORIGIN_LOOPBACK}</origin><origin>http://localhost:4321</origin></allowed-origins><allowed-methods preflight-result-max-age=\"300\"><method>GET</method><method>POST</method><method>PATCH</method><method>DELETE</method></allowed-methods><allowed-headers><header>*</header></allowed-headers><expose-headers><header>x-apim-simulator</header><header>x-apim-trace-id</header><header>x-correlation-id</header><header>x-todo-demo-policy</header></expose-headers></cors></inbound><backend><forward-request /></backend><outbound><set-header name=\"x-todo-demo-policy\" exists-action=\"override\"><value>applied</value></set-header></outbound><on-error /></policies>",
       "operations": {
         "health": {
           "name": "Health",

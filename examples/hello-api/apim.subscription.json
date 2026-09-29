@@ -36,7 +36,7 @@
       "upstream_base_url": "http://hello-api:8000",
       "upstream_path_prefix": "/api",
       "products": ["hello"],
-      "policies_xml": "<policies><inbound /><backend /><outbound><set-header name=\"x-hello-policy\" exists-action=\"override\"><value>applied</value></set-header></outbound><on-error /></policies>",
+      "policies_xml": "<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-hello-policy\" exists-action=\"override\"><value>applied</value></set-header></outbound><on-error /></policies>",
       "operations": {
         "health": {
           "name": "Health",

@@ -29,7 +29,7 @@ from app.backend_pool import (
     render_backend_value,
     select_pool_member,
 )
-from app.config import GatewayConfig, ProductState, RouteConfig
+from app.config import GatewayConfig, ProductState, RouteConfig, SubscriptionScope
 from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
@@ -123,6 +123,12 @@ def effective_product_id_for_call(
 ) -> str:
     if not allowed_products:
         return ""
+    if auth.subscription_scope in {
+        SubscriptionScope.Api,
+        SubscriptionScope.AllApis,
+        SubscriptionScope.Service,
+    }:
+        return ""
     published = [p for p in allowed_products if product_is_published(cfg, p)]
     if auth.subscription is not None:
         granted = set(auth.subscription_products)
@@ -136,6 +142,44 @@ def effective_product_id_for_call(
     if published:
         return published[0]
     return ""
+
+
+def _subscription_scope_applies(route: RouteConfig, auth: AuthContext, allowed_products: list[str]) -> bool:
+    """Whether an accepted subscription covers this API or product.
+
+    API Management accepts API-, all-APIs-, and service-scoped subscriptions
+    without a product association, and does not apply product policy for them:
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    if auth.subscription is None:
+        return False
+    if auth.subscription_scope == SubscriptionScope.Api:
+        return auth.subscription_api_id == route.api_id
+    if auth.subscription_scope in {SubscriptionScope.AllApis, SubscriptionScope.Service}:
+        return True
+    if auth.subscription_scope == SubscriptionScope.Product:
+        return bool(set(allowed_products).intersection(auth.subscription_products))
+    # Identity-only keys predate scoped subscriptions and remain a local
+    # compatibility mode; they have no APIM scope to validate.
+    if auth.subscription_scope is None and not auth.subscription_products:
+        return True
+    return bool(set(allowed_products).intersection(auth.subscription_products))
+
+
+def _enforce_non_product_scope(
+    route: RouteConfig,
+    auth: AuthContext,
+    allowed_products: list[str],
+    cfg: GatewayConfig,
+    request: Request | None,
+) -> bool:
+    """Validate and consume an API-, all-APIs-, or service-scoped key."""
+    non_product_scopes = {SubscriptionScope.Api, SubscriptionScope.AllApis, SubscriptionScope.Service}
+    if auth.subscription is None or auth.subscription_scope not in non_product_scopes:
+        return False
+    if not _subscription_scope_applies(route, auth, allowed_products):
+        raise subscription_key_error(request, cfg, route, missing=False)
+    return True
 
 
 def _subscription_required(cfg: GatewayConfig, published_products: list[str], bypassed: bool) -> bool:
@@ -156,19 +200,22 @@ def _reject_key_scoped_elsewhere(
     auth: AuthContext,
     allowed_products: list[str],
     request: Request | None,
+    should_reject: bool,
 ) -> None:
-    """Deny a valid key for a product the API isn't in, even beside an open product.
+    """Deny a valid key whose scope does not cover this API.
 
     APIM ignores a key that isn't valid at all when an open product exists, but
     while the API itself requires a subscription it denies a real key scoped to
-    some other product (third row of the summary table):
+    some other product or API (third row of the summary table):
     https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
-    Keys with no product list (identity-only keys) carry no scope to check.
+    Keys with no APIM scope (identity-only compatibility keys) carry no scope
+    to check.
     """
-    granted = set(auth.subscription_products)
-    if auth.subscription is None or not granted or not cfg.subscription.required:
+    if not should_reject or auth.subscription is None or not cfg.subscription.required:
         return
-    if not granted.intersection(allowed_products):
+    if auth.subscription_scope is None and not auth.subscription_products:
+        return
+    if not _subscription_scope_applies(route, auth, allowed_products):
         raise subscription_key_error(request, cfg, route, missing=False)
 
 
@@ -182,6 +229,18 @@ def enforce_product_grant(
 ) -> str:
     allowed_products = allowed_products_for_route(route)
     if not allowed_products:
+        _reject_key_scoped_elsewhere(
+            cfg,
+            route,
+            auth,
+            allowed_products,
+            request,
+            should_reject=cfg.subscription.required and not subscription_is_bypassed,
+        )
+        _enforce_non_product_scope(route, auth, allowed_products, cfg, request)
+        return ""
+
+    if _enforce_non_product_scope(route, auth, allowed_products, cfg, request):
         return ""
 
     published_products = [p for p in allowed_products if product_is_published(cfg, p)]
@@ -193,8 +252,14 @@ def enforce_product_grant(
         raise HTTPException(status_code=403, detail="Product is not published")
 
     require_sub = _subscription_required(cfg, published_products, subscription_is_bypassed)
-    if not require_sub:
-        _reject_key_scoped_elsewhere(cfg, route, auth, allowed_products, request)
+    _reject_key_scoped_elsewhere(
+        cfg,
+        route,
+        auth,
+        allowed_products,
+        request,
+        should_reject=not require_sub,
+    )
     if require_sub:
         if auth.subscription is None:
             raise subscription_key_error(request, cfg, route, missing=True)
@@ -737,6 +802,38 @@ def _serve_from_cache(
     return cached_response
 
 
+def _serve_cached_exchange(
+    *,
+    cache_key: str | None,
+    request: Request,
+    route: Any,
+    policy_req: PolicyRequest,
+    policy_runtime: Any,
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+    cfg: GatewayConfig,
+    gateway_metrics: Any,
+    correlation_id: str | None,
+    trace_id: str | None,
+) -> Response | None:
+    """Return a cached response when this request has a gateway cache key."""
+    if cache_key is None:
+        return None
+    return _serve_from_cache(
+        cache_key=cache_key,
+        request=request,
+        route=route,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        cfg=cfg,
+        gateway_metrics=gateway_metrics,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+    )
+
+
 @dataclass(frozen=True)
 class _AdmittedRequest:
     """A request that passed the gate: it has a route, an identity and a product."""
@@ -805,7 +902,7 @@ def _policy_document_stack(
         cached = policy_cache.get(cache_key)
         if cached is not None:
             return cached
-        doc = parse_policies_xml(xml, policy_fragments=cfg.policy_fragments)
+        doc = parse_policies_xml(xml, policy_fragments=cfg.policy_fragments, gateway_config=cfg)
         policy_cache[cache_key] = doc
         return doc
 
@@ -981,11 +1078,11 @@ def _gateway_cache_key(
     if not cfg.cache_enabled or request.method != "GET" or cfg.proxy_streaming or policy_response_cache_active:
         return None
     return request_cache_key(
-        method=request.method,
+        method=policy_req.method,
         upstream_url=upstream_url,
         query=policy_req.query,
-        authorization=request.headers.get("authorization", ""),
-        subscription_key=request.headers.get("ocp-apim-subscription-key", ""),
+        authorization=policy_req.headers.get("authorization", ""),
+        subscription_key=policy_req.headers.get("ocp-apim-subscription-key", ""),
     )
 
 
@@ -1620,6 +1717,91 @@ async def _guarded_outbound(
     )
 
 
+async def _respond_without_backend(
+    *,
+    policy_docs: list[Any],
+    policy_runtime: Any,
+    request: Request,
+    policy_req: PolicyRequest,
+    cfg: GatewayConfig,
+    correlation_id: str | None,
+    trace_id: str | None,
+    trace_store: dict[str, Any],
+    trace_base: dict[str, Any],
+    trace_collector: Any,
+) -> Response:
+    """Run outbound policies after backend forwarding was intentionally skipped.
+
+    APIM documents that outbound starts after inbound succeeds when no
+    ``forward-request`` is present, but does not document the response when
+    outbound has no ``return-response``. Use the documented default
+    ``return-response`` result: 200 OK with no body.
+    https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy
+    https://learn.microsoft.com/en-us/azure/api-management/return-response-policy
+    """
+    synthetic_response = httpx.Response(200, request=httpx.Request(policy_req.method, "http://apim.local"))
+    synthetic_upstream = _UpstreamPayload(
+        status_code=200,
+        headers={},
+        media_type=None,
+        content=b"",
+        buffered=True,
+    )
+    outbound = await _guarded_outbound(
+        policy_docs=policy_docs,
+        policy_runtime=policy_runtime,
+        request=request,
+        policy_req=policy_req,
+        upstream_response=synthetic_response,
+        upstream=synthetic_upstream,
+        cfg=cfg,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        trace_store=trace_store,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        attempts_used=0,
+        elapsed_seconds=0,
+    )
+    if isinstance(outbound, Response):
+        return outbound
+
+    finalize_deferred_actions(
+        PolicyRequest(
+            method=policy_req.method,
+            path=policy_req.path,
+            query=dict(policy_req.query),
+            headers=dict(policy_req.headers),
+            variables=policy_req.variables,
+            body=policy_req.body,
+            response_status_code=outbound.status_code,
+            response_headers=outbound.headers,
+            response_body=outbound.content,
+            response_media_type=outbound.media_type,
+        ),
+        policy_runtime,
+    )
+    return _uncached_response(
+        request=request,
+        cfg=cfg,
+        upstream_response=synthetic_response,
+        streaming=False,
+        status_code=outbound.status_code,
+        response_headers=outbound.headers,
+        media_type=outbound.media_type,
+        content=outbound.content,
+        attempts_used=0,
+        elapsed_seconds=0,
+        trace=_TraceContext(
+            requested=trace_id is not None,
+            trace_id=trace_id,
+            collector=trace_collector,
+        ),
+        trace_store=trace_store,
+        trace_base=trace_base,
+    )
+
+
 async def _short_circuit_policy_stages(
     *,
     policy_docs: list[Any],
@@ -1769,6 +1951,7 @@ async def execute_gateway_request(request: Request) -> Response:
         http_client=client,
         timeout_seconds=cfg.proxy_timeout_seconds,
         trace=trace_collector,
+        openid_cache=request.app.state.policy_openid_cache,
         response_cache=request.app.state.policy_response_cache,
         value_cache=request.app.state.policy_value_cache,
         llm_metric_emitter=lambda amount, attributes: gateway_metrics.llm_tokens.add(amount, attributes),
@@ -1809,6 +1992,29 @@ async def execute_gateway_request(request: Request) -> Response:
 
     _enforce_authz_with_policy_claims(request=request, route=route, auth=auth, policy_req=policy_req, cfg=cfg)
 
+    if not policy_req.variables.get("_forward_request_present"):
+        request.state.apim_backend_id = "none"
+        request.state.apim_upstream_attempts = 0
+        request.state.apim_upstream_duration_seconds = 0.0
+        set_current_span_attributes(
+            **{
+                APIM_BACKEND_ID_ATTR: "none",
+                "apim.policy.documents": len(policy_docs),
+            }
+        )
+        return await _respond_without_backend(
+            policy_docs=policy_docs,
+            policy_runtime=policy_runtime,
+            request=request,
+            policy_req=policy_req,
+            cfg=cfg,
+            correlation_id=correlation_id,
+            trace_id=trace_id if trace_requested else None,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
+        )
+
     choice = _choose_backend(
         cfg=cfg,
         route=route,
@@ -1846,22 +2052,21 @@ async def execute_gateway_request(request: Request) -> Response:
         policy_req=policy_req,
         policy_response_cache_active=policy_response_cache_active,
     )
-    if cache_key is not None:
-        hit = _serve_from_cache(
-            cache_key=cache_key,
-            request=request,
-            route=route,
-            policy_req=policy_req,
-            policy_runtime=policy_runtime,
-            trace_base=trace_base,
-            trace_collector=trace_collector,
-            cfg=cfg,
-            gateway_metrics=gateway_metrics,
-            correlation_id=correlation_id,
-            trace_id=trace_id,
-        )
-        if hit is not None:
-            return hit
+    hit = _serve_cached_exchange(
+        cache_key=cache_key,
+        request=request,
+        route=route,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        trace_base=trace_base,
+        trace_collector=trace_collector,
+        cfg=cfg,
+        gateway_metrics=gateway_metrics,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+    )
+    if hit is not None:
+        return hit
 
     attempt_result = await _send_upstream_with_retries(
         client=client,

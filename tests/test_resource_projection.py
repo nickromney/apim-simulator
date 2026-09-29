@@ -27,6 +27,7 @@ from app.config import (
     Subscription,
     SubscriptionConfig,
     SubscriptionKeyPair,
+    SubscriptionScope,
     TagConfig,
     load_config,
 )
@@ -226,6 +227,32 @@ def test_project_summary_uses_service_scoped_ids_and_masks_secrets() -> None:
     assert payload["subscriptions"][0]["resource_id"] == "service/lab-sim/subscriptions/starter-dev"
     assert payload["named_values"][0]["value"] == "***"
     assert payload["named_values"][0]["resolved"]["value"] == "***"
+
+
+def test_project_subscription_exposes_non_product_scope() -> None:
+    """Management projections identify an API-scoped subscription.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    cfg = GatewayConfig(
+        subscription=SubscriptionConfig(
+            subscriptions={
+                "api-sub": Subscription(
+                    id="api-sub",
+                    name="API subscription",
+                    keys=SubscriptionKeyPair(primary="primary", secondary="secondary"),
+                    scope=SubscriptionScope.Api,
+                    api_id="weather",
+                )
+            }
+        )
+    )
+    payload = project_summary(cfg)["subscriptions"][0]
+    assert payload["scope"] == "api"
+    assert payload["api_id"] == "weather"
+    assert payload["products"] == []
+    assert payload["all_apis"] is False
+    assert payload["service_scoped"] is False
 
 
 def test_load_config_accepts_api_and_route_authored_files(tmp_path, monkeypatch) -> None:

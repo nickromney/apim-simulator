@@ -15,6 +15,7 @@ from app.config import (
     GatewayConfig,
     RouteConfig,
     SubscriptionIdentity,
+    SubscriptionScope,
     SubscriptionState,
     TrustedClientCertificateConfig,
 )
@@ -36,7 +37,12 @@ class AuthContext:
     claims: dict[str, Any]
     subscription: SubscriptionIdentity | None
     subscription_products: list[str]
+    subscription_scope: SubscriptionScope | None = None
+    subscription_api_id: str | None = None
     client_cert: ClientCertContext | None = None
+
+
+_SUPPORTED_OIDC_ALGORITHMS = frozenset({"HS256", "HS384", "HS512", "PS256", "RS256", "RS512", "ES256"})
 
 
 def build_client_principal(claims: dict[str, Any]) -> str:
@@ -68,8 +74,6 @@ class OIDCVerifier:
         self._jwks_client = PyJWKClient(jwks_uri) if (jwks_uri and not jwks) else None
 
     def _get_key_from_static_jwks(self, token: str) -> Any:
-        from jwt.algorithms import RSAAlgorithm
-
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         jwks = self._jwks or {}
@@ -83,10 +87,16 @@ class OIDCVerifier:
         jwk = candidates[0] if candidates else None
         if not isinstance(jwk, dict):
             raise HTTPException(status_code=401, detail="Invalid or expired access token")
-        return RSAAlgorithm.from_jwk(json.dumps(jwk))
+        try:
+            return jwt.PyJWK(jwk).key
+        except (InvalidTokenError, ValueError) as exc:
+            raise HTTPException(status_code=401, detail="Invalid or expired access token") from exc
 
     def decode(self, token: str) -> dict[str, Any]:
         try:
+            algorithm = jwt.get_unverified_header(token).get("alg")
+            if algorithm not in _SUPPORTED_OIDC_ALGORITHMS:
+                raise HTTPException(status_code=401, detail="Invalid or expired access token")
             if self._jwks_client is not None:
                 signing_key = self._jwks_client.get_signing_key_from_jwt(token)
                 key = signing_key.key
@@ -96,10 +106,12 @@ class OIDCVerifier:
             return jwt.decode(
                 token,
                 key,
-                algorithms=["RS256"],
+                algorithms=[algorithm],
                 audience=self.audience,
                 issuer=self.issuer,
             )
+        except HTTPException:
+            raise
         except InvalidTokenError as exc:
             raise HTTPException(status_code=401, detail="Invalid or expired access token") from exc
 
@@ -251,6 +263,21 @@ def require_subscription_products(
     return sub.products
 
 
+def _subscription_scope_optional(
+    request: Request, config: GatewayConfig, route: RouteConfig | None = None
+) -> tuple[SubscriptionScope | None, str | None]:
+    if _subscription_bypassed(request, config):
+        return None, None
+    provided = _get_subscription_key_optional(request, config, route)
+    if not provided:
+        return None, None
+    _require_active_subscription(request, config, route, provided)
+    sub = config.subscription.lookup_subscription_by_key(provided)
+    if sub is None:
+        return None, None
+    return sub.scope_kind, sub.api_id
+
+
 def _anonymous_context(request: Request, config: GatewayConfig, route: RouteConfig | None) -> AuthContext:
     """The stand-in identity used when the gateway allows anonymous calls.
 
@@ -259,10 +286,11 @@ def _anonymous_context(request: Request, config: GatewayConfig, route: RouteConf
     """
     issuer, audience = _default_issuer_audience(config)
     if route_has_open_product(config, route):
-        subscription, products = _lenient_subscription(request, config, route)
+        subscription, products, scope, api_id = _lenient_subscription(request, config, route)
     else:
         subscription = get_subscription_identity_optional(request, config, route)
         products = get_subscription_products_optional(request, config, route)
+        scope, api_id = _subscription_scope_optional(request, config, route)
     return AuthContext(
         claims={
             "sub": "anon-demo",
@@ -274,6 +302,8 @@ def _anonymous_context(request: Request, config: GatewayConfig, route: RouteConf
         },
         subscription=subscription,
         subscription_products=products,
+        subscription_scope=scope,
+        subscription_api_id=api_id,
     )
 
 
@@ -322,15 +352,18 @@ def route_has_open_product(config: GatewayConfig, route: RouteConfig | None) -> 
 
 def _lenient_subscription(
     request: Request, config: GatewayConfig, route: RouteConfig | None
-) -> tuple[SubscriptionIdentity | None, list[str]]:
+) -> tuple[SubscriptionIdentity | None, list[str], SubscriptionScope | None, str | None]:
     """Read a subscription key, dropping one that can't be accepted (open product)."""
     try:
+        scope, api_id = _subscription_scope_optional(request, config, route)
         return (
             get_subscription_identity_optional(request, config, route),
             get_subscription_products_optional(request, config, route),
+            scope,
+            api_id,
         )
     except GatewayError:
-        return None, []
+        return None, [], None, None
 
 
 def authenticate_request(
@@ -341,25 +374,32 @@ def authenticate_request(
         return _anonymous_context(request, config, route)
 
     if route_has_open_product(config, route):
-        subscription, products = _lenient_subscription(request, config, route)
+        subscription, products, scope, api_id = _lenient_subscription(request, config, route)
     else:
-        subscription, products = _strict_subscription(request, config, route)
+        subscription, products, scope, api_id = _strict_subscription(request, config, route)
 
     token = _bearer_token(request)
     verifier = _verifier_for_token(token, oidc_verifiers)
-    return AuthContext(claims=verifier.decode(token), subscription=subscription, subscription_products=products)
+    return AuthContext(
+        claims=verifier.decode(token),
+        subscription=subscription,
+        subscription_products=products,
+        subscription_scope=scope,
+        subscription_api_id=api_id,
+    )
 
 
 def _strict_subscription(
     request: Request, config: GatewayConfig, route: RouteConfig | None
-) -> tuple[SubscriptionIdentity | None, list[str]]:
+) -> tuple[SubscriptionIdentity | None, list[str], SubscriptionScope | None, str | None]:
     """Read a subscription key, rejecting a missing or invalid one when required."""
     subscription = validate_subscription_key(request, config, route)
     if config.subscription.required:
         products = require_subscription_products(request, config, route)
     else:
         products = get_subscription_products_optional(request, config, route)
-    return subscription, products
+    scope, api_id = _subscription_scope_optional(request, config, route)
+    return subscription, products, scope, api_id
 
 
 def _extract_client_cert_context(request: Request, cert_cfg: ClientCertificateConfig) -> ClientCertContext | None:
