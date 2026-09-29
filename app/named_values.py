@@ -69,6 +69,22 @@ def resolve_named_values_in_text(text: str, config: GatewayConfig) -> str:
     return NAMED_VALUE_PATTERN.sub(_replace, text)
 
 
+def validate_named_value_references(text: str, config: GatewayConfig) -> None:
+    """Reject policy references that do not name a configured value."""
+    missing = sorted(
+        {
+            match.group(1).strip()
+            for match in NAMED_VALUE_PATTERN.finditer(text)
+            if match.group(1).strip() not in config.named_values
+        }
+    )
+    if missing:
+        # Microsoft documents the reference syntax and deletion constraint, but
+        # not the management API's exact missing-reference error text.
+        names = ", ".join(missing)
+        raise ValueError(f"unknown named value referenced by policy: {names}")
+
+
 def secret_named_value_map(config: GatewayConfig) -> dict[str, str]:
     out: dict[str, str] = {}
     for name in config.named_values:

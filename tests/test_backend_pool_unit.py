@@ -478,8 +478,8 @@ def test_basic_auth_credentials_are_rendered_against_the_request_and_config() ->
     auth = apply_backend_credentials(
         _backend(
             auth_type="basic",
-            basic_username="{header:x-tenant}-{{realm}}",
-            basic_password="{{upstream-secret}}-{header:x-tenant}",
+            basic_username='@($"{context.Request.Headers.GetValueOrDefault("x-tenant", "")}-{{realm}}")',
+            basic_password='@($"{{upstream-secret}}-{context.Request.Headers.GetValueOrDefault("x-tenant", "")}")',
         ),
         req,
         _config(named_values={"upstream-secret": "s3cret", "realm": "eu"}),
@@ -491,7 +491,10 @@ def test_basic_auth_credentials_are_rendered_against_the_request_and_config() ->
 def test_the_managed_identity_resource_is_rendered() -> None:
     req = _policy_request(**{"x-tenant": "acme"})
     apply_backend_credentials(
-        _backend(auth_type="managed_identity", managed_identity_resource="{header:x-tenant}/{{scope}}"),
+        _backend(
+            auth_type="managed_identity",
+            managed_identity_resource='@($"{context.Request.Headers.GetValueOrDefault("x-tenant", "")}/{{scope}}")',
+        ),
         req,
         _config(named_values={"scope": ".default"}),
     )
@@ -503,8 +506,8 @@ def test_an_explicit_authorization_is_rendered_from_both_halves() -> None:
     req = _policy_request(**{"x-scheme": "Bearer"})
     apply_backend_credentials(
         _backend(
-            authorization_scheme="{header:x-scheme}{{scheme-suffix}}",
-            authorization_parameter="{{token}}-{header:x-scheme}",
+            authorization_scheme='@($"{context.Request.Headers.GetValueOrDefault("x-scheme", "")}{{scheme-suffix}}")',
+            authorization_parameter='@($"{{token}}-{context.Request.Headers.GetValueOrDefault("x-scheme", "")}")',
         ),
         req,
         _config(named_values={"token": "abc123", "scheme-suffix": "+"}),
@@ -539,8 +542,12 @@ def test_header_and_query_credentials_are_rendered() -> None:
     req = _policy_request(**{"x-tenant": "acme"})
     apply_backend_credentials(
         _backend(
-            header_credentials={"X-Api-Key": "{{api-key}}-{header:x-tenant}"},
-            query_credentials={"tenant": "{header:x-tenant}-{{region}}"},
+            header_credentials={
+                "X-Api-Key": '@($"{{api-key}}-{context.Request.Headers.GetValueOrDefault("x-tenant", "")}")'
+            },
+            query_credentials={
+                "tenant": '@($"{context.Request.Headers.GetValueOrDefault("x-tenant", "")}-{{region}}")'
+            },
         ),
         req,
         _config(named_values={"api-key": "k-1", "region": "eu"}),

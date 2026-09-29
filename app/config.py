@@ -773,16 +773,25 @@ def validate_policy_config(cfg: GatewayConfig) -> GatewayConfig:
     from defusedxml import ElementTree
 
     from app.effective_policy import validate_policy_xml_syntax
+    from app.named_values import validate_named_value_references
 
     for fragment_id, xml in cfg.policy_fragments.items():
         try:
             ElementTree.fromstring(f"<fragment>{xml}</fragment>")
         except ElementTree.ParseError as exc:
             raise ValueError(f"Invalid policy fragment XML at {fragment_id}") from exc
+        try:
+            validate_named_value_references(xml, cfg)
+        except ValueError as exc:
+            raise ValueError(f"Invalid policy fragment at {fragment_id}: {exc}") from exc
 
     for location, xml in _policy_xml_entries(cfg):
         try:
             validate_policy_xml_syntax(xml)
+        except ValueError as exc:
+            raise ValueError(f"Invalid policy XML at {location}: {exc}") from exc
+        try:
+            validate_named_value_references(xml, cfg)
         except ValueError as exc:
             raise ValueError(f"Invalid policy XML at {location}: {exc}") from exc
     return cfg

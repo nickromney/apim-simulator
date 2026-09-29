@@ -8,6 +8,7 @@ import pytest
 from app.config import (
     ApiConfig,
     GatewayConfig,
+    NamedValueConfig,
     OperationConfig,
     OperationParameterConfig,
     OperationRequestMetadataConfig,
@@ -123,6 +124,31 @@ def _operation_config() -> GatewayConfig:
             )
         },
     )
+
+
+def test_policy_rejects_a_missing_named_value_reference() -> None:
+    """APIM policy named-value references must resolve at policy validation.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    with pytest.raises(Exception, match="unknown named value"):
+        parse_policies_xml(
+            "<policies><inbound><set-body>{{missing}}</set-body></inbound></policies>",
+            gateway_config=GatewayConfig(named_values={"present": NamedValueConfig(value="ok")}),
+        )
+
+
+def test_config_validation_rejects_a_missing_named_value_reference() -> None:
+    """Config loading validates named values used by policy documents.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    from app.config import validate_policy_config
+
+    with pytest.raises(ValueError, match="unknown named value"):
+        validate_policy_config(
+            GatewayConfig(policies_xml="<policies><inbound><set-body>{{missing}}</set-body></inbound></policies>")
+        )
 
 
 @pytest.mark.contract("POLICY-VALIDATE-PARAMETERS")

@@ -1,7 +1,7 @@
 <policies>
   <inbound>
     <set-query-parameter name="source" exists-action="override">
-      <value>{path}</value>
+      <value>@(context.Request.Url.Path)</value>
     </set-query-parameter>
   </inbound>
   <backend />

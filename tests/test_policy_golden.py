@@ -244,12 +244,16 @@ def test_golden_policy_quota_enforces_403() -> None:
 
 
 def test_golden_policy_set_variable_renders_into_later_policy_values() -> None:
+    """APIM policy expressions, not simulator-only token syntax, read request data.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+    """
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
-    <set-variable name="mode" value="{query:mode}" />
-    <set-header name="x-mode" exists-action="override"><value>{var:mode}</value></set-header>
+    <set-variable name="mode" value='@(context.Request.Url.Query.GetValueOrDefault("mode", ""))' />
+    <set-header name="x-mode" exists-action="override"><value>@(context.Variables.GetValueOrDefault("mode", ""))</value></set-header>
   </inbound>
   <backend />
   <outbound />
@@ -265,12 +269,16 @@ def test_golden_policy_set_variable_renders_into_later_policy_values() -> None:
 
 
 def test_golden_policy_set_query_parameter_mutates_upstream_query_only() -> None:
+    """APIM request path access uses a policy expression.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+    """
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
     <set-query-parameter name="source" exists-action="override">
-      <value>{path}</value>
+      <value>@(context.Request.Url.Path)</value>
     </set-query-parameter>
   </inbound>
   <backend />
@@ -285,7 +293,11 @@ def test_golden_policy_set_query_parameter_mutates_upstream_query_only() -> None
     assert req.query["source"] == "/api/health"
 
 
-def test_golden_policy_set_body_replaces_request_body() -> None:
+def test_golden_policy_set_body_keeps_literal_braces_literal() -> None:
+    """Literal set-body text is not an undocumented token template.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+    """
     doc = parse_policies_xml(
         """\
 <policies>
@@ -299,28 +311,27 @@ def test_golden_policy_set_body_replaces_request_body() -> None:
 """
     )
     req = PolicyRequest(
-        method="POST",
-        path="/api/items",
-        query={},
-        headers={},
-        variables={"subscription_id": "sub-1"},
-        body=b"original",
+        method="POST", path="/api/items", query={}, headers={}, variables={"subscription_id": "sub-1"}, body=b"original"
     )
     early = apply_inbound([doc], req)
     assert early is None
-    assert req.body == b'{"path":"/api/items","subscription":"sub-1"}'
+    assert req.body == b'{"path":"{path}","subscription":"{subscription_id}"}'
 
 
 def test_golden_policy_return_response_supports_set_body_template() -> None:
+    """Policy expressions provide variable access in literal policy text.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+    """
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
-    <set-variable name="mode" value="{query:mode}" />
+    <set-variable name="mode" value='@(context.Request.Url.Query.GetValueOrDefault("mode", ""))' />
     <return-response>
       <set-status code="200" reason="ok" />
       <set-header name="content-type" exists-action="override"><value>application/json</value></set-header>
-      <set-body>{"mode":"{var:mode}"}</set-body>
+      <set-body>@("{\\&quot;mode\\&quot;:\\&quot;" + context.Variables.GetValueOrDefault("mode", "") + "\\&quot;}")</set-body>
     </return-response>
   </inbound>
   <backend />
@@ -364,11 +375,15 @@ def test_golden_policy_include_fragment_inserts_fragment_nodes() -> None:
 
 
 def test_golden_policy_named_values_resolve_before_template_tokens() -> None:
+    """Named values are resolved in policy values before policy expressions run.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
     doc = parse_policies_xml(
         """\
 <policies>
   <inbound>
-    <set-header name="x-backend" exists-action="override"><value>https://{{backend-host}}{path}</value></set-header>
+    <set-header name="x-backend" exists-action="override"><value>@("https://{{backend-host}}" + context.Request.Url.Path)</value></set-header>
   </inbound>
   <backend />
   <outbound />
@@ -385,6 +400,61 @@ def test_golden_policy_named_values_resolve_before_template_tokens() -> None:
 
     assert early is None
     assert req.headers["x-backend"] == "https://backend.example.test/api/health"
+
+
+def test_golden_policy_named_values_resolve_in_attribute_values() -> None:
+    """Named values are substituted in policy attributes before execution.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    doc = parse_policies_xml(
+        """\
+<policies>
+  <inbound>
+    <set-header name="{{header-name}}" exists-action="override"><value>enabled</value></set-header>
+    <set-query-parameter name="{{query-name}}" exists-action="override"><value>yes</value></set-query-parameter>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+""",
+        gateway_config=GatewayConfig(
+            named_values={
+                "header-name": NamedValueConfig(value="x-feature"),
+                "query-name": NamedValueConfig(value="feature"),
+            }
+        ),
+    )
+    req = PolicyRequest(method="GET", path="/api/health", query={}, headers={}, variables={})
+
+    early = apply_inbound([doc], req)
+
+    assert early is None
+    assert req.headers["x-feature"] == "enabled"
+    assert req.query["feature"] == "yes"
+
+
+def test_golden_policy_named_value_expansion_is_single_pass() -> None:
+    """Named values cannot contain and expand another named value.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    cfg = GatewayConfig(
+        named_values={
+            "outer": NamedValueConfig(value="{{inner}}"),
+            "inner": NamedValueConfig(value="resolved"),
+        }
+    )
+    doc = parse_policies_xml(
+        '<policies><inbound><set-header name="x-value"><value>{{outer}}</value></set-header></inbound></policies>',
+        gateway_config=cfg,
+    )
+    req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
+
+    apply_inbound([doc], req, runtime=PolicyRuntime(gateway_config=cfg))
+
+    assert req.headers["x-value"] == "{{inner}}"
 
 
 def test_golden_policy_parses_policy_parity_v2_nodes() -> None:
