@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import jwt
@@ -625,10 +626,131 @@ class IpFilter(PolicyNode):
         return None
 
 
+_CORS_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _cors_origin_key(value: str) -> str:
+    """Comparable form of an origin: lower case, default port made explicit.
+
+    The docs say an omitted port means 80 for HTTP and 443 for HTTPS, and their
+    own example lists origins with a trailing slash, while browsers send none.
+    """
+    text = value.strip().rstrip("/").lower()
+    try:
+        parts = urlsplit(text)
+        port = parts.port
+    except ValueError:
+        return text
+    if not parts.scheme or not parts.hostname:
+        return text
+    return f"{parts.scheme}://{parts.hostname}:{port or _CORS_DEFAULT_PORTS.get(parts.scheme, 0)}"
+
+
+def _header_ci(headers: dict[str, str], name: str) -> str | None:
+    for key, value in headers.items():
+        if key.lower() == name:
+            return value
+    return None
+
+
 @dataclass(frozen=True)
 class Cors(PolicyNode):
+    """The `cors` policy.
+
+    https://learn.microsoft.com/en-us/azure/api-management/cors-policy
+
+    The gateway answers a preflight through `apply_preflight` before the normal
+    pipeline runs; `apply` handles the actual (simple or approved) request.
+
+    Documentation gaps, chosen deliberately:
+    - `terminate-unmatched-request`: the attributes table says the default is
+      `false`, while "Common configuration issues" says the default is `true`.
+      We follow the latter, which describes the observed empty 200 OK.
+    - The docs say `allow-credentials` shapes the preflight response only; we
+      also send it on actual responses, since a browser needs it there.
+    - With `*` origins and `allow-credentials="true"` the docs are silent. We
+      echo the request origin (a literal `*` is rejected by browsers when
+      credentials are on). `*` methods/headers echo the requested ones likewise.
+    - Whether a preflight's requested method/headers are checked against the
+      lists is undocumented; we advertise the lists and leave enforcement to
+      the browser. The required `allowed-headers` element is not enforced.
+    """
+
+    origins: tuple[str, ...] = ()
+    methods: tuple[str, ...] = ("GET", "POST")
+    headers: tuple[str, ...] = ()
+    expose_headers: tuple[str, ...] = ()
+    allow_credentials: str | None = None
+    terminate_unmatched_request: str | None = None
+    preflight_max_age: str | None = None
+
+    def _origin_matches(self, origin: str) -> bool:
+        key = _cors_origin_key(origin)
+        return any(item.strip() == "*" or _cors_origin_key(item) == key for item in self.origins)
+
+    def _terminates_unmatched(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> bool:
+        return _policy_bool(self.terminate_unmatched_request, req, runtime, default=True)
+
+    def _allow_origin_value(self, origin: str, credentials: bool) -> str:
+        wildcard = any(item.strip() == "*" for item in self.origins)
+        return "*" if wildcard and not credentials else origin
+
+    def _common_headers(self, origin: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> dict[str, str]:
+        credentials = _policy_bool(self.allow_credentials, req, runtime)
+        out = {"access-control-allow-origin": self._allow_origin_value(origin, credentials)}
+        if out["access-control-allow-origin"] != "*":
+            out["vary"] = "Origin"
+        if credentials:
+            out["access-control-allow-credentials"] = "true"
+        return out
+
+    def preflight_headers(self, origin: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> dict[str, str]:
+        out = self._common_headers(origin, req, runtime)
+        requested_method = _header_ci(req.headers, "access-control-request-method") or "*"
+        requested_headers = _header_ci(req.headers, "access-control-request-headers") or "*"
+        methods = [str(render_policy_value(m, req, runtime)).upper() for m in self.methods]
+        out["access-control-allow-methods"] = requested_method if "*" in methods else ", ".join(methods)
+        if self.headers:
+            out["access-control-allow-headers"] = requested_headers if "*" in self.headers else ", ".join(self.headers)
+        out["access-control-max-age"] = str(_policy_int(self.preflight_max_age, req, runtime, default=0))
+        return out
+
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        origin = _header_ci(req.headers, "origin")
+        if origin is None:
+            return None
+        if self._origin_matches(origin):
+            for name, value in self._common_headers(origin, req, runtime).items():
+                _queue_response_header(req, name, value)
+            if self.expose_headers:
+                _queue_response_header(req, "access-control-expose-headers", ", ".join(self.expose_headers))
+            _record_step(runtime, "cors", {"origin": origin, "matched": True})
+            return None
+        _record_step(runtime, "cors", {"origin": origin, "matched": False})
+        if req.method.upper() in {"GET", "HEAD"} and self._terminates_unmatched(req, runtime):
+            return ResponseSpec(status_code=200, headers={})
         return None
+
+
+async def apply_preflight(
+    docs: list[PolicyDocument], req: PolicyRequest, runtime: PolicyRuntime | None = None
+) -> ResponseSpec | None:
+    """Answer a CORS preflight from the in-scope `cors` policies.
+
+    Returns None when no `cors` policy is in scope (the caller then treats the
+    request as an ordinary OPTIONS). Only cors is evaluated; the other policies
+    run on the approved request.
+    """
+    origin = _header_ci(req.headers, "origin") or ""
+    policies = [step for _, step in _effective_section_steps(docs, "inbound") if isinstance(step, Cors)]
+    if not policies:
+        return None
+    for policy in policies:
+        if policy._origin_matches(origin):
+            return ResponseSpec(status_code=200, headers=policy.preflight_headers(origin, req, runtime))
+        if policy._terminates_unmatched(req, runtime):
+            break
+    return ResponseSpec(status_code=200, headers={})
 
 
 @dataclass(frozen=True)
@@ -3318,6 +3440,27 @@ def _parse_ip_address(el: ElementTree.Element) -> tuple[IpAddress, IpAddress]:
     return ip, ip
 
 
+def _cors_values(el: ElementTree.Element, section: str, child: str) -> tuple[str, ...]:
+    parent = el.find(section)
+    if parent is None:
+        return ()
+    return tuple(value for item in parent.findall(child) if (value := _text_or_empty(item)))
+
+
+def _parse_cors(el: ElementTree.Element) -> Cors:
+    methods_el = el.find("allowed-methods")
+    methods = _cors_values(el, "allowed-methods", "method") or ("GET", "POST")
+    return Cors(
+        origins=_cors_values(el, "allowed-origins", "origin"),
+        methods=methods,
+        headers=_cors_values(el, "allowed-headers", "header"),
+        expose_headers=_cors_values(el, "expose-headers", "header"),
+        allow_credentials=el.attrib.get("allow-credentials"),
+        terminate_unmatched_request=el.attrib.get("terminate-unmatched-request"),
+        preflight_max_age=methods_el.attrib.get("preflight-result-max-age") if methods_el is not None else None,
+    )
+
+
 def _parse_ip_filter(el: ElementTree.Element) -> IpFilter:
     _reject_unknown_attributes(el, {"action"}, "ip-filter")
     action = _required_attr(el, "action", "ip-filter").strip()
@@ -4020,6 +4163,7 @@ _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "rewrite-uri": _parse_rewrite_uri,
     "check-header": _parse_check_header,
     "ip-filter": _parse_ip_filter,
+    "cors": _parse_cors,
     "rate-limit": _parse_rate_limit,
     "rate-limit-by-key": _parse_rate_limit_by_key,
     "quota": _parse_quota,
@@ -4048,7 +4192,6 @@ _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
 # Elements that carry no attributes worth reading.
 _CONSTANT_ELEMENTS: dict[str, Callable[[], PolicyNode]] = {
     "base": NoOp,
-    "cors": Cors,
 }
 
 
