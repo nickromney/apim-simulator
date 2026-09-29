@@ -39,6 +39,9 @@ class AuthContext:
     client_cert: ClientCertContext | None = None
 
 
+_SUPPORTED_OIDC_ALGORITHMS = frozenset({"HS256", "HS384", "HS512", "PS256", "RS256", "RS512", "ES256"})
+
+
 def build_client_principal(claims: dict[str, Any]) -> str:
     principal = {
         "auth_typ": "oauth2",
@@ -68,8 +71,6 @@ class OIDCVerifier:
         self._jwks_client = PyJWKClient(jwks_uri) if (jwks_uri and not jwks) else None
 
     def _get_key_from_static_jwks(self, token: str) -> Any:
-        from jwt.algorithms import RSAAlgorithm
-
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         jwks = self._jwks or {}
@@ -83,10 +84,16 @@ class OIDCVerifier:
         jwk = candidates[0] if candidates else None
         if not isinstance(jwk, dict):
             raise HTTPException(status_code=401, detail="Invalid or expired access token")
-        return RSAAlgorithm.from_jwk(json.dumps(jwk))
+        try:
+            return jwt.PyJWK(jwk).key
+        except (InvalidTokenError, ValueError) as exc:
+            raise HTTPException(status_code=401, detail="Invalid or expired access token") from exc
 
     def decode(self, token: str) -> dict[str, Any]:
         try:
+            algorithm = jwt.get_unverified_header(token).get("alg")
+            if algorithm not in _SUPPORTED_OIDC_ALGORITHMS:
+                raise HTTPException(status_code=401, detail="Invalid or expired access token")
             if self._jwks_client is not None:
                 signing_key = self._jwks_client.get_signing_key_from_jwt(token)
                 key = signing_key.key
@@ -96,10 +103,12 @@ class OIDCVerifier:
             return jwt.decode(
                 token,
                 key,
-                algorithms=["RS256"],
+                algorithms=[algorithm],
                 audience=self.audience,
                 issuer=self.issuer,
             )
+        except HTTPException:
+            raise
         except InvalidTokenError as exc:
             raise HTTPException(status_code=401, detail="Invalid or expired access token") from exc
 
