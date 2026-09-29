@@ -68,7 +68,7 @@ def test_check_header_refusal_enters_on_error_and_returns_its_response() -> None
     assert response.headers["err-source"] == "check-header"
     assert response.headers["err-reason"] == "HeaderNotFound"
     assert response.headers["err-section"] == "inbound"
-    assert response.headers["err-status"] == "403"
+    assert response.headers["err-status"] == "418"
 
 
 def test_on_error_without_return_response_keeps_error_response_and_adds_headers() -> None:

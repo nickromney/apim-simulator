@@ -762,7 +762,7 @@ def test_backend_basic_auth_is_applied_and_url_is_used() -> None:
 
     app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     with TestClient(app) as client:
-        resp = client.get("/api/health")
+        resp = client.get("/api/health", headers={"Authorization": "Bearer client-token"})
     assert resp.status_code == 200
 
 
@@ -3936,8 +3936,9 @@ def test_backend_managed_identity_and_client_certificate_headers_are_applied() -
     assert mi.status_code == 200
     assert cc.status_code == 200
     assert seen[0][0] == _http_url("managed-identity-upstream/api/health")
-    assert seen[0][1]["x-apim-managed-identity"] == "true"
-    assert seen[0][1]["x-apim-managed-identity-resource"] == "https://resource.example"
+    assert seen[0][1]["authorization"].startswith("Bearer local-apim-mi.")
+    assert "x-apim-managed-identity" not in seen[0][1]
+    assert "x-apim-managed-identity-resource" not in seen[0][1]
     assert seen[1][0] == _http_url("client-certificate-upstream/api/health")
     assert seen[1][1]["x-apim-client-certificate"] == "present"
     assert seen[1][1]["x-apim-client-certificate-thumbprints"] == "thumb-a,thumb-b"
