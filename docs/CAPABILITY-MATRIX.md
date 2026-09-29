@@ -28,6 +28,9 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | SKU selection | N/A | `azurerm_api_management.sku_name` | Simulator is single-instance |
 | Zones / HA | N/A | `azurerm_api_management.zones` | Not applicable |
 | Virtual network type | Partial | `azurerm_api_management.virtual_network_type` / AzAPI `properties.virtualNetworkType` | Imported into service metadata only; use docker/k8s networking for actual topology |
+| Gateway error responses | Yes | N/A | Errors raised by the gateway itself use APIM's `{"statusCode","message"}` body. Missing and invalid subscription keys, keys for inactive subscriptions, and keys that don't cover the API all return 401 with APIM's messages and a `WWW-Authenticate: AzureApiManagementKey` challenge. An unreachable backend returns `500 Internal server error` |
+| Backend request headers | Yes | N/A | The backend gets its own `Host` and an `X-Forwarded-For` with the client address appended. The subscription key is forwarded, as in APIM. Simulator identity headers (`x-apim-user-*`, `x-ms-client-principal*`, `x-user-*`, `x-apim-products`) are sent only with `inject_simulator_identity_headers: true` |
+| Simulator response headers | Adapted | N/A | `x-apim-simulator` and `x-correlation-id` are sent only with `emit_simulator_response_headers` / `propagate_simulator_correlation_id`; APIM sends neither |
 | Custom domains / hostnames | Partial | `azurerm_api_management.hostname_configuration` / AzAPI `properties.hostnameConfigurations` | Imported as service hostname metadata; TLS termination remains external |
 
 ## Runtime Scenarios
@@ -51,8 +54,9 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Operation descriptions and template params | Yes | `azurerm_api_management_api_operation` | Imported from operation metadata blocks and projected through management APIs |
 | Operation request metadata | Partial | `azurerm_api_management_api_operation.request` | Imported and projected through management APIs, and can be authored on operation PUT; request validation is not enforced at runtime |
 | Operation response metadata | Partial | `azurerm_api_management_api_operation.response` | Imported and projected through management APIs, and can be authored on operation PUT; runtime uses them for `mock-response` examples but not full schema enforcement |
-| Path routing | Yes | - | `path_prefix` matching |
+| Path routing | Yes | - | Operations match their full URL template segment by segment: `{param}` takes one segment, `{*param}` and `/*` take the rest, query-string template parts must match, literal segments beat parameters, and the API URL suffix matches case-insensitively. An unmatched request is `404 {"statusCode":404,"message":"Resource not found"}`. An API with no operations serves nothing, as in APIM. Tie-breaking between equally specific templates is not documented by Microsoft; declaration order decides. Routes declared directly under `routes` (outside `apis`) keep simulator prefix matching |
 | Method routing | Yes | - | Per-operation `method` |
+| Template parameters | Yes | - | Matched values are exposed as `context.Request.MatchedParameters` |
 | API Version Sets | Yes | `azurerm_api_management_api_version_set` | Header/Query/Segment schemes |
 | OpenAPI import | Partial | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu and `/apim/management/apis/{api_id}/import`; full schema/request/response extraction is narrower than explicit APIM resources |
 | GraphQL | No | `azurerm_api_management_api` | Not implemented |
@@ -129,15 +133,16 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `choose`/`when`/`otherwise` | Yes | - | Conditional logic |
 | `check-header` | Yes | - | Required header validation |
 | `ip-filter` | Yes | - | Allow/deny IP ranges |
-| `cors` | Partial | - | Basic CORS headers |
-| `rate-limit` | Yes | - | Calls per period |
-| `rate-limit-by-key` | Yes | - | Supports literal and response-aware increment evaluation plus custom remaining/retry headers |
-| `quota` | Yes | - | Calls per renewal period |
-| `quota-by-key` | Partial | - | Supports call quotas and `first-period-start`; `bandwidth` remains unsupported |
+| `cors` | No | - | The policy element is accepted but does nothing; CORS comes from the gateway-wide `allowed_origins` setting, and `OPTIONS` requests are answered before policies run |
+| `rate-limit` | Yes | - | Sliding window per subscription and per policy scope; skipped without a subscription key. Over the limit: `429` with `{"statusCode":429,"message":"Rate limit is exceeded. Try again in N seconds."}` and `Retry-After`. Supports `retry-after-header-name`, `retry-after-variable-name`, `remaining-calls-header-name`, `remaining-calls-variable-name`, `total-calls-header-name`, and nested `<api>`/`<operation>` limits. `renewal-period` is capped at 300 s. Implements the classic tiers' sliding window, not the v2 token bucket. See [rate-limit](https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy) |
+| `rate-limit-by-key` | Yes | - | One sliding-window counter per `counter-key` across all scopes. Expression-valued `increment-condition`/`increment-count` are evaluated after the response, so the 429 lands one call later, as documented. Same 429 body and header attributes as `rate-limit`. See [rate-limit-by-key](https://learn.microsoft.com/en-us/azure/api-management/rate-limit-by-key-policy) |
+| `quota` | Yes | - | `calls` and/or `bandwidth` (KB of request plus response body) per subscription and per policy scope; skipped without a subscription key. `renewal-period="0"` never renews. Over quota: `403` with `{"statusCode":403,"message":"Out of call volume quota. Quota will be replenished in hh:mm:ss."}` (or `Out of bandwidth quota`) and `Retry-After`. Adapted: APIM anchors periods to the subscription's start date, which the local model doesn't store, so periods start at the first counted call. See [quota](https://learn.microsoft.com/en-us/azure/api-management/quota-policy) |
+| `quota-by-key` | Partial | - | Call quotas per `counter-key`, anchored at `first-period-start`, minimum period 300 s, incremented once per request even when several policies share a key. Same 403 body as `quota`. `bandwidth` is rejected as unsupported. See [quota-by-key](https://learn.microsoft.com/en-us/azure/api-management/quota-by-key-policy) |
 | `validate-jwt` | Yes | - | OpenID config, audiences, issuers, required claims, output token variables |
 | `authentication-basic` | Partial | - | Backend auth only |
 | `authentication-certificate` | Partial | - | Backend auth config |
 | `authentication-managed-identity` | Partial | - | Backend auth config |
+| `forward-request` | Partial | - | Applies `timeout` (default 300 s), `timeout-ms`, `follow-redirects`, `buffer-request-body`, `buffer-response` and `fail-on-error-status-code`. Adapted: the backend is still called when no `forward-request` is in effect. See [forward-request](https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy) |
 | `set-backend-service` | Yes | - | Supports `backend-id` and `base-url` overrides in inbound/backend |
 | `cache-lookup` | Partial | - | Supports local internal cache; `prefer-external` is adapted to local cache and `external` is unsupported |
 | `cache-store` | Partial | - | Supports local internal response cache for GET responses |
