@@ -107,6 +107,41 @@ def test_product_policy_applies_for_authorizing_product() -> None:
 
 
 @pytest.mark.contract("POLICY-PRODUCT-SCOPE")
+def test_product_policy_runs_before_api_when_api_calls_base_first() -> None:
+    """With base first, the product section runs before the API's own policies.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+    """
+    product_policy = (
+        "<policies><inbound>"
+        '<set-header name="x-scope-order" exists-action="append"><value>product</value></set-header>'
+        "</inbound><backend /><outbound /><on-error /></policies>"
+    )
+    api_policy = (
+        "<policies><inbound><base />"
+        '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header>'
+        "</inbound><backend /><outbound /><on-error /></policies>"
+    )
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("x-scope-order"))
+        return httpx.Response(200, json={"ok": True})
+
+    config = _subscribed_config(
+        products={"p1": ProductConfig(name="p1", policies_xml=product_policy)},
+        subscription_products=["p1"],
+        route_products=["p1"],
+        route_policy=api_policy,
+    )
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        resp = client.get("/api/health", headers={"Ocp-Apim-Subscription-Key": "good"})
+    assert resp.status_code == 200
+    assert seen == ["product,api"]
+
+
+@pytest.mark.contract("POLICY-PRODUCT-SCOPE")
 def test_api_scope_without_base_suppresses_product_scope() -> None:
     """A child section without base does not inherit its product section.
 

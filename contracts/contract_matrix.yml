@@ -340,7 +340,8 @@ contracts:
       - docs/CAPABILITY-MATRIX.md#policies
     owner_tests:
       - tests/test_policy_scopes.py::test_product_policy_applies_for_authorizing_product
-      - tests/test_policy_scopes.py::test_product_policy_runs_before_api_scope
+      - tests/test_policy_scopes.py::test_product_policy_runs_before_api_when_api_calls_base_first
+      - tests/test_policy_scopes.py::test_api_scope_without_base_suppresses_product_scope
     fixture_or_golden: inline-xml
     assertion_kind: http-json
 
