@@ -31,7 +31,7 @@ from app.config import (
     GatewayConfig,
     NamedValueConfig,
 )
-from app.policy import PolicyRequest
+from app.policy import PolicyRequest, issue_local_managed_identity_token
 
 
 def _member(backend_id: str, *, weight: int = 1, priority: int = 1) -> BackendPoolMemberConfig:
@@ -313,15 +313,14 @@ def test_basic_auth_returns_credentials_for_the_upstream_call() -> None:
     assert auth == ("user", "pass")
 
 
-def test_basic_auth_defers_to_an_authorization_header_the_caller_already_set() -> None:
-    """A policy that set Authorization itself must win over backend config."""
+def test_basic_auth_replaces_an_authorization_header_the_caller_already_set() -> None:
+    """Backend basic authentication replaces a caller's Authorization header."""
     req = _policy_request(authorization="Bearer caller-token")
     auth = apply_backend_credentials(
         _backend(auth_type="basic", basic_username="user", basic_password="pass"), req, _config()
     )
 
-    assert auth is None
-    assert req.headers["authorization"] == "Bearer caller-token"
+    assert auth == ("user", "pass")
 
 
 @pytest.mark.parametrize(
@@ -338,24 +337,25 @@ def test_basic_auth_needs_both_halves(username: str | None, password: str | None
     assert auth is None
 
 
-def test_managed_identity_is_signalled_as_a_header() -> None:
-    """The simulator has no real identity to present, so it says so instead."""
+def test_managed_identity_uses_a_local_bearer_token() -> None:
+    """The simulator uses an opaque local bearer-token adaptation."""
     req = _policy_request()
     auth = apply_backend_credentials(
         _backend(auth_type="managed_identity", managed_identity_resource="https://vault.invalid"), req, _config()
     )
 
     assert auth is None
-    assert req.headers["x-apim-managed-identity"] == "true"
-    assert req.headers["x-apim-managed-identity-resource"] == "https://vault.invalid"
+    assert req.headers["authorization"].startswith("Bearer local-apim-mi.")
+    assert "x-apim-managed-identity" not in req.headers
+    assert "x-apim-managed-identity-resource" not in req.headers
 
 
 def test_managed_identity_without_a_resource_sets_only_the_flag() -> None:
     req = _policy_request()
     apply_backend_credentials(_backend(auth_type="managed_identity"), req, _config())
 
-    assert req.headers["x-apim-managed-identity"] == "true"
-    assert "x-apim-managed-identity-resource" not in req.headers
+    assert req.headers["authorization"].startswith("Bearer local-apim-mi.")
+    assert "x-apim-managed-identity" not in req.headers
 
 
 def test_client_certificate_auth_is_signalled_as_a_header() -> None:
@@ -537,7 +537,7 @@ def test_the_managed_identity_resource_is_rendered() -> None:
         _config(named_values={"scope": ".default"}),
     )
 
-    assert req.headers["x-apim-managed-identity-resource"] == "acme/.default"
+    assert req.headers["authorization"] == f"Bearer {issue_local_managed_identity_token('acme/.default')}"
 
 
 def test_an_explicit_authorization_is_rendered_from_both_halves() -> None:

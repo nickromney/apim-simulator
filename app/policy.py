@@ -43,6 +43,10 @@ class ResponseSpec:
     headers: dict[str, str]
     body: bytes = b""
     media_type: str | None = None
+    # ASGI's http.response.start has no reason-phrase field; retain the APIM
+    # value for direct policy consumers while the live server selects its
+    # standard phrase.
+    reason: str | None = None
 
 
 @dataclass
@@ -90,6 +94,21 @@ class PolicyRuntime:
     llm_metric_emitter: Any = None
     custom_metric_emitter: Any = None
     clock: Callable[[], float] | None = None
+
+
+def issue_local_managed_identity_token(resource: str, client_id: str | None = None) -> str:
+    """Issue a deterministic opaque token for the local managed-identity adapter.
+
+    The simulator has no Microsoft Entra tenant, so this is intentionally not a
+    real access token. The payload keeps the selected resource and identity
+    visible to local tests without forwarding the old simulator marker headers.
+    """
+    payload = json.dumps(
+        {"resource": resource, "client_id": client_id or "system-assigned"},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    encoded = base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+    return f"local-apim-mi.{encoded}"
 
 
 @dataclass(frozen=True)
@@ -296,6 +315,68 @@ class SetHeader(PolicyNode):
 
 
 @dataclass(frozen=True)
+class AuthenticationBasic(PolicyNode):
+    username: str
+    password: str
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        username = render_policy_value(self.username, req, runtime)
+        password = render_policy_value(self.password, req, runtime)
+        credentials = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+        req.headers["authorization"] = f"Basic {credentials}"
+        _record_step(runtime, "authentication-basic", {"header": "authorization"})
+        return None
+
+
+@dataclass(frozen=True)
+class AuthenticationManagedIdentity(PolicyNode):
+    resource: str
+    client_id: str | None = None
+    output_token_variable_name: str | None = None
+    ignore_error: bool = False
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        resource = render_policy_value(self.resource, req, runtime)
+        if not resource:
+            if self.output_token_variable_name:
+                req.variables[self.output_token_variable_name] = None
+            if self.ignore_error:
+                return None
+            raise HTTPException(status_code=500, detail="authentication-managed-identity token acquisition failed")
+
+        token = issue_local_managed_identity_token(resource, self.client_id)
+        req.headers["authorization"] = f"Bearer {token}"
+        if self.output_token_variable_name:
+            req.variables[self.output_token_variable_name] = token
+            _record_variable_write(runtime, self.output_token_variable_name, token, "authentication-managed-identity")
+        _record_step(runtime, "authentication-managed-identity", {"resource": resource})
+        return None
+
+
+@dataclass(frozen=True)
+class AuthenticationCertificate(PolicyNode):
+    thumbprint: str | None = None
+    certificate_id: str | None = None
+    body: str | None = None
+    password: str | None = None
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        # Learn documents certificate selection, but is silent on a local
+        # gateway without a certificate store; marker headers are the local
+        # transport adaptation and are removed before ordinary proxying.
+        if self.thumbprint is not None:
+            req.headers["x-apim-authentication-certificate-thumbprint"] = render_policy_value(
+                self.thumbprint, req, runtime
+            )
+        elif self.certificate_id is not None:
+            req.headers["x-apim-authentication-certificate-id"] = render_policy_value(self.certificate_id, req, runtime)
+        else:
+            req.headers["x-apim-authentication-certificate"] = "present"
+        _record_step(runtime, "authentication-certificate", {"configured": True})
+        return None
+
+
+@dataclass(frozen=True)
 class RewriteUri(PolicyNode):
     template: str
 
@@ -362,34 +443,64 @@ class SetBody(PolicyNode):
 
 
 @dataclass(frozen=True)
+class _ReturnResponseStatus:
+    code: str
+    reason: str | None
+
+
+@dataclass(frozen=True)
 class ReturnResponse(PolicyNode):
-    status_code: int
-    reason: str | None = None
-    headers: list[SetHeader] = field(default_factory=list)
-    body: str | None = None
-    media_type: str | None = None
+    response_variable_name: str | None = None
+    actions: tuple[SetHeader | SetBody | _ReturnResponseStatus, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        out_headers: dict[str, str] = {}
+        source = req.variables.get(self.response_variable_name) if self.response_variable_name else None
+        if self.response_variable_name and not isinstance(source, CalloutResponse):
+            raise HTTPException(
+                status_code=500,
+                detail=f"return-response response variable is not a response: {self.response_variable_name}",
+            )
+
+        if isinstance(source, CalloutResponse):
+            status_code = source.StatusCode
+            out_headers = dict(source.Headers)
+            response_body = source.Body.AsString().encode("utf-8")
+            reason = source.ReasonPhrase or None
+        else:
+            status_code = 200
+            out_headers = {}
+            response_body = b""
+            reason = None
+
         temp_req = PolicyRequest(
             method=req.method,
             path=req.path,
             query=dict(req.query),
             headers=out_headers,
             variables=req.variables,
-            body=req.body,
-            response_status_code=req.response_status_code,
+            body=response_body,
+            response_status_code=status_code,
+            response_headers=out_headers,
+            response_body=response_body,
+            response_media_type=req.response_media_type,
+            section=req.section,
         )
-        for header in self.headers:
-            header.apply(temp_req, runtime)
+        for action in self.actions:
+            if isinstance(action, _ReturnResponseStatus):
+                temp_req.response_status_code = int(render_policy_value(action.code, temp_req, runtime))
+                reason = render_policy_value(action.reason, temp_req, runtime) if action.reason is not None else None
+            elif isinstance(action, SetHeader):
+                action.apply(temp_req, runtime)
+            else:
+                temp_req.response_body = render_policy_value(action.value, temp_req, runtime).encode("utf-8")
 
-        body = render_policy_value(self.body or "", req, runtime)
-        _record_step(runtime, "return-response", {"status_code": self.status_code})
+        _record_step(runtime, "return-response", {"status_code": temp_req.response_status_code or 200})
         return ResponseSpec(
-            status_code=self.status_code,
+            status_code=temp_req.response_status_code or 200,
             headers=out_headers,
-            body=body.encode("utf-8"),
-            media_type=self.media_type or out_headers.get("content-type"),
+            body=temp_req.response_body,
+            media_type=temp_req.response_media_type or out_headers.get("content-type"),
+            reason=reason,
         )
 
 
@@ -3548,6 +3659,9 @@ class SendRequest(PolicyNode):
     body: str | None = None
     authentication_certificate_thumbprint: str | None = None
     authentication_managed_identity_resource: str | None = None
+    authentication_managed_identity_client_id: str | None = None
+    authentication_managed_identity_output_token_variable_name: str | None = None
+    authentication_managed_identity_ignore_error: bool = False
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         raise RuntimeError("send-request must be executed through apply_async")
@@ -3562,9 +3676,11 @@ class SendRequest(PolicyNode):
         are applied on top.
         """
         mode = (render_policy_value(self.mode, req, runtime) or "new").lower()
+        if mode not in {"new", "copy"}:
+            raise HTTPException(status_code=500, detail="send-request mode must be new or copy")
         copying = mode == "copy"
 
-        url = str(req.variables.get("original_request_url") or "")
+        url = str(req.variables.get("original_request_url") or "") if copying else ""
         if self.url is not None:
             url = render_policy_value(self.url, req, runtime)
         if not url:
@@ -3580,7 +3696,8 @@ class SendRequest(PolicyNode):
             query=dict(req.query),
             headers=dict(req.headers) if copying else {},
             variables=req.variables,
-            body=req.body if copying else b"",
+            body=req.body if copying and not req.in_outbound else b"",
+            section=req.section,
         )
         for header in self.headers:
             header.apply(temp_req, runtime)
@@ -3593,27 +3710,43 @@ class SendRequest(PolicyNode):
     def _apply_callout_authentication(
         self, temp_req: PolicyRequest, req: PolicyRequest, runtime: PolicyRuntime | None
     ) -> None:
-        """Signal managed identity or client certificate to the callout target.
-
-        The simulator has no real credential to present, so it says which one
-        would have been used rather than presenting one.
-        """
+        """Apply local adaptations for callout authentication policies."""
         if self.authentication_managed_identity_resource is not None:
-            temp_req.headers["x-apim-managed-identity"] = "true"
-            temp_req.headers["x-apim-managed-identity-resource"] = render_policy_value(
-                self.authentication_managed_identity_resource, req, runtime
-            )
+            resource = render_policy_value(self.authentication_managed_identity_resource, req, runtime)
+            if not resource:
+                if self.authentication_managed_identity_output_token_variable_name:
+                    req.variables[self.authentication_managed_identity_output_token_variable_name] = None
+                if self.authentication_managed_identity_ignore_error:
+                    return
+                raise HTTPException(status_code=500, detail="send-request managed identity token acquisition failed")
+            token = issue_local_managed_identity_token(resource, self.authentication_managed_identity_client_id)
+            temp_req.headers["authorization"] = f"Bearer {token}"
+            if self.authentication_managed_identity_output_token_variable_name:
+                req.variables[self.authentication_managed_identity_output_token_variable_name] = token
+                _record_variable_write(
+                    runtime,
+                    self.authentication_managed_identity_output_token_variable_name,
+                    token,
+                    "send-request",
+                )
         if self.authentication_certificate_thumbprint is not None:
             temp_req.headers["x-apim-authentication-certificate-thumbprint"] = render_policy_value(
                 self.authentication_certificate_thumbprint, req, runtime
             )
 
+    def _response_variable_name(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> str:
+        name = render_policy_value(self.response_variable_name, req, runtime).strip()
+        if not name:
+            raise HTTPException(status_code=500, detail="send-request response-variable-name evaluated to empty")
+        return name
+
     def _record_ignored_error(
         self, req: PolicyRequest, runtime: PolicyRuntime | None, *, url: str, method: str, exc: Exception
     ) -> None:
         """Record a failed callout the policy asked to tolerate."""
-        req.variables[self.response_variable_name] = None
-        _record_variable_write(runtime, self.response_variable_name, None, "send-request")
+        response_variable_name = self._response_variable_name(req, runtime)
+        req.variables[response_variable_name] = None
+        _record_variable_write(runtime, response_variable_name, None, "send-request")
         _record_send_request(
             runtime,
             {
@@ -3621,7 +3754,7 @@ class SendRequest(PolicyNode):
                 "method": method,
                 "status": "ignored-error",
                 "error": str(exc),
-                "response_variable_name": self.response_variable_name,
+                "response_variable_name": response_variable_name,
             },
         )
 
@@ -3649,15 +3782,16 @@ class SendRequest(PolicyNode):
             content=response.content,
             reason=response.reason_phrase,
         )
-        req.variables[self.response_variable_name] = callout
-        _record_variable_write(runtime, self.response_variable_name, callout, "send-request")
+        response_variable_name = self._response_variable_name(req, runtime)
+        req.variables[response_variable_name] = callout
+        _record_variable_write(runtime, response_variable_name, callout, "send-request")
         _record_send_request(
             runtime,
             {
                 "url": url,
                 "method": method,
                 "status_code": response.status_code,
-                "response_variable_name": self.response_variable_name,
+                "response_variable_name": response_variable_name,
             },
         )
         return None
@@ -3792,21 +3926,66 @@ def _parse_rewrite_uri(el: ElementTree.Element) -> RewriteUri:
     return RewriteUri(template=template)
 
 
-def _parse_return_response(el: ElementTree.Element) -> ReturnResponse:
-    status_el = el.find("set-status")
-    if status_el is None:
-        raise HTTPException(status_code=500, detail="return-response missing set-status")
-    code = int(status_el.attrib.get("code") or "200")
-    reason = status_el.attrib.get("reason")
-    headers = [_parse_set_header(h) for h in el.findall("set-header")]
-    body_el = el.find("body")
-    set_body_el = el.find("set-body")
-    body = (
-        _parse_set_body(set_body_el).value
-        if set_body_el is not None
-        else (_text_or_empty(body_el) if body_el is not None else None)
+def _parse_authentication_basic(el: ElementTree.Element) -> AuthenticationBasic:
+    return AuthenticationBasic(
+        username=_required_attr(el, "username", "authentication-basic"),
+        password=_required_attr(el, "password", "authentication-basic"),
     )
-    return ReturnResponse(status_code=code, reason=reason, headers=headers, body=body)
+
+
+def _parse_authentication_managed_identity(el: ElementTree.Element) -> AuthenticationManagedIdentity:
+    resource = _required_attr(el, "resource", "authentication-managed-identity")
+    client_id = _static_policy_name(el, "client-id", "authentication-managed-identity")
+    output_name = _static_policy_name(el, "output-token-variable-name", "authentication-managed-identity")
+    ignore_error = str(el.attrib.get("ignore-error") or "false").lower()
+    if ignore_error not in {"true", "false"}:
+        raise HTTPException(
+            status_code=500, detail="authentication-managed-identity ignore-error must be true or false"
+        )
+    return AuthenticationManagedIdentity(
+        resource=resource,
+        client_id=client_id,
+        output_token_variable_name=output_name,
+        ignore_error=ignore_error == "true",
+    )
+
+
+def _parse_authentication_certificate(el: ElementTree.Element) -> AuthenticationCertificate:
+    thumbprint = el.attrib.get("thumbprint")
+    certificate_id = el.attrib.get("certificate-id")
+    body = el.attrib.get("body")
+    if not thumbprint and not certificate_id and not body:
+        raise HTTPException(
+            status_code=500,
+            detail="authentication-certificate requires thumbprint, certificate-id, or body",
+        )
+    return AuthenticationCertificate(
+        thumbprint=thumbprint,
+        certificate_id=certificate_id,
+        body=body,
+        password=el.attrib.get("password"),
+    )
+
+
+def _parse_return_response(el: ElementTree.Element) -> ReturnResponse:
+    response_variable_name = _static_policy_name(el, "response-variable-name", "return-response")
+    actions: list[SetHeader | SetBody | _ReturnResponseStatus] = []
+    for child in el:
+        if child.tag == "set-status":
+            code = child.attrib.get("code")
+            if not code:
+                raise HTTPException(status_code=500, detail="set-status requires code")
+            actions.append(_ReturnResponseStatus(code=code, reason=child.attrib.get("reason")))
+        elif child.tag == "set-header":
+            actions.append(_parse_set_header(child))
+        elif child.tag == "set-body":
+            actions.append(_parse_set_body(child))
+        elif child.tag == "body":
+            # Kept for existing simulator policies; APIM documents set-body.
+            actions.append(SetBody(value=_text_or_empty(child)))
+        else:
+            raise HTTPException(status_code=500, detail=f"return-response unsupported element: {child.tag}")
+    return ReturnResponse(response_variable_name=response_variable_name, actions=tuple(actions))
 
 
 def _parse_mock_response(el: ElementTree.Element) -> MockResponse:
@@ -4647,6 +4826,12 @@ def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
 
 
 def _parse_set_backend_service(el: ElementTree.Element) -> SetBackendService:
+    service_fabric = sorted(name for name in el.attrib if name.startswith("sf-"))
+    if service_fabric:
+        raise HTTPException(
+            status_code=500,
+            detail=f"set-backend-service Service Fabric attributes are unsupported: {service_fabric[0]}",
+        )
     base_url = el.attrib.get("base-url")
     backend_id = el.attrib.get("backend-id")
     if not base_url and not backend_id:
@@ -4670,14 +4855,41 @@ def _parse_forward_request(el: ElementTree.Element) -> ForwardRequest:
     )
 
 
+def _required_send_request_child(el: ElementTree.Element, tag: str) -> None:
+    child = el.find(tag)
+    if child is None or not _text_or_empty(child):
+        raise HTTPException(status_code=500, detail="send-request mode=new requires set-url and set-method")
+
+
+def _validate_send_request_shape(el: ElementTree.Element, mode: str) -> None:
+    if not is_apim_expression(mode) and mode.lower() not in {"new", "copy"}:
+        raise HTTPException(status_code=500, detail="send-request mode must be new or copy")
+    if not is_apim_expression(mode) and mode.lower() == "new":
+        _required_send_request_child(el, "set-url")
+        _required_send_request_child(el, "set-method")
+    if el.find("proxy") is not None:
+        # Learn specifies that proxy routes the callout but not how a shared
+        # client should apply per-policy proxy credentials; reject rather than
+        # silently dropping the documented child.
+        raise HTTPException(status_code=500, detail="send-request proxy is unsupported by the simulator")
+    auth_cert_el = el.find("authentication-certificate")
+    if auth_cert_el is not None and not auth_cert_el.attrib.get("thumbprint"):
+        raise HTTPException(status_code=500, detail="send-request authentication-certificate requires thumbprint")
+    auth_mi_el = el.find("authentication-managed-identity")
+    if auth_mi_el is not None and not auth_mi_el.attrib.get("resource"):
+        raise HTTPException(status_code=500, detail="send-request authentication-managed-identity requires resource")
+
+
 def _parse_send_request(el: ElementTree.Element) -> SendRequest:
     response_variable_name = (el.attrib.get("response-variable-name") or "").strip()
     if not response_variable_name:
         raise HTTPException(status_code=500, detail="send-request missing response-variable-name")
+    mode = str(el.attrib.get("mode") or "new").strip()
+    _validate_send_request_shape(el, mode)
     auth_cert_el = el.find("authentication-certificate")
     auth_mi_el = el.find("authentication-managed-identity")
     return SendRequest(
-        mode=str(el.attrib.get("mode") or "new"),
+        mode=mode,
         response_variable_name=response_variable_name,
         timeout=el.attrib.get("timeout"),
         ignore_error=str(el.attrib.get("ignore-error") or "false").lower() == "true",
@@ -4694,6 +4906,23 @@ def _parse_send_request(el: ElementTree.Element) -> SendRequest:
             str(auth_mi_el.attrib.get("resource"))
             if auth_mi_el is not None and auth_mi_el.attrib.get("resource")
             else None
+        ),
+        authentication_managed_identity_client_id=(
+            _static_policy_name(auth_mi_el, "client-id", "send-request authentication-managed-identity")
+            if auth_mi_el is not None
+            else None
+        ),
+        authentication_managed_identity_output_token_variable_name=(
+            _static_policy_name(
+                auth_mi_el,
+                "output-token-variable-name",
+                "send-request authentication-managed-identity",
+            )
+            if auth_mi_el is not None
+            else None
+        ),
+        authentication_managed_identity_ignore_error=(
+            str(auth_mi_el.attrib.get("ignore-error") or "false").lower() == "true" if auth_mi_el is not None else False
         ),
     )
 
@@ -4817,6 +5046,9 @@ def _parse_children(
 # `azure-openai-*`); both map to the same parser rather than to two nodes.
 _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "set-header": _parse_set_header,
+    "authentication-basic": _parse_authentication_basic,
+    "authentication-managed-identity": _parse_authentication_managed_identity,
+    "authentication-certificate": _parse_authentication_certificate,
     "set-variable": _parse_set_variable,
     "set-query-parameter": _parse_set_query_parameter,
     "set-body": _parse_set_body,
