@@ -2358,14 +2358,25 @@ def _record_validation_error(
     *,
     policy: str,
     errors_variable_name: str | None,
-    message: str,
+    name: str,
+    error_type: str,
+    validation_rule: str,
+    details: str,
+    action: str,
 ) -> None:
+    error = {
+        "Name": name,
+        "Type": error_type,
+        "ValidationRule": validation_rule,
+        "Details": details,
+        "Action": action,
+    }
     if errors_variable_name:
         existing = req.variables.get(errors_variable_name)
         errors = existing if isinstance(existing, list) else []
-        errors.append({"source": policy, "message": message})
+        errors.append(error)
         req.variables[errors_variable_name] = errors
-    _record_step(runtime, policy, {"error": message})
+    _record_step(runtime, policy, {"error": error})
 
 
 def _operation_request_metadata(req: PolicyRequest, runtime: PolicyRuntime | None) -> Any:
@@ -2387,18 +2398,26 @@ _INTERNAL_ERROR_PUBLIC_MESSAGE = "The request could not be processed due to an i
 
 @dataclass(frozen=True)
 class ValidateContentType:
-    content_type: str
+    content_type: str | None
     validate_as: str
     action: str
 
 
 @dataclass(frozen=True)
+class ContentTypeMap:
+    any_content_type_value: str | None = None
+    missing_content_type_value: str | None = None
+    types: tuple[tuple[str | None, str, str | None], ...] = ()
+
+
+@dataclass(frozen=True)
 class ValidateContent(PolicyNode):
-    unspecified_content_type_action: str = "ignore"
-    max_size: int | None = None
-    size_exceeded_action: str = "prevent"
+    unspecified_content_type_action: str
+    max_size: int
+    size_exceeded_action: str
     errors_variable_name: str | None = None
     content_types: tuple[ValidateContentType, ...] = ()
+    content_type_map: ContentTypeMap | None = None
 
     @staticmethod
     def _message(req: PolicyRequest) -> tuple[bytes, str, str]:
@@ -2409,20 +2428,30 @@ class ValidateContent(PolicyNode):
         """
         if req.in_outbound:
             headers = req.response_headers if req.response_headers is not None else req.headers
-            content_type = headers.get("content-type") or req.response_media_type or ""
+            content_type = _header_value(headers, "content-type") or req.response_media_type or ""
             return req.response_body, content_type, "Response"
-        return req.body, req.headers.get("content-type") or "", "Request"
+        return req.body, _header_value(req.headers, "content-type"), "Request"
 
     def _size_failure(
         self, req: PolicyRequest, runtime: PolicyRuntime | None, *, body: bytes, noun: str
     ) -> ResponseSpec | None:
-        if self.max_size is None or len(body) <= self.max_size:
+        if len(body) <= self.max_size:
             return None
+        error_type = f"{noun}Body"
+        details = (
+            f"{noun}'s body is {len(body)} bytes long and it exceeds the configured limit of {self.max_size} bytes."
+        )
+        public = f"{noun}'s body is {len(body)} bytes long and it exceeds the limit of {self.max_size} bytes."
         return self._fail(
             req,
             runtime,
             action=self.size_exceeded_action,
-            message=f"{noun} body is larger than max-size ({self.max_size} bytes)",
+            name="",
+            error_type=error_type,
+            validation_rule="SizeLimit",
+            details=details,
+            public_message=public,
+            status_code=400 if not req.in_outbound else 502,
         )
 
     def _json_failure(
@@ -2430,6 +2459,9 @@ class ValidateContent(PolicyNode):
     ) -> ResponseSpec | None:
         if matched.validate_as != "json":
             return None
+        # Learn describes schema-based IncorrectMessage details, but this
+        # simulator deliberately defers schema selection/enforcement. The
+        # existing JSON well-formedness check therefore has no definition name.
         try:
             json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -2437,9 +2469,31 @@ class ValidateContent(PolicyNode):
                 req,
                 runtime,
                 action=matched.action,
-                message=f"Body is not valid JSON for content type {content_type}",
+                name=content_type,
+                error_type="ResponseBody" if req.in_outbound else "RequestBody",
+                validation_rule="IncorrectMessage",
+                details=f"Body of the {'response' if req.in_outbound else 'request'} is not valid JSON for content type "
+                f"{content_type}",
+                public_message=f"Body of the {'response' if req.in_outbound else 'request'} is not valid JSON for content type "
+                f"{content_type}",
             )
         return None
+
+    def _mapped_content_type(self, req: PolicyRequest, runtime: PolicyRuntime | None, content_type: str) -> str:
+        mapping = self.content_type_map
+        if mapping is None:
+            return content_type
+        incoming = content_type
+        for source, target, condition in mapping.types:
+            if source is not None and source.casefold() == incoming.casefold():
+                return target
+            if condition and bool(evaluate_apim_expression(condition, req, runtime)):
+                return target
+        if mapping.any_content_type_value:
+            return mapping.any_content_type_value
+        if not incoming and mapping.missing_content_type_value:
+            return mapping.missing_content_type_value
+        return incoming
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         """Validate the request (inbound) or response (outbound) body.
@@ -2456,18 +2510,30 @@ class ValidateContent(PolicyNode):
         if outcome is not None:
             return outcome
 
-        content_type = raw_content_type.split(";", 1)[0].strip().lower()
+        content_type = self._mapped_content_type(req, runtime, raw_content_type.split(";", 1)[0].strip()).lower()
         matched = next(
-            (item for item in self.content_types if item.content_type.lower() == content_type),
+            (
+                item
+                for item in self.content_types
+                if not item.content_type or item.content_type.casefold() == content_type
+            ),
             None,
         )
         if matched is None:
-            if content_type and self.unspecified_content_type_action != "ignore":
+            if self.unspecified_content_type_action != "ignore":
                 return self._fail(
                     req,
                     runtime,
                     action=self.unspecified_content_type_action,
-                    message=f"Content type {content_type} is not specified for validation",
+                    name=content_type,
+                    error_type="ResponseBody" if req.in_outbound else "RequestBody",
+                    validation_rule="Unspecified",
+                    details=f"Unspecified content type {content_type} is not allowed.",
+                    public_message=(
+                        _INTERNAL_ERROR_PUBLIC_MESSAGE
+                        if req.in_outbound
+                        else f"Unspecified content type {content_type} is not allowed."
+                    ),
                 )
             return None
         if matched.action == "ignore":
@@ -2486,12 +2552,25 @@ class ValidateContent(PolicyNode):
         runtime: PolicyRuntime | None,
         *,
         action: str,
-        message: str,
+        name: str,
+        error_type: str,
+        validation_rule: str,
+        details: str,
+        public_message: str,
+        status_code: int = 400,
     ) -> ResponseSpec | None:
         if action == "ignore":
             return None
         _record_validation_error(
-            req, runtime, policy="validate-content", errors_variable_name=self.errors_variable_name, message=message
+            req,
+            runtime,
+            policy="validate-content",
+            errors_variable_name=self.errors_variable_name,
+            name=name,
+            error_type=error_type,
+            validation_rule=validation_rule,
+            details=details,
+            action=action,
         )
         if action != "prevent":
             return None
@@ -2503,28 +2582,70 @@ class ValidateContent(PolicyNode):
                 body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             )
         return ResponseSpec(
-            status_code=400,
+            status_code=status_code,
             headers={"content-type": "text/plain"},
-            body=message.encode("utf-8"),
+            body=public_message.encode("utf-8"),
         )
 
 
-# Headers every HTTP client sends. validate-parameters must not reject these as
-# "unspecified", or it fails every request rather than catching a mistake.
-_ALWAYS_ALLOWED_HEADERS = frozenset({"host", "content-type", "content-length", "accept", "connection", "user-agent"})
+def _header_value(headers: dict[str, str], name: str) -> str:
+    wanted = name.casefold()
+    return next((value for key, value in headers.items() if key.casefold() == wanted), "")
 
 
 @dataclass(frozen=True)
 class ValidateParameters(PolicyNode):
-    specified_parameter_action: str = "prevent"
-    unspecified_parameter_action: str = "ignore"
+    specified_parameter_action: str
+    unspecified_parameter_action: str
     errors_variable_name: str | None = None
     headers_specified_action: str | None = None
     headers_unspecified_action: str | None = None
     query_specified_action: str | None = None
     query_unspecified_action: str | None = None
+    path_specified_action: str | None = None
+    overrides: tuple[tuple[str, str, str], ...] = ()
 
-    def _missing_required_failure(
+    def _action_for(
+        self,
+        *,
+        kind: str,
+        name: str,
+        specified: bool,
+        group_action: str | None,
+    ) -> str:
+        normalised = name.casefold() if kind == "header" else name
+        for override_kind, override_name, action in self.overrides:
+            if override_kind == kind and override_name == normalised:
+                return action
+        if group_action is not None:
+            return group_action
+        return self.specified_parameter_action if specified else self.unspecified_parameter_action
+
+    def _failure(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        kind: str,
+        name: str,
+        rule: str,
+        details: str,
+        action: str,
+    ) -> ResponseSpec | None:
+        if action == "ignore":
+            return None
+        error_type = {"header": "RequestHeader", "query": "QueryParameter", "path": "PathParameter"}[kind]
+        return self._fail(
+            req,
+            runtime,
+            action=action,
+            name=name,
+            error_type=error_type,
+            validation_rule=rule,
+            details=details,
+        )
+
+    def _check_kind(
         self,
         req: PolicyRequest,
         runtime: PolicyRuntime | None,
@@ -2533,97 +2654,80 @@ class ValidateParameters(PolicyNode):
         declared: list[Any],
         present: set[str],
         normalise: Any,
-        action: str,
+        specified_action: str | None,
+        unspecified_action: str | None,
     ) -> ResponseSpec | None:
-        """Refuse when a parameter the operation declares required is absent."""
-        if action == "ignore":
-            return None
+        declared_names = {normalise(param.name) for param in declared}
         for param in declared:
-            if param.required and normalise(param.name) not in present:
-                outcome = self._fail(
+            name = normalise(param.name)
+            if param.required and name not in present:
+                outcome = self._failure(
                     req,
                     runtime,
-                    action=action,
-                    message=f"Required {kind} parameter {param.name} is missing",
+                    kind=kind,
+                    name=param.name,
+                    rule="Required",
+                    details=f"Required {kind} parameter {param.name} is missing",
+                    action=self._action_for(kind=kind, name=param.name, specified=True, group_action=specified_action),
                 )
                 if outcome is not None:
                     return outcome
-        return None
-
-    def _unspecified_failure(
-        self,
-        req: PolicyRequest,
-        runtime: PolicyRuntime | None,
-        *,
-        kind: str,
-        declared_names: set[str],
-        present: set[str],
-        action: str,
-    ) -> ResponseSpec | None:
-        """Refuse parameters the operation never declared.
-
-        Headers every HTTP client sends are exempt: rejecting `host` or
-        `user-agent` would fail every request rather than catch a mistake.
-        """
-        if action == "ignore":
-            return None
-        for name in sorted(present):
-            if name in declared_names or (kind == "header" and name in _ALWAYS_ALLOWED_HEADERS):
-                continue
-            outcome = self._fail(
+        for name in sorted(present - declared_names):
+            outcome = self._failure(
                 req,
                 runtime,
-                action=action,
-                message=f"Unspecified {kind} parameter {name} is not allowed",
+                kind=kind,
+                name=name,
+                rule="Unspecified",
+                details=f"Unspecified {kind} parameter {name} is not allowed.",
+                action=self._action_for(kind=kind, name=name, specified=False, group_action=unspecified_action),
             )
             if outcome is not None:
                 return outcome
         return None
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        """Check headers and query parameters against the operation's contract."""
+        """Check headers, query, and path parameters against the operation contract."""
+        # Learn also validates parameter values against schema definitions;
+        # schema/value enforcement remains deferred in this simulator.
         operation = _operation_request_metadata(req, runtime)
         request_meta = getattr(operation, "request", None)
-
         checks = (
             (
                 "header",
                 list(getattr(request_meta, "headers", []) or []),
-                {name.lower() for name in req.headers},
-                lambda name: name.lower(),
-                self.headers_specified_action or self.specified_parameter_action,
-                self.headers_unspecified_action or self.unspecified_parameter_action,
+                {name.casefold() for name in req.headers},
+                str.casefold,
+                self.headers_specified_action,
+                self.headers_unspecified_action,
             ),
             (
                 "query",
                 list(getattr(request_meta, "query_parameters", []) or []),
                 set(req.query),
                 lambda name: name,
-                self.query_specified_action or self.specified_parameter_action,
-                self.query_unspecified_action or self.unspecified_parameter_action,
+                self.query_specified_action,
+                self.query_unspecified_action,
+            ),
+            (
+                "path",
+                list(getattr(operation, "template_parameters", []) or []),
+                set((req.variables.get("_matched_parameters") or {}).keys()),
+                lambda name: name,
+                self.path_specified_action,
+                None,
             ),
         )
-
         for kind, declared, present, normalise, specified_action, unspecified_action in checks:
-            outcome = self._missing_required_failure(
+            outcome = self._check_kind(
                 req,
                 runtime,
                 kind=kind,
                 declared=declared,
                 present=present,
                 normalise=normalise,
-                action=specified_action,
-            )
-            if outcome is not None:
-                return outcome
-
-            outcome = self._unspecified_failure(
-                req,
-                runtime,
-                kind=kind,
-                declared_names={normalise(param.name) for param in declared},
-                present=present,
-                action=unspecified_action,
+                specified_action=specified_action,
+                unspecified_action=unspecified_action,
             )
             if outcome is not None:
                 return outcome
@@ -2635,23 +2739,36 @@ class ValidateParameters(PolicyNode):
         runtime: PolicyRuntime | None,
         *,
         action: str,
-        message: str,
+        name: str,
+        error_type: str,
+        validation_rule: str,
+        details: str,
     ) -> ResponseSpec | None:
         _record_validation_error(
-            req, runtime, policy="validate-parameters", errors_variable_name=self.errors_variable_name, message=message
+            req,
+            runtime,
+            policy="validate-parameters",
+            errors_variable_name=self.errors_variable_name,
+            name=name,
+            error_type=error_type,
+            validation_rule=validation_rule,
+            details=details,
+            action=action,
         )
-        if action == "prevent":
+        if action != "prevent":
+            return None
+        if req.in_outbound:
             return ResponseSpec(
-                status_code=400,
+                status_code=502,
                 headers={"content-type": "text/plain"},
-                body=message.encode("utf-8"),
+                body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             )
-        return None
+        return ResponseSpec(status_code=400, headers={"content-type": "text/plain"}, body=details.encode("utf-8"))
 
 
 @dataclass(frozen=True)
 class ValidateStatusCode(PolicyNode):
-    unspecified_status_code_action: str = "prevent"
+    unspecified_status_code_action: str
     errors_variable_name: str | None = None
     status_codes: tuple[tuple[int, str], ...] = ()
 
@@ -2670,12 +2787,17 @@ class ValidateStatusCode(PolicyNode):
         action = dict(self.status_codes).get(status, self.unspecified_status_code_action)
         if action == "ignore":
             return None
+        details = f"Response status code {status} is not allowed."
         _record_validation_error(
             req,
             runtime,
             policy="validate-status-code",
             errors_variable_name=self.errors_variable_name,
-            message=f"Response status code {status} is not specified for this operation",
+            name=str(status),
+            error_type="StatusCode",
+            validation_rule="Unspecified",
+            details=details,
+            action=action,
         )
         if action != "prevent":
             return None
@@ -2686,6 +2808,94 @@ class ValidateStatusCode(PolicyNode):
             body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             media_type="text/plain",
         )
+
+
+@dataclass(frozen=True)
+class ValidateHeaders(PolicyNode):
+    specified_header_action: str
+    unspecified_header_action: str
+    errors_variable_name: str | None = None
+    overrides: tuple[tuple[str, str], ...] = ()
+
+    def _action_for(self, name: str, *, specified: bool) -> str:
+        normalised = name.casefold()
+        for override_name, action in self.overrides:
+            if override_name == normalised:
+                return action
+        return self.specified_header_action if specified else self.unspecified_header_action
+
+    def _fail(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        name: str,
+        action: str,
+        rule: str,
+        details: str,
+    ) -> ResponseSpec | None:
+        if action == "ignore":
+            return None
+        _record_validation_error(
+            req,
+            runtime,
+            policy="validate-headers",
+            errors_variable_name=self.errors_variable_name,
+            name=name,
+            error_type="ResponseHeader",
+            validation_rule=rule,
+            details=details,
+            action=action,
+        )
+        if action != "prevent":
+            return None
+        return ResponseSpec(
+            status_code=502,
+            headers={"content-type": "text/plain"},
+            body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
+            media_type="text/plain",
+        )
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        if not req.in_outbound:
+            return None
+        # Learn validates response-header values against schema definitions;
+        # this implementation covers presence and unspecified names only.
+        operation = _operation_request_metadata(req, runtime)
+        responses = list(getattr(operation, "responses", []) or [])
+        response = next(
+            (item for item in responses if item.status_code == req.response_status_code),
+            None,
+        )
+        declared = list(getattr(response, "headers", []) or [])
+        declared_names = {header.name.casefold() for header in declared}
+        headers = req.response_headers or {}
+        for header in declared:
+            if header.required and header.name.casefold() not in {name.casefold() for name in headers}:
+                outcome = self._fail(
+                    req,
+                    runtime,
+                    name=header.name,
+                    action=self._action_for(header.name, specified=True),
+                    rule="Required",
+                    details=f"Required response header {header.name} is missing.",
+                )
+                if outcome is not None:
+                    return outcome
+        for name in sorted(headers):
+            if name.casefold() in declared_names:
+                continue
+            outcome = self._fail(
+                req,
+                runtime,
+                name=name,
+                action=self._action_for(name, specified=False),
+                rule="Unspecified",
+                details=f"Unspecified header {name} is not allowed.",
+            )
+            if outcome is not None:
+                return outcome
+        return None
 
 
 @dataclass(frozen=True)
@@ -4066,68 +4276,188 @@ def _parse_emit_metric(el: ElementTree.Element) -> EmitMetric:
 
 
 def _parse_validate_content(el: ElementTree.Element) -> ValidateContent:
-    max_size_raw = (el.attrib.get("max-size") or "").strip()
+    _reject_unknown_attributes(
+        el,
+        {"unspecified-content-type-action", "max-size", "size-exceeded-action", "errors-variable-name"},
+        "validate-content",
+    )
+    max_size_raw = _required_attr(el, "max-size", "validate-content").strip()
     content_types: list[ValidateContentType] = []
     for child in el.findall("content"):
+        _reject_unknown_attributes(
+            child,
+            {
+                "type",
+                "validate-as",
+                "schema-id",
+                "schema-ref",
+                "action",
+                "allow-additional-properties",
+                "case-insensitive-property-names",
+            },
+            "validate-content content",
+        )
         content_type = (child.attrib.get("type") or "").strip()
-        if not content_type:
-            raise HTTPException(status_code=500, detail="validate-content content element missing type")
         validate_as = (child.attrib.get("validate-as") or "json").strip().lower()
         if validate_as != "json":
             raise HTTPException(status_code=500, detail=f"Unsupported validate-as: {validate_as}")
+        unsupported = (
+            "schema-id",
+            "schema-ref",
+            "allow-additional-properties",
+            "case-insensitive-property-names",
+        )
+        for attribute in unsupported:
+            if attribute in child.attrib:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"validate-content does not implement {attribute}",
+                )
         content_types.append(
             ValidateContentType(
-                content_type=content_type,
+                content_type=content_type or None,
                 validate_as=validate_as,
                 action=_validation_action(child.attrib.get("action"), default="prevent"),
             )
         )
+    map_el = el.find("content-type-map")
+    content_type_map = None
+    if map_el is not None:
+        _reject_unknown_attributes(
+            map_el,
+            {"any-content-type-value", "missing-content-type-value"},
+            "validate-content content-type-map",
+        )
+        mappings: list[tuple[str | None, str, str | None]] = []
+        for child in map_el.findall("type"):
+            _reject_unknown_attributes(child, {"from", "when", "to"}, "validate-content content-type-map type")
+            source = (child.attrib.get("from") or "").strip() or None
+            condition = (child.attrib.get("when") or "").strip() or None
+            target = (child.attrib.get("to") or "").strip()
+            if (source is None) == (condition is None) or not target:
+                raise HTTPException(
+                    status_code=500,
+                    detail="validate-content content-type-map type requires exactly one of from or when and to",
+                )
+            mappings.append((source, target, condition))
+        content_type_map = ContentTypeMap(
+            any_content_type_value=(map_el.attrib.get("any-content-type-value") or "").strip() or None,
+            missing_content_type_value=(map_el.attrib.get("missing-content-type-value") or "").strip() or None,
+            types=tuple(mappings),
+        )
     return ValidateContent(
         unspecified_content_type_action=_validation_action(
-            el.attrib.get("unspecified-content-type-action"), default="ignore"
+            _required_attr(el, "unspecified-content-type-action", "validate-content"), default="ignore"
         ),
         max_size=int(max_size_raw) if max_size_raw else None,
-        size_exceeded_action=_validation_action(el.attrib.get("size-exceeded-action"), default="prevent"),
+        size_exceeded_action=_validation_action(
+            _required_attr(el, "size-exceeded-action", "validate-content"), default="ignore"
+        ),
         errors_variable_name=el.attrib.get("errors-variable-name"),
         content_types=tuple(content_types),
+        content_type_map=content_type_map,
     )
 
 
 def _parse_validate_parameters(el: ElementTree.Element) -> ValidateParameters:
+    _reject_unknown_attributes(
+        el,
+        {"specified-parameter-action", "unspecified-parameter-action", "errors-variable-name"},
+        "validate-parameters",
+    )
     headers_el = el.find("headers")
     query_el = el.find("query")
+    path_el = el.find("path")
 
     def _child_action(child: ElementTree.Element | None, attr: str) -> str | None:
         if child is None or child.attrib.get(attr) is None:
             return None
         return _validation_action(child.attrib.get(attr), default="ignore")
 
+    def _overrides(child: ElementTree.Element | None, kind: str) -> list[tuple[str, str, str]]:
+        if child is None:
+            return []
+        allowed = {"specified-parameter-action", "unspecified-parameter-action"}
+        if kind == "path":
+            allowed = {"specified-parameter-action"}
+        _reject_unknown_attributes(child, allowed, f"validate-parameters {kind}")
+        overrides = []
+        for parameter in child.findall("parameter"):
+            _reject_unknown_attributes(parameter, {"name", "action"}, f"validate-parameters {kind} parameter")
+            name = _required_attr(parameter, "name", f"validate-parameters {kind} parameter").strip()
+            action = _validation_action(
+                _required_attr(parameter, "action", f"validate-parameters {kind} parameter"), default="ignore"
+            )
+            overrides.append((kind, name.casefold() if kind == "header" else name, action))
+        return overrides
+
     return ValidateParameters(
-        specified_parameter_action=_validation_action(el.attrib.get("specified-parameter-action"), default="prevent"),
+        specified_parameter_action=_validation_action(
+            _required_attr(el, "specified-parameter-action", "validate-parameters"), default="ignore"
+        ),
         unspecified_parameter_action=_validation_action(
-            el.attrib.get("unspecified-parameter-action"), default="ignore"
+            _required_attr(el, "unspecified-parameter-action", "validate-parameters"), default="ignore"
         ),
         errors_variable_name=el.attrib.get("errors-variable-name"),
         headers_specified_action=_child_action(headers_el, "specified-parameter-action"),
         headers_unspecified_action=_child_action(headers_el, "unspecified-parameter-action"),
         query_specified_action=_child_action(query_el, "specified-parameter-action"),
         query_unspecified_action=_child_action(query_el, "unspecified-parameter-action"),
+        path_specified_action=_child_action(path_el, "specified-parameter-action"),
+        overrides=tuple(_overrides(headers_el, "header") + _overrides(query_el, "query") + _overrides(path_el, "path")),
     )
 
 
 def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
+    _reject_unknown_attributes(
+        el,
+        {"unspecified-status-code-action", "errors-variable-name"},
+        "validate-status-code",
+    )
     status_codes: list[tuple[int, str]] = []
     for child in el.findall("status-code"):
+        _reject_unknown_attributes(child, {"code", "action"}, "validate-status-code status-code")
         code_raw = (child.attrib.get("code") or "").strip()
         if not code_raw:
             raise HTTPException(status_code=500, detail="validate-status-code status-code element missing code")
-        status_codes.append((int(code_raw), _validation_action(child.attrib.get("action"), default="ignore")))
+        status_codes.append(
+            (
+                int(code_raw),
+                _validation_action(
+                    _required_attr(child, "action", "validate-status-code status-code"), default="ignore"
+                ),
+            )
+        )
     return ValidateStatusCode(
         unspecified_status_code_action=_validation_action(
-            el.attrib.get("unspecified-status-code-action"), default="prevent"
+            _required_attr(el, "unspecified-status-code-action", "validate-status-code"), default="ignore"
         ),
         errors_variable_name=el.attrib.get("errors-variable-name"),
         status_codes=tuple(status_codes),
+    )
+
+
+def _parse_validate_headers(el: ElementTree.Element) -> ValidateHeaders:
+    _reject_unknown_attributes(
+        el,
+        {"specified-header-action", "unspecified-header-action", "errors-variable-name"},
+        "validate-headers",
+    )
+    overrides: list[tuple[str, str]] = []
+    for child in el.findall("header"):
+        _reject_unknown_attributes(child, {"name", "action"}, "validate-headers header")
+        name = _required_attr(child, "name", "validate-headers header").strip()
+        action = _validation_action(_required_attr(child, "action", "validate-headers header"), default="ignore")
+        overrides.append((name.casefold(), action))
+    return ValidateHeaders(
+        specified_header_action=_validation_action(
+            _required_attr(el, "specified-header-action", "validate-headers"), default="ignore"
+        ),
+        unspecified_header_action=_validation_action(
+            _required_attr(el, "unspecified-header-action", "validate-headers"), default="ignore"
+        ),
+        errors_variable_name=el.attrib.get("errors-variable-name"),
+        overrides=tuple(overrides),
     )
 
 
@@ -4505,6 +4835,7 @@ _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "emit-metric": _parse_emit_metric,
     "validate-content": _parse_validate_content,
     "validate-parameters": _parse_validate_parameters,
+    "validate-headers": _parse_validate_headers,
     "validate-status-code": _parse_validate_status_code,
     "cache-lookup": _parse_cache_lookup,
     "cache-store": _parse_cache_store,

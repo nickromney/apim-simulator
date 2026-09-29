@@ -161,8 +161,9 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `llm-semantic-cache-lookup`/`-store` | No | - | Policy not implemented; the sibling AI Foundry simulator provides service-side semantic caching behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `llm-content-safety` | No | - | Policy not implemented; the sibling AI Foundry simulator serves the Content Safety API behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `emit-metric` | Partial | - | Adapted: emits the OTEL counter `apim.policy.metric` with double values (including zero), the documented `API Management` default namespace, evaluated dimension names, documented default dimensions, and at most five configured dimensions |
-| `validate-content` | Partial | - | Size, content-type map, and JSON well-formedness of the request body (inbound, 400) or response body (outbound, 502); JSON Schema enforcement deferred |
-| `validate-parameters` | Partial | - | Required/unspecified headers and query against operation metadata; path parameters deferred |
+| `validate-content` | Partial | - | Size (refused with 400 in inbound and 502 in outbound, per the validation error table), content-type map, optional content type with JSON well-formedness, and APIM-shaped structured validation errors for request/response bodies; JSON/XML/SOAP schema enforcement and schema override attributes are deferred/rejected |
+| `validate-parameters` | Partial | - | Required/unspecified headers, query, and operation-template path parameters with per-parameter overrides; value/schema enforcement is deferred |
+| `validate-headers` | Partial | - | Response required/unspecified header checks against operation response metadata with per-header overrides; header value/schema enforcement is deferred |
 | `validate-status-code` | Partial | - | Declared operation responses are always valid (a per-code override does not apply to them), then explicit codes, then the unspecified action; `prevent` returns 502 to the client and to the cache |
 | `log-to-eventhub` | No | - | Use observability stack |
 

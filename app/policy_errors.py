@@ -34,6 +34,7 @@ ERROR_RESPONSE_POLICIES = frozenset(
         "validate-jwt",
         "validate-content",
         "validate-parameters",
+        "validate-headers",
         "llm-token-limit",
     }
 )
