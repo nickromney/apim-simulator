@@ -69,11 +69,12 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Products | Yes | `azurerm_api_management_product` | `products` map |
 | Product-API association | Yes | `azurerm_api_management_product_api` | `products` list on route/API |
 | Product-group association | Yes | `azurerm_api_management_product_group` | Descriptive link resources under `/apim/management/products/{product_id}/groups` |
-| Product publish state | Adapted | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; the simulator still rejects a route whose only configured products are unpublished with an enveloped 403. APIM documents that unpublishing hides a product from the developer portal but does not invalidate existing keys or product-context access. Config-authored products default to `published` |
-| Subscriptions | Yes | `azurerm_api_management_subscription` | `subscription.subscriptions` |
+| Product publish state | Adapted | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; the simulator rejects product-context access whose only configured products are unpublished with an enveloped 403. API-, all-APIs-, and service-scoped subscriptions do not select product context and are not blocked by product publication. APIM documents that unpublishing hides a product from the developer portal but does not invalidate existing keys or product-context access. Config-authored products default to `published` |
+| Subscriptions | Yes | `azurerm_api_management_subscription` | `subscription.subscriptions`; product scope remains the `products` list, API scope uses `api_id`, all-APIs scope uses `all_apis`, and the service-scoped all-access form uses explicit `service_scoped: true` (never enabled by default). Terraform import maps `api_id` and `product_id`; when neither is present it imports all-APIs scope. Unknown or conflicting scope fields are rejected. |
 | Primary/secondary keys | Yes | - | `keys.primary`, `keys.secondary` |
 | Subscription state | Yes | `azurerm_api_management_subscription.state` | `active`, `suspended`, `cancelled`, `submitted`, `rejected`, `expired`; only `active` keys authenticate, and inactive keys return APIM's 401 invalid-key envelope |
 | Subscription key names and forwarding | Yes | `azurerm_api_management_api.subscription_key_parameter_names` | Defaults are `Ocp-Apim-Subscription-Key` and `subscription-key`; keys are forwarded to backends by default and can be removed by inbound policy |
+| Subscription scope policy context | Yes | `azurerm_api_management_subscription.api_id` / `product_id` | API-, all-APIs-, and service-scoped keys authorize without a product and do not apply product-scope policies; `context.Subscription` still identifies the accepted subscription. |
 | Key rotation | Yes | - | `/apim/management/subscriptions/{id}/rotate` |
 | Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle. When an API is in an open product, a key that can't be accepted is ignored and no key is needed; the request is served in the open product's context (a valid key still supplies the subscription context). The key header wins over the query parameter even when empty; an empty value counts as a missing key. See [subscriptions](https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions) |
 | Subscription bypass | Yes | - | Header conditions |
@@ -202,7 +203,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Tag inspection and CRUD | Yes | `azurerm_api_management_tag` | `/apim/management/tags` plus nested API/product/operation tag link endpoints |
 | Policy inspection/update | Yes | - | `/apim/management/policies/{scope_type}/{scope_name}` |
 | Replay | Yes | - | `/apim/management/replay` |
-| Subscription CRUD | Yes | `azurerm_api_management_subscription` | List, create, update, delete, and rotate via API |
+| Subscription CRUD | Yes | `azurerm_api_management_subscription` | List, create, update, delete, and rotate via API; payloads expose `scope`, `api_id`, `all_apis`, `service_scoped`, and existing product fields |
 | Config import | Yes | - | Terraform/OpenTofu JSON import via management API and `make import-tofu` |
 | Git integration | No | `azurerm_api_management.management.git_configuration_enabled` | Use GitOps |
 

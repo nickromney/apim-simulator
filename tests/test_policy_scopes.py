@@ -11,6 +11,7 @@ from app.config import (
     Subscription,
     SubscriptionConfig,
     SubscriptionKeyPair,
+    SubscriptionScope,
     TenantAccessConfig,
 )
 from app.main import create_app
@@ -244,6 +245,52 @@ def test_product_policy_uses_granted_product_when_route_has_many() -> None:
         resp = client.get("/api/health", headers={"Ocp-Apim-Subscription-Key": "good"})
     assert resp.status_code == 200
     assert resp.headers["x-scope"] == "product"
+
+
+def test_api_scoped_subscription_skips_product_policy_and_keeps_context_subscription() -> None:
+    """An API-scoped key skips product policy while preserving context.Subscription.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    route_policy = (
+        "<policies><inbound /><backend /><outbound>"
+        '<set-header name="x-subscription" exists-action="override">'
+        "<value>@(context.Subscription.Id)</value>"
+        "</set-header>"
+        "</outbound><on-error /></policies>"
+    )
+    config = GatewayConfig(
+        allow_anonymous=True,
+        products={"p1": ProductConfig(name="p1", policies_xml=PRODUCT_HEADER_POLICY)},
+        subscription=SubscriptionConfig(
+            required=True,
+            subscriptions={
+                "demo": Subscription(
+                    id="sub1",
+                    name="demo",
+                    keys=SubscriptionKeyPair(primary="good", secondary="good2"),
+                    scope=SubscriptionScope.Api,
+                    api_id="weather",
+                )
+            },
+        ),
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                api_id="weather",
+                upstream_base_url=http_url("upstream"),
+                upstream_path_prefix="/api",
+                products=["p1"],
+                policies_xml=route_policy,
+            )
+        ],
+    )
+    with _client(config) as client:
+        resp = client.get("/api/health", headers={"Ocp-Apim-Subscription-Key": "good"})
+    assert resp.status_code == 200
+    assert "x-scope" not in resp.headers
+    assert resp.headers["x-subscription"] == "sub1"
 
 
 @pytest.mark.contract("POLICY-PRODUCT-SCOPE")

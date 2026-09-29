@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.urls import http_url
 
@@ -87,19 +87,78 @@ class SubscriptionState(StrEnum):
     Expired = "expired"
 
 
+class SubscriptionScope(StrEnum):
+    Product = "product"
+    Api = "api"
+    AllApis = "all-apis"
+    Service = "service"
+
+
 class Subscription(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     name: str
     keys: SubscriptionKeyPair
     state: SubscriptionState = SubscriptionState.Active
+    # APIM documents these scope categories, but not a local JSON schema for
+    # representing them. The simulator keeps product scope backward compatible
+    # and makes the other scopes explicit fields.
     products: list[str] = Field(default_factory=list)
+    scope: SubscriptionScope | None = None
+    api_id: str | None = None
+    all_apis: bool = False
+    # The built-in APIM all-access subscription is never created implicitly.
+    service_scoped: bool = False
     created_by: str | None = None
+
+    def _selected_scopes(self) -> list[SubscriptionScope]:
+        selectors: list[SubscriptionScope] = []
+        if self.products:
+            selectors.append(SubscriptionScope.Product)
+        if self.api_id:
+            selectors.append(SubscriptionScope.Api)
+        if self.all_apis:
+            selectors.append(SubscriptionScope.AllApis)
+        if self.service_scoped:
+            selectors.append(SubscriptionScope.Service)
+        return selectors
+
+    def _validate_explicit_scope(self) -> None:
+        if self.scope == SubscriptionScope.Product and not self.products:
+            raise ValueError("product subscription scope requires products")
+        if self.scope == SubscriptionScope.Api and not self.api_id:
+            raise ValueError("api subscription scope requires api_id")
+        if self.scope == SubscriptionScope.AllApis:
+            self.all_apis = True
+        if self.scope == SubscriptionScope.Service:
+            self.service_scoped = True
+
+    @model_validator(mode="after")
+    def _validate_scope(self) -> Subscription:
+        selected = self._selected_scopes()
+        if len(selected) > 1:
+            raise ValueError("subscription scope fields are mutually exclusive")
+        if self.scope is None:
+            if selected:
+                self.scope = selected[0]
+            return self
+        if selected and selected[0] != self.scope:
+            raise ValueError("subscription scope conflicts with its scope fields")
+        self._validate_explicit_scope()
+        return self
+
+    @property
+    def scope_kind(self) -> SubscriptionScope | None:
+        return self.scope
 
     def identity(self) -> SubscriptionIdentity:
         return SubscriptionIdentity(id=self.id, name=self.name)
 
 
 class SubscriptionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     required: bool = True
     header_names: list[str] = Field(default_factory=lambda: ["Ocp-Apim-Subscription-Key"])
     query_param_names: list[str] = Field(default_factory=lambda: ["subscription-key"])

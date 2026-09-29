@@ -96,6 +96,53 @@ def test_config_from_tofu_show_json_mvp() -> None:
     assert cfg.subscription.subscriptions["sub1"].products == ["app-a"]
 
 
+def test_config_from_tofu_show_json_imports_api_and_all_api_subscription_scopes() -> None:
+    """Terraform subscription imports preserve API and all-APIs scopes.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_api.weather",
+                "type": "azurerm_api_management_api",
+                "name": "weather",
+                "values": {"name": "weather", "path": "weather", "service_url": http_url("upstream")},
+            },
+            {
+                "address": "azurerm_api_management_subscription.api",
+                "type": "azurerm_api_management_subscription",
+                "name": "api",
+                "values": {
+                    "subscription_id": "api-sub",
+                    "display_name": "API",
+                    "primary_key": "api-primary",
+                    "secondary_key": "api-secondary",
+                    "api_id": "/subscriptions/test/apis/weather",
+                },
+            },
+            {
+                "address": "azurerm_api_management_subscription.all",
+                "type": "azurerm_api_management_subscription",
+                "name": "all",
+                "values": {
+                    "subscription_id": "all-sub",
+                    "display_name": "All APIs",
+                    "primary_key": "all-primary",
+                    "secondary_key": "all-secondary",
+                },
+            },
+        ]
+    )
+    cfg = config_from_tofu_show_json(tf)
+    api_subscription = cfg.subscription.subscriptions["api-sub"]
+    all_subscription = cfg.subscription.subscriptions["all-sub"]
+    assert api_subscription.api_id == "weather"
+    assert api_subscription.scope.value == "api"
+    assert all_subscription.all_apis is True
+    assert all_subscription.scope.value == "all-apis"
+
+
 def test_import_maps_product_publish_state_approval_and_subscription_state() -> None:
     tf = _tf_json(
         [

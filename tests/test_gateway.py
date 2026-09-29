@@ -3271,6 +3271,31 @@ def test_management_subscription_crud_endpoints_delegate_through_management_plan
     assert deleted.json() == {"deleted": True, "subscription_id": "demo", "remaining": 0}
 
 
+def test_management_subscription_payload_exposes_api_scope() -> None:
+    """Management subscription payloads expose the configured APIM scope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/apim/management/subscriptions",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={"id": "api-sub", "name": "API", "scope": "api", "api_id": "weather"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == "api"
+    assert response.json()["api_id"] == "weather"
+    assert response.json()["products"] == []
+
+
 def test_platform_style_mounted_config_allows_jwt_requests(tmp_path: Path, monkeypatch) -> None:
     issuer = _http_url("issuer.example")
     audience = "api-app"

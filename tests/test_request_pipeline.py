@@ -10,15 +10,28 @@ from app.config import (
     SubscriptionConfig,
     SubscriptionIdentity,
     SubscriptionKeyPair,
+    SubscriptionScope,
 )
 from app.request_pipeline import enforce_product_grant, enforce_route_authz, extract_roles, extract_scopes
 from app.security import AuthContext, authenticate_request
 from app.urls import http_url
 
 
-def _auth(*, products: list[str] | None = None, subscription: bool = True) -> AuthContext:
+def _auth(
+    *,
+    products: list[str] | None = None,
+    subscription: bool = True,
+    scope: SubscriptionScope | None = None,
+    api_id: str | None = None,
+) -> AuthContext:
     identity = SubscriptionIdentity(id="demo", name="Demo") if subscription else None
-    return AuthContext(claims={"sub": "user"}, subscription=identity, subscription_products=products or [])
+    return AuthContext(
+        claims={"sub": "user"},
+        subscription=identity,
+        subscription_products=products or [],
+        subscription_scope=scope,
+        subscription_api_id=api_id,
+    )
 
 
 def test_enforce_product_grant_returns_empty_when_route_has_no_products() -> None:
@@ -70,6 +83,148 @@ def test_enforce_product_grant_picks_first_published_granted_product() -> None:
         products=["closed", "starter"],
     )
     assert enforce_product_grant(cfg, route, _auth(products=["starter"]), subscription_is_bypassed=False) == "starter"
+
+
+@pytest.mark.parametrize(
+    ("scope", "api_id"),
+    [
+        (SubscriptionScope.AllApis, None),
+        (SubscriptionScope.Service, None),
+    ],
+)
+def test_non_product_subscription_scopes_grant_without_product(scope: SubscriptionScope, api_id: str | None) -> None:
+    """All-APIs and service-scoped subscriptions grant access without a product.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    cfg = GatewayConfig(products={"starter": ProductConfig(name="starter")})
+    route = RouteConfig(
+        name="r1",
+        path_prefix="/api",
+        api_id="weather",
+        upstream_base_url=http_url("upstream"),
+        products=["starter"],
+    )
+    assert (
+        enforce_product_grant(
+            cfg,
+            route,
+            _auth(scope=scope, api_id=api_id),
+            subscription_is_bypassed=False,
+        )
+        == ""
+    )
+
+
+def test_api_subscription_scope_grants_only_its_api_and_skips_product_context() -> None:
+    """An API-scoped key grants its API and does not select a product context.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    cfg = GatewayConfig(products={"starter": ProductConfig(name="starter")})
+    route = RouteConfig(
+        name="r1",
+        path_prefix="/api",
+        api_id="weather",
+        upstream_base_url=http_url("upstream"),
+        products=["starter"],
+    )
+    assert (
+        enforce_product_grant(
+            cfg,
+            route,
+            _auth(scope=SubscriptionScope.Api, api_id="weather"),
+            subscription_is_bypassed=False,
+        )
+        == ""
+    )
+    with pytest.raises(HTTPException) as exc:
+        enforce_product_grant(
+            cfg,
+            route,
+            _auth(scope=SubscriptionScope.Api, api_id="other"),
+            subscription_is_bypassed=False,
+        )
+    assert exc.value.status_code == 401
+
+
+def test_api_subscription_scope_is_not_blocked_by_unpublished_product() -> None:
+    """An API-scoped key does not depend on product publication state.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    cfg = GatewayConfig(products={"hidden": ProductConfig(name="hidden", state=ProductState.NotPublished)})
+    route = RouteConfig(
+        name="r1",
+        path_prefix="/api",
+        api_id="weather",
+        upstream_base_url=http_url("upstream"),
+        products=["hidden"],
+    )
+    assert (
+        enforce_product_grant(
+            cfg,
+            route,
+            _auth(scope=SubscriptionScope.Api, api_id="weather"),
+            subscription_is_bypassed=False,
+        )
+        == ""
+    )
+
+
+def test_product_subscription_does_not_grant_an_api_without_a_product() -> None:
+    """A product-scoped key is not an appropriate key for an API-only route.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    cfg = GatewayConfig(products={"starter": ProductConfig(name="starter")})
+    route = RouteConfig(
+        name="r1",
+        path_prefix="/api",
+        api_id="weather",
+        upstream_base_url=http_url("upstream"),
+    )
+    with pytest.raises(HTTPException) as exc:
+        enforce_product_grant(
+            cfg,
+            route,
+            _auth(products=["starter"], scope=SubscriptionScope.Product),
+            subscription_is_bypassed=False,
+        )
+    assert exc.value.status_code == 401
+
+
+def test_subscription_config_rejects_unknown_and_conflicting_scopes() -> None:
+    """Subscription configuration must not silently discard scope fields.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    with pytest.raises(ValueError):
+        Subscription.model_validate(
+            {
+                "id": "demo",
+                "name": "Demo",
+                "keys": {"primary": "p", "secondary": "s"},
+                "unknown_scope": "anything",
+            }
+        )
+    with pytest.raises(ValueError):
+        Subscription.model_validate(
+            {
+                "id": "demo",
+                "name": "Demo",
+                "keys": {"primary": "p", "secondary": "s"},
+                "scope": "unknown",
+            }
+        )
+    with pytest.raises(ValueError):
+        Subscription(
+            id="demo",
+            name="Demo",
+            keys=SubscriptionKeyPair(primary="p", secondary="s"),
+            products=["starter"],
+            api_id="weather",
+        )
 
 
 def test_extract_scopes_and_roles() -> None:

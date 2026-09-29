@@ -183,6 +183,11 @@ def project_subscription(config: GatewayConfig, config_key: str, subscription: S
         "name": subscription.name,
         "state": subscription.state.value,
         "products": subscription.products,
+        "product_id": subscription.products[0] if len(subscription.products) == 1 else None,
+        "scope": subscription.scope_kind.value if subscription.scope_kind is not None else None,
+        "api_id": subscription.api_id,
+        "all_apis": subscription.all_apis,
+        "service_scoped": subscription.service_scoped,
         "created_by": subscription.created_by,
         "keys": subscription.keys.model_dump(mode="json"),
     }

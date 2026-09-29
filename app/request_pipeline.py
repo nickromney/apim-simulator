@@ -29,7 +29,7 @@ from app.backend_pool import (
     render_backend_value,
     select_pool_member,
 )
-from app.config import GatewayConfig, ProductState, RouteConfig
+from app.config import GatewayConfig, ProductState, RouteConfig, SubscriptionScope
 from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
@@ -123,6 +123,12 @@ def effective_product_id_for_call(
 ) -> str:
     if not allowed_products:
         return ""
+    if auth.subscription_scope in {
+        SubscriptionScope.Api,
+        SubscriptionScope.AllApis,
+        SubscriptionScope.Service,
+    }:
+        return ""
     published = [p for p in allowed_products if product_is_published(cfg, p)]
     if auth.subscription is not None:
         granted = set(auth.subscription_products)
@@ -136,6 +142,44 @@ def effective_product_id_for_call(
     if published:
         return published[0]
     return ""
+
+
+def _subscription_scope_applies(route: RouteConfig, auth: AuthContext, allowed_products: list[str]) -> bool:
+    """Whether an accepted subscription covers this API or product.
+
+    API Management accepts API-, all-APIs-, and service-scoped subscriptions
+    without a product association, and does not apply product policy for them:
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    if auth.subscription is None:
+        return False
+    if auth.subscription_scope == SubscriptionScope.Api:
+        return auth.subscription_api_id == route.api_id
+    if auth.subscription_scope in {SubscriptionScope.AllApis, SubscriptionScope.Service}:
+        return True
+    if auth.subscription_scope == SubscriptionScope.Product:
+        return bool(set(allowed_products).intersection(auth.subscription_products))
+    # Identity-only keys predate scoped subscriptions and remain a local
+    # compatibility mode; they have no APIM scope to validate.
+    if auth.subscription_scope is None and not auth.subscription_products:
+        return True
+    return bool(set(allowed_products).intersection(auth.subscription_products))
+
+
+def _enforce_non_product_scope(
+    route: RouteConfig,
+    auth: AuthContext,
+    allowed_products: list[str],
+    cfg: GatewayConfig,
+    request: Request | None,
+) -> bool:
+    """Validate and consume an API-, all-APIs-, or service-scoped key."""
+    non_product_scopes = {SubscriptionScope.Api, SubscriptionScope.AllApis, SubscriptionScope.Service}
+    if auth.subscription is None or auth.subscription_scope not in non_product_scopes:
+        return False
+    if not _subscription_scope_applies(route, auth, allowed_products):
+        raise subscription_key_error(request, cfg, route, missing=False)
+    return True
 
 
 def _subscription_required(cfg: GatewayConfig, published_products: list[str], bypassed: bool) -> bool:
@@ -156,19 +200,22 @@ def _reject_key_scoped_elsewhere(
     auth: AuthContext,
     allowed_products: list[str],
     request: Request | None,
+    should_reject: bool,
 ) -> None:
-    """Deny a valid key for a product the API isn't in, even beside an open product.
+    """Deny a valid key whose scope does not cover this API.
 
     APIM ignores a key that isn't valid at all when an open product exists, but
     while the API itself requires a subscription it denies a real key scoped to
-    some other product (third row of the summary table):
+    some other product or API (third row of the summary table):
     https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
-    Keys with no product list (identity-only keys) carry no scope to check.
+    Keys with no APIM scope (identity-only compatibility keys) carry no scope
+    to check.
     """
-    granted = set(auth.subscription_products)
-    if auth.subscription is None or not granted or not cfg.subscription.required:
+    if not should_reject or auth.subscription is None or not cfg.subscription.required:
         return
-    if not granted.intersection(allowed_products):
+    if auth.subscription_scope is None and not auth.subscription_products:
+        return
+    if not _subscription_scope_applies(route, auth, allowed_products):
         raise subscription_key_error(request, cfg, route, missing=False)
 
 
@@ -182,6 +229,18 @@ def enforce_product_grant(
 ) -> str:
     allowed_products = allowed_products_for_route(route)
     if not allowed_products:
+        _reject_key_scoped_elsewhere(
+            cfg,
+            route,
+            auth,
+            allowed_products,
+            request,
+            should_reject=cfg.subscription.required and not subscription_is_bypassed,
+        )
+        _enforce_non_product_scope(route, auth, allowed_products, cfg, request)
+        return ""
+
+    if _enforce_non_product_scope(route, auth, allowed_products, cfg, request):
         return ""
 
     published_products = [p for p in allowed_products if product_is_published(cfg, p)]
@@ -193,8 +252,14 @@ def enforce_product_grant(
         raise HTTPException(status_code=403, detail="Product is not published")
 
     require_sub = _subscription_required(cfg, published_products, subscription_is_bypassed)
-    if not require_sub:
-        _reject_key_scoped_elsewhere(cfg, route, auth, allowed_products, request)
+    _reject_key_scoped_elsewhere(
+        cfg,
+        route,
+        auth,
+        allowed_products,
+        request,
+        should_reject=not require_sub,
+    )
     if require_sub:
         if auth.subscription is None:
             raise subscription_key_error(request, cfg, route, missing=True)

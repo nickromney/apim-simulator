@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import (
     ApiConfig,
@@ -39,6 +39,7 @@ from app.config import (
     ProductConfig,
     ProductState,
     RouteAuthzConfig,
+    SubscriptionScope,
     SubscriptionState,
     TagConfig,
     UserConfig,
@@ -94,18 +95,32 @@ def _decode_body(content: bytes) -> dict[str, str | None]:
 
 
 class SubscriptionUpsert(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     name: str
     state: SubscriptionState = SubscriptionState.Active
     products: list[str] = Field(default_factory=list)
+    product_id: str | None = None
+    scope: SubscriptionScope | None = None
+    api_id: str | None = None
+    all_apis: bool = False
+    service_scoped: bool = False
     primary_key: str | None = None
     secondary_key: str | None = None
 
 
 class SubscriptionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
     state: SubscriptionState | None = None
     products: list[str] | None = None
+    product_id: str | None = None
+    scope: SubscriptionScope | None = None
+    api_id: str | None = None
+    all_apis: bool | None = None
+    service_scoped: bool | None = None
 
 
 class ApiUpsert(BaseModel):

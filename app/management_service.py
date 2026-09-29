@@ -22,6 +22,7 @@ from app.config import (
     ProductConfig,
     Subscription,
     SubscriptionKeyPair,
+    SubscriptionScope,
     TagConfig,
     UserConfig,
     load_config,
@@ -108,6 +109,8 @@ class ManagementService:
         del cfg.products[product_id]
         for subscription in cfg.subscription.subscriptions.values():
             subscription.products = [item for item in subscription.products if item != product_id]
+            if not subscription.products and subscription.scope == SubscriptionScope.Product:
+                subscription.scope = None
         for api in cfg.apis.values():
             api.products = [item for item in api.products if item != product_id]
             for operation in api.operations.values():
@@ -179,18 +182,58 @@ class ManagementService:
     def create_subscription(self, cfg: GatewayConfig, body: Any) -> GatewayConfig:
         if self.find_subscription_by_id(cfg, body.id) is not None:
             raise HTTPException(status_code=409, detail="Subscription already exists")
+        if getattr(body, "product_id", None) is not None and getattr(body, "products", None):
+            raise HTTPException(status_code=400, detail="product_id conflicts with products")
 
         primary = body.primary_key or f"sub-{body.id}-primary"
         secondary = body.secondary_key or f"sub-{body.id}-secondary"
-        cfg.subscription.subscriptions[body.id] = Subscription(
-            id=body.id,
-            name=body.name,
-            keys=SubscriptionKeyPair(primary=primary, secondary=secondary),
-            state=body.state,
-            products=body.products,
-            created_by="management",
-        )
+        try:
+            cfg.subscription.subscriptions[body.id] = Subscription(
+                id=body.id,
+                name=body.name,
+                keys=SubscriptionKeyPair(primary=primary, secondary=secondary),
+                state=body.state,
+                products=body.products if getattr(body, "product_id", None) is None else [body.product_id],
+                scope=getattr(body, "scope", None),
+                api_id=getattr(body, "api_id", None),
+                all_apis=getattr(body, "all_apis", False),
+                service_scoped=getattr(body, "service_scoped", False),
+                created_by="management",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return self.persist_or_apply_config(cfg)
+
+    @staticmethod
+    def _validate_product_id_conflict(body: Any) -> None:
+        if getattr(body, "product_id", None) is not None and getattr(body, "products", None):
+            raise HTTPException(status_code=400, detail="product_id conflicts with products")
+
+    @staticmethod
+    def _subscription_scope_update(body: Any) -> dict[str, Any] | None:
+        fields = ("products", "product_id", "scope", "api_id", "all_apis", "service_scoped")
+        if not any(getattr(body, field, None) is not None for field in fields):
+            return None
+        values: dict[str, Any] = {
+            "products": [],
+            "scope": None,
+            "api_id": None,
+            "all_apis": False,
+            "service_scoped": False,
+        }
+        if getattr(body, "products", None) is not None:
+            values["products"] = body.products
+        if getattr(body, "product_id", None) is not None:
+            values["products"] = [body.product_id]
+        if getattr(body, "api_id", None) is not None:
+            values["api_id"] = body.api_id
+        if getattr(body, "all_apis", None) is True:
+            values["all_apis"] = True
+        if getattr(body, "service_scoped", None) is True:
+            values["service_scoped"] = True
+        if getattr(body, "scope", None) is not None:
+            values["scope"] = body.scope
+        return values
 
     def update_subscription(self, cfg: GatewayConfig, subscription_id: str, body: Any) -> GatewayConfig:
         sub = self.find_subscription_by_id(cfg, subscription_id)
@@ -201,8 +244,23 @@ class ManagementService:
             sub.name = body.name
         if body.state is not None:
             sub.state = body.state
-        if body.products is not None:
-            sub.products = body.products
+        self._validate_product_id_conflict(body)
+        scope_values = self._subscription_scope_update(body)
+        if scope_values is not None:
+            try:
+                replacement = Subscription.model_validate(
+                    {
+                        **sub.model_dump(mode="python"),
+                        **scope_values,
+                    }
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            sub.products = replacement.products
+            sub.scope = replacement.scope
+            sub.api_id = replacement.api_id
+            sub.all_apis = replacement.all_apis
+            sub.service_scoped = replacement.service_scoped
         return self.persist_or_apply_config(cfg)
 
     def delete_subscription(self, cfg: GatewayConfig, subscription_id: str) -> GatewayConfig:
