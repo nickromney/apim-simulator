@@ -278,3 +278,24 @@ def test_load_config_accepts_api_and_route_authored_files(tmp_path, monkeypatch)
     assert loaded_route.service.display_name == "Local APIM Simulator"
     assert loaded_route.apis == {}
     assert loaded_route.routes[0].name == "legacy"
+
+
+def test_load_config_rejects_malformed_policy_xml(tmp_path, monkeypatch) -> None:
+    """Configuration loading fails clearly for malformed policy XML.
+
+    https://learn.microsoft.com/en-us/rest/api/apimanagement/policy/create-or-update?view=rest-apimanagement-2024-05-01
+    """
+    config_path = tmp_path / "invalid-policy.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "allow_anonymous": True,
+                "policies_xml": "<policies><inbound>",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APIM_CONFIG_PATH", str(config_path))
+
+    with pytest.raises(ValueError, match="Invalid policies XML"):
+        load_config()

@@ -533,6 +533,66 @@ class GatewayConfig(BaseModel):
         return out
 
 
+def _api_policy_xml_entries(api_id: str, api: ApiConfig) -> list[tuple[str, str]]:
+    """Policy XML values authored by one API and its operations."""
+    entries: list[tuple[str, str]] = []
+    if api.policies_xml:
+        entries.append((f"API {api_id}", api.policies_xml))
+    for operation_id, operation in api.operations.items():
+        if operation.policies_xml:
+            entries.append((f"operation {api_id}:{operation_id}", operation.policies_xml))
+    return entries
+
+
+def _route_policy_xml_entries(route: RouteConfig) -> list[tuple[str, str]]:
+    """Policy XML values authored by one legacy route."""
+    entries: list[tuple[str, str]] = []
+    for index, xml in enumerate(route.policies_xml_documents):
+        if xml:
+            entries.append((f"route {route.name} document {index}", xml))
+    if route.policies_xml:
+        entries.append((f"route {route.name}", route.policies_xml))
+    return entries
+
+
+def _policy_xml_entries(cfg: GatewayConfig) -> list[tuple[str, str]]:
+    """Policy XML values authored in the gateway document and its scopes."""
+    entries: list[tuple[str, str]] = []
+    for index, xml in enumerate(cfg.policies_xml_documents):
+        if xml:
+            entries.append((f"gateway document {index}", xml))
+    if cfg.policies_xml:
+        entries.append(("gateway", cfg.policies_xml))
+    for product_id, product in cfg.products.items():
+        if product.policies_xml:
+            entries.append((f"product {product_id}", product.policies_xml))
+    for api_id, api in cfg.apis.items():
+        entries.extend(_api_policy_xml_entries(api_id, api))
+    for route in cfg.routes:
+        entries.extend(_route_policy_xml_entries(route))
+    return entries
+
+
+def validate_policy_config(cfg: GatewayConfig) -> GatewayConfig:
+    """Reject malformed policy documents before the gateway can serve them."""
+    from defusedxml import ElementTree
+
+    from app.effective_policy import validate_policy_xml_syntax
+
+    for fragment_id, xml in cfg.policy_fragments.items():
+        try:
+            ElementTree.fromstring(f"<fragment>{xml}</fragment>")
+        except ElementTree.ParseError as exc:
+            raise ValueError(f"Invalid policy fragment XML at {fragment_id}") from exc
+
+    for location, xml in _policy_xml_entries(cfg):
+        try:
+            validate_policy_xml_syntax(xml)
+        except ValueError as exc:
+            raise ValueError(f"Invalid policy XML at {location}: {exc}") from exc
+    return cfg
+
+
 def _url_template_prefix(url_template: str) -> str:
     """The fixed leading path of an operation template, before its first `{param}`."""
     templ = (url_template or "").strip()
@@ -731,4 +791,4 @@ def load_config() -> GatewayConfig:
         return _default_config_from_env()
     with open(config_path, encoding="utf-8") as f:
         data = json.load(f)
-    return GatewayConfig.model_validate(data)
+    return validate_policy_config(GatewayConfig.model_validate(data))

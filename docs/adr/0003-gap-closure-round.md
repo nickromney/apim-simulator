@@ -17,13 +17,21 @@ simulator (see "Held" below).
 
 ### D1. Product-scope policies (adapted)
 
-Policies now merge global → **product** → API → operation, matching Azure's
-scope order (workspaces excluded — the simulator has no workspace model). The
-"which product" rule is adapted and deterministic: the first published product
-granted by the authorizing subscription, else the first published product on
-the route (open products, subscription bypass). Azure resolves this through
-the subscription's product context; for multi-product open routes the
-simulator's "first published" tiebreak is documented behaviour, not parity.
+Policies now evaluate per section from global → **product** → API → operation,
+matching Azure's scope order (workspaces excluded — the simulator has no
+workspace model). A child section is effective only at its authored position:
+each `<base />` is replaced by the already-effective parent section, while a
+configured section without `<base />` suppresses that parent section; a scope
+with no policy document is not added to the stack. The simulator follows the
+documented ordering for all four sections and expands configured policy
+fragments before applying them. The "which product" rule is adapted and
+deterministic: the first published product granted by the authorizing
+subscription, else the first published product on the route (open products,
+subscription bypass). Azure resolves this through the subscription's product
+context; for multi-product open routes the simulator's "first published"
+tiebreak is documented behaviour, not parity. See [Policies in Azure API
+Management](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-policies)
+and [Set or edit policies](https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies).
 The management policy surface gains a `product` scope, and the effective
 product id is exposed to policies as the `product_id` variable and the
 `Product ID` default metric dimension.

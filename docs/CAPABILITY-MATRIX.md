@@ -116,7 +116,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Inbound policies | Yes | `azurerm_api_management_api_policy` | XML format |
 | Outbound policies | Yes | - | `<outbound>` section |
 | On-error policies | Yes | - | `<on-error>` section |
-| Policy inheritance | Yes | - | Gateway -> Product -> API -> Operation (product scope is adapted; see ADR 0003) |
+| Policy inheritance | Yes | - | Per-section global -> product -> API -> operation; each child `<base />` is replaced in place by the parent section, while omitting it (including an empty/absent configured section) suppresses that parent section. A scope with no document is skipped. Workspace scope is not modeled; product selection is adapted (see ADR 0003). Based on [policy scopes](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-policies) and [`base`](https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies). |
 | `set-header` | Yes | - | Add/override/delete modes |
 | `rewrite-uri` | Yes | - | Path rewriting |
 | `set-variable` | Yes | - | Writes to request-scoped `variables` |

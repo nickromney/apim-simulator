@@ -14,7 +14,7 @@ This repository is not trying to clone all of Azure API Management. It is a loca
 - Route-level scope, role, and claim checks
 - Client-certificate and proxy-forwarded mTLS validation modes
 - Host matching, API version-set routing, and forwarded-header-aware tracing
-- Policy scopes merged global → product → API → operation, including a `product` management policy scope
+- Policy scopes evaluated per section as global → product → API → operation, including a `product` management policy scope: a child `<base />` inherits the parent section at that position, omission suppresses the parent section, and a scope with no document leaves the parent unchanged. Workspace scope is not modeled; product selection is adapted to the local subscription model.
 - Load-balanced backend pools with priority/weight members and adapted circuit breakers
 - A practical XML policy subset:
   - `set-header`
