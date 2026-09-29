@@ -19,6 +19,8 @@ ERROR_HEADERS = """
     <set-header name="err-message"><value>@(context.LastError.Message)</value></set-header>
     <set-header name="err-section"><value>@(context.LastError.Section)</value></set-header>
     <set-header name="err-scope"><value>@(context.LastError.Scope)</value></set-header>
+    <set-header name="err-path"><value>@(context.LastError.Path)</value></set-header>
+    <set-header name="err-policy-id"><value>@(context.LastError.PolicyId)</value></set-header>
     <set-header name="err-status"><value>@(context.Response.StatusCode.ToString())</value></set-header>
 """
 
@@ -178,6 +180,30 @@ def test_expression_failure_enters_on_error_with_documented_reason() -> None:
     assert response.headers["err-source"] == "set-variable"
     assert response.headers["err-reason"] == "ExpressionValueEvaluationFailure"
     assert response.headers["err-section"] == "inbound"
+
+
+def test_last_error_reports_nested_policy_path_and_id() -> None:
+    """LastError exposes nested policy hierarchy and the failing policy id.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
+    policy = f"""
+    <policies>
+      <inbound>
+        <choose>
+          <when condition="true">
+            <set-variable id="failing-variable" name="v" value="@(1 / 0)" />
+          </when>
+        </choose>
+      </inbound>
+      <on-error>{ERROR_HEADERS}</on-error>
+    </policies>
+    """
+    with _client(policy) as client:
+        response = client.get("/api/x")
+
+    assert response.headers["err-path"] == r"choose[1]\when[1]\set-variable[1]"
+    assert response.headers["err-policy-id"] == "failing-variable"
 
 
 def test_expression_failure_without_on_error_returns_apim_500_body() -> None:

@@ -131,6 +131,14 @@ class Always(Condition):
 
 
 @dataclass(frozen=True)
+class BooleanConstant(Condition):
+    value: bool
+
+    def __call__(self, req: PolicyRequest) -> bool:
+        return self.value
+
+
+@dataclass(frozen=True)
 class HeaderEquals(Condition):
     name: str
     value: str
@@ -232,14 +240,16 @@ _CONDITION_FORMS: tuple[tuple[Callable[[str], bool], Callable[[str], Condition]]
 def parse_condition(expr: str | None) -> Condition:
     """Parse a `<when condition="...">` expression.
 
-    An empty condition always fires. An `@`-prefixed one is a full policy
-    expression evaluated at request time; everything else is the small
-    comparison language recognised by _CONDITION_FORMS.
+    An `@`-prefixed condition is a full policy expression evaluated at request
+    time; everything else is the small comparison language recognised by
+    _CONDITION_FORMS. Boolean constants are documented by the choose policy.
     """
-    if not expr:
-        return Always()
+    if expr is None or not expr.strip():
+        raise HTTPException(status_code=500, detail="choose when requires condition")
 
     expr = expr.strip()
+    if expr.lower() in {"true", "false"}:
+        return BooleanConstant(value=expr.lower() == "true")
     if expr.startswith("@"):
         return ExpressionCondition(expression=expr)
 
@@ -258,6 +268,13 @@ class PolicyNode:
 
     async def apply_async(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         return self.apply(req, runtime)
+
+
+def _annotate_policy_node(node: PolicyNode, *, policy_id: str | None, path: str) -> PolicyNode:
+    """Attach parser metadata without changing the public node dataclasses."""
+    object.__setattr__(node, "_policy_id", policy_id or "")
+    object.__setattr__(node, "_policy_path", path)
+    return node
 
 
 @dataclass(frozen=True)
@@ -431,13 +448,11 @@ def _mock_operation(req: PolicyRequest, runtime: PolicyRuntime | None) -> Any | 
 def _mock_representation(operation: Any, *, status_code: int, content_type: str | None) -> Any | None:
     """The response representation to mock.
 
-    Prefers the response declared for this status code, falling back to the
-    first declared response: a mock-response naming a status the operation does
-    not document is still better served by an example than by an empty body.
+    APIM selects a representation only from the response matching the
+    requested status code. A requested content type must also match exactly,
+    case-insensitively; otherwise the response has no content.
     """
     candidates = [item for item in operation.responses if item.status_code == status_code]
-    if not candidates and operation.responses:
-        candidates = [operation.responses[0]]
     if not candidates:
         return None
 
@@ -445,13 +460,93 @@ def _mock_representation(operation: Any, *, status_code: int, content_type: str 
     if not representations:
         return None
     if content_type:
-        matched = next(
-            (r for r in representations if r.content_type.lower() == content_type.lower()),
-            None,
-        )
-        if matched is not None:
-            return matched
+        return next((r for r in representations if r.content_type.lower() == content_type.lower()), None)
     return representations[0]
+
+
+def _schema_definition(schema: Any, schema_id: str) -> Any | None:
+    definitions = getattr(schema, "definitions", {})
+    if schema_id in definitions:
+        return definitions[schema_id]
+    components = getattr(schema, "components", {})
+    component_schemas = components.get("schemas", {}) if isinstance(components, dict) else {}
+    return component_schemas.get(schema_id)
+
+
+def _schema_composite_sample(schema: dict[str, Any], definitions: dict[str, Any], seen: set[str]) -> Any | None:
+    for key in ("oneOf", "anyOf", "allOf"):
+        options = schema.get(key)
+        if isinstance(options, list) and options:
+            return _schema_sample(options[0], definitions, seen)
+    enum = schema.get("enum")
+    return enum[0] if isinstance(enum, list) and enum else None
+
+
+def _schema_structured_sample(schema: dict[str, Any], definitions: dict[str, Any], seen: set[str]) -> Any | None:
+    schema_type = schema.get("type")
+    if schema_type == "object" or "properties" in schema:
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            return {}
+        return {name: _schema_sample(value, definitions, seen) for name, value in properties.items()}
+    if schema_type == "array":
+        item = _schema_sample(schema.get("items", {}), definitions, seen)
+        return [] if item is None else [item]
+    return None
+
+
+def _schema_scalar_sample(schema_type: Any) -> Any | None:
+    return {
+        "string": "",
+        "integer": 0,
+        "number": 0,
+        "boolean": False,
+    }.get(schema_type)
+
+
+def _schema_sample(schema: Any, definitions: dict[str, Any], seen: set[str]) -> Any | None:
+    """Generate a sample for the simple JSON Schema shapes modeled locally.
+
+    APIM supports richer schema dialects and XML representations. The local
+    adaptation handles simple JSON object/array/scalar schemas; unsupported
+    constructs produce no body.
+    """
+    if not isinstance(schema, dict):
+        return None
+    if "example" in schema:
+        return schema["example"]
+    if "default" in schema:
+        return schema["default"]
+    if "$ref" in schema:
+        reference = str(schema["$ref"]).rsplit("/", 1)[-1]
+        if reference in seen:
+            return None
+        return _schema_sample(definitions.get(reference), definitions, seen | {reference})
+    composite = _schema_composite_sample(schema, definitions, seen)
+    if composite is not None:
+        return composite
+    structured = _schema_structured_sample(schema, definitions, seen)
+    return structured if structured is not None else _schema_scalar_sample(schema.get("type"))
+
+
+def _mock_schema_sample(api_id: str, operation: Any, representation: Any, runtime: PolicyRuntime) -> Any | None:
+    schema_id = getattr(representation, "schema_id", None)
+    if not schema_id or runtime.gateway_config is None:
+        return None
+    api = runtime.gateway_config.apis.get(api_id)
+    if api is None or "json" not in representation.content_type.lower():
+        return None
+    schema = api.schemas.get(schema_id)
+    if schema is None:
+        return None
+    root = _schema_definition(schema, schema_id)
+    if root is None:
+        try:
+            root = json.loads(schema.value) if schema.value else None
+        except (TypeError, json.JSONDecodeError):
+            root = None
+    definitions = getattr(schema, "definitions", {})
+    return _schema_sample(root, definitions if isinstance(definitions, dict) else {}, set())
 
 
 def _mock_response_sample(
@@ -477,6 +572,13 @@ def _mock_response_sample(
                 _encode_mock_response_example(example.value, content_type=resolved_content_type),
                 resolved_content_type,
             )
+    if runtime is not None:
+        api_id = str(req.variables.get("api_id") or "")
+        schema_sample = _mock_schema_sample(api_id, operation, representation, runtime)
+        if schema_sample is not None:
+            return _encode_mock_response_example(
+                schema_sample, content_type=resolved_content_type
+            ), resolved_content_type
     return b"", resolved_content_type
 
 
@@ -3536,6 +3638,8 @@ def _parse_set_variable(el: ElementTree.Element) -> SetVariable:
     name = (el.attrib.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=500, detail="set-variable missing name")
+    if "value" not in el.attrib:
+        raise HTTPException(status_code=500, detail="set-variable requires value")
     return SetVariable(name=name, value=_policy_value_or_empty(el))
 
 
@@ -3548,6 +3652,12 @@ def _parse_set_query_parameter(el: ElementTree.Element) -> SetQueryParameter:
 
 
 def _parse_set_body(el: ElementTree.Element) -> SetBody:
+    template = el.attrib.get("template")
+    if template:
+        raise HTTPException(status_code=500, detail=f"set-body template {template} is unsupported")
+    for attribute in ("xsi-nil", "parse-date"):
+        if attribute in el.attrib:
+            raise HTTPException(status_code=500, detail=f"set-body {attribute} is unsupported")
     return SetBody(value=_policy_value_or_empty(el))
 
 
@@ -3590,7 +3700,7 @@ def _required_attr(el: ElementTree.Element, name: str, policy_name: str) -> str:
 
 def _parse_check_header(el: ElementTree.Element) -> CheckHeader:
     _reject_unknown_attributes(
-        el, {"name", "failed-check-httpcode", "failed-check-error-message", "ignore-case"}, "check-header"
+        el, {"id", "name", "failed-check-httpcode", "failed-check-error-message", "ignore-case"}, "check-header"
     )
     name = _required_attr(el, "name", "check-header").strip()
     status_code = _required_attr(el, "failed-check-httpcode", "check-header").strip()
@@ -3647,7 +3757,7 @@ def _parse_cors(el: ElementTree.Element) -> Cors:
 
 
 def _parse_ip_filter(el: ElementTree.Element) -> IpFilter:
-    _reject_unknown_attributes(el, {"action"}, "ip-filter")
+    _reject_unknown_attributes(el, {"id", "action"}, "ip-filter")
     action = _required_attr(el, "action", "ip-filter").strip()
     if not is_apim_expression(action) and action.lower() not in {"allow", "forbid"}:
         raise HTTPException(status_code=500, detail="ip-filter action must be allow or forbid")
@@ -4341,9 +4451,16 @@ def _parse_choose(
     policy_fragments: dict[str, str],
     section_name: str,
     seen_fragments: set[str],
+    path: str,
+    path_component: str,
+    in_fragment: bool,
 ) -> Choose:
+    when_elements = el.findall("when")
+    if not when_elements:
+        raise HTTPException(status_code=500, detail="choose requires at least one when")
     branches: list[tuple[Condition, list[PolicyNode]]] = []
-    for when in el.findall("when"):
+    choose_path = path or path_component
+    for index, when in enumerate(when_elements, start=1):
         cond = parse_condition(when.attrib.get("condition"))
         steps = _parse_children(
             list(when),
@@ -4351,6 +4468,8 @@ def _parse_choose(
             section_name=section_name,
             seen_fragments=set(seen_fragments),
             allow_base=False,
+            path_prefix=f"{choose_path}\\when[{index}]",
+            in_fragment=in_fragment,
         )
         branches.append((cond, steps))
     otherwise_el = el.find("otherwise")
@@ -4361,6 +4480,8 @@ def _parse_choose(
             section_name=section_name,
             seen_fragments=set(seen_fragments),
             allow_base=False,
+            path_prefix=f"{choose_path}\\otherwise[1]",
+            in_fragment=in_fragment,
         )
         if otherwise_el is not None
         else []
@@ -4377,10 +4498,11 @@ def _fragment_elements(xml: str, *, section_name: str) -> list[ElementTree.Eleme
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=500, detail="Invalid policy fragment XML") from exc
 
-    if root.tag == "policies":
-        section = root.find(section_name)
-        return list(section) if section is not None else []
+    if root.tag == "policies" or root.tag in {"inbound", "backend", "outbound", "on-error"}:
+        raise HTTPException(status_code=500, detail="policy fragment cannot contain policy sections")
     if root.tag == "fragment":
+        if any(child.tag in {"inbound", "backend", "outbound", "on-error"} for child in root):
+            raise HTTPException(status_code=500, detail="policy fragment cannot contain policy sections")
         return list(root)
     return [root]
 
@@ -4392,44 +4514,77 @@ def _parse_children(
     section_name: str,
     seen_fragments: set[str],
     allow_base: bool = True,
+    path_prefix: str = "",
+    in_fragment: bool = False,
 ) -> list[PolicyNode]:
     out: list[PolicyNode] = []
+    occurrences: dict[str, int] = {}
     for child in children:
+        occurrences[child.tag] = occurrences.get(child.tag, 0) + 1
         # APIM's base marker controls the containing section; it is not a
         # policy statement that can be deferred inside choose branches.
         if child.tag == "base" and not allow_base:
             raise HTTPException(status_code=500, detail="base element is only allowed directly inside a policy section")
+        if in_fragment and child.tag in {"base", "include-fragment"}:
+            detail = "base" if child.tag == "base" else "another fragment"
+            raise HTTPException(status_code=500, detail=f"policy fragment cannot contain {detail}")
         if child.tag == "include-fragment":
-            fragment_id = (
-                child.attrib.get("fragment-id") or child.attrib.get("name") or child.attrib.get("id") or ""
-            ).strip()
-            if not fragment_id:
-                raise HTTPException(status_code=500, detail="include-fragment missing fragment-id")
-            if fragment_id in seen_fragments:
-                raise HTTPException(status_code=500, detail=f"Circular policy fragment include: {fragment_id}")
-            fragment_xml = policy_fragments.get(fragment_id)
-            if fragment_xml is None:
-                raise HTTPException(status_code=500, detail=f"Unknown policy fragment: {fragment_id}")
-            fragment_children = _fragment_elements(fragment_xml, section_name=section_name)
             out.extend(
-                _parse_children(
-                    fragment_children,
+                _parse_included_fragment(
+                    child,
                     policy_fragments=policy_fragments,
                     section_name=section_name,
-                    seen_fragments=seen_fragments | {fragment_id},
+                    seen_fragments=seen_fragments,
                     allow_base=allow_base,
+                    path_prefix=path_prefix,
                 )
             )
             continue
+        component = f"{child.tag}[{occurrences[child.tag]}]"
+        path = f"{path_prefix}\\{component}" if path_prefix else ""
         out.append(
             _parse_node(
                 child,
                 policy_fragments=policy_fragments,
                 section_name=section_name,
                 seen_fragments=seen_fragments,
+                path=path,
+                path_component=component,
+                in_fragment=in_fragment,
             )
         )
     return out
+
+
+def _parse_included_fragment(
+    child: ElementTree.Element,
+    *,
+    policy_fragments: dict[str, str],
+    section_name: str,
+    seen_fragments: set[str],
+    allow_base: bool,
+    path_prefix: str,
+) -> list[PolicyNode]:
+    if not (child.attrib.get("fragment-id") or "").strip():
+        raise HTTPException(status_code=500, detail="include-fragment requires fragment-id")
+    _reject_unknown_attributes(child, {"fragment-id"}, "include-fragment")
+    fragment_id = (child.attrib.get("fragment-id") or "").strip()
+    if is_apim_expression(fragment_id):
+        raise HTTPException(status_code=500, detail="include-fragment fragment-id does not allow expressions")
+    if fragment_id in seen_fragments:
+        raise HTTPException(status_code=500, detail=f"Circular policy fragment include: {fragment_id}")
+    fragment_xml = policy_fragments.get(fragment_id)
+    if fragment_xml is None:
+        raise HTTPException(status_code=500, detail=f"Unknown policy fragment: {fragment_id}")
+    return _parse_children(
+        _fragment_elements(fragment_xml, section_name=section_name),
+        policy_fragments=policy_fragments,
+        section_name=section_name,
+        seen_fragments=seen_fragments | {fragment_id},
+        allow_base=allow_base,
+        path_prefix=path_prefix,
+        in_fragment=True,
+    )
 
 
 # Policy elements whose parser needs nothing but the element itself. Some Azure
@@ -4474,6 +4629,57 @@ _CONSTANT_ELEMENTS: dict[str, Callable[[], PolicyNode]] = {
     "base": NoOp,
 }
 
+# Allowed sections come from the Usage section of each policy's Learn page, e.g.
+# https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+_POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
+    "choose": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "include-fragment": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "set-header": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "set-variable": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "set-query-parameter": frozenset({"inbound", "backend"}),
+    "set-body": frozenset({"inbound", "backend", "outbound"}),
+    "rewrite-uri": frozenset({"inbound"}),
+    "check-header": frozenset({"inbound"}),
+    "ip-filter": frozenset({"inbound"}),
+    "cors": frozenset({"inbound"}),
+    "rate-limit": frozenset({"inbound"}),
+    "rate-limit-by-key": frozenset({"inbound"}),
+    "quota": frozenset({"inbound"}),
+    "quota-by-key": frozenset({"inbound"}),
+    "llm-token-limit": frozenset({"inbound"}),
+    "azure-openai-token-limit": frozenset({"inbound"}),
+    "llm-emit-token-metric": frozenset({"inbound"}),
+    "azure-openai-emit-token-metric": frozenset({"inbound"}),
+    "emit-metric": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "validate-content": frozenset({"inbound", "outbound", "on-error"}),
+    "validate-parameters": frozenset({"inbound"}),
+    "validate-status-code": frozenset({"outbound", "on-error"}),
+    "cache-lookup": frozenset({"inbound"}),
+    "cache-store": frozenset({"outbound"}),
+    "cache-lookup-value": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "cache-store-value": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "cache-remove-value": frozenset({"inbound", "backend", "outbound"}),
+    "return-response": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "mock-response": frozenset({"inbound", "outbound", "on-error"}),
+    "validate-jwt": frozenset({"inbound"}),
+    "set-backend-service": frozenset({"inbound", "backend"}),
+    "forward-request": frozenset({"backend"}),
+    "send-request": frozenset({"inbound", "backend", "outbound", "on-error"}),
+}
+
+_SINGLETON_POLICIES = frozenset(
+    {
+        "rate-limit",
+        "quota",
+        "cors",
+        "validate-parameters",
+        "validate-status-code",
+        "cache-lookup",
+        "cache-lookup-value",
+        "cache-store-value",
+    }
+)
+
 
 def _parse_node(
     el: ElementTree.Element,
@@ -4481,6 +4687,9 @@ def _parse_node(
     policy_fragments: dict[str, str],
     section_name: str,
     seen_fragments: set[str],
+    path: str,
+    path_component: str,
+    in_fragment: bool,
 ) -> PolicyNode:
     """One policy element to one node.
 
@@ -4488,22 +4697,48 @@ def _parse_node(
     only one that needs the fragment table and the recursion guard.
     """
     tag = el.tag
-    if tag == "forward-request" and section_name != "backend":
-        raise HTTPException(status_code=500, detail="forward-request is only supported in the backend section")
+    allowed_sections = _POLICY_ALLOWED_SECTIONS.get(tag)
+    if allowed_sections is not None and section_name not in allowed_sections:
+        if tag == "forward-request":
+            raise HTTPException(status_code=500, detail="forward-request is only supported in the backend section")
+        raise HTTPException(status_code=500, detail=f"{tag} is not allowed in {section_name} section")
     constant = _CONSTANT_ELEMENTS.get(tag)
     if constant is not None:
-        return constant()
+        return _annotate_policy_node(constant(), policy_id=el.attrib.get("id"), path=path)
     if tag == "choose":
-        return _parse_choose(
+        node = _parse_choose(
             el,
             policy_fragments=policy_fragments,
             section_name=section_name,
             seen_fragments=seen_fragments,
+            path=path,
+            path_component=path_component,
+            in_fragment=in_fragment,
         )
+        return _annotate_policy_node(node, policy_id=el.attrib.get("id"), path=path)
     parser = _ELEMENT_PARSERS.get(tag)
     if parser is None:
         raise HTTPException(status_code=500, detail=f"Unsupported policy element: {tag}")
-    return parser(el)
+    return _annotate_policy_node(parser(el), policy_id=el.attrib.get("id"), path=path)
+
+
+def _iter_policy_nodes(nodes: list[PolicyNode]) -> Iterator[PolicyNode]:
+    for node in nodes:
+        yield node
+        if isinstance(node, Choose):
+            for _condition, steps in node.branches:
+                yield from _iter_policy_nodes(steps)
+            yield from _iter_policy_nodes(node.otherwise)
+
+
+def _validate_section_structure(name: str, nodes: list[PolicyNode]) -> None:
+    non_base = [node for node in nodes if not isinstance(node, NoOp)]
+    if name == "backend" and len(non_base) > 1:
+        raise HTTPException(status_code=500, detail="backend section allows only one policy element")
+    for policy_name in _SINGLETON_POLICIES:
+        count = sum(element_name(node) == policy_name for node in _iter_policy_nodes(non_base))
+        if count > 1:
+            raise HTTPException(status_code=500, detail=f"{policy_name} can be used only once per section")
 
 
 def _resolve_policy_fragment_named_values(policy_fragments: dict[str, str], config: GatewayConfig) -> dict[str, str]:
@@ -4549,7 +4784,9 @@ def parse_policies_xml(
         if sec is None:
             return []
         sections_present.add(name)
-        return _parse_children(list(sec), policy_fragments=fragments, section_name=name, seen_fragments=set())
+        nodes = _parse_children(list(sec), policy_fragments=fragments, section_name=name, seen_fragments=set())
+        _validate_section_structure(name, nodes)
+        return nodes
 
     return PolicyDocument(
         inbound=section("inbound"),
@@ -4591,11 +4828,17 @@ async def _apply_steps_async(
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
     for step in steps:
-        req.variables["_policy_step"] = element_name(step)
+        _set_policy_execution_context(req, step)
         out = await step.apply_async(req, runtime)
         if out is not None:
             return out
     return None
+
+
+def _set_policy_execution_context(req: PolicyRequest, step: PolicyNode) -> None:
+    req.variables["_policy_step"] = element_name(step)
+    req.variables["_policy_path"] = str(getattr(step, "_policy_path", "") or "")
+    req.variables["_policy_id"] = str(getattr(step, "_policy_id", "") or "")
 
 
 ScopedStep = tuple[str, PolicyNode]
@@ -4644,7 +4887,7 @@ async def _apply_section_async(
         runtime.policy_named_values_resolved = bool(docs) and all(doc.named_values_resolved for doc in docs)
     for scope, step in _effective_section_steps(docs, section_name):
         req.variables["_policy_scope"] = scope
-        req.variables["_policy_step"] = element_name(step)
+        _set_policy_execution_context(req, step)
         out = await step.apply_async(req, runtime)
         if out is not None:
             return out
