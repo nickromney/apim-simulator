@@ -1,6 +1,8 @@
 {
   "allowed_origins": ["${TODO_FRONTEND_ORIGIN_LOCALHOST}", "${TODO_FRONTEND_ORIGIN_LOOPBACK}", "http://localhost:4321"],
   "allow_anonymous": true,
+  "emit_simulator_response_headers": true,
+  "propagate_simulator_correlation_id": true,
   "products": {
     "todo-demo": {
       "name": "Todo Demo",

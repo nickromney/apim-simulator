@@ -238,19 +238,32 @@ def apply_claim_headers(headers: dict[str, str], claims: dict[str, Any]) -> None
     headers["x-ms-client-principal-name"] = str(claims.get("preferred_username", ""))
 
 
-def build_upstream_headers(request: Request, auth: AuthContext) -> dict[str, str]:
+def build_upstream_headers(
+    request: Request,
+    auth: AuthContext,
+    *,
+    inject_simulator_identity_headers: bool = False,
+) -> dict[str, str]:
     headers: dict[str, str] = {
         key: value
         for key, value in request.headers.items()
         if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() not in INTERNAL_UPSTREAM_HEADERS
     }
-    incoming_host = request.headers.get("host")
-    if incoming_host:
-        headers["host"] = incoming_host
 
-    apply_claim_headers(headers, auth.claims)
+    client_host = request.client.host if request.client else ""
+    incoming_forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+    if client_host:
+        # Microsoft documents that APIM adds X-Forwarded-For and that a policy
+        # cannot remove the client IP. The docs do not specify exact list
+        # formatting, so use the standard comma-separated proxy form.
+        headers["x-forwarded-for"] = (
+            f"{incoming_forwarded_for}, {client_host}" if incoming_forwarded_for else client_host
+        )
 
-    if auth.subscription is not None:
+    if inject_simulator_identity_headers:
+        apply_claim_headers(headers, auth.claims)
+
+    if inject_simulator_identity_headers and auth.subscription is not None:
         headers["x-user-id"] = auth.subscription.id
         headers["x-user-name"] = auth.subscription.name
         if auth.subscription_products:
@@ -260,9 +273,7 @@ def build_upstream_headers(request: Request, auth: AuthContext) -> dict[str, str
 
 
 def filter_response_headers(upstream_headers: dict[str, str]) -> dict[str, str]:
-    headers = {key: value for key, value in upstream_headers.items() if key.lower() not in HOP_BY_HOP_HEADERS}
-    headers["x-apim-simulator"] = "apim-simulator"
-    return headers
+    return {key: value for key, value in upstream_headers.items() if key.lower() not in HOP_BY_HOP_HEADERS}
 
 
 def build_user_payload(auth: AuthContext, issuer: str | None, audience: str | None) -> dict[str, Any]:

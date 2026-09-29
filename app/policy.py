@@ -718,6 +718,29 @@ def _policy_int(
     return int(float(text))
 
 
+def _policy_float(
+    value: str | None,
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None = None,
+    *,
+    default: float = 0.0,
+) -> float:
+    if value is None:
+        return default
+    resolved = evaluate_policy_value(value, req, runtime)
+    if isinstance(resolved, bool):
+        return float(resolved)
+    if isinstance(resolved, (int, float)):
+        return float(resolved)
+    text = _stringify_policy_value(resolved).strip()
+    if not text:
+        return default
+    try:
+        return float(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid numeric policy value: {text}") from exc
+
+
 def _is_deferred_expression(value: str | None) -> bool:
     return value is not None and is_apim_expression(value)
 
@@ -2520,6 +2543,60 @@ class SetBackendService(PolicyNode):
 
 
 @dataclass(frozen=True)
+class ForwardRequest(PolicyNode):
+    """Configure the backend forward operation for this policy request."""
+
+    timeout: str | None = None
+    timeout_ms: str | None = None
+    follow_redirects: str | None = None
+    buffer_request_body: str | None = None
+    buffer_response: str | None = None
+    fail_on_error_status_code: str | None = None
+    http_version: str | None = None
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        if self.timeout_ms is not None:
+            timeout_seconds = _policy_float(self.timeout_ms, req, runtime) / 1000
+        else:
+            timeout_seconds = _policy_float(self.timeout, req, runtime, default=300.0)
+        if timeout_seconds < 0:
+            raise HTTPException(status_code=500, detail="forward-request timeout must be non-negative")
+
+        http_version = render_policy_value(self.http_version or "1", req, runtime).strip().lower()
+        if http_version not in {"1", "2", "2or1"}:
+            raise HTTPException(status_code=500, detail=f"Unsupported forward-request http-version: {http_version}")
+
+        req.variables["_forward_request_timeout_seconds"] = timeout_seconds
+        req.variables["_forward_request_follow_redirects"] = _policy_bool(
+            self.follow_redirects, req, runtime, default=False
+        )
+        req.variables["_forward_request_buffer_request_body"] = _policy_bool(
+            self.buffer_request_body, req, runtime, default=False
+        )
+        req.variables["_forward_request_buffer_response"] = _policy_bool(
+            self.buffer_response, req, runtime, default=True
+        )
+        req.variables["_forward_request_fail_on_error_status_code"] = _policy_bool(
+            self.fail_on_error_status_code, req, runtime, default=False
+        )
+        req.variables["_forward_request_http_version"] = http_version
+        req.variables["_forward_request_present"] = True
+        _record_step(
+            runtime,
+            "forward-request",
+            {
+                "timeout_seconds": timeout_seconds,
+                "follow_redirects": req.variables["_forward_request_follow_redirects"],
+                "buffer_request_body": req.variables["_forward_request_buffer_request_body"],
+                "buffer_response": req.variables["_forward_request_buffer_response"],
+                "fail_on_error_status_code": req.variables["_forward_request_fail_on_error_status_code"],
+                "http_version": http_version,
+            },
+        )
+        return None
+
+
+@dataclass(frozen=True)
 class SendRequest(PolicyNode):
     mode: str
     response_variable_name: str
@@ -3163,6 +3240,22 @@ def _parse_set_backend_service(el: ElementTree.Element) -> SetBackendService:
     return SetBackendService(base_url=base_url, backend_id=backend_id)
 
 
+def _parse_forward_request(el: ElementTree.Element) -> ForwardRequest:
+    timeout = el.attrib.get("timeout")
+    timeout_ms = el.attrib.get("timeout-ms")
+    if timeout is not None and timeout_ms is not None:
+        raise HTTPException(status_code=500, detail="forward-request cannot specify both timeout and timeout-ms")
+    return ForwardRequest(
+        timeout=timeout,
+        timeout_ms=timeout_ms,
+        follow_redirects=el.attrib.get("follow-redirects"),
+        buffer_request_body=el.attrib.get("buffer-request-body"),
+        buffer_response=el.attrib.get("buffer-response"),
+        fail_on_error_status_code=el.attrib.get("fail-on-error-status-code"),
+        http_version=el.attrib.get("http-version"),
+    )
+
+
 def _parse_send_request(el: ElementTree.Element) -> SendRequest:
     response_variable_name = (el.attrib.get("response-variable-name") or "").strip()
     if not response_variable_name:
@@ -3328,6 +3421,7 @@ _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "mock-response": _parse_mock_response,
     "validate-jwt": _parse_validate_jwt,
     "set-backend-service": _parse_set_backend_service,
+    "forward-request": _parse_forward_request,
     "send-request": _parse_send_request,
 }
 
@@ -3351,6 +3445,8 @@ def _parse_node(
     only one that needs the fragment table and the recursion guard.
     """
     tag = el.tag
+    if tag == "forward-request" and section_name != "backend":
+        raise HTTPException(status_code=500, detail="forward-request is only supported in the backend section")
     constant = _CONSTANT_ELEMENTS.get(tag)
     if constant is not None:
         return constant()

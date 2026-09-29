@@ -250,6 +250,7 @@ def test_trace_headers_and_trace_lookup_work() -> None:
         allow_anonymous=True,
         trace_enabled=True,
         proxy_streaming=False,
+        emit_simulator_response_headers=True,
         routes=[
             RouteConfig(
                 name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), upstream_path_prefix="/api"
@@ -641,6 +642,8 @@ def test_proxy_injects_identity_headers_and_filters_hop_by_hop() -> None:
 
     config = GatewayConfig(
         allow_anonymous=False,
+        inject_simulator_identity_headers=True,
+        emit_simulator_response_headers=True,
         oidc=OIDCConfig(issuer=issuer, audience=audience, jwks=jwks),
         products={"p1": ProductConfig(name="p1")},
         subscription=SubscriptionConfig(
@@ -3719,6 +3722,7 @@ def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> N
             allow_anonymous=True,
             trace_enabled=True,
             proxy_streaming=False,
+            inject_simulator_identity_headers=True,
             routes=[
                 RouteConfig(
                     name="r1",
@@ -4201,7 +4205,7 @@ def test_cached_gateway_response_populates_trace_headers_and_trace_store() -> No
         policy_runtime=PolicyRuntime(gateway_config=GatewayConfig(trace_enabled=True)),
         trace_base={"route_name": "r1"},
         trace_collector=None,
-        cfg=GatewayConfig(trace_enabled=True),
+        cfg=GatewayConfig(trace_enabled=True, emit_simulator_response_headers=True),
         gateway_metrics=SimpleNamespace(cache_events=SimpleNamespace(add=lambda *args, **kwargs: None)),
         correlation_id="corr-123",
         trace_id="trace-123",
