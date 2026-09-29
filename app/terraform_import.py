@@ -39,6 +39,7 @@ from app.config import (
     ServiceMetadataConfig,
     Subscription,
     SubscriptionKeyPair,
+    SubscriptionScope,
     SubscriptionState,
     TagConfig,
     UserConfig,
@@ -862,6 +863,19 @@ def _import_subscription(res: TFResource, acc: _ImportAccumulator) -> None:
     display_name = str(res.values.get("display_name") or res.values.get("name") or sub_id)
     primary = str(res.values.get("primary_key") or "")
     secondary = str(res.values.get("secondary_key") or "")
+    raw_api_id = str(res.values.get("api_id") or "").strip()
+    raw_product_id = str(res.values.get("product_id") or "").strip()
+    api_id = _arm_id_segment(raw_api_id, "apis") if raw_api_id else None
+    if api_id and ";rev=" in api_id:
+        api_id = api_id.split(";rev=", 1)[0] or None
+    product_id = _arm_id_segment(raw_product_id, "products") if raw_product_id else None
+    if raw_product_id and product_id is None:
+        product_id = raw_product_id
+    # The AzureRM resource uses optional api_id/product_id; neither means
+    # all-APIs in the APIM subscription model described by Learn.
+    all_apis = bool(_coerce_bool(res.values.get("all_apis"))) or not raw_api_id and not raw_product_id
+    service_scoped = bool(_coerce_bool(res.values.get("service_scoped")))
+    scope = res.values.get("scope")
     raw_state = str(res.values.get("state") or "").strip().lower()
     try:
         sub_state = SubscriptionState(raw_state) if raw_state else SubscriptionState.Active
@@ -875,12 +889,20 @@ def _import_subscription(res: TFResource, acc: _ImportAccumulator) -> None:
             )
         )
         sub_state = SubscriptionState.Active
-    acc.subscriptions[sub_id] = Subscription(
-        id=sub_id,
-        name=display_name,
-        keys=SubscriptionKeyPair(primary=primary, secondary=secondary),
-        state=sub_state,
-    )
+    try:
+        acc.subscriptions[sub_id] = Subscription(
+            id=sub_id,
+            name=display_name,
+            keys=SubscriptionKeyPair(primary=primary, secondary=secondary),
+            state=sub_state,
+            products=[product_id] if product_id else [],
+            scope=scope,
+            api_id=api_id,
+            all_apis=all_apis,
+            service_scoped=service_scoped,
+        )
+    except ValueError as exc:
+        raise ValueError(f"Invalid subscription {sub_id!r}: {exc}") from exc
 
 
 def _import_named_value(res: TFResource, acc: _ImportAccumulator) -> None:
@@ -1434,9 +1456,20 @@ def _link_subscription(res: TFResource, acc: _ImportAccumulator) -> None:
     sub_id = str(res.values.get("subscription_id") or res.values.get("name") or res.name)
     if sub_id not in acc.subscriptions:
         return
-    product_id = res.values.get("product_id")
-    if isinstance(product_id, str) and product_id and product_id not in acc.subscriptions[sub_id].products:
-        acc.subscriptions[sub_id].products.append(product_id)
+    raw_product_id = res.values.get("product_id")
+    if not isinstance(raw_product_id, str) or not raw_product_id:
+        return
+    product_id = _arm_id_segment(raw_product_id, "products") or raw_product_id
+    subscription = acc.subscriptions[sub_id]
+    if product_id in subscription.products:
+        return
+    if subscription.all_apis or subscription.service_scoped or subscription.api_id is not None:
+        subscription.all_apis = False
+        subscription.service_scoped = False
+        subscription.api_id = None
+        subscription.scope = None
+    subscription.products.append(product_id)
+    subscription.scope = SubscriptionScope.Product
 
 
 def _link_api_policy(res: TFResource, acc: _ImportAccumulator) -> None:
