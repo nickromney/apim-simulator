@@ -685,6 +685,11 @@ class GatewayConfig(BaseModel):
     proxy_max_attempts: int = 1
     proxy_retry_statuses: list[int] = Field(default_factory=lambda: [502, 503, 504])
     proxy_streaming: bool = True
+    # These headers describe the simulator, not Azure API Management. They are
+    # compatibility switches for demos that explicitly depend on them.
+    inject_simulator_identity_headers: bool = False
+    emit_simulator_response_headers: bool = False
+    propagate_simulator_correlation_id: bool = False
     max_request_body_bytes: int = 1_048_576
     cache_enabled: bool = False
     cache_ttl_seconds: float = 5.0

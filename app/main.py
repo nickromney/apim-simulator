@@ -447,7 +447,8 @@ def _add_observability_middleware(app: FastAPI, telemetry: ObservabilityRuntime)
             )
             raise
         else:
-            response.headers.setdefault("x-correlation-id", correlation_id)
+            if request.app.state.gateway_config.emit_simulator_response_headers:
+                response.headers.setdefault("x-correlation-id", correlation_id)
             duration_seconds = time.perf_counter() - start
             _record_request_observation(request, status_code=response.status_code, duration_seconds=duration_seconds)
             telemetry.logger.info(

@@ -119,11 +119,23 @@ class _ExpressionSubscription:
 
 
 @dataclass(frozen=True)
+class _ExpressionLastError:
+    Source: str = ""
+    Reason: str = ""
+    Message: str = ""
+    Scope: str = ""
+    Section: str = ""
+    Path: str = ""
+    PolicyId: str = ""
+
+
+@dataclass(frozen=True)
 class ExpressionContext:
     request: _ExpressionRequest
     response: _ExpressionResponse
     subscription: _ExpressionSubscription
     variables: ExpressionMap
+    LastError: _ExpressionLastError
 
     def variables_get(self, key: str, default: Any = "") -> Any:
         return self.variables.get(key, default)
@@ -193,6 +205,8 @@ def _normalize_request(req: PolicyRequest) -> _ExpressionRequest:
 
 
 def build_expression_context(req: PolicyRequest) -> ExpressionContext:
+    error = req.variables.get("_last_error")
+    error_values = error if isinstance(error, dict) else {}
     return ExpressionContext(
         request=_normalize_request(req),
         response=_ExpressionResponse(
@@ -201,6 +215,15 @@ def build_expression_context(req: PolicyRequest) -> ExpressionContext:
         ),
         subscription=_ExpressionSubscription(id=str(req.variables.get("subscription_id") or "")),
         variables=ExpressionMap(req.variables),
+        LastError=_ExpressionLastError(
+            Source=str(error_values.get("Source") or ""),
+            Reason=str(error_values.get("Reason") or ""),
+            Message=str(error_values.get("Message") or ""),
+            Scope=str(error_values.get("Scope") or ""),
+            Section=str(error_values.get("Section") or ""),
+            Path=str(error_values.get("Path") or ""),
+            PolicyId=str(error_values.get("PolicyId") or ""),
+        ),
     )
 
 

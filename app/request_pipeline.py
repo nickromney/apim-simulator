@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -319,7 +320,7 @@ def cached_gateway_response(
     )
     finalize_deferred_actions(final_req, policy_runtime)
     out_headers["x-apim-cache"] = "hit"
-    out_headers["x-correlation-id"] = correlation_id
+    _add_simulator_response_headers(out_headers, cfg, correlation_id)
     attach_trace(
         out_headers,
         trace_id=trace_id,
@@ -340,6 +341,15 @@ def cached_gateway_response(
         headers=out_headers,
         media_type=media_type,
     )
+
+
+def _add_simulator_response_headers(headers: dict[str, str], cfg: GatewayConfig, correlation_id: str | None) -> None:
+    """Add opt-in headers used by simulator demos, not by APIM itself."""
+    if not cfg.emit_simulator_response_headers:
+        return
+    headers.setdefault("x-apim-simulator", "apim-simulator")
+    if correlation_id is not None:
+        headers.setdefault("x-correlation-id", correlation_id)
 
 
 def _policy_response(
@@ -373,8 +383,7 @@ def _policy_response(
         ),
         policy_runtime,
     )
-    headers["x-apim-simulator"] = "apim-sim-full"
-    headers["x-correlation-id"] = correlation_id
+    _add_simulator_response_headers(headers, cfg, correlation_id)
     attach_trace(
         headers,
         trace_id=trace_id,
@@ -415,7 +424,7 @@ async def _read_upstream_response(
     asked to buffer, or a non-streaming configuration.
     """
     headers = filter_response_headers(dict(upstream_response.headers))
-    headers["x-correlation-id"] = correlation_id
+    _add_simulator_response_headers(headers, cfg, correlation_id)
     if pool.pool_backend is not None:
         headers["x-apim-backend-pool"] = pool.pool_backend_id
         headers["x-apim-backend-id"] = pool.backend_id
@@ -428,6 +437,8 @@ async def _read_upstream_response(
         cache_key is not None
         or policy_response_cache_active
         or bool(policy_req.variables.get("_policy_response_buffering_required"))
+        or bool(policy_req.variables.get("_forward_request_buffer_response"))
+        or bool(policy_req.variables.get("_forward_request_fail_on_error_status_code"))
         or not cfg.proxy_streaming
     )
     content = b""
@@ -441,6 +452,96 @@ async def _read_upstream_response(
         media_type=upstream_response.headers.get("content-type"),
         content=content,
         buffered=requires_buffering,
+    )
+
+
+async def _handle_backend_error_status(
+    *,
+    request: Request,
+    cfg: GatewayConfig,
+    policy_docs: list[Any],
+    policy_req: PolicyRequest,
+    policy_runtime: Any,
+    upstream_response: httpx.Response,
+    upstream: _UpstreamPayload,
+    attempts_used: int,
+    elapsed_seconds: float,
+    trace: _TraceContext,
+    trace_store: dict[str, Any],
+    trace_base: dict[str, Any],
+    trace_id: str | None,
+    trace_collector: Any,
+    correlation_id: str | None,
+) -> Response | None:
+    """Apply on-error for a backend status when forward-request asks for it."""
+    status_code = upstream.status_code
+    if not (400 <= status_code <= 599) or not policy_req.variables.get("_forward_request_fail_on_error_status_code"):
+        return None
+
+    failure_req = PolicyRequest(
+        method=request.method,
+        path=policy_req.path,
+        query=dict(policy_req.query),
+        headers=dict(policy_req.headers),
+        variables={
+            **policy_req.variables,
+            "error": "backend_response_failure",
+            "_last_error": {
+                "Source": "forward-request",
+                "Reason": "BackendResponseFailure",
+                "Message": f"Backend returned HTTP {status_code}",
+                "Scope": "",
+                "Section": "backend",
+                "Path": "",
+                "PolicyId": "",
+            },
+        },
+        body=policy_req.body,
+        response_status_code=status_code,
+        response_headers=dict(upstream.headers),
+        response_body=upstream.content,
+        response_media_type=upstream.media_type,
+    )
+    override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
+    if override is not None:
+        request.state.apim_result_reason = "policy_on_error_override"
+        return _policy_response(
+            body=override.body,
+            status_code=override.status_code,
+            headers=dict(override.headers),
+            media_type=override.media_type,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
+            cfg=cfg,
+            extra={
+                "attempts": attempts_used,
+                "status": override.status_code,
+                "elapsed_ms": int(elapsed_seconds * 1000),
+                "cache": None,
+                "reason": "policy_on_error_override",
+            },
+            policy_req=failure_req,
+            policy_runtime=policy_runtime,
+        )
+
+    request.state.apim_result_reason = "backend_response_failure"
+    return _uncached_response(
+        request=request,
+        cfg=cfg,
+        upstream_response=upstream_response,
+        streaming=False,
+        status_code=status_code,
+        response_headers=upstream.headers,
+        media_type=upstream.media_type,
+        content=upstream.content,
+        attempts_used=attempts_used,
+        elapsed_seconds=elapsed_seconds,
+        trace=trace,
+        trace_store=trace_store,
+        trace_base=trace_base,
     )
 
 
@@ -473,7 +574,7 @@ async def _apply_outbound_policies(
 
 
 def _enforce_authz_with_policy_claims(
-    *, request: Request, route: Any, auth: AuthContext, policy_req: PolicyRequest
+    *, request: Request, route: Any, auth: AuthContext, policy_req: PolicyRequest, cfg: GatewayConfig
 ) -> None:
     """Apply route authorization against the claims policy actually validated.
 
@@ -485,7 +586,8 @@ def _enforce_authz_with_policy_claims(
     jwt_claims = policy_req.variables.get("_last_jwt_claims")
     if isinstance(jwt_claims, dict):
         effective_claims = jwt_claims
-        apply_claim_headers(policy_req.headers, effective_claims)
+        if cfg.inject_simulator_identity_headers:
+            apply_claim_headers(policy_req.headers, effective_claims)
 
     try:
         enforce_route_authz(route, effective_claims)
@@ -622,6 +724,20 @@ async def _read_body_within_limit(request: Request, cfg: GatewayConfig) -> bytes
     return body
 
 
+def _upstream_last_error(last_exc: Exception | None) -> dict[str, str]:
+    """Map transport failures to APIM's documented LastError vocabulary."""
+    timed_out = isinstance(last_exc, httpx.TimeoutException)
+    return {
+        "Source": "forward-request" if timed_out else "multiple",
+        "Reason": "Timeout" if timed_out else "BackendConnectionFailure",
+        "Message": str(last_exc) or ("Backend timeout" if timed_out else "Backend connection failure"),
+        "Scope": "",
+        "Section": "backend",
+        "Path": "",
+        "PolicyId": "",
+    }
+
+
 async def _fail_upstream_unavailable(
     *,
     request: Request,
@@ -638,7 +754,7 @@ async def _fail_upstream_unavailable(
     trace_base: dict[str, Any],
     trace_collector: Any,
 ) -> Response:
-    """Every retry failed. Give on-error policy the last word, else raise 502."""
+    """Every retry failed. Give on-error policy the last word, else return APIM's 500."""
     from app.telemetry import set_current_span_attributes
 
     request.state.apim_result_reason = "upstream_unavailable"
@@ -652,21 +768,55 @@ async def _fail_upstream_unavailable(
 
     override = None
     if policy_docs:
+        last_error = _upstream_last_error(last_exc)
         failure_req = PolicyRequest(
             method=request.method,
             path=policy_req.path,
             query=dict(policy_req.query),
             headers=dict(policy_req.headers),
-            variables={**policy_req.variables, "error": "upstream_unavailable"},
+            variables={
+                **policy_req.variables,
+                "error": "upstream_unavailable",
+                "_last_error": last_error,
+            },
+            response_status_code=500,
         )
         override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
 
     if override is None:
         logging.getLogger("apim-simulator").exception("Unable to reach upstream", exc_info=last_exc)
-        # APIM records this transport failure as BackendConnectionFailure, but
-        # Learn does not define one public body for every backend failure mode:
-        # https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
-        raise HTTPException(status_code=502, detail="Backend API unavailable")
+        # The Learn error-handling page documents HTTP 500 and the
+        # BackendConnectionFailure reason, but not the default JSON body. This
+        # shape is the observed APIM gateway response documented in the linked
+        # Microsoft Q&A answer.
+        body = json.dumps(
+            {
+                "statusCode": 500,
+                "message": "Internal server error",
+                "activityId": str(uuid.uuid4()),
+            }
+        ).encode()
+        return _policy_response(
+            body=body,
+            status_code=500,
+            headers={"content-type": "application/json"},
+            media_type="application/json",
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
+            cfg=cfg,
+            extra={
+                "attempts": attempts_used,
+                "status": 500,
+                "elapsed_ms": int(elapsed_seconds * 1000),
+                "cache": None,
+                "reason": "backend_connection_failure",
+            },
+            policy_req=policy_req,
+            policy_runtime=policy_runtime,
+        )
 
     request.state.apim_result_reason = "policy_on_error_override"
     return _policy_response(
@@ -866,7 +1016,10 @@ async def _send_upstream_with_retries(
     Each failed attempt against a pool trips that member's breaker and reselects,
     so a retry can land on a different backend than the one that just failed.
     """
-    timeout = httpx.Timeout(cfg.proxy_timeout_seconds)
+    timeout_seconds = float(policy_req.variables.get("_forward_request_timeout_seconds", cfg.proxy_timeout_seconds))
+    timeout = httpx.Timeout(timeout_seconds)
+    follow_redirects = bool(policy_req.variables.get("_forward_request_follow_redirects", False))
+    buffer_request_body = bool(policy_req.variables.get("_forward_request_buffer_request_body", True))
     max_attempts = max(1, cfg.proxy_max_attempts)
     last_exc: Exception | None = None
     upstream_response: httpx.Response | None = None
@@ -884,13 +1037,18 @@ async def _send_upstream_with_retries(
         req = client.build_request(
             method,
             upstream_url,
-            content=policy_req.body,
+            content=policy_req.body if attempt == 1 or buffer_request_body else b"",
             headers=policy_req.headers,
             params=policy_req.query,
             timeout=timeout,
         )
         try:
-            upstream_response = await client.send(req, stream=cfg.proxy_streaming, auth=upstream_auth)
+            upstream_response = await client.send(
+                req,
+                stream=cfg.proxy_streaming,
+                auth=upstream_auth,
+                follow_redirects=follow_redirects,
+            )
         except httpx.RequestError as exc:
             last_exc = exc
             _failover()
@@ -1249,6 +1407,36 @@ async def _short_circuit_policy_stages(
     return None
 
 
+def _record_selected_backend(trace_collector: Any, backend_id: str | None, upstream_base_url: str) -> None:
+    """Note the backend in the trace, unless a policy already recorded its own choice."""
+    if trace_collector is not None and trace_collector.selected_backend is None:
+        trace_collector.selected_backend = {
+            "backend_id": backend_id or None,
+            "base_url": upstream_base_url,
+        }
+
+
+def _initial_upstream_headers(
+    request: Request, auth: AuthContext, cfg: GatewayConfig, correlation_id: str | None
+) -> dict[str, str]:
+    """The backend request headers before any policy runs, keyed in lower case.
+
+    Simulator identity and correlation headers are added only when the config
+    opts in; APIM itself adds neither.
+    """
+    headers = {
+        key.lower(): value
+        for key, value in build_upstream_headers(
+            request,
+            auth,
+            inject_simulator_identity_headers=cfg.inject_simulator_identity_headers,
+        ).items()
+    }
+    if cfg.propagate_simulator_correlation_id and correlation_id:
+        headers.setdefault("x-correlation-id", correlation_id)
+    return headers
+
+
 async def execute_gateway_request(request: Request) -> Response:
     from app.telemetry import set_current_span_attributes
 
@@ -1266,10 +1454,8 @@ async def execute_gateway_request(request: Request) -> Response:
     policy_docs = _policy_document_stack(cfg, route, effective_product_id, request.app.state.policy_cache)
 
     body = await _read_body_within_limit(request, cfg)
-    headers = {k.lower(): v for k, v in build_upstream_headers(request, auth).items()}
-
     correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
-    headers.setdefault("x-correlation-id", correlation_id)
+    headers = _initial_upstream_headers(request, auth, cfg, correlation_id)
 
     forwarding = _ForwardingContext.read(request)
     request.state.apim_client_ip = forwarding.client_ip
@@ -1336,7 +1522,7 @@ async def execute_gateway_request(request: Request) -> Response:
     if short_circuit is not None:
         return short_circuit
 
-    _enforce_authz_with_policy_claims(request=request, route=route, auth=auth, policy_req=policy_req)
+    _enforce_authz_with_policy_claims(request=request, route=route, auth=auth, policy_req=policy_req, cfg=cfg)
 
     choice = _choose_backend(
         cfg=cfg,
@@ -1361,11 +1547,7 @@ async def execute_gateway_request(request: Request) -> Response:
         }
     )
 
-    if trace_collector is not None and trace_collector.selected_backend is None:
-        trace_collector.selected_backend = {
-            "backend_id": backend_id or None,
-            "base_url": upstream_base_url,
-        }
+    _record_selected_backend(trace_collector, backend_id, upstream_base_url)
 
     upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=upstream_base_url)
     policy_req.variables["upstream_url"] = upstream_url
@@ -1452,6 +1634,26 @@ async def execute_gateway_request(request: Request) -> Response:
     response_headers, media_type, content = upstream.headers, upstream.media_type, upstream.content
     upstream_status_code = upstream.status_code
     requires_buffering = upstream.buffered
+
+    backend_error_response = await _handle_backend_error_status(
+        request=request,
+        cfg=cfg,
+        policy_docs=policy_docs,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        upstream_response=upstream_response,
+        upstream=upstream,
+        attempts_used=attempts_used,
+        elapsed_seconds=elapsed_seconds,
+        trace=trace,
+        trace_store=trace_store,
+        trace_base=trace_base,
+        trace_id=trace_id if trace_requested else None,
+        trace_collector=trace_collector,
+        correlation_id=correlation_id,
+    )
+    if backend_error_response is not None:
+        return backend_error_response
 
     if policy_docs:
         response_headers, content, media_type = await _apply_outbound_policies(
