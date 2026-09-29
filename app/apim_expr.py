@@ -90,6 +90,7 @@ class _ExpressionRequest:
     path: str
     headers: ExpressionMap
     query: ExpressionMap
+    matched_parameters: ExpressionMap
     original_host: str
     ip_address: str
 
@@ -98,6 +99,9 @@ class _ExpressionRequest:
 
     def query_get(self, key: str, default: Any = "") -> Any:
         return self.query.get(key, default)
+
+    def matched_parameters_get(self, key: str, default: Any = "") -> Any:
+        return self.matched_parameters.get(key, default)
 
 
 @dataclass(frozen=True)
@@ -174,11 +178,15 @@ def _normalize_request(req: PolicyRequest) -> _ExpressionRequest:
     request_query = req.variables.get("_request_query")
     if not isinstance(request_query, dict):
         request_query = req.query
+    matched_parameters = req.variables.get("_matched_parameters")
+    if not isinstance(matched_parameters, dict):
+        matched_parameters = {}
     return _ExpressionRequest(
         method=req.method,
         path=req.path,
         headers=ExpressionMap(request_headers),
         query=ExpressionMap(request_query),
+        matched_parameters=ExpressionMap(matched_parameters),
         original_host=host,
         ip_address=str(req.variables.get("client_ip") or ""),
     )
@@ -253,6 +261,10 @@ def _translate_expression(expr: str) -> str:
     translated = re.sub(r"(?<![=!<>])!(?!=)", " not ", translated)
     translated = translated.replace("context.Request.Headers.GetValueOrDefault", "context.request.headers_get")
     translated = translated.replace("context.Request.Url.Query.GetValueOrDefault", "context.request.query_get")
+    translated = translated.replace(
+        "context.Request.MatchedParameters.GetValueOrDefault", "context.request.matched_parameters_get"
+    )
+    translated = translated.replace("context.Request.MatchedParameters", "context.request.matched_parameters")
     translated = translated.replace("context.Request.OriginalUrl.Host", "context.request.original_host")
     translated = translated.replace("context.Request.IpAddress", "context.request.ip_address")
     translated = translated.replace("context.Request.Url.Path", "context.request.path")
