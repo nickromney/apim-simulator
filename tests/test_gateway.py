@@ -4394,7 +4394,7 @@ def test_cache_lookup_same_developer_shares_subscriptions() -> None:
   <inbound>
     <cache-lookup vary-by-developer="true" vary-by-developer-groups="false" caching-type="internal" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound><cache-store duration="60" /></outbound>
   <on-error />
 </policies>
@@ -4451,7 +4451,7 @@ def test_cache_lookup_varies_by_groups_of_subscription_owner() -> None:
   <inbound>
     <cache-lookup vary-by-developer="false" vary-by-developer-groups="true" caching-type="internal" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound><cache-store duration="60" /></outbound>
   <on-error />
 </policies>
@@ -4509,14 +4509,14 @@ def test_cache_lookup_uses_headers_and_query_after_inbound_mutations() -> None:
     policy = """\
 <policies>
   <inbound>
-    <set-header name="x-cache-vary" exists-action="override"><value>{header:x-input}</value></set-header>
-    <set-query-parameter name="cache-vary" exists-action="override"><value>{query:input}</value></set-query-parameter>
+    <set-header name="x-cache-vary" exists-action="override"><value>@(context.Request.Headers.GetValueOrDefault("x-input", ""))</value></set-header>
+    <set-query-parameter name="cache-vary" exists-action="override"><value>@(context.Request.Url.Query.GetValueOrDefault("input", ""))</value></set-query-parameter>
     <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" caching-type="internal">
       <vary-by-header>x-cache-vary</vary-by-header>
       <vary-by-query-parameter>cache-vary</vary-by-query-parameter>
     </cache-lookup>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound><cache-store duration="60" /></outbound>
   <on-error />
 </policies>
@@ -4559,7 +4559,7 @@ def test_cache_lookup_authorization_added_by_policy_disables_private_cache() -> 
     <set-header name="authorization" exists-action="override"><value>Bearer injected</value></set-header>
     <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" caching-type="internal" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound><cache-store duration="60" /></outbound>
   <on-error />
 </policies>
@@ -4601,7 +4601,7 @@ def test_cache_store_status_default_and_cache_response_override(cache_response: 
   <inbound>
     <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" caching-type="internal" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound><cache-store duration="60"{cache_attribute} /></outbound>
   <on-error />
 </policies>
@@ -4643,7 +4643,7 @@ def test_cache_lookup_get_with_body_is_still_method_eligible() -> None:
   <inbound>
     <cache-lookup vary-by-developer="false" vary-by-developer-groups="false" caching-type="internal" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound><cache-store duration="60" /></outbound>
   <on-error />
 </policies>
