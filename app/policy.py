@@ -71,6 +71,7 @@ class PolicyRuntime:
     deferred_actions: list[Any] = field(default_factory=list)
     llm_metric_emitter: Any = None
     custom_metric_emitter: Any = None
+    clock: Callable[[], float] | None = None
 
 
 @dataclass(frozen=True)
@@ -572,73 +573,120 @@ class Cors(PolicyNode):
 
 
 @dataclass(frozen=True)
+class ThrottleRule:
+    target_kind: str | None
+    target_name: str | None
+    target_id: str | None
+    calls: int | None
+    renewal_period: int
+    bandwidth: int | None = None
+
+
+@dataclass(frozen=True)
 class RateLimit(PolicyNode):
     calls: int
     renewal_period: int
-    scope: str = "subscription"
+    retry_after_header_name: str | None = None
+    retry_after_variable_name: str | None = None
+    remaining_calls_header_name: str | None = None
+    remaining_calls_variable_name: str | None = None
+    total_calls_header_name: str | None = None
+    rules: tuple[ThrottleRule, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         store = req.variables.get("rate_limit_store")
-        if not isinstance(store, dict):
+        key = _subscription_throttle_key(req, "rate-limit")
+        if not isinstance(store, dict) or key is None:
             return None
 
-        key = _rate_limit_key(req, scope=self.scope)
-        now = int(time.time())
-        window = now - (now % self.renewal_period)
-        count = 0
-        if isinstance(store.get(key), dict):
-            entry = store[key]
-            if entry.get("window") == window:
-                count = int(entry.get("count") or 0)
-        count += 1
-        store[key] = {"window": window, "count": count}
+        now = _policy_now(runtime)
+        rules = self._applicable_rules(req)
+        buckets: list[tuple[ThrottleRule, list[float], str]] = []
+        for rule in rules:
+            rule_key = _throttle_rule_key(key, rule)
+            bucket = _rate_limit_bucket(store, rule_key)
+            _prune_rate_limit_bucket(bucket, now, rule.renewal_period)
+            if len(bucket) >= rule.calls:
+                remaining = max(0, rule.calls - len(bucket))
+                return _rate_limit_response(
+                    req,
+                    runtime,
+                    calls=rule.calls,
+                    retry_after=_rate_limit_retry_after(bucket, now, rule.renewal_period),
+                    remaining=remaining,
+                    retry_after_header_name=self.retry_after_header_name,
+                    retry_after_variable_name=self.retry_after_variable_name,
+                    remaining_calls_header_name=self.remaining_calls_header_name,
+                    remaining_calls_variable_name=self.remaining_calls_variable_name,
+                    total_calls_header_name=self.total_calls_header_name,
+                )
+            buckets.append((rule, bucket, rule_key))
 
-        remaining = max(0, self.calls - count)
-        headers = {
-            "content-type": "text/plain",
-            "x-ratelimit-limit": str(self.calls),
-            "x-ratelimit-remaining": str(remaining),
-            "x-ratelimit-reset": str(window + self.renewal_period),
-        }
-        if count > self.calls:
-            return ResponseSpec(status_code=429, headers=headers, body=b"Rate limit exceeded")
+        for _, bucket, _ in buckets:
+            bucket.append(now)
+        root_bucket = buckets[0][1]
+        remaining = max(0, self.calls - len(root_bucket))
+        _publish_rate_counts(
+            req,
+            runtime,
+            remaining=remaining,
+            calls=self.calls,
+            remaining_calls_header_name=self.remaining_calls_header_name,
+            remaining_calls_variable_name=self.remaining_calls_variable_name,
+            total_calls_header_name=self.total_calls_header_name,
+        )
+        _record_step(runtime, "rate-limit", {"count": len(root_bucket), "remaining": remaining})
         return None
+
+    def _applicable_rules(self, req: PolicyRequest) -> tuple[ThrottleRule, ...]:
+        root = ThrottleRule(None, None, None, self.calls, self.renewal_period)
+        return (root, *(rule for rule in self.rules if _throttle_rule_matches(rule, req)))
 
 
 @dataclass(frozen=True)
 class Quota(PolicyNode):
-    calls: int
+    calls: int | None
     renewal_period: int
-    scope: str = "subscription"
+    bandwidth: int | None = None
+    rules: tuple[ThrottleRule, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         store = req.variables.get("quota_store")
-        if not isinstance(store, dict):
-            store = req.variables.get("rate_limit_store")
-        if not isinstance(store, dict):
+        key = _subscription_throttle_key(req, "quota")
+        if not isinstance(store, dict) or key is None:
             return None
 
-        key = f"quota:{_rate_limit_key(req, scope=self.scope)}"
-        now = int(time.time())
-        window = now - (now % self.renewal_period)
-        count = 0
-        if isinstance(store.get(key), dict):
-            entry = store[key]
-            if entry.get("window") == window:
-                count = int(entry.get("count") or 0)
-        count += 1
-        store[key] = {"window": window, "count": count}
+        now = _policy_now(runtime)
+        rules = self._applicable_rules(req)
+        entries: list[tuple[ThrottleRule, dict[str, Any], int | None, str]] = []
+        for rule in rules:
+            rule_key = _throttle_rule_key(key, rule)
+            entry, reset_at = _quota_window_state(
+                store,
+                rule_key,
+                now=now,
+                renewal_period=self.renewal_period if rule.target_kind is None else rule.renewal_period,
+                first_period_start=None,
+            )
+            if _quota_limit_exceeded(entry, rule):
+                return _quota_response(
+                    now=now,
+                    reset_at=reset_at,
+                    bandwidth_exceeded=_quota_bandwidth_exceeded(entry, rule),
+                )
+            entries.append((rule, entry, reset_at, rule_key))
 
-        remaining = max(0, self.calls - count)
-        headers = {
-            "content-type": "text/plain",
-            "x-quota-limit": str(self.calls),
-            "x-quota-remaining": str(remaining),
-            "x-quota-reset": str(window + self.renewal_period),
-        }
-        if count > self.calls:
-            return ResponseSpec(status_code=429, headers=headers, body=b"Quota exceeded")
+        for rule, entry, _, rule_key in entries:
+            if rule.calls is not None:
+                entry["count"] = int(entry.get("count") or 0) + 1
+            if rule.bandwidth is not None:
+                _queue_quota_finalization(req, runtime, rule, rule_key)
+        _record_step(runtime, "quota", {"count": entries[0][1].get("count", 0)})
         return None
+
+    def _applicable_rules(self, req: PolicyRequest) -> tuple[ThrottleRule, ...]:
+        root = ThrottleRule(None, None, None, self.calls, self.renewal_period, self.bandwidth)
+        return (root, *(rule for rule in self.rules if _throttle_rule_matches(rule, req)))
 
 
 def _request_headers(req: PolicyRequest) -> dict[str, str]:
@@ -718,8 +766,52 @@ def _policy_int(
     return int(float(text))
 
 
+def _validated_policy_int(
+    value: str | None,
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    name: str,
+    minimum: int,
+) -> int:
+    try:
+        number = _policy_int(value, req, runtime, default=0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"{name} must be an integer") from exc
+    if number < minimum:
+        raise HTTPException(status_code=500, detail=f"{name} must be >= {minimum}")
+    return number
+
+
+def _positive_policy_int(value: str | None, req: PolicyRequest, runtime: PolicyRuntime | None, *, name: str) -> int:
+    return _validated_policy_int(value, req, runtime, name=name, minimum=1)
+
+
+def _nonnegative_policy_int(
+    value: str | None,
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    name: str,
+    default: int = 1,
+) -> int:
+    return _validated_policy_int(value or str(default), req, runtime, name=name, minimum=0)
+
+
+def _rate_period(value: str | None, req: PolicyRequest, runtime: PolicyRuntime | None) -> int:
+    period = _validated_policy_int(value, req, runtime, name="rate-limit-by-key renewal-period", minimum=1)
+    if period > 300:
+        raise HTTPException(status_code=500, detail="rate-limit-by-key renewal-period must be <= 300")
+    return period
+
+
 def _is_deferred_expression(value: str | None) -> bool:
     return value is not None and is_apim_expression(value)
+
+
+def _policy_now(runtime: PolicyRuntime | None) -> float:
+    """Read the runtime clock, falling back to wall time for normal requests."""
+    return runtime.clock() if runtime is not None and runtime.clock is not None else time.time()
 
 
 def _normalize_cache_caching_type(caching_type: str | None) -> tuple[str, bool]:
@@ -816,7 +908,146 @@ def _rate_limit_retry_after(bucket: list[float], now: float, renewal_period: int
     if not bucket:
         return renewal_period
     earliest = bucket[0]
-    return max(1, int((earliest + renewal_period) - now))
+    return max(1, math.ceil((earliest + renewal_period) - now))
+
+
+def _subscription_throttle_key(req: PolicyRequest, prefix: str) -> str | None:
+    subscription_id = str(req.variables.get("subscription_id") or "")
+    if not subscription_id:
+        return None
+    return f"{prefix}:subscription:{subscription_id}"
+
+
+def _throttle_rule_key(base_key: str, rule: ThrottleRule) -> str:
+    if rule.target_kind is None:
+        return base_key
+    target = rule.target_id or rule.target_name or ""
+    return f"{base_key}:{rule.target_kind}:{target}"
+
+
+def _throttle_rule_matches(rule: ThrottleRule, req: PolicyRequest) -> bool:
+    if rule.target_kind is None:
+        return True
+    if rule.target_id is not None:
+        return str(req.variables.get(f"{rule.target_kind}_id") or "") == rule.target_id
+    values = (
+        req.variables.get(f"{rule.target_kind}_name"),
+        req.variables.get(f"{rule.target_kind}_id"),
+    )
+    return rule.target_name in {str(value) for value in values if value is not None}
+
+
+def _json_throttle_body(status_code: int, message: str) -> bytes:
+    return json.dumps({"statusCode": status_code, "message": message}, separators=(",", ":")).encode("utf-8")
+
+
+def _rate_limit_response(
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    calls: int,
+    retry_after: int,
+    remaining: int,
+    retry_after_header_name: str | None,
+    retry_after_variable_name: str | None,
+    remaining_calls_header_name: str | None,
+    remaining_calls_variable_name: str | None,
+    total_calls_header_name: str | None,
+) -> ResponseSpec:
+    if retry_after_variable_name:
+        req.variables[retry_after_variable_name] = retry_after
+        _record_variable_write(runtime, retry_after_variable_name, retry_after, "rate-limit")
+    if remaining_calls_variable_name:
+        req.variables[remaining_calls_variable_name] = remaining
+        _record_variable_write(runtime, remaining_calls_variable_name, remaining, "rate-limit")
+    headers = {
+        "content-type": "application/json",
+        (retry_after_header_name or "Retry-After").lower(): str(retry_after),
+    }
+    if remaining_calls_header_name:
+        headers[remaining_calls_header_name.lower()] = str(remaining)
+    if total_calls_header_name:
+        headers[total_calls_header_name.lower()] = str(calls)
+    message = f"Rate limit is exceeded. Try again in {retry_after} seconds."
+    return ResponseSpec(status_code=429, headers=headers, body=_json_throttle_body(429, message))
+
+
+def _publish_rate_counts(
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    remaining: int,
+    calls: int,
+    remaining_calls_header_name: str | None,
+    remaining_calls_variable_name: str | None,
+    total_calls_header_name: str | None,
+) -> None:
+    if remaining_calls_variable_name:
+        req.variables[remaining_calls_variable_name] = remaining
+        _record_variable_write(runtime, remaining_calls_variable_name, remaining, "rate-limit")
+    if remaining_calls_header_name:
+        _queue_response_header(req, remaining_calls_header_name, remaining)
+    if total_calls_header_name:
+        _queue_response_header(req, total_calls_header_name, calls)
+
+
+def _quota_limit_exceeded(entry: dict[str, Any], rule: ThrottleRule) -> bool:
+    if rule.calls is not None and int(entry.get("count") or 0) >= rule.calls:
+        return True
+    return _quota_bandwidth_exceeded(entry, rule)
+
+
+def _quota_bandwidth_exceeded(entry: dict[str, Any], rule: ThrottleRule) -> bool:
+    return rule.bandwidth is not None and int(entry.get("bandwidth") or 0) >= rule.bandwidth
+
+
+def _timespan(total_seconds: int) -> str:
+    """Seconds in .NET TimeSpan's default form: hh:mm:ss, prefixed by d. past a day.
+
+    The Learn error table shows the replenish time as xx:xx:xx; APIM renders a
+    .NET TimeSpan, which adds a day component once the interval passes 24 hours.
+    """
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    clock = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{days}.{clock}" if days else clock
+
+
+def _quota_response(*, now: float, reset_at: int | None, bandwidth_exceeded: bool) -> ResponseSpec:
+    retry_after = max(0, math.ceil(reset_at - now)) if reset_at is not None else 0
+    kind = "bandwidth" if bandwidth_exceeded else "call volume"
+    message = f"Out of {kind} quota. Quota will be replenished in {_timespan(retry_after)}."
+    return ResponseSpec(
+        status_code=403,
+        headers={"content-type": "application/json", "retry-after": str(retry_after)},
+        body=_json_throttle_body(403, message),
+    )
+
+
+def _quota_bandwidth_kilobytes(req: PolicyRequest) -> int:
+    # The Learn policy references define the unit but not the rounding rule;
+    # the simulator counts the request and response bodies in whole KB, rounding
+    # up so a non-empty partial kilobyte is not silently free.
+    total_bytes = len(req.body) + len(req.response_body)
+    return math.ceil(total_bytes / 1024) if total_bytes else 0
+
+
+def _queue_quota_finalization(
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    rule: ThrottleRule,
+    key: str,
+) -> None:
+    if runtime is None:
+        return
+    runtime.deferred_actions.append(
+        QuotaDeferred(
+            key=key,
+            renewal_period=rule.renewal_period,
+            bandwidth=rule.bandwidth or 0,
+        )
+    )
 
 
 def _quota_window_state(
@@ -830,14 +1061,20 @@ def _quota_window_state(
     if renewal_period == 0:
         entry = store.get(key)
         if not isinstance(entry, dict):
-            entry = {"window_start": None, "count": 0}
+            entry = {"window_start": None, "count": 0, "bandwidth": 0}
             store[key] = entry
         return entry, None
 
     if renewal_period < 0:
-        raise HTTPException(status_code=500, detail="quota-by-key renewal-period must be >= 0")
+        raise HTTPException(status_code=500, detail="quota renewal-period must be >= 0")
 
-    if first_period_start and first_period_start != "0001-01-01T00:00:00Z":
+    previous = store.get(key)
+    if first_period_start is None:
+        # The local subscription model has no creation timestamp. APIM anchors
+        # quota windows to that timestamp; first observation is the deterministic
+        # fallback until the model can carry the real subscription start.
+        anchor = float(previous.get("anchor", now)) if isinstance(previous, dict) else now
+    elif first_period_start != "0001-01-01T00:00:00Z":
         anchor = datetime.strptime(first_period_start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
     else:
         anchor = 0.0
@@ -849,12 +1086,39 @@ def _quota_window_state(
         window_start = anchor + (window_index * renewal_period)
 
     entry = store.get(key)
-    if not isinstance(entry, dict) or entry.get("window_start") != window_start:
-        entry = {"window_start": window_start, "count": 0}
+    if not isinstance(previous, dict) or previous.get("window_start") != window_start:
+        entry = {"window_start": window_start, "anchor": anchor, "count": 0, "bandwidth": 0}
         store[key] = entry
+    else:
+        entry = previous
 
     reset_at = int(window_start + renewal_period)
     return entry, reset_at
+
+
+@dataclass(frozen=True)
+class QuotaDeferred(DeferredPolicyAction):
+    key: str
+    renewal_period: int
+    bandwidth: int
+
+    def finalize(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:
+        store = req.variables.get("quota_store")
+        if not isinstance(store, dict):
+            return
+        entry, _ = _quota_window_state(
+            store,
+            self.key,
+            now=_policy_now(runtime),
+            renewal_period=self.renewal_period,
+            first_period_start=None,
+        )
+        entry["bandwidth"] = int(entry.get("bandwidth") or 0) + _quota_bandwidth_kilobytes(req)
+        _record_step(
+            runtime,
+            "quota",
+            {"deferred": True, "bandwidth": entry["bandwidth"], "key": self.key},
+        )
 
 
 @dataclass(frozen=True)
@@ -874,16 +1138,16 @@ class RateLimitByKeyDeferred(DeferredPolicyAction):
         store = req.variables.get("rate_limit_store")
         if not isinstance(store, dict):
             return
-        calls = max(1, _policy_int(self.calls, req, runtime, default=1))
-        renewal_period = max(1, _policy_int(self.renewal_period, req, runtime, default=60))
+        calls = _positive_policy_int(self.calls, req, runtime, name="rate-limit-by-key calls")
+        renewal_period = _rate_period(self.renewal_period, req, runtime)
         counter_key = render_policy_value(self.counter_key, req, runtime)
-        if not counter_key:
-            return
-        now = time.time()
+        now = _policy_now(runtime)
         bucket = _rate_limit_bucket(store, f"rate-limit-by-key:{counter_key}")
         _prune_rate_limit_bucket(bucket, now, renewal_period)
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
-        increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
+        increment = _nonnegative_policy_int(
+            self.increment_count, req, runtime, name="rate-limit-by-key increment-count"
+        )
         if should_increment and increment:
             bucket.extend([now] * increment)
         remaining = max(0, calls - len(bucket))
@@ -891,9 +1155,9 @@ class RateLimitByKeyDeferred(DeferredPolicyAction):
             req.variables[self.remaining_calls_variable_name] = remaining
             _record_variable_write(runtime, self.remaining_calls_variable_name, remaining, "rate-limit-by-key")
         if self.remaining_calls_header_name:
-            _response_header_target(req)[self.remaining_calls_header_name.lower()] = str(remaining)
+            _queue_response_header(req, self.remaining_calls_header_name, remaining)
         if self.total_calls_header_name:
-            _response_header_target(req)[self.total_calls_header_name.lower()] = str(calls)
+            _queue_response_header(req, self.total_calls_header_name, calls)
         _record_step(
             runtime,
             "rate-limit-by-key",
@@ -906,10 +1170,23 @@ class RateLimitByKeyDeferred(DeferredPolicyAction):
         )
 
 
+def _claim_quota_key_increment(req: PolicyRequest, counter_key: str) -> bool:
+    """True the first time this request increments a quota-by-key counter.
+
+    https://learn.microsoft.com/en-us/azure/api-management/quota-by-key-policy
+    says a key shared by several policies is incremented only once per request.
+    """
+    claimed = req.variables.setdefault("_quota_by_key_incremented", set())
+    if counter_key in claimed:
+        return False
+    claimed.add(counter_key)
+    return True
+
+
 @dataclass(frozen=True)
 class QuotaByKeyDeferred(DeferredPolicyAction):
-    calls: str
-    renewal_period: str
+    calls: int
+    renewal_period: int
     counter_key: str
     increment_condition: str | None
     increment_count: str | None
@@ -919,11 +1196,9 @@ class QuotaByKeyDeferred(DeferredPolicyAction):
         store = req.variables.get("quota_store")
         if not isinstance(store, dict):
             return
-        renewal_period = _policy_int(self.renewal_period, req, runtime, default=3600)
+        renewal_period = self.renewal_period
         counter_key = render_policy_value(self.counter_key, req, runtime)
-        if not counter_key:
-            return
-        now = time.time()
+        now = _policy_now(runtime)
         entry, _ = _quota_window_state(
             store,
             f"quota-by-key:{counter_key}",
@@ -932,8 +1207,8 @@ class QuotaByKeyDeferred(DeferredPolicyAction):
             first_period_start=self.first_period_start,
         )
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
-        increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
-        if should_increment and increment:
+        increment = _nonnegative_policy_int(self.increment_count, req, runtime, name="quota-by-key increment-count")
+        if should_increment and increment and _claim_quota_key_increment(req, counter_key):
             entry["count"] = int(entry.get("count") or 0) + increment
         _record_step(
             runtime,
@@ -997,13 +1272,11 @@ class RateLimitByKey(PolicyNode):
         store = req.variables.get("rate_limit_store")
         if not isinstance(store, dict):
             return None
-        calls = max(1, _policy_int(self.calls, req, runtime, default=1))
-        renewal_period = max(1, _policy_int(self.renewal_period, req, runtime, default=60))
+        calls = _positive_policy_int(self.calls, req, runtime, name="rate-limit-by-key calls")
+        renewal_period = _rate_period(self.renewal_period, req, runtime)
         counter_key = render_policy_value(self.counter_key, req, runtime)
-        if not counter_key:
-            raise HTTPException(status_code=500, detail="rate-limit-by-key requires counter-key")
 
-        now = time.time()
+        now = _policy_now(runtime)
         bucket = _rate_limit_bucket(store, f"rate-limit-by-key:{counter_key}")
         _prune_rate_limit_bucket(bucket, now, renewal_period)
 
@@ -1030,8 +1303,11 @@ class RateLimitByKey(PolicyNode):
             return None
 
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
-        increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
-        if should_increment and increment:
+        increment = _nonnegative_policy_int(
+            self.increment_count, req, runtime, name="rate-limit-by-key increment-count"
+        )
+        would_exceed = should_increment and len(bucket) + increment > calls
+        if should_increment and increment and not would_exceed:
             bucket.extend([now] * increment)
 
         remaining = max(0, calls - len(bucket))
@@ -1041,7 +1317,7 @@ class RateLimitByKey(PolicyNode):
             "rate-limit-by-key",
             {"counter_key": counter_key, "count": len(bucket), "remaining": remaining},
         )
-        if len(bucket) > calls:
+        if would_exceed:
             return self._limit_response(
                 req,
                 runtime,
@@ -1064,21 +1340,22 @@ class RateLimitByKey(PolicyNode):
         if self.retry_after_variable_name:
             req.variables[self.retry_after_variable_name] = retry_after
             _record_variable_write(runtime, self.retry_after_variable_name, retry_after, "rate-limit-by-key")
-        headers = {
-            "content-type": "text/plain",
-            header_name.lower(): str(retry_after),
-        }
+        if self.remaining_calls_variable_name:
+            req.variables[self.remaining_calls_variable_name] = remaining
+            _record_variable_write(runtime, self.remaining_calls_variable_name, remaining, "rate-limit-by-key")
+        headers = {"content-type": "application/json", header_name.lower(): str(retry_after)}
         if self.remaining_calls_header_name:
             headers[self.remaining_calls_header_name.lower()] = str(remaining)
         if self.total_calls_header_name:
             headers[self.total_calls_header_name.lower()] = str(calls)
-        return ResponseSpec(status_code=429, headers=headers, body=b"Rate limit exceeded")
+        message = f"Rate limit is exceeded. Try again in {retry_after} seconds."
+        return ResponseSpec(status_code=429, headers=headers, body=_json_throttle_body(429, message))
 
 
 @dataclass(frozen=True)
 class QuotaByKey(PolicyNode):
-    calls: str
-    renewal_period: str
+    calls: int
+    renewal_period: int
     counter_key: str
     increment_condition: str | None = None
     increment_count: str | None = None
@@ -1088,12 +1365,10 @@ class QuotaByKey(PolicyNode):
         store = req.variables.get("quota_store")
         if not isinstance(store, dict):
             return None
-        calls = max(1, _policy_int(self.calls, req, runtime, default=1))
-        renewal_period = _policy_int(self.renewal_period, req, runtime, default=3600)
+        calls = self.calls
+        renewal_period = self.renewal_period
         counter_key = render_policy_value(self.counter_key, req, runtime)
-        if not counter_key:
-            raise HTTPException(status_code=500, detail="quota-by-key requires counter-key")
-        now = time.time()
+        now = _policy_now(runtime)
         entry, reset_at = _quota_window_state(
             store,
             f"quota-by-key:{counter_key}",
@@ -1104,7 +1379,7 @@ class QuotaByKey(PolicyNode):
         current = int(entry.get("count") or 0)
         if _is_deferred_expression(self.increment_condition) or _is_deferred_expression(self.increment_count):
             if current >= calls:
-                return self._quota_response(now=now, reset_at=reset_at)
+                return _quota_response(now=now, reset_at=reset_at, bandwidth_exceeded=False)
             if runtime is not None:
                 runtime.deferred_actions.append(
                     QuotaByKeyDeferred(
@@ -1120,20 +1395,15 @@ class QuotaByKey(PolicyNode):
             return None
 
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
-        increment = max(0, _policy_int(self.increment_count, req, runtime, default=1))
-        if should_increment and increment:
+        increment = _nonnegative_policy_int(self.increment_count, req, runtime, name="quota-by-key increment-count")
+        would_exceed = should_increment and current + increment > calls
+        if should_increment and increment and not would_exceed and _claim_quota_key_increment(req, counter_key):
             current += increment
             entry["count"] = current
         _record_step(runtime, "quota-by-key", {"counter_key": counter_key, "count": current})
-        if current > calls:
-            return self._quota_response(now=now, reset_at=reset_at)
+        if would_exceed:
+            return _quota_response(now=now, reset_at=reset_at, bandwidth_exceeded=False)
         return None
-
-    def _quota_response(self, *, now: float, reset_at: int | None) -> ResponseSpec:
-        headers = {"content-type": "text/plain"}
-        if reset_at is not None:
-            headers["retry-after"] = str(max(1, reset_at - int(now)))
-        return ResponseSpec(status_code=403, headers=headers, body=b"Quota exceeded")
 
 
 LLM_RATE_WINDOW_SECONDS = 60
@@ -2856,25 +3126,211 @@ def _parse_ip_filter(el: ElementTree.Element) -> IpFilter:
     return IpFilter(action=action, allow=allow)
 
 
+def _reject_unknown_attributes(el: ElementTree.Element, allowed: set[str], policy_name: str) -> None:
+    unknown = sorted(set(el.attrib) - allowed)
+    if unknown:
+        raise HTTPException(status_code=500, detail=f"{policy_name} unsupported attribute: {unknown[0]}")
+
+
+def _static_policy_name(el: ElementTree.Element, name: str, policy_name: str) -> str | None:
+    value = el.attrib.get(name)
+    if value is not None and is_apim_expression(value):
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} does not allow policy expressions")
+    return value.strip() if value is not None else None
+
+
+def _static_positive_int(
+    el: ElementTree.Element,
+    name: str,
+    policy_name: str,
+    *,
+    required: bool = True,
+    maximum: int | None = None,
+) -> int | None:
+    value = el.attrib.get(name)
+    if value is None:
+        if required:
+            raise HTTPException(status_code=500, detail=f"{policy_name} requires {name}")
+        return None
+    if is_apim_expression(value):
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} does not allow policy expressions")
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} must be an integer") from exc
+    if number <= 0:
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} must be > 0")
+    if maximum is not None and number > maximum:
+        raise HTTPException(status_code=500, detail=f"{policy_name} {name} must be <= {maximum}")
+    return number
+
+
+def _static_period(
+    el: ElementTree.Element,
+    policy_name: str,
+    *,
+    minimum: int = 1,
+    allow_zero: bool = False,
+    maximum: int | None = None,
+) -> int:
+    value = el.attrib.get("renewal-period")
+    if value is None:
+        raise HTTPException(status_code=500, detail=f"{policy_name} requires renewal-period")
+    if is_apim_expression(value):
+        raise HTTPException(status_code=500, detail=f"{policy_name} renewal-period does not allow policy expressions")
+    try:
+        period = int(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"{policy_name} renewal-period must be an integer") from exc
+    if (period == 0 and allow_zero) or period >= minimum:
+        if maximum is None or period <= maximum:
+            return period
+    if maximum is not None:
+        raise HTTPException(
+            status_code=500, detail=f"{policy_name} renewal-period must be between {minimum} and {maximum}"
+        )
+    raise HTTPException(status_code=500, detail=f"{policy_name} renewal-period must be >= {minimum}")
+
+
+def _throttle_target(
+    el: ElementTree.Element,
+    kind: str,
+    policy_name: str,
+    *,
+    allow_bandwidth: bool,
+) -> tuple[str | None, str | None]:
+    allowed = {"name", "id", "calls", "renewal-period"}
+    if allow_bandwidth:
+        allowed.add("bandwidth")
+    _reject_unknown_attributes(
+        el,
+        allowed,
+        policy_name,
+    )
+    target_id = (el.attrib.get("id") or "").strip() or None
+    target_name = (el.attrib.get("name") or "").strip() or None
+    if target_id is None and target_name is None:
+        raise HTTPException(status_code=500, detail=f"{policy_name} {kind} requires name or id")
+    return target_name, target_id
+
+
+def _rate_limit_nested_rules(el: ElementTree.Element) -> tuple[ThrottleRule, ...]:
+    rules: list[ThrottleRule] = []
+    for api in el:
+        if api.tag != "api":
+            raise HTTPException(status_code=500, detail=f"rate-limit unsupported child element: {api.tag}")
+        api_name, api_id = _throttle_target(api, "api", "rate-limit", allow_bandwidth=False)
+        api_calls = _static_positive_int(api, "calls", "rate-limit", maximum=None)
+        api_period = _static_period(api, "rate-limit", maximum=300)
+        rules.append(ThrottleRule("api", api_name, api_id, api_calls or 0, api_period))
+        for operation in api:
+            if operation.tag != "operation":
+                raise HTTPException(status_code=500, detail=f"rate-limit unsupported child element: {operation.tag}")
+            operation_name, operation_id = _throttle_target(operation, "operation", "rate-limit", allow_bandwidth=False)
+            operation_calls = _static_positive_int(operation, "calls", "rate-limit", maximum=None)
+            operation_period = _static_period(operation, "rate-limit", maximum=300)
+            rules.append(
+                ThrottleRule("operation", operation_name, operation_id, operation_calls or 0, operation_period)
+            )
+    return tuple(rules)
+
+
 def _parse_rate_limit(el: ElementTree.Element) -> RateLimit:
-    calls = int(el.attrib.get("calls") or "0")
-    renewal = int(el.attrib.get("renewal-period") or el.attrib.get("renewal_period") or "60")
-    scope = str(el.attrib.get("scope") or "subscription")
-    if calls <= 0:
-        raise HTTPException(status_code=500, detail="rate-limit requires calls > 0")
-    return RateLimit(calls=calls, renewal_period=renewal, scope=scope)
+    _reject_unknown_attributes(
+        el,
+        {
+            "id",
+            "calls",
+            "renewal-period",
+            "retry-after-header-name",
+            "retry-after-variable-name",
+            "remaining-calls-header-name",
+            "remaining-calls-variable-name",
+            "total-calls-header-name",
+        },
+        "rate-limit",
+    )
+    calls = _static_positive_int(el, "calls", "rate-limit") or 0
+    renewal = _static_period(el, "rate-limit", maximum=300)
+    names = {
+        name: _static_policy_name(el, name, "rate-limit")
+        for name in (
+            "retry-after-header-name",
+            "retry-after-variable-name",
+            "remaining-calls-header-name",
+            "remaining-calls-variable-name",
+            "total-calls-header-name",
+        )
+    }
+    return RateLimit(
+        calls=calls,
+        renewal_period=renewal,
+        retry_after_header_name=names["retry-after-header-name"],
+        retry_after_variable_name=names["retry-after-variable-name"],
+        remaining_calls_header_name=names["remaining-calls-header-name"],
+        remaining_calls_variable_name=names["remaining-calls-variable-name"],
+        total_calls_header_name=names["total-calls-header-name"],
+        rules=_rate_limit_nested_rules(el),
+    )
+
+
+def _quota_nested_rules(el: ElementTree.Element) -> tuple[ThrottleRule, ...]:
+    rules: list[ThrottleRule] = []
+    for api in el:
+        if api.tag != "api":
+            raise HTTPException(status_code=500, detail=f"quota unsupported child element: {api.tag}")
+        api_name, api_id = _throttle_target(api, "api", "quota", allow_bandwidth=True)
+        api_calls = _static_positive_int(api, "calls", "quota", required=False)
+        api_bandwidth = _static_positive_int(api, "bandwidth", "quota", required=False)
+        if api_calls is None and api_bandwidth is None:
+            raise HTTPException(status_code=500, detail="quota api requires calls or bandwidth")
+        api_period = _static_period(api, "quota", allow_zero=True)
+        rules.append(ThrottleRule("api", api_name, api_id, api_calls, api_period, api_bandwidth))
+        for operation in api:
+            if operation.tag != "operation":
+                raise HTTPException(status_code=500, detail=f"quota unsupported child element: {operation.tag}")
+            operation_name, operation_id = _throttle_target(operation, "operation", "quota", allow_bandwidth=True)
+            operation_calls = _static_positive_int(operation, "calls", "quota", required=False)
+            operation_bandwidth = _static_positive_int(operation, "bandwidth", "quota", required=False)
+            if operation_calls is None and operation_bandwidth is None:
+                raise HTTPException(status_code=500, detail="quota operation requires calls or bandwidth")
+            operation_period = _static_period(operation, "quota", allow_zero=True)
+            rules.append(
+                ThrottleRule(
+                    "operation", operation_name, operation_id, operation_calls, operation_period, operation_bandwidth
+                )
+            )
+    return tuple(rules)
 
 
 def _parse_quota(el: ElementTree.Element) -> Quota:
-    calls = int(el.attrib.get("calls") or "0")
-    renewal = int(el.attrib.get("renewal-period") or el.attrib.get("renewal_period") or "3600")
-    scope = str(el.attrib.get("scope") or "subscription")
-    if calls <= 0:
-        raise HTTPException(status_code=500, detail="quota requires calls > 0")
-    return Quota(calls=calls, renewal_period=renewal, scope=scope)
+    _reject_unknown_attributes(el, {"id", "calls", "bandwidth", "renewal-period"}, "quota")
+    calls = _static_positive_int(el, "calls", "quota", required=False)
+    bandwidth = _static_positive_int(el, "bandwidth", "quota", required=False)
+    if calls is None and bandwidth is None:
+        raise HTTPException(status_code=500, detail="quota requires calls or bandwidth")
+    renewal = _static_period(el, "quota", allow_zero=True)
+    return Quota(calls=calls, bandwidth=bandwidth, renewal_period=renewal, rules=_quota_nested_rules(el))
 
 
 def _parse_rate_limit_by_key(el: ElementTree.Element) -> RateLimitByKey:
+    _reject_unknown_attributes(
+        el,
+        {
+            "id",
+            "calls",
+            "renewal-period",
+            "increment-condition",
+            "increment-count",
+            "counter-key",
+            "retry-after-header-name",
+            "retry-after-variable-name",
+            "remaining-calls-header-name",
+            "remaining-calls-variable-name",
+            "total-calls-header-name",
+        },
+        "rate-limit-by-key",
+    )
     calls = (el.attrib.get("calls") or "").strip()
     renewal_period = (el.attrib.get("renewal-period") or "").strip()
     counter_key = (el.attrib.get("counter-key") or "").strip()
@@ -2884,22 +3340,50 @@ def _parse_rate_limit_by_key(el: ElementTree.Element) -> RateLimitByKey:
         raise HTTPException(status_code=500, detail="rate-limit-by-key requires renewal-period")
     if not counter_key:
         raise HTTPException(status_code=500, detail="rate-limit-by-key requires counter-key")
+    if not is_apim_expression(calls):
+        _static_positive_int(el, "calls", "rate-limit-by-key")
+    if not is_apim_expression(renewal_period):
+        _static_period(el, "rate-limit-by-key", maximum=300)
+    names = {
+        name: _static_policy_name(el, name, "rate-limit-by-key")
+        for name in (
+            "retry-after-header-name",
+            "retry-after-variable-name",
+            "remaining-calls-header-name",
+            "remaining-calls-variable-name",
+            "total-calls-header-name",
+        )
+    }
     return RateLimitByKey(
         calls=calls,
         renewal_period=renewal_period,
         counter_key=counter_key,
         increment_condition=el.attrib.get("increment-condition"),
         increment_count=el.attrib.get("increment-count"),
-        retry_after_header_name=el.attrib.get("retry-after-header-name"),
-        retry_after_variable_name=el.attrib.get("retry-after-variable-name"),
-        remaining_calls_header_name=el.attrib.get("remaining-calls-header-name"),
-        remaining_calls_variable_name=el.attrib.get("remaining-calls-variable-name"),
-        total_calls_header_name=el.attrib.get("total-calls-header-name"),
+        retry_after_header_name=names["retry-after-header-name"],
+        retry_after_variable_name=names["retry-after-variable-name"],
+        remaining_calls_header_name=names["remaining-calls-header-name"],
+        remaining_calls_variable_name=names["remaining-calls-variable-name"],
+        total_calls_header_name=names["total-calls-header-name"],
     )
 
 
 def _parse_quota_by_key(el: ElementTree.Element) -> QuotaByKey:
-    if el.attrib.get("bandwidth"):
+    _reject_unknown_attributes(
+        el,
+        {
+            "id",
+            "calls",
+            "bandwidth",
+            "renewal-period",
+            "increment-condition",
+            "increment-count",
+            "counter-key",
+            "first-period-start",
+        },
+        "quota-by-key",
+    )
+    if "bandwidth" in el.attrib:
         raise HTTPException(status_code=500, detail="quota-by-key bandwidth is not supported")
     calls = (el.attrib.get("calls") or "").strip()
     renewal_period = (el.attrib.get("renewal-period") or "").strip()
@@ -2910,13 +3394,21 @@ def _parse_quota_by_key(el: ElementTree.Element) -> QuotaByKey:
         raise HTTPException(status_code=500, detail="quota-by-key requires renewal-period")
     if not counter_key:
         raise HTTPException(status_code=500, detail="quota-by-key requires counter-key")
+    calls_value = _static_positive_int(el, "calls", "quota-by-key")
+    renewal_value = _static_period(el, "quota-by-key", allow_zero=True, minimum=300)
+    first_period_start = el.attrib.get("first-period-start") or "0001-01-01T00:00:00Z"
+    if first_period_start:
+        try:
+            datetime.strptime(first_period_start, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail="quota-by-key first-period-start must be UTC ISO-8601") from exc
     return QuotaByKey(
-        calls=calls,
-        renewal_period=renewal_period,
+        calls=calls_value or 0,
+        renewal_period=renewal_value,
         counter_key=counter_key,
         increment_condition=el.attrib.get("increment-condition"),
         increment_count=el.attrib.get("increment-count"),
-        first_period_start=el.attrib.get("first-period-start"),
+        first_period_start=first_period_start,
     )
 
 
@@ -3191,20 +3683,9 @@ def _parse_send_request(el: ElementTree.Element) -> SendRequest:
     )
 
 
-def _rate_limit_key(req: PolicyRequest, *, scope: str) -> str:
-    scope = (scope or "subscription").lower()
-    route = str(req.variables.get("route") or "")
-    subscription_id = str(req.variables.get("subscription_id") or "")
-    products = req.variables.get("products")
-    product_part = ",".join(sorted(str(item) for item in products)) if isinstance(products, list) else ""
-    client_ip = str(req.variables.get("client_ip") or "")
-    if scope == "subscription":
-        return f"sub:{subscription_id}|route:{route}|products:{product_part}"
-    if scope == "product":
-        return f"product:{product_part}|sub:{subscription_id}|route:{route}"
-    if scope == "ip":
-        return f"ip:{client_ip}|route:{route}"
-    return f"route:{route}|sub:{subscription_id}|products:{product_part}"
+def _rate_limit_key(req: PolicyRequest) -> str | None:
+    """Return the subscription counter key used by the subscription rate policy."""
+    return _subscription_throttle_key(req, "rate-limit")
 
 
 def _parse_choose(
