@@ -161,7 +161,7 @@ def test_validate_parameters_flags_unspecified_query() -> None:
 
 
 @pytest.mark.contract("POLICY-VALIDATE-STATUS-CODE")
-def test_validate_status_code_prevent_mutates_response() -> None:
+def test_validate_status_code_prevent_short_circuits_with_502() -> None:
     doc = _doc(outbound='<validate-status-code unspecified-status-code-action="prevent" />')
     runtime = PolicyRuntime(gateway_config=_operation_config())
 
@@ -178,9 +178,10 @@ def test_validate_status_code_prevent_mutates_response() -> None:
         response_body=b"teapot",
         response_media_type="text/plain",
     )
-    asyncio.run(apply_outbound_async([doc], req, runtime))
-    assert req.response_status_code == 502
-    assert req.response_body == b"Response status code validation failed"
+    blocked = asyncio.run(apply_outbound_async([doc], req, runtime))
+    assert blocked is not None
+    assert blocked.status_code == 502
+    assert b"teapot" not in blocked.body
 
 
 @pytest.mark.contract("POLICY-VALIDATE-STATUS-CODE")

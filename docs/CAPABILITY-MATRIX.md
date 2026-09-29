@@ -127,9 +127,9 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `rewrite-uri` | Yes | - | Path rewriting |
 | `set-variable` | Yes | - | Writes to request-scoped `variables` |
 | `set-query-parameter` | Yes | - | Mutates outbound upstream query only |
-| `set-body` | Yes | - | Literal or templated request/short-circuit body replacement |
+| `set-body` | Yes | - | Literal or templated body: the request body in inbound/backend, the response body in outbound ([set-body](https://learn.microsoft.com/en-us/azure/api-management/set-body-policy)) |
 | `include-fragment` | Yes | - | Config-backed via `policy_fragments` |
-| `return-response` | Yes | - | Short-circuit with custom response |
+| `return-response` | Yes | - | Short-circuit with custom response; in outbound it replaces the response and ends the section ([return-response](https://learn.microsoft.com/en-us/azure/api-management/return-response-policy)) |
 | `choose`/`when`/`otherwise` | Yes | - | Conditional logic |
 | `check-header` | Yes | - | Required header validation |
 | `ip-filter` | Yes | - | Allow/deny IP ranges |
@@ -149,7 +149,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `cache-lookup-value` | Partial | - | Supports local internal value cache plus default-value; `prefer-external` is adapted and `external` is unsupported |
 | `cache-store-value` | Partial | - | Stores to local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
 | `cache-remove-value` | Partial | - | Removes from local in-memory value cache; `prefer-external` is adapted and `external` is unsupported |
-| `mock-response` | Partial | - | Supports `status-code` and `content-type`, returning the first matching authored response example for the current operation |
+| `mock-response` | Partial | - | Valid in inbound and outbound (outbound replaces the response). Supports `status-code` and `content-type`, returning the first matching authored response example for the current operation |
 | `send-request` | Yes | - | Supports `new\|copy`, headers/body, timeout, ignore-error, managed identity, certificate placeholder |
 | `llm-token-limit` | Partial | - | Adapted: sliding-minute and quota-period windows, estimate/actual usage counting, 429/403 with retry and remaining headers; see [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `azure-openai-token-limit` | Partial | - | Alias of `llm-token-limit` |
@@ -158,9 +158,9 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `llm-semantic-cache-lookup`/`-store` | No | - | Policy not implemented; the sibling AI Foundry simulator provides service-side semantic caching behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `llm-content-safety` | No | - | Policy not implemented; the sibling AI Foundry simulator serves the Content Safety API behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `emit-metric` | Partial | - | Adapted: emits the OTEL counter `apim.policy.metric` with dimensions |
-| `validate-content` | Partial | - | Size, content-type map, and JSON well-formedness; JSON Schema enforcement deferred |
+| `validate-content` | Partial | - | Size, content-type map, and JSON well-formedness of the request body (inbound, 400) or response body (outbound, 502); JSON Schema enforcement deferred |
 | `validate-parameters` | Partial | - | Required/unspecified headers and query against operation metadata; path parameters deferred |
-| `validate-status-code` | Partial | - | Explicit codes plus declared operation responses; `prevent` mutates the response to 502 |
+| `validate-status-code` | Partial | - | Declared operation responses are always valid (a per-code override does not apply to them), then explicit codes, then the unspecified action; `prevent` returns 502 to the client and to the cache |
 | `log-to-eventhub` | No | - | Use observability stack |
 
 ## Backends

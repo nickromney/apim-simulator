@@ -313,7 +313,7 @@ contracts:
       - docs/SCOPE.md#supported-now
       - docs/CAPABILITY-MATRIX.md#policies
     owner_tests:
-      - tests/test_policy_validation.py::test_validate_status_code_prevent_mutates_response
+      - tests/test_policy_validation.py::test_validate_status_code_prevent_short_circuits_with_502
     fixture_or_golden: inline-xml
     assertion_kind: policy-golden
 

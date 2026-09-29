@@ -48,6 +48,13 @@ class PolicyRequest:
     response_headers: dict[str, str] | None = None
     response_body: bytes = b""
     response_media_type: str | None = None
+    # Which policy section is executing. Policies that act on "the message"
+    # (set-body, validate-content) act on the response in outbound.
+    section: str = "inbound"
+
+    @property
+    def in_outbound(self) -> bool:
+        return self.section == "outbound"
 
 
 @dataclass
@@ -332,8 +339,14 @@ class SetBody(PolicyNode):
     value: str
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        req.body = render_policy_value(self.value, req, runtime).encode("utf-8")
-        _record_step(runtime, "set-body", {"length": len(req.body)})
+        # https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
+        # In the outbound section set-body sets the response body.
+        body = render_policy_value(self.value, req, runtime).encode("utf-8")
+        if req.in_outbound:
+            req.response_body = body
+        else:
+            req.body = body
+        _record_step(runtime, "set-body", {"length": len(body)})
         return None
 
 
@@ -2139,6 +2152,11 @@ def _operation_request_metadata(req: PolicyRequest, runtime: PolicyRuntime | Non
     return operation
 
 
+# Public response for a validation failure on a response
+# https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+_INTERNAL_ERROR_PUBLIC_MESSAGE = "The request could not be processed due to an internal error. Contact the API owner."
+
+
 @dataclass(frozen=True)
 class ValidateContentType:
     content_type: str
@@ -2154,68 +2172,84 @@ class ValidateContent(PolicyNode):
     errors_variable_name: str | None = None
     content_types: tuple[ValidateContentType, ...] = ()
 
-    def _size_failure(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> ResponseSpec | None:
-        if self.max_size is None or len(req.body) <= self.max_size:
+    @staticmethod
+    def _message(req: PolicyRequest) -> tuple[bytes, str, str]:
+        """The body, content type and noun this policy validates in this section.
+
+        https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+        Inbound validates the request; outbound validates the response.
+        """
+        if req.in_outbound:
+            headers = req.response_headers if req.response_headers is not None else req.headers
+            content_type = headers.get("content-type") or req.response_media_type or ""
+            return req.response_body, content_type, "Response"
+        return req.body, req.headers.get("content-type") or "", "Request"
+
+    def _size_failure(
+        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, body: bytes, noun: str
+    ) -> ResponseSpec | None:
+        if self.max_size is None or len(body) <= self.max_size:
             return None
         return self._fail(
             req,
             runtime,
             action=self.size_exceeded_action,
-            message=f"Request body is larger than max-size ({self.max_size} bytes)",
+            message=f"{noun} body is larger than max-size ({self.max_size} bytes)",
         )
 
     def _json_failure(
-        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, matched: Any, request_content_type: str
+        self, req: PolicyRequest, runtime: PolicyRuntime | None, *, matched: Any, body: bytes, content_type: str
     ) -> ResponseSpec | None:
         if matched.validate_as != "json":
             return None
         try:
-            json.loads(req.body.decode("utf-8"))
+            json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return self._fail(
                 req,
                 runtime,
                 action=matched.action,
-                message=f"Body is not valid JSON for content type {request_content_type}",
+                message=f"Body is not valid JSON for content type {content_type}",
             )
         return None
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        """Validate the request body against the declared content types.
+        """Validate the request (inbound) or response (outbound) body.
 
         An empty body is never validated. A content type the policy does not
         declare is handled by unspecified-content-type-action, which may well be
         to ignore it.
         """
-        if not req.body:
+        body, raw_content_type, noun = self._message(req)
+        if not body:
             return None
 
-        outcome = self._size_failure(req, runtime)
+        outcome = self._size_failure(req, runtime, body=body, noun=noun)
         if outcome is not None:
             return outcome
 
-        request_content_type = (req.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        content_type = raw_content_type.split(";", 1)[0].strip().lower()
         matched = next(
-            (item for item in self.content_types if item.content_type.lower() == request_content_type),
+            (item for item in self.content_types if item.content_type.lower() == content_type),
             None,
         )
         if matched is None:
-            if request_content_type and self.unspecified_content_type_action != "ignore":
+            if content_type and self.unspecified_content_type_action != "ignore":
                 return self._fail(
                     req,
                     runtime,
                     action=self.unspecified_content_type_action,
-                    message=f"Content type {request_content_type} is not specified for validation",
+                    message=f"Content type {content_type} is not specified for validation",
                 )
             return None
         if matched.action == "ignore":
             return None
 
-        outcome = self._json_failure(req, runtime, matched=matched, request_content_type=request_content_type)
+        outcome = self._json_failure(req, runtime, matched=matched, body=body, content_type=content_type)
         if outcome is not None:
             return outcome
 
-        _record_step(runtime, "validate-content", {"content_type": request_content_type, "valid": True})
+        _record_step(runtime, "validate-content", {"content_type": content_type, "valid": True})
         return None
 
     def _fail(
@@ -2231,13 +2265,20 @@ class ValidateContent(PolicyNode):
         _record_validation_error(
             req, runtime, policy="validate-content", errors_variable_name=self.errors_variable_name, message=message
         )
-        if action == "prevent":
+        if action != "prevent":
+            return None
+        if req.in_outbound:
+            # 502 in outbound, with the detail withheld from the client.
             return ResponseSpec(
-                status_code=400,
+                status_code=502,
                 headers={"content-type": "text/plain"},
-                body=message.encode("utf-8"),
+                body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             )
-        return None
+        return ResponseSpec(
+            status_code=400,
+            headers={"content-type": "text/plain"},
+            body=message.encode("utf-8"),
+        )
 
 
 # Headers every HTTP client sends. validate-parameters must not reject these as
@@ -2390,16 +2431,15 @@ class ValidateStatusCode(PolicyNode):
         status = req.response_status_code
         if status is None:
             return None
-        explicit = dict(self.status_codes)
-        if status in explicit:
-            action = explicit[status]
-        else:
-            operation = _operation_request_metadata(req, runtime)
-            declared = {resp.status_code for resp in getattr(operation, "responses", []) or []}
-            if status in declared:
-                _record_step(runtime, "validate-status-code", {"status_code": status, "declared": True})
-                return None
-            action = self.unspecified_status_code_action
+        # A status declared for the operation is valid; the per-code override
+        # "doesn't take effect" for it.
+        # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+        operation = _operation_request_metadata(req, runtime)
+        declared = {resp.status_code for resp in getattr(operation, "responses", []) or []}
+        if status in declared:
+            _record_step(runtime, "validate-status-code", {"status_code": status, "declared": True})
+            return None
+        action = dict(self.status_codes).get(status, self.unspecified_status_code_action)
         if action == "ignore":
             return None
         _record_validation_error(
@@ -2409,15 +2449,15 @@ class ValidateStatusCode(PolicyNode):
             errors_variable_name=self.errors_variable_name,
             message=f"Response status code {status} is not specified for this operation",
         )
-        if action == "prevent":
-            # Outbound policies cannot short-circuit in this engine, so
-            # prevent mutates the response in place instead.
-            req.response_status_code = 502
-            req.response_body = b"Response status code validation failed"
-            req.response_media_type = "text/plain"
-            if req.response_headers is not None:
-                req.response_headers["content-type"] = "text/plain"
-        return None
+        if action != "prevent":
+            return None
+        # prevent in outbound answers 502 and never leaks the backend response.
+        return ResponseSpec(
+            status_code=502,
+            headers={"content-type": "text/plain"},
+            body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
+            media_type="text/plain",
+        )
 
 
 @dataclass(frozen=True)
@@ -4073,6 +4113,22 @@ async def _apply_section_async(
     return None
 
 
+def _reads_response_body(step: PolicyNode) -> bool:
+    if isinstance(step, Choose):
+        nested = [item for _cond, steps in step.branches for item in steps] + list(step.otherwise)
+        return any(_reads_response_body(item) for item in nested)
+    return isinstance(step, SetBody | ValidateContent)
+
+
+def outbound_reads_response_body(docs: list[PolicyDocument]) -> bool:
+    """Whether an outbound step needs the response body in memory.
+
+    Streaming leaves the body unread, so set-body and validate-content would see
+    nothing unless the gateway buffers first.
+    """
+    return any(_reads_response_body(step) for _scope, step in _effective_section_steps(docs, "outbound"))
+
+
 async def apply_inbound_async(
     docs: list[PolicyDocument],
     req: PolicyRequest,
@@ -4093,10 +4149,14 @@ async def apply_outbound_async(
     docs: list[PolicyDocument],
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
-) -> None:
-    out = await _apply_section_async(docs, "outbound", req, runtime)
-    if out is not None:
-        raise HTTPException(status_code=500, detail="Outbound policies cannot short-circuit responses in the simulator")
+) -> ResponseSpec | None:
+    """Run the outbound section; a returned spec replaces the response.
+
+    return-response and mock-response are valid in outbound and end the section.
+    https://learn.microsoft.com/en-us/azure/api-management/return-response-policy
+    """
+    req.section = "outbound"
+    return await _apply_section_async(docs, "outbound", req, runtime)
 
 
 async def apply_on_error_async(
