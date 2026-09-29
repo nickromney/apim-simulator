@@ -333,7 +333,7 @@ def test_fail_on_error_status_code_enters_on_error() -> None:
       <on-error>
         <return-response>
           <set-status code="599" reason="Backend failure" />
-          <set-body template="raw">handled</set-body>
+          <set-body>handled</set-body>
         </return-response>
       </on-error>
     </policies>
@@ -390,7 +390,7 @@ def test_backend_connection_failure_exposes_last_error_reason_to_on_error() -> N
         <return-response>
           <set-status code="599" reason="Backend failure" />
           <set-header name="error-reason"><value>@(context.LastError.Reason)</value></set-header>
-          <set-body template="raw">handled</set-body>
+          <set-body>handled</set-body>
         </return-response>
       </on-error>
     </policies>

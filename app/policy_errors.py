@@ -8,9 +8,8 @@ rate-limit, quota, ip-filter, check-header and validate-jwt as errors, so a
 response produced by those policies enters on-error just like an exception.
 return-response and mock-response are not errors.
 
-Not modelled (the simulator's policy nodes do not carry the data): the
-``Path`` of a nested policy (``choose[3]\\when[2]``) and ``PolicyId``, the
-optional ``id`` attribute of the failing policy. Both are left empty.
+Policy nodes carry the optional ``id`` attribute and parser-built nested path
+so ``Path`` and ``PolicyId`` can be exposed through on-error.
 """
 
 from __future__ import annotations
@@ -111,7 +110,14 @@ def _refusal_message(body: bytes) -> str:
 
 
 def response_last_error(
-    source: str, body: bytes, *, scope: str, section: str, reason: str | None = None
+    source: str,
+    body: bytes,
+    *,
+    scope: str,
+    section: str,
+    path: str = "",
+    policy_id: str = "",
+    reason: str | None = None,
 ) -> dict[str, str] | None:
     """LastError for a refusal response, or None when the response is not an error.
 
@@ -122,11 +128,25 @@ def response_last_error(
         return None
     message = _refusal_message(body)
     return build_last_error(
-        source=source, reason=reason or _reason_for(source, message), message=message, scope=scope, section=section
+        source=source,
+        reason=reason or _reason_for(source, message),
+        message=message,
+        scope=scope,
+        section=section,
+        path=path,
+        policy_id=policy_id,
     )
 
 
-def exception_last_error(exc: Exception, source: str, *, scope: str, section: str) -> tuple[int, dict[str, str]]:
+def exception_last_error(
+    exc: Exception,
+    source: str,
+    *,
+    scope: str,
+    section: str,
+    path: str = "",
+    policy_id: str = "",
+) -> tuple[int, dict[str, str]]:
     """Status code and LastError for an exception raised while a policy ran.
 
     HTTPException carries its own status (a misconfigured policy is a 500). Any
@@ -142,6 +162,8 @@ def exception_last_error(exc: Exception, source: str, *, scope: str, section: st
             message=str(exc.detail),
             scope=scope,
             section=section,
+            path=path,
+            policy_id=policy_id,
         )
     return 500, build_last_error(
         source=source,
@@ -149,4 +171,6 @@ def exception_last_error(exc: Exception, source: str, *, scope: str, section: st
         message=str(exc),
         scope=scope,
         section=section,
+        path=path,
+        policy_id=policy_id,
     )

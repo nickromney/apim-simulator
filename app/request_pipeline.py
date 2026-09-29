@@ -605,6 +605,8 @@ async def _handle_backend_error_status(
                 message=f"Backend returned HTTP {status_code}",
                 scope=str(policy_req.variables.get("_policy_scope") or ""),
                 section="backend",
+                path=str(policy_req.variables.get("_policy_path") or ""),
+                policy_id=str(policy_req.variables.get("_policy_id") or ""),
             ),
         },
         body=policy_req.body,
@@ -1728,6 +1730,8 @@ async def _on_error_for_exception(
         str(policy_req.variables.get("_policy_step") or "multiple"),
         scope=str(policy_req.variables.get("_policy_scope") or ""),
         section=section,
+        path=str(policy_req.variables.get("_policy_path") or ""),
+        policy_id=str(policy_req.variables.get("_policy_id") or ""),
     )
     default = _apim_500_response()
     if isinstance(exc, HTTPException):
@@ -1776,6 +1780,8 @@ async def _guarded_stage(
         str(detail).encode() if detail else early.body,
         scope=str(policy_req.variables.get("_policy_scope") or ""),
         section=section,
+        path=str(policy_req.variables.get("_policy_path") or ""),
+        policy_id=str(policy_req.variables.get("_policy_id") or ""),
         reason=policy_req.variables.get("_policy_error_reason"),
     )
     if last_error is None:
