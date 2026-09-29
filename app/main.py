@@ -17,6 +17,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import GatewayConfig, load_config
+from app.gateway_errors import GatewayError, gateway_error_handler
 from app.management_api import build_management_router
 from app.management_service import ManagementService
 from app.proxy import build_user_payload
@@ -415,7 +416,12 @@ def _build_catch_all_router() -> APIRouter:  # noqa: C901 - one branch per route
     async def gateway_proxy(full_path: str, request: Request) -> Response:
         if request.method == "OPTIONS":
             return Response(status_code=204)
-        return await execute_gateway_request(request)
+        try:
+            return await execute_gateway_request(request)
+        except GatewayError:
+            raise
+        except HTTPException as exc:
+            raise GatewayError.from_http_exception(exc) from exc
 
     return router
 
@@ -555,6 +561,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             resolve_manager=_resolve_manager,
         ),
     )
+    app.add_exception_handler(GatewayError, gateway_error_handler)
     management_plane = ManagementService(
         app=app,
         serialize_gateway_config=_serialize_gateway_config,

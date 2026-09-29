@@ -286,7 +286,7 @@ case "$url" in
         response_headers+=("x-from-vscode: true")
       else
         response_status=401
-        response_body='{"detail":"Missing subscription key"}'
+        response_body='{"statusCode":401,"message":"Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API."}'
       fi
     fi
     ;;
@@ -355,7 +355,8 @@ EOF
   [[ "$output" != *"Starting tutorial 02 stack with docker compose"* ]]
   [[ "$output" == *"Verifying product and subscription metadata"* ]]
   [[ "$output" == *'"subscription_count": 1'* ]]
-  [[ "$output" == *'"detail": "Missing subscription key"'* ]]
+  [[ "$output" == *'"statusCode": 401'* ]]
+  [[ "$output" == *'Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API.'* ]]
   [[ "$output" == *'"status": "ok"'* ]]
 }
 

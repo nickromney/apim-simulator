@@ -48,8 +48,8 @@ verify_tutorial() {
   echo '$ curl -i "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
   capture_http_request "$APIM_BASE/$APIM_API_PATH/health"
   captured_expect_summary \
-    '{"detail":"Missing subscription key","status_code":401}' \
-    'summary = {"detail": (body_json or {}).get("detail"), "status_code": status}'
+    '{"message":"Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API.","status_code":401}' \
+    'summary = {"message": (body_json or {}).get("message"), "status_code": status}'
 
   echo
   echo '$ curl -sS -H "Ocp-Apim-Subscription-Key: '"$APIM_SUBSCRIPTION_KEY"'" "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'

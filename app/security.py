@@ -18,6 +18,7 @@ from app.config import (
     SubscriptionState,
     TrustedClientCertificateConfig,
 )
+from app.gateway_errors import subscription_key_error
 
 
 @dataclass(frozen=True)
@@ -164,12 +165,15 @@ def _get_subscription_key_optional(
     return None
 
 
-def _require_active_subscription(config: GatewayConfig, provided_key: str) -> None:
+def _require_active_subscription(
+    request: Request, config: GatewayConfig, route: RouteConfig | None, provided_key: str
+) -> None:
     sub = config.subscription.lookup_subscription_by_key(provided_key)
     if sub is None:
         return
     if sub.state != SubscriptionState.Active:
-        raise HTTPException(status_code=403, detail=f"Subscription is not active (state: {sub.state.value})")
+        # APIM treats a key for an inactive subscription as an invalid key.
+        raise subscription_key_error(request, config, route, missing=False)
 
 
 def validate_subscription_key(
@@ -182,13 +186,13 @@ def validate_subscription_key(
 
     provided = _get_subscription_key_optional(request, config, route)
     if not provided:
-        raise HTTPException(status_code=401, detail="Missing subscription key")
+        raise subscription_key_error(request, config, route, missing=True)
 
-    _require_active_subscription(config, provided)
+    _require_active_subscription(request, config, route, provided)
 
     identity = config.subscription.lookup_identity_by_key(provided)
     if identity is None:
-        raise HTTPException(status_code=401, detail="Invalid subscription key")
+        raise subscription_key_error(request, config, route, missing=False)
     return identity
 
 
@@ -202,10 +206,10 @@ def get_subscription_identity_optional(
     if not provided:
         return None
 
-    _require_active_subscription(config, provided)
+    _require_active_subscription(request, config, route, provided)
     identity = config.subscription.lookup_identity_by_key(provided)
     if identity is None:
-        raise HTTPException(status_code=401, detail="Invalid subscription key")
+        raise subscription_key_error(request, config, route, missing=False)
     return identity
 
 
@@ -218,7 +222,7 @@ def get_subscription_products_optional(
     if not provided:
         return []
 
-    _require_active_subscription(config, provided)
+    _require_active_subscription(request, config, route, provided)
     sub = config.subscription.lookup_subscription_by_key(provided)
     return sub.products if sub is not None else []
 
@@ -230,15 +234,15 @@ def require_subscription_products(
         return []
     provided = _get_subscription_key_optional(request, config, route)
     if not provided:
-        raise HTTPException(status_code=401, detail="Missing subscription key")
+        raise subscription_key_error(request, config, route, missing=True)
 
-    _require_active_subscription(config, provided)
+    _require_active_subscription(request, config, route, provided)
     sub = config.subscription.lookup_subscription_by_key(provided)
     if sub is None:
         # Back-compat: key->identity mode has no products.
         if config.subscription.lookup_identity_by_key(provided) is not None:
             return []
-        raise HTTPException(status_code=401, detail="Invalid subscription key")
+        raise subscription_key_error(request, config, route, missing=False)
     return sub.products
 
 

@@ -117,6 +117,10 @@ def test_pool_fails_over_and_opens_circuit() -> None:
 
 @pytest.mark.contract("BACKEND-POOL")
 def test_pool_returns_503_when_all_members_are_open() -> None:
+    """Gateway-generated pool exhaustion uses the APIM JSON envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/backends
+    """
     config = _pool_config(
         members=[
             BackendPoolMemberConfig(backend_id="backend-a"),
@@ -131,7 +135,7 @@ def test_pool_returns_503_when_all_members_are_open() -> None:
 
         second = client.get("/api/health")
         assert second.status_code == 503
-        assert second.json()["detail"] == "All backend pool members are unavailable"
+        assert second.json() == {"statusCode": 503, "message": "All backend pool members are unavailable"}
 
 
 @pytest.mark.contract("BACKEND-POOL")

@@ -1604,7 +1604,7 @@ def _assemble_config(acc: _ImportAccumulator) -> GatewayConfig:
     if acc.client_certificate_mode is not None:
         cfg.client_certificate.mode = acc.client_certificate_mode
     if not header_names:
-        cfg.subscription.header_names = ["Ocp-Apim-Subscription-Key", "X-Ocp-Apim-Subscription-Key"]
+        cfg.subscription.header_names = ["Ocp-Apim-Subscription-Key"]
     if not query_param_names:
         cfg.subscription.query_param_names = ["subscription-key"]
     cfg.routes = cfg.materialize_routes()

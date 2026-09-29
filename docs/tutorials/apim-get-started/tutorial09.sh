@@ -169,8 +169,8 @@ echo "A submitted subscription cannot call the API yet"
 echo '$ curl -i -H "Ocp-Apim-Subscription-Key: '"$APIM_PORTAL_SUBSCRIPTION_KEY"'" "'"$APIM_BASE"'/'"$APIM_PORTAL_API_ID"'/health"'
 capture_http_request "$APIM_BASE/$APIM_PORTAL_API_ID/health" -H "Ocp-Apim-Subscription-Key: $APIM_PORTAL_SUBSCRIPTION_KEY"
 captured_expect_summary \
-  '{"detail":"Subscription is not active (state: submitted)","status_code":403}' \
-  'summary = {"detail": (body_json or {}).get("detail"), "status_code": status}'
+  '{"message":"Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.","status_code":401}' \
+  'summary = {"message": (body_json or {}).get("message"),"status_code": status}'
 echo
 
 echo "Approving the subscription as the operator"

@@ -14,13 +14,16 @@ and the portal is off unless enabled.
 ### Gateway semantics
 
 - Products have a `state` (`published` or `not_published`) and an
-  `approval_required` flag. Only published products authorize gateway
-  traffic; a subscription whose product is unpublished gets
-  `403 Product is not published`.
+  `approval_required` flag. The simulator retains an adapted product-state
+  gate: a route whose only configured products are unpublished gets the
+  enveloped `403 Product is not published`. APIM documents that unpublishing a
+  product hides it from the developer portal but does not invalidate keys or
+  product-context access.
 - Subscriptions support the full APIM state set: `active`, `suspended`,
   `cancelled`, `submitted`, `rejected`, `expired`. Only `active` keys
-  authenticate; rejections name the state, for example
-  `403 Subscription is not active (state: submitted)`.
+  authenticate; inactive keys use the enveloped `401 Access denied due to
+  invalid subscription key. Make sure to provide a valid key for an active
+  subscription.` response.
 - `approval_required` is only valid on products with
   `require_subscription: true`; config load fails loudly otherwise.
 

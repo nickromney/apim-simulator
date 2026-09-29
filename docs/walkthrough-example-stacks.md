@@ -292,13 +292,15 @@ PY
 {
   "invalid_subscription": {
     "body": {
-      "detail": "Invalid subscription key"
+      "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+      "statusCode": 401
     },
     "status": 401
   },
   "missing_subscription": {
     "body": {
-      "detail": "Missing subscription key"
+      "message": "Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API.",
+      "statusCode": 401
     },
     "status": 401
   },
@@ -1163,14 +1165,16 @@ PY
   },
   "invalid_subscription": {
     "body": {
-      "detail": "Invalid subscription key"
+      "message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription.",
+      "statusCode": 401
     },
     "status": 401
   },
   "list_count": 1,
   "missing_subscription": {
     "body": {
-      "detail": "Missing subscription key"
+      "message": "Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API.",
+      "statusCode": 401
     },
     "status": 401
   },

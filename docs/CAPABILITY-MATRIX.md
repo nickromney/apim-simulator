@@ -19,6 +19,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 |---------|-----------|-------------------|-------|
 | Health endpoint | Yes | N/A | `/apim/health` |
 | Startup probe | Yes | N/A | `/apim/startup` |
+| Gateway error envelope | Yes | N/A | Public API routes return `{"statusCode": <int>, "message": "<text>"}` with `application/json`; `/apim/management`, `/apim/portal`, and health/probe routes retain their local FastAPI response shapes |
 | Config reload | Yes | N/A | `/apim/reload` + file watcher |
 | CORS | Yes | `azurerm_api_management` | `allowed_origins` in config |
 | Public network access | Partial | `azurerm_api_management.public_network_access_enabled` / AzAPI `properties.publicNetworkAccess` | Imported into service metadata only; local reachability is not enforced |
@@ -64,10 +65,11 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Products | Yes | `azurerm_api_management_product` | `products` map |
 | Product-API association | Yes | `azurerm_api_management_product_api` | `products` list on route/API |
 | Product-group association | Yes | `azurerm_api_management_product_group` | Descriptive link resources under `/apim/management/products/{product_id}/groups` |
-| Product publish state | Yes | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; only published products authorize gateway traffic. Adapted: config-authored products default to `published` (Azure portal defaults new products to not published) |
+| Product publish state | Adapted | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; the simulator still rejects a route whose only configured products are unpublished with an enveloped 403. APIM documents that unpublishing hides a product from the developer portal but does not invalidate existing keys or product-context access. Config-authored products default to `published` |
 | Subscriptions | Yes | `azurerm_api_management_subscription` | `subscription.subscriptions` |
 | Primary/secondary keys | Yes | - | `keys.primary`, `keys.secondary` |
-| Subscription state | Yes | `azurerm_api_management_subscription.state` | `active`, `suspended`, `cancelled`, `submitted`, `rejected`, `expired`; only `active` keys authenticate |
+| Subscription state | Yes | `azurerm_api_management_subscription.state` | `active`, `suspended`, `cancelled`, `submitted`, `rejected`, `expired`; only `active` keys authenticate, and inactive keys return APIM's 401 invalid-key envelope |
+| Subscription key names and forwarding | Yes | `azurerm_api_management_api.subscription_key_parameter_names` | Defaults are `Ocp-Apim-Subscription-Key` and `subscription-key`; keys are forwarded to backends by default and can be removed by inbound policy |
 | Key rotation | Yes | - | `/apim/management/subscriptions/{id}/rotate` |
 | Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle |
 | Subscription bypass | Yes | - | Header conditions |
