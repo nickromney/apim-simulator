@@ -19,6 +19,10 @@ def test_enforce_product_grant_returns_empty_when_route_has_no_products() -> Non
 
 
 def test_enforce_product_grant_rejects_unpublished_product() -> None:
+    """Product access errors keep their status while using the gateway envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     cfg = GatewayConfig(products={"starter": ProductConfig(name="starter", state=ProductState.NotPublished)})
     route = RouteConfig(name="r1", path_prefix="/api", upstream_base_url=http_url("upstream"), products=["starter"])
     with pytest.raises(HTTPException) as exc:
@@ -28,11 +32,19 @@ def test_enforce_product_grant_rejects_unpublished_product() -> None:
 
 
 def test_enforce_product_grant_requires_subscription_key() -> None:
+    """APIM reports a missing subscription key with its standard 401 message.
+
+    https://learn.microsoft.com/en-us/troubleshoot/azure/api-mgmt/availability/unauthorized-errors-invoke-apis
+    """
     cfg = GatewayConfig(products={"starter": ProductConfig(name="starter")})
     route = RouteConfig(name="r1", path_prefix="/api", upstream_base_url=http_url("upstream"), products=["starter"])
     with pytest.raises(HTTPException) as exc:
         enforce_product_grant(cfg, route, _auth(subscription=False), subscription_is_bypassed=False)
     assert exc.value.status_code == 401
+    assert (
+        exc.value.detail
+        == "Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API."
+    )
 
 
 def test_enforce_product_grant_picks_first_published_granted_product() -> None:
@@ -57,6 +69,10 @@ def test_extract_scopes_and_roles() -> None:
 
 
 def test_enforce_route_authz_requires_scope() -> None:
+    """Simulator-only route authorization keeps 403 and uses the gateway envelope.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
     from app.config import RouteAuthzConfig
 
     route = RouteConfig(

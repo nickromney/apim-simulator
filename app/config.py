@@ -97,9 +97,7 @@ class Subscription(BaseModel):
 
 class SubscriptionConfig(BaseModel):
     required: bool = True
-    header_names: list[str] = Field(
-        default_factory=lambda: ["Ocp-Apim-Subscription-Key", "X-Ocp-Apim-Subscription-Key"]
-    )
+    header_names: list[str] = Field(default_factory=lambda: ["Ocp-Apim-Subscription-Key"])
     query_param_names: list[str] = Field(default_factory=lambda: ["subscription-key"])
     # Back-compat/simple mode: direct map of key -> identity
     keys: dict[str, SubscriptionIdentity] = Field(default_factory=dict)

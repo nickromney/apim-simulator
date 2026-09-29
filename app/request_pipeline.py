@@ -29,6 +29,7 @@ from app.backend_pool import (
 )
 from app.config import GatewayConfig, ProductState, RouteConfig
 from app.effective_policy import stacked_policy_xml_documents
+from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
 from app.policy import (
     PolicyRequest,
@@ -134,6 +135,7 @@ def enforce_product_grant(
     auth: AuthContext,
     *,
     subscription_is_bypassed: bool,
+    request: Request | None = None,
 ) -> str:
     allowed_products = allowed_products_for_route(route)
     if not allowed_products:
@@ -141,6 +143,10 @@ def enforce_product_grant(
 
     published_products = [p for p in allowed_products if product_is_published(cfg, p)]
     if not published_products:
+        # The simulator keeps this product-state gate as an explicit adaptation;
+        # APIM says unpublishing hides a product from the portal without
+        # invalidating existing keys or product-context access:
+        # https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
         raise HTTPException(status_code=403, detail="Product is not published")
 
     require_sub = any(
@@ -150,12 +156,12 @@ def enforce_product_grant(
         require_sub = False
     if require_sub:
         if auth.subscription is None:
-            raise HTTPException(status_code=401, detail="Missing subscription key")
+            raise subscription_key_error(request, cfg, route, missing=True)
         granted = set(auth.subscription_products)
         if not set(published_products).intersection(granted):
             if set(allowed_products).intersection(granted):
                 raise HTTPException(status_code=403, detail="Product is not published")
-            raise HTTPException(status_code=403, detail="Subscription not authorized for product")
+            raise subscription_key_error(request, cfg, route, missing=False)
 
     return effective_product_id_for_call(cfg, allowed_products, auth)
 
@@ -552,7 +558,7 @@ def _admit_request(request: Request, cfg: GatewayConfig) -> _AdmittedRequest:
     resolved = resolve_route(cfg, request)
     if resolved is None:
         request.state.apim_result_reason = "no_route"
-        raise HTTPException(status_code=404, detail="No route")
+        raise HTTPException(status_code=404, detail="Resource not found")
     route = resolved.route
     request.state.apim_route_name = route.name
 
@@ -564,6 +570,7 @@ def _admit_request(request: Request, cfg: GatewayConfig) -> _AdmittedRequest:
             route,
             auth,
             subscription_is_bypassed=subscription_bypassed(request, cfg),
+            request=request,
         )
     except HTTPException as exc:
         request.state.apim_result_reason = _product_grant_reason(exc)
@@ -608,6 +615,9 @@ async def _read_body_within_limit(request: Request, cfg: GatewayConfig) -> bytes
     body = await request.body()
     if len(body) > cfg.max_request_body_bytes:
         request.state.apim_result_reason = "request_body_too_large"
+        # Learn documents validation size errors, but not this simulator limit's
+        # public text; retain the local 413 contract inside the APIM envelope:
+        # https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
         raise HTTPException(status_code=413, detail="Request body too large")
     return body
 
@@ -653,6 +663,9 @@ async def _fail_upstream_unavailable(
 
     if override is None:
         logging.getLogger("apim-simulator").exception("Unable to reach upstream", exc_info=last_exc)
+        # APIM records this transport failure as BackendConnectionFailure, but
+        # Learn does not define one public body for every backend failure mode:
+        # https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
         raise HTTPException(status_code=502, detail="Backend API unavailable")
 
     request.state.apim_result_reason = "policy_on_error_override"
@@ -769,6 +782,9 @@ def _choose_backend(
         selection = select_pool_member(cfg, backend_health, backend_id, backend, now=time.time())
         if selection is None:
             request.state.apim_result_reason = "backend_pool_exhausted"
+            # APIM's circuit-breaker documentation defines 503 availability
+            # behavior, but not this simulator pool's public message:
+            # https://learn.microsoft.com/en-us/azure/api-management/backends
             raise HTTPException(status_code=503, detail="All backend pool members are unavailable")
         backend_id, backend = selection
         policy_req.headers["x-apim-backend-pool"] = pool.pool_backend_id

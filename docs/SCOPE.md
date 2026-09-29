@@ -6,7 +6,7 @@ This repository is not trying to clone all of Azure API Management. It is a loca
 
 - Config-driven gateway routing and upstream proxying
 - Service metadata, APIs, operations, products, subscriptions, version sets, backends, named values, policy fragments, tags, users, groups, loggers, and diagnostics in local config
-- Product publish state and approval-required flows, with full APIM subscription lifecycle states
+- Product publish state and approval-required flows, with full APIM subscription lifecycle states; unpublished-product gateway rejection remains an explicitly documented simulator adaptation
 - An adapted consumer developer-portal surface at `/apim/portal`: catalog browsing, group-scoped product visibility, subscription sign-up, and a try-it console
 - Tenant-key-protected management APIs, replay, trace summaries, and the operator console
 - Terraform/OpenTofu import plus static compatibility reporting

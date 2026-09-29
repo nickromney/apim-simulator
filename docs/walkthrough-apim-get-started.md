@@ -160,8 +160,8 @@ $ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/a
 Verifying subscription-backed access
 $ curl -i "http://localhost:8000/tutorial-api/health"
 {
-  "detail": "Missing subscription key",
-  "status_code": 401
+  "statusCode": 401,
+  "message": "Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API."
 }
 
 $ curl -sS -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/tutorial-api/health"
