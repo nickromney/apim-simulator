@@ -154,13 +154,13 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `cache-remove-value` | Partial | - | Removes from local in-memory value cache; `prefer-external` is adapted and `external` is unsupported. Supports `fail-on-cache-removal-error`; the local dictionary has no removal failure path, so this option cannot fire locally. |
 | `mock-response` | Partial | - | Valid in inbound and outbound (outbound replaces the response). Supports `status-code` and `content-type`, returning the first matching authored response example for the current operation |
 | `send-request` | Yes | - | Supports `new\|copy`, headers/body, timeout, ignore-error, managed identity, certificate placeholder |
-| `llm-token-limit` | Partial | - | Adapted: sliding-minute and quota-period windows, estimate/actual usage counting, 429/403 with retry and remaining headers; see [AI-GATEWAY.md](AI-GATEWAY.md) |
+| `llm-token-limit` | Partial | - | Adapted: sliding-minute and quota-period windows, estimate/actual usage counting, Vertex `usageMetadata` plus OpenAI/Anthropic usage parsing, APIM JSON error envelopes with `Retry-After`, and retry/remaining headers. Local remaining-quota values are exact counters while Azure documents them as estimates; see [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `azure-openai-token-limit` | Partial | - | Alias of `llm-token-limit` |
-| `llm-emit-token-metric` | Partial | - | Adapted: emits OTEL counter `apim.llm.tokens` with policy dimensions instead of Application Insights metrics |
+| `llm-emit-token-metric` | Partial | - | Adapted: emits OTEL counter `apim.llm.tokens` with the documented `API Management` default namespace, evaluated dimension names, documented default dimensions, and at most five configured dimensions instead of Application Insights metrics |
 | `azure-openai-emit-token-metric` | Partial | - | Alias of `llm-emit-token-metric` |
 | `llm-semantic-cache-lookup`/`-store` | No | - | Policy not implemented; the sibling AI Foundry simulator provides service-side semantic caching behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
 | `llm-content-safety` | No | - | Policy not implemented; the sibling AI Foundry simulator serves the Content Safety API behind `make up-ai-foundry` — see ADR 0003 and [AI-GATEWAY.md](AI-GATEWAY.md) |
-| `emit-metric` | Partial | - | Adapted: emits the OTEL counter `apim.policy.metric` with dimensions |
+| `emit-metric` | Partial | - | Adapted: emits the OTEL counter `apim.policy.metric` with double values (including zero), the documented `API Management` default namespace, evaluated dimension names, documented default dimensions, and at most five configured dimensions |
 | `validate-content` | Partial | - | Size, content-type map, and JSON well-formedness of the request body (inbound, 400) or response body (outbound, 502); JSON Schema enforcement deferred |
 | `validate-parameters` | Partial | - | Required/unspecified headers and query against operation metadata; path parameters deferred |
 | `validate-status-code` | Partial | - | Declared operation responses are always valid (a per-code override does not apply to them), then explicit codes, then the unspecified action; `prevent` returns 502 to the client and to the cache |
