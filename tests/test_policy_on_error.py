@@ -49,7 +49,7 @@ def test_check_header_refusal_enters_on_error_and_returns_its_response() -> None
     """A check-header refusal is a predefined error: control jumps to on-error."""
     policy = """
     <policies>
-      <inbound><check-header name="x-required" failed-check-httpcode="403" failed-check-error-message="Header x-required was not found in the request. Access denied." /></inbound>
+      <inbound><check-header name="x-required" failed-check-httpcode="403" failed-check-error-message="Header x-required was not found in the request. Access denied." ignore-case="false" /></inbound>
       <on-error>
         <return-response>
           <set-status code="418" />
@@ -75,7 +75,7 @@ def test_on_error_without_return_response_keeps_error_response_and_adds_headers(
     """The learn example sets headers in on-error and the caller still gets the error response."""
     policy = f"""
     <policies>
-      <inbound><check-header name="x-required" failed-check-httpcode="403" failed-check-error-message="denied" /></inbound>
+      <inbound><check-header name="x-required" failed-check-httpcode="403" failed-check-error-message="denied" ignore-case="false" /></inbound>
       <on-error>{ERROR_HEADERS}</on-error>
     </policies>
     """
@@ -83,7 +83,7 @@ def test_on_error_without_return_response_keeps_error_response_and_adds_headers(
         response = client.get("/api/x")
 
     assert response.status_code == 403
-    assert response.text == "denied"
+    assert response.json() == {"statusCode": 403, "message": "denied"}
     assert response.headers["err-source"] == "check-header"
     assert response.headers["err-message"] == "denied"
     assert response.headers["err-section"] == "inbound"
@@ -92,12 +92,12 @@ def test_on_error_without_return_response_keeps_error_response_and_adds_headers(
 
 
 def test_refusal_without_on_error_is_unchanged() -> None:
-    policy = '<policies><inbound><check-header name="x-required" failed-check-httpcode="403" failed-check-error-message="denied" /></inbound></policies>'
+    policy = '<policies><inbound><check-header name="x-required" failed-check-httpcode="403" failed-check-error-message="denied" ignore-case="false" /></inbound></policies>'
     with _client(policy) as client:
         response = client.get("/api/x")
 
     assert response.status_code == 403
-    assert response.text == "denied"
+    assert response.json() == {"statusCode": 403, "message": "denied"}
 
 
 def test_return_response_is_not_an_error() -> None:
@@ -205,3 +205,23 @@ def test_outbound_expression_failure_enters_on_error() -> None:
     assert response.headers["err-source"] == "set-header"
     assert response.headers["err-section"] == "outbound"
     assert response.headers["err-reason"] == "ExpressionValueEvaluationFailure"
+
+
+def test_last_error_reports_the_policy_reason_and_envelope_message() -> None:
+    """LastError carries the predefined Reason and the refusal's message, not its JSON body.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    """
+    policy = """<policies>
+      <inbound><check-header name="x-required" failed-check-httpcode="403" failed-check-error-message="nope" ignore-case="false"><value>ok</value></check-header></inbound>
+      <on-error>
+        <set-header name="err-reason" exists-action="override"><value>@(context.LastError.Reason)</value></set-header>
+        <set-header name="err-message" exists-action="override"><value>@(context.LastError.Message)</value></set-header>
+      </on-error>
+    </policies>"""
+    with _client(policy) as client:
+        response = client.get("/api/x", headers={"x-required": "wrong"})
+
+    assert response.status_code == 403
+    assert response.headers["err-reason"] == "HeaderValueNotAllowed"
+    assert response.headers["err-message"] == "nope"

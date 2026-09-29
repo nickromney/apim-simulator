@@ -43,6 +43,7 @@ from app.policy import (
     apply_on_error_async,
     apply_outbound_async,
     finalize_deferred_actions,
+    outbound_reads_response_body,
     parse_policies_xml,
 )
 from app.policy_errors import build_last_error, exception_last_error, response_last_error
@@ -582,6 +583,23 @@ async def _handle_backend_error_status(
     )
 
 
+def _require_buffering_for_outbound(policy_docs: list[Any], policy_req: PolicyRequest) -> None:
+    """Have the upstream body read when an outbound policy must see or change it."""
+    if outbound_reads_response_body(policy_docs):
+        policy_req.variables["_policy_response_buffering_required"] = True
+
+
+@dataclass
+class _OutboundResult:
+    """What the outbound stage made of the response."""
+
+    status_code: int
+    headers: dict[str, str]
+    content: bytes
+    media_type: str | None
+    replaced: bool = False
+
+
 async def _apply_outbound_policies(
     *,
     policy_docs: list[Any],
@@ -592,8 +610,13 @@ async def _apply_outbound_policies(
     content: bytes,
     media_type: str | None,
     upstream_status_code: int,
-) -> tuple[dict[str, str], bytes, str | None]:
-    """Run the outbound stage and return what it made of the response."""
+) -> _OutboundResult:
+    """Run the outbound stage and return what it made of the response.
+
+    A short-circuit (return-response, mock-response, a validation that prevents)
+    replaces the whole response. Otherwise a changed body must not keep the
+    upstream Content-Length.
+    """
     outbound_req = PolicyRequest(
         method=request.method,
         path=policy_req.path,
@@ -606,8 +629,49 @@ async def _apply_outbound_policies(
         response_body=content,
         response_media_type=media_type,
     )
-    await apply_outbound_async(policy_docs, outbound_req, policy_runtime)
-    return outbound_req.headers, outbound_req.response_body, outbound_req.response_media_type or media_type
+    spec = await apply_outbound_async(policy_docs, outbound_req, policy_runtime)
+    if spec is not None:
+        headers = {k: v for k, v in spec.headers.items() if k.lower() != "content-length"}
+        return _OutboundResult(
+            spec.status_code, headers, spec.body, spec.media_type or headers.get("content-type"), replaced=True
+        )
+    headers = outbound_req.headers
+    if outbound_req.response_body != content:
+        headers = {k: v for k, v in headers.items() if k.lower() != "content-length"}
+    return _OutboundResult(
+        upstream_status_code,
+        headers,
+        outbound_req.response_body,
+        outbound_req.response_media_type or media_type,
+    )
+
+
+async def _run_outbound_stage(
+    *,
+    policy_docs: list[Any],
+    policy_runtime: Any,
+    request: Request,
+    policy_req: PolicyRequest,
+    upstream_response: httpx.Response,
+    upstream: _UpstreamPayload,
+) -> _OutboundResult:
+    """Apply outbound policies, if any, to the upstream response."""
+    if not policy_docs:
+        return _OutboundResult(upstream.status_code, upstream.headers, upstream.content, upstream.media_type)
+    outbound = await _apply_outbound_policies(
+        policy_docs=policy_docs,
+        policy_runtime=policy_runtime,
+        request=request,
+        policy_req=policy_req,
+        response_headers=upstream.headers,
+        content=upstream.content,
+        media_type=upstream.media_type,
+        upstream_status_code=upstream.status_code,
+    )
+    if outbound.replaced and not upstream.buffered:
+        # The upstream body is never sent, so release the connection.
+        await upstream_response.aclose()
+    return outbound
 
 
 def _enforce_authz_with_policy_claims(
@@ -1486,6 +1550,7 @@ async def _guarded_stage(
         str(detail).encode() if detail else early.body,
         scope=str(policy_req.variables.get("_policy_scope") or ""),
         section=section,
+        reason=policy_req.variables.get("_policy_error_reason"),
     )
     if last_error is None:
         return early, False
@@ -1506,10 +1571,8 @@ async def _guarded_outbound(
     policy_runtime: Any,
     request: Request,
     policy_req: PolicyRequest,
-    response_headers: dict[str, str],
-    content: bytes,
-    media_type: str | None,
-    upstream_status_code: int,
+    upstream_response: httpx.Response,
+    upstream: _UpstreamPayload,
     cfg: GatewayConfig,
     correlation_id: str | None,
     trace_id: str | None,
@@ -1518,20 +1581,16 @@ async def _guarded_outbound(
     trace_collector: Any,
     attempts_used: int,
     elapsed_seconds: float,
-) -> tuple[dict[str, str], bytes, str | None] | Response:
+) -> _OutboundResult | Response:
     """Run outbound policy; an exception in it jumps to on-error and replaces the response."""
-    if not policy_docs:
-        return response_headers, content, media_type
     try:
-        return await _apply_outbound_policies(
+        return await _run_outbound_stage(
             policy_docs=policy_docs,
             policy_runtime=policy_runtime,
             request=request,
             policy_req=policy_req,
-            response_headers=response_headers,
-            content=content,
-            media_type=media_type,
-            upstream_status_code=upstream_status_code,
+            upstream_response=upstream_response,
+            upstream=upstream,
         )
     except Exception as exc:
         spec = await _on_error_for_exception(
@@ -1848,6 +1907,7 @@ async def execute_gateway_request(request: Request) -> Response:
         )
 
     request.state.apim_upstream_duration_seconds = elapsed_seconds
+    _require_buffering_for_outbound(policy_docs, policy_req)
     upstream = await _read_upstream_response(
         upstream_response=upstream_response,
         correlation_id=correlation_id,
@@ -1886,10 +1946,8 @@ async def execute_gateway_request(request: Request) -> Response:
         policy_runtime=policy_runtime,
         request=request,
         policy_req=policy_req,
-        response_headers=response_headers,
-        content=content,
-        media_type=media_type,
-        upstream_status_code=upstream_status_code,
+        upstream_response=upstream_response,
+        upstream=upstream,
         cfg=cfg,
         correlation_id=correlation_id,
         trace_id=trace_id if trace_requested else None,
@@ -1901,7 +1959,9 @@ async def execute_gateway_request(request: Request) -> Response:
     )
     if isinstance(outbound, Response):
         return outbound
-    response_headers, content, media_type = outbound
+    response_headers, content, media_type = outbound.headers, outbound.content, outbound.media_type
+    upstream_status_code = outbound.status_code
+    requires_buffering = requires_buffering or outbound.replaced
 
     finalize_deferred_actions(
         PolicyRequest(

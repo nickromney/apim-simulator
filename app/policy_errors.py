@@ -15,6 +15,7 @@ optional ``id`` attribute of the failing policy. Both are left empty.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -96,13 +97,31 @@ def _reason_for(source: str, message: str) -> str:
     return ""
 
 
-def response_last_error(source: str, body: bytes, *, scope: str, section: str) -> dict[str, str] | None:
-    """LastError for a refusal response, or None when the response is not an error."""
+def _refusal_message(body: bytes) -> str:
+    """The message a refusal carried: the envelope's message field, else the raw text."""
+    text = body.decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return text
+    if isinstance(parsed, dict) and isinstance(parsed.get("message"), str):
+        return parsed["message"]
+    return text
+
+
+def response_last_error(
+    source: str, body: bytes, *, scope: str, section: str, reason: str | None = None
+) -> dict[str, str] | None:
+    """LastError for a refusal response, or None when the response is not an error.
+
+    A policy that knows its predefined Reason records it; otherwise the Reason is
+    inferred from the message text.
+    """
     if source not in ERROR_RESPONSE_POLICIES:
         return None
-    message = body.decode("utf-8", errors="replace")
+    message = _refusal_message(body)
     return build_last_error(
-        source=source, reason=_reason_for(source, message), message=message, scope=scope, section=section
+        source=source, reason=reason or _reason_for(source, message), message=message, scope=scope, section=section
     )
 
 
