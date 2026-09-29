@@ -128,7 +128,7 @@ json_expect_summary \
 echo
 
 v2_api="$(management_put "/apim/management/apis/versioned-v2" "$(cat <<JSON
-{"name":"Versioned V2","path":"$VERSIONED_PATH","upstream_base_url":"http://mock-backend:8080/api","api_version_set":"$VERSION_SET_ID","api_version":"v2","policies_xml":"<policies><inbound /><backend /><outbound><set-header name=\"x-version\" exists-action=\"override\"><value>v2</value></set-header></outbound><on-error /></policies>"}
+{"name":"Versioned V2","path":"$VERSIONED_PATH","upstream_base_url":"http://mock-backend:8080/api","api_version_set":"$VERSION_SET_ID","api_version":"v2","policies_xml":"<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-version\" exists-action=\"override\"><value>v2</value></set-header></outbound><on-error /></policies>"}
 JSON
 )")"
 json_expect_summary \

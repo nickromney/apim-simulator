@@ -53,7 +53,7 @@
       "upstream_path_prefix": "/api",
       "backend": "hello-backend",
       "products": ["starter-usage-plan"],
-      "policies_xml": "<policies>\n  <inbound>\n    <include-fragment fragment-id=\"inject-stage-header\" />\n  </inbound>\n  <backend />\n  <outbound />\n  <on-error />\n</policies>",
+      "policies_xml": "<policies>\n  <inbound>\n    <include-fragment fragment-id=\"inject-stage-header\" />\n  </inbound>\n  <backend><forward-request /></backend>\n  <outbound />\n  <on-error />\n</policies>",
       "operations": {
         "health": {
           "name": "health",

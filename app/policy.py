@@ -4308,11 +4308,11 @@ def _effective_section_steps(docs: list[PolicyDocument], section_name: str) -> l
     effective: list[ScopedStep] = []
     section_key = "on-error" if section_name == "on_error" else section_name
     for doc in docs:
-        # APIM documents explicitly describe omitted base as dropping the
-        # parent. The docs do not distinguish a missing section from an empty
-        # one, so both are treated as a configured section with no base.
+        # A section present without base drops the parent. An omitted section
+        # is taken as the default, which Learn says includes base in every
+        # section; the page doesn't state the omitted case outright.
+        # https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
         if section_key not in doc.sections_present:
-            effective = []
             continue
         local = getattr(doc, section_name.replace("-", "_"))
         if any(isinstance(step, NoOp) for step in local):

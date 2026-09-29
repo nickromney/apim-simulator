@@ -20,7 +20,7 @@
       </when>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <cache-store-value key="@(context.Request.Headers.GetValueOrDefault(&quot;x-user&quot;,&quot;&quot;))" value="warm" duration="60" />
   </outbound>

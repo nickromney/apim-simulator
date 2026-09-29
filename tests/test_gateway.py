@@ -773,7 +773,7 @@ def test_rate_limit_policy_returns_429_on_second_call() -> None:
   <inbound>
     <rate-limit calls="1" renewal-period="300" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1022,7 +1022,7 @@ def test_policy_inbound_set_header_modifies_upstream_request() -> None:
       <value>1</value>
     </set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1057,7 +1057,7 @@ def test_policy_inbound_rewrite_uri_modifies_upstream_path() -> None:
   <inbound>
     <rewrite-uri template="/api/v1/other" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1099,7 +1099,7 @@ def test_policy_choose_when_selects_branch() -> None:
       </otherwise>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1138,7 +1138,7 @@ def test_policy_return_response_short_circuits_upstream() -> None:
       <body>nope</body>
     </return-response>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1261,7 +1261,7 @@ def test_full_model_api_and_operation_policies_stack() -> None:
   <inbound>
     <set-header name="x-api" exists-action="override"><value>1</value></set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -1272,7 +1272,7 @@ def test_full_model_api_and_operation_policies_stack() -> None:
     <set-header name="x-op" exists-action="override"><value>1</value></set-header>
     <base />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -3148,7 +3148,7 @@ def test_management_crud_persists_api_authored_resources(tmp_path: Path, monkeyp
                 "upstream_base_url": _http_url("weather-backend"),
                 "backend": "weather-backend",
                 "products": ["starter"],
-                "policies_xml": "<policies><inbound><base /></inbound><backend /><outbound /><on-error /></policies>",
+                "policies_xml": "<policies><inbound><base /></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
             },
         )
         operation = client.put(
@@ -3350,7 +3350,7 @@ def test_management_policy_get_put_updates_route_policy_in_memory() -> None:
     policy_xml = """\
 <policies>
   <inbound />
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -3389,7 +3389,7 @@ def test_management_policy_get_put_updates_route_policy_in_memory() -> None:
   <inbound>
     <set-header name="x-managed" exists-action="override"><value>1</value></set-header>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -3939,7 +3939,7 @@ def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> N
       </required-claims>
     </validate-jwt>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4011,7 +4011,7 @@ def test_send_request_policy_can_branch_on_response_body() -> None:
       </when>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4057,7 +4057,7 @@ def test_set_backend_service_policy_switches_backend_by_query() -> None:
       </when>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4106,7 +4106,7 @@ def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> N
       remaining-calls-variable-name="remaining_calls"
       total-calls-header-name="X-Total" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4155,7 +4155,7 @@ def test_rate_limit_by_key_supports_context_subscription_id_expression() -> None
     <rate-limit-by-key calls="1" renewal-period="60" counter-key="@(context.Subscription.Id)" />
     <base />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <set-header name="Custom" exists-action="override">
       <value>My custom value</value>
@@ -4229,7 +4229,7 @@ def test_quota_by_key_respects_first_period_start(monkeypatch: Any) -> None:
       counter-key="@(context.Request.IpAddress)"
       first-period-start="2026-04-02T10:00:00Z" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>
@@ -4274,7 +4274,7 @@ def test_cache_lookup_and_store_hit_and_vary_by_query_parameter() -> None:
       <vary-by-query-parameter>version</vary-by-query-parameter>
     </cache-lookup>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <cache-store duration="60" />
   </outbound>
@@ -4322,7 +4322,7 @@ def test_cache_lookup_varies_by_developer_subscription() -> None:
       downstream-caching-type="private"
       must-revalidate="true" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <cache-store duration="60" />
   </outbound>
@@ -4512,7 +4512,7 @@ def test_cache_lookup_value_store_and_remove_value() -> None:
       </when>
     </choose>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound>
     <cache-store-value key="@(context.Request.Headers.GetValueOrDefault(&quot;x-user&quot;,&quot;&quot;))" value="warm" duration="60" />
   </outbound>
@@ -4559,7 +4559,7 @@ def test_external_cache_policy_is_unsupported_at_runtime() -> None:
   <inbound>
     <cache-lookup-value key="demo" variable-name="value" caching-type="external" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

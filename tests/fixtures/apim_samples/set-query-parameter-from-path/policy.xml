@@ -4,7 +4,7 @@
       <value>{path}</value>
     </set-query-parameter>
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

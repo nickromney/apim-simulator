@@ -2,7 +2,7 @@
   <inbound>
     <cache-lookup-value key="demo" variable-name="value" caching-type="external" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

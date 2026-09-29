@@ -33,7 +33,7 @@ curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
 curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
   -H "Content-Type: application/json" \
   "$APIM_BASE/apim/management/apis/versioned-v2" \
-  --data '{"name":"Versioned V2","path":"versioned","upstream_base_url":"http://mock-backend:8080/api","api_version_set":"public","api_version":"v2","policies_xml":"<policies><inbound /><backend /><outbound><set-header name=\"x-version\" exists-action=\"override\"><value>v2</value></set-header></outbound><on-error /></policies>"}'
+  --data '{"name":"Versioned V2","path":"versioned","upstream_base_url":"http://mock-backend:8080/api","api_version_set":"public","api_version":"v2","policies_xml":"<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-version\" exists-action=\"override\"><value>v2</value></set-header></outbound><on-error /></policies>"}'
 ```
 
 Add the same operation to both:

@@ -2,7 +2,7 @@
   <inbound>
     <include-fragment fragment-id="common-header" />
   </inbound>
-  <backend />
+  <backend><forward-request /></backend>
   <outbound />
   <on-error />
 </policies>

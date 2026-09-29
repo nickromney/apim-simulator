@@ -11,5 +11,5 @@ X-Apim-Tenant-Key: {{tenant}}
 Content-Type: application/json
 
 {
-  "xml": "<policies><inbound /><backend /><outbound><set-header name=\"x-from-vscode\" exists-action=\"override\"><value>true</value></set-header></outbound><on-error /></policies>"
+  "xml": "<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-from-vscode\" exists-action=\"override\"><value>true</value></set-header></outbound><on-error /></policies>"
 }

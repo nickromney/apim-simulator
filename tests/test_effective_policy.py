@@ -221,30 +221,42 @@ def test_omitting_base_drops_the_parent_section() -> None:
     assert req.headers["x-order"] == "child"
 
 
-def test_empty_or_absent_child_section_drops_parent_but_missing_document_inherits() -> None:
-    """A configured empty/absent section has no base; an absent scope is unchanged.
+def test_empty_section_drops_parent_but_omitted_section_inherits() -> None:
+    """A present section without base drops the parent; an omitted section inherits it.
 
-    The distinction between an omitted section and an empty section is not
-    called out separately in Learn; both have no base marker, so this follows
-    APIM's documented no-inheritance rule for the configured child document.
+    Learn says base "is included by default in each policy section", and that
+    APIM configures base in the backend section at every non-global scope. It
+    does not state what an omitted section means. Treating it as the default
+    (base) keeps minimal policies that only define inbound forwarding to the
+    backend, which is how they behave in practice.
 
     https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
     """
     parent = parse_policies_xml(PARENT_POLICY)
     empty_section = parse_policies_xml("<policies><inbound /></policies>")
-    absent_section = parse_policies_xml("<policies><outbound /></policies>")
+    omitted_section = parse_policies_xml("<policies><outbound /></policies>")
 
     empty_req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
     assert apply_inbound([parent, empty_section], empty_req) is None
     assert "x-order" not in empty_req.headers
 
-    absent_req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
-    assert apply_inbound([parent, absent_section], absent_req) is None
-    assert "x-order" not in absent_req.headers
+    omitted_req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
+    assert apply_inbound([parent, omitted_section], omitted_req) is None
+    assert omitted_req.headers["x-order"] == "global"
 
     missing_doc_req = PolicyRequest(method="GET", path="/", query={}, headers={}, variables={})
     assert apply_inbound([parent], missing_doc_req) is None
     assert missing_doc_req.headers["x-order"] == "global"
+
+
+def test_effective_xml_inherits_an_omitted_section() -> None:
+    """The management effective-policy view treats an omitted section as base.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+    """
+    merged = effective_policy_xml([PARENT_POLICY], ["<policies><outbound /></policies>"])
+
+    assert "global" in merged.split("<inbound>", 1)[1].split("</inbound>", 1)[0]
 
 
 def test_policy_fragments_are_expanded_before_base_is_replaced() -> None:
