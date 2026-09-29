@@ -2652,6 +2652,7 @@ class PolicyDocument:
     backend: list[PolicyNode]
     outbound: list[PolicyNode]
     on_error: list[PolicyNode]
+    sections_present: frozenset[str] = frozenset()
 
 
 POLICY_VALUE_PATTERN = re.compile(r"\{([^{}]+)\}")
@@ -3222,6 +3223,7 @@ def _parse_choose(
             policy_fragments=policy_fragments,
             section_name=section_name,
             seen_fragments=set(seen_fragments),
+            allow_base=False,
         )
         branches.append((cond, steps))
     otherwise_el = el.find("otherwise")
@@ -3231,6 +3233,7 @@ def _parse_choose(
             policy_fragments=policy_fragments,
             section_name=section_name,
             seen_fragments=set(seen_fragments),
+            allow_base=False,
         )
         if otherwise_el is not None
         else []
@@ -3261,9 +3264,14 @@ def _parse_children(
     policy_fragments: dict[str, str],
     section_name: str,
     seen_fragments: set[str],
+    allow_base: bool = True,
 ) -> list[PolicyNode]:
     out: list[PolicyNode] = []
     for child in children:
+        # APIM's base marker controls the containing section; it is not a
+        # policy statement that can be deferred inside choose branches.
+        if child.tag == "base" and not allow_base:
+            raise HTTPException(status_code=500, detail="base element is only allowed directly inside a policy section")
         if child.tag == "include-fragment":
             fragment_id = (
                 child.attrib.get("fragment-id") or child.attrib.get("name") or child.attrib.get("id") or ""
@@ -3282,6 +3290,7 @@ def _parse_children(
                     policy_fragments=policy_fragments,
                     section_name=section_name,
                     seen_fragments=seen_fragments | {fragment_id},
+                    allow_base=allow_base,
                 )
             )
             continue
@@ -3376,11 +3385,13 @@ def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = No
         raise HTTPException(status_code=500, detail="Policies XML must have <policies> root")
 
     fragments = policy_fragments or {}
+    sections_present: set[str] = set()
 
     def section(name: str) -> list[PolicyNode]:
         sec = root.find(name)
         if sec is None:
             return []
+        sections_present.add(name)
         return _parse_children(list(sec), policy_fragments=fragments, section_name=name, seen_fragments=set())
 
     return PolicyDocument(
@@ -3388,6 +3399,7 @@ def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = No
         backend=section("backend"),
         outbound=section("outbound"),
         on_error=section("on-error"),
+        sections_present=frozenset(sections_present),
     )
 
 
@@ -3423,16 +3435,51 @@ async def _apply_steps_async(
     return None
 
 
+def _replace_base_steps(local: list[PolicyNode], parent: list[PolicyNode]) -> list[PolicyNode]:
+    """Replace each direct base marker with the effective parent steps."""
+    out: list[PolicyNode] = []
+    for step in local:
+        if isinstance(step, NoOp):
+            out.extend(parent)
+        else:
+            out.append(step)
+    return out
+
+
+def _effective_section_steps(docs: list[PolicyDocument], section_name: str) -> list[PolicyNode]:
+    """Resolve one section across the broad-to-narrow document stack."""
+    effective: list[PolicyNode] = []
+    section_key = "on-error" if section_name == "on_error" else section_name
+    for doc in docs:
+        # APIM documents explicitly describe omitted base as dropping the
+        # parent. The docs do not distinguish a missing section from an empty
+        # one, so both are treated as a configured section with no base.
+        if section_key not in doc.sections_present:
+            effective = []
+            continue
+        local = getattr(doc, section_name.replace("-", "_"))
+        if any(isinstance(step, NoOp) for step in local):
+            effective = _replace_base_steps(local, effective)
+        else:
+            effective = list(local)
+    return effective
+
+
+async def _apply_section_async(
+    docs: list[PolicyDocument],
+    section_name: str,
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None = None,
+) -> ResponseSpec | None:
+    return await _apply_steps_async(_effective_section_steps(docs, section_name), req, runtime)
+
+
 async def apply_inbound_async(
     docs: list[PolicyDocument],
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
-    for doc in docs:
-        out = await _apply_steps_async(doc.inbound, req, runtime)
-        if out is not None:
-            return out
-    return None
+    return await _apply_section_async(docs, "inbound", req, runtime)
 
 
 async def apply_backend_async(
@@ -3440,11 +3487,7 @@ async def apply_backend_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
-    for doc in docs:
-        out = await _apply_steps_async(doc.backend, req, runtime)
-        if out is not None:
-            return out
-    return None
+    return await _apply_section_async(docs, "backend", req, runtime)
 
 
 async def apply_outbound_async(
@@ -3452,12 +3495,9 @@ async def apply_outbound_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> None:
-    for doc in docs:
-        out = await _apply_steps_async(doc.outbound, req, runtime)
-        if out is not None:
-            raise HTTPException(
-                status_code=500, detail="Outbound policies cannot short-circuit responses in the simulator"
-            )
+    out = await _apply_section_async(docs, "outbound", req, runtime)
+    if out is not None:
+        raise HTTPException(status_code=500, detail="Outbound policies cannot short-circuit responses in the simulator")
 
 
 async def apply_on_error_async(
@@ -3465,11 +3505,7 @@ async def apply_on_error_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
-    for doc in docs:
-        out = await _apply_steps_async(doc.on_error, req, runtime)
-        if out is not None:
-            return out
-    return None
+    return await _apply_section_async(docs, "on_error", req, runtime)
 
 
 def finalize_deferred_actions(req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:

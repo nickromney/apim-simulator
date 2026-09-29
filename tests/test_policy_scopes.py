@@ -28,6 +28,24 @@ ROUTE_HEADER_POLICY = (
     "</outbound><on-error /></policies>"
 )
 
+GLOBAL_INBOUND_APPEND_POLICY = (
+    "<policies><inbound>"
+    '<set-header name="x-scope-order" exists-action="append"><value>global</value></set-header>'
+    "</inbound><backend /><outbound /><on-error /></policies>"
+)
+
+API_INBOUND_APPEND_POLICY = (
+    "<policies><inbound>"
+    '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header>'
+    "</inbound><backend /><outbound /><on-error /></policies>"
+)
+
+API_INBOUND_APPEND_WITH_BASE_POLICY = (
+    "<policies><inbound>"
+    '<set-header name="x-scope-order" exists-action="append"><value>api</value></set-header><base />'
+    "</inbound><backend /><outbound /><on-error /></policies>"
+)
+
 
 def _subscribed_config(
     *,
@@ -73,6 +91,10 @@ def _client(config: GatewayConfig) -> TestClient:
 
 @pytest.mark.contract("POLICY-PRODUCT-SCOPE")
 def test_product_policy_applies_for_authorizing_product() -> None:
+    """APIM applies the policy of the product authorizing the request.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-policies
+    """
     config = _subscribed_config(
         products={"p1": ProductConfig(name="p1", policies_xml=PRODUCT_HEADER_POLICY)},
         subscription_products=["p1"],
@@ -85,7 +107,11 @@ def test_product_policy_applies_for_authorizing_product() -> None:
 
 
 @pytest.mark.contract("POLICY-PRODUCT-SCOPE")
-def test_product_policy_runs_before_api_scope() -> None:
+def test_api_scope_without_base_suppresses_product_scope() -> None:
+    """A child section without base does not inherit its product section.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+    """
     config = _subscribed_config(
         products={"p1": ProductConfig(name="p1", policies_xml=PRODUCT_HEADER_POLICY)},
         subscription_products=["p1"],
@@ -95,12 +121,81 @@ def test_product_policy_runs_before_api_scope() -> None:
     with _client(config) as client:
         resp = client.get("/api/health", headers={"Ocp-Apim-Subscription-Key": "good"})
     assert resp.status_code == 200
-    # global -> product -> API: the API-scope override wins.
     assert resp.headers["x-scope"] == "api"
+
+
+def test_api_base_runs_child_before_parent_inbound_policy() -> None:
+    """A base placed after a child policy runs the parent at that position.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+    """
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["x-scope-order"])
+        return httpx.Response(200, json={"ok": True})
+
+    config = GatewayConfig(
+        allow_anonymous=True,
+        policies_xml=GLOBAL_INBOUND_APPEND_POLICY,
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                upstream_base_url=http_url("upstream"),
+                upstream_path_prefix="/api",
+                policies_xml=API_INBOUND_APPEND_WITH_BASE_POLICY,
+            )
+        ],
+    )
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    with TestClient(app) as client:
+        resp = client.get("/api/health")
+
+    assert resp.status_code == 200
+    assert seen == ["api,global"]
+
+
+def test_api_without_base_drops_global_inbound_policy() -> None:
+    """An API policy that omits base does not run the global inbound policy.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-policies
+    """
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["x-scope-order"])
+        return httpx.Response(200, json={"ok": True})
+
+    config = GatewayConfig(
+        allow_anonymous=True,
+        policies_xml=GLOBAL_INBOUND_APPEND_POLICY,
+        routes=[
+            RouteConfig(
+                name="r1",
+                path_prefix="/api",
+                upstream_base_url=http_url("upstream"),
+                upstream_path_prefix="/api",
+                policies_xml=API_INBOUND_APPEND_POLICY,
+            )
+        ],
+    )
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    with TestClient(app) as client:
+        resp = client.get("/api/health")
+
+    assert resp.status_code == 200
+    assert seen == ["api"]
 
 
 @pytest.mark.contract("POLICY-PRODUCT-SCOPE")
 def test_product_policy_uses_granted_product_when_route_has_many() -> None:
+    """Only the product context of the subscription contributes product policy.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     other_policy = PRODUCT_HEADER_POLICY.replace("product", "other")
     config = _subscribed_config(
         products={
@@ -118,6 +213,10 @@ def test_product_policy_uses_granted_product_when_route_has_many() -> None:
 
 @pytest.mark.contract("POLICY-PRODUCT-SCOPE")
 def test_open_product_policy_applies_without_subscription() -> None:
+    """An open product supplies the product context for an anonymous request.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
     config = GatewayConfig(
         allow_anonymous=True,
         products={"open": ProductConfig(name="open", require_subscription=False, policies_xml=PRODUCT_HEADER_POLICY)},
@@ -139,6 +238,10 @@ def test_open_product_policy_applies_without_subscription() -> None:
 
 @pytest.mark.contract("POLICY-PRODUCT-SCOPE")
 def test_management_product_policy_scope_roundtrip() -> None:
+    """Product policies can be saved through the simulator management surface.
+
+    https://learn.microsoft.com/en-us/rest/api/apimanagement/product-policy/create-or-update?view=rest-apimanagement-2024-05-01
+    """
     config = _subscribed_config(
         products={"p1": ProductConfig(name="p1")},
         subscription_products=["p1"],
@@ -163,3 +266,26 @@ def test_management_product_policy_scope_roundtrip() -> None:
 
         missing = client.get("/apim/management/policies/product/nope", headers={"X-Apim-Tenant-Key": "t1"})
         assert missing.status_code == 404
+
+
+def test_management_policy_save_rejects_malformed_xml() -> None:
+    """Saving malformed XML returns a clear client error instead of dropping it.
+
+    https://learn.microsoft.com/en-us/rest/api/apimanagement/policy/create-or-update?view=rest-apimanagement-2024-05-01
+    """
+    config = _subscribed_config(
+        products={"p1": ProductConfig(name="p1")},
+        subscription_products=["p1"],
+        route_products=["p1"],
+    )
+    config.tenant_access = TenantAccessConfig(enabled=True, primary_key="t1")
+
+    with _client(config) as client:
+        response = client.put(
+            "/apim/management/policies/product/p1",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={"xml": "<policies><inbound>"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid policies XML"

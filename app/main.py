@@ -16,7 +16,7 @@ import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import GatewayConfig, load_config
+from app.config import GatewayConfig, load_config, validate_policy_config
 from app.gateway_errors import GatewayError, gateway_error_handler
 from app.management_api import build_management_router
 from app.management_service import ManagementService
@@ -539,7 +539,7 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     is included last and everything else has to be included before it.
     """
     telemetry = configure_observability(service_name=APIM_SERVICE_NAME, service_version=APIM_SERVICE_VERSION)
-    gateway_config = config or load_config()
+    gateway_config = validate_policy_config(config or load_config())
     gateway_config.routes = gateway_config.materialize_routes()
 
     management_plane: ManagementService | None = None

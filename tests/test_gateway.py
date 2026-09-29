@@ -1243,6 +1243,10 @@ def test_full_model_operation_method_routing() -> None:
 
 
 def test_full_model_api_and_operation_policies_stack() -> None:
+    """A child scope inherits its parent only at an explicit base marker.
+
+    https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
+    """
     api_policy = """\
 <policies>
   <inbound>
@@ -1257,6 +1261,7 @@ def test_full_model_api_and_operation_policies_stack() -> None:
 <policies>
   <inbound>
     <set-header name="x-op" exists-action="override"><value>1</value></set-header>
+    <base />
   </inbound>
   <backend />
   <outbound />
