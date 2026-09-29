@@ -80,11 +80,17 @@ def test_callout_body_reads_a_json_object() -> None:
     assert CalloutBody(b'{"a": 1}').AsJObject() == {"a": 1}
 
 
-def test_callout_body_that_is_not_a_json_object_reads_as_empty() -> None:
-    assert CalloutBody(b"").AsJObject() == {}
-    assert CalloutBody(b"not json").AsJObject() == {}
-    assert CalloutBody(b"[1, 2]").AsJObject() == {}
-    assert CalloutBody(b"\xff\xfe").AsJObject() == {}
+def test_callout_body_that_is_not_a_json_object_raises() -> None:
+    """IMessageBody.As<JObject> rejects invalid JSON.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    with pytest.raises(ValueError, match="body is not valid JSON"):
+        CalloutBody(b"not json").AsJObject()
+    with pytest.raises(ValueError, match="body is not valid JSON"):
+        CalloutBody(b"[1, 2]").AsJObject()
+    with pytest.raises(ValueError, match="body is not valid JSON"):
+        CalloutBody(b"\xff\xfe").AsJObject()
 
 
 def test_callout_body_reads_as_string_and_replaces_undecodable_bytes() -> None:
@@ -290,6 +296,78 @@ def test_logical_operators_translate() -> None:
 # translates to "a != not b" -- is a syntax error either way.
 
 
+def test_operator_translation_does_not_rewrite_string_literals() -> None:
+    """C# operators are syntax, not replacements inside string literals.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    assert _evaluate('@("true")') == "true"
+    assert _evaluate('@("a && b || !c != d")') == "a && b || !c != d"
+
+
+def test_multi_statement_expression_supports_declaration_assignment_and_return() -> None:
+    """C# policy expressions support local declarations, assignment, and return.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    assert _evaluate('@{ string value = "a"; value = value + "b"; return value; }') == "ab"
+
+
+def test_multi_statement_expression_supports_if_else() -> None:
+    """C# if/else statements select one Boolean-controlled branch.
+
+    https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/statements/selection-statements
+    """
+    assert _evaluate('@{ var value = 2; if (value > 1) { return "yes"; } else { return "no"; } }') == "yes"
+
+
+def test_csharp_string_methods_and_ternary_are_supported() -> None:
+    """C# string members and the conditional operator follow documented semantics.
+
+    https://learn.microsoft.com/en-us/dotnet/api/system.string.contains
+    https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/conditional-operator
+    """
+    assert _evaluate('@("Abc".Contains("b"))') is True
+    assert _evaluate('@("Abc".Contains("B"))') is False
+    assert _evaluate('@("Abc".Equals("Abc"))') is True
+    assert _evaluate('@("Abc".Length)') == 3
+    assert _evaluate('@("abc".StartsWith("a") ? "yes" : "no")') == "yes"
+    assert _evaluate('@("abc".EndsWith("c"))') is True
+    assert _evaluate('@("abc".ToUpper())') == "ABC"
+    assert _evaluate('@("ABC".ToLower())') == "abc"
+    assert _evaluate('@("  abc  ".Trim())') == "abc"
+
+
+def test_dictionary_contains_key_and_generic_calls_are_supported() -> None:
+    """Allowed dictionary and generic context members remain callable.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    https://learn.microsoft.com/en-us/dotnet/api/system.collections.generic.dictionary-2.containskey
+    """
+    assert (
+        _evaluate(
+            '@(context.Variables.ContainsKey("tier") ? '
+            'context.Variables.GetValueOrDefault<string>("tier", "fallback") : "missing")',
+            variables={"tier": "gold"},
+        )
+        == "gold"
+    )
+    context = _context()
+    context.variables["resp"] = CalloutResponse(status_code=200, headers={}, content=b'{"a": 1}')
+    assert evaluate_apim_expression('@(context.Variables["resp"].Body.As<JObject>()["a"])', context) == 1
+
+
+def test_csharp_integer_division_and_to_string_are_preserved() -> None:
+    """C# integer division truncates toward zero and ToString returns text.
+
+    https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/arithmetic-operators
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    assert _evaluate("@(5 / 2)") == 2
+    assert _evaluate("@(-5 / 2)") == -2
+    assert _evaluate("@(5.ToString())") == "5"
+
+
 def test_request_accessors_translate() -> None:
     variables = {"client_ip": "10.1.2.3", "incoming_host": "api.example:443"}
     assert _evaluate('@(context.Request.Headers.GetValueOrDefault("X-Key",""))', variables=variables) == "demo"
@@ -321,7 +399,7 @@ def test_string_methods_translate() -> None:
     assert _evaluate('@("a,b".Split(",").Last())') == "b"
     assert _evaluate('@("abc".StartsWith("a"))') is True
     assert _evaluate('@("  x  ".Trim())') == "x"
-    assert _evaluate("@((1).ToString())") == 1
+    assert _evaluate("@((1).ToString())") == "1"
 
 
 def test_body_accessors_translate() -> None:
@@ -349,12 +427,20 @@ def test_an_interpolated_string_with_no_expression_is_returned_as_is() -> None:
     assert _evaluate('@($"plain")') == "plain"
 
 
+def test_interpolated_strings_unescape_double_braces() -> None:
+    """C# interpolated strings use doubled braces for literal braces.
+
+    https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/tokens/interpolated
+    """
+    assert _evaluate('@($"{{value}}={1 + 1}")') == "{value}=2"
+
+
 def test_an_interpolated_string_handles_a_nested_brace() -> None:
     assert _evaluate('@($"{ {"a": 1}["a"] }")') == "1"
 
 
-def test_an_interpolation_opening_on_a_brace_keeps_the_inner_braces() -> None:
-    assert _evaluate('@($"{{"a": 1}["a"]}")') == "1"
+def test_an_interpolation_escapes_each_double_brace() -> None:
+    assert _evaluate('@($"{{{{")') == "{{"
 
 
 def test_an_unclosed_interpolation_is_an_error() -> None:

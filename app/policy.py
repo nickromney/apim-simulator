@@ -22,6 +22,7 @@ from app.apim_expr import (
     CalloutResponse,
     JwtValue,
     build_expression_context,
+    evaluate_apim_condition,
     evaluate_apim_expression,
     is_apim_expression,
 )
@@ -170,7 +171,7 @@ class ExpressionCondition(Condition):
     expression: str
 
     def __call__(self, req: PolicyRequest) -> bool:
-        return bool(evaluate_apim_expression(self.expression, build_expression_context(req)))
+        return evaluate_apim_condition(self.expression, build_expression_context(req))
 
 
 def _strip_condition_quotes(value: str) -> str:
