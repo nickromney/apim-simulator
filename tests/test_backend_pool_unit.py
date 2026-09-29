@@ -23,8 +23,11 @@ from app.backend_pool import (
 )
 from app.config import (
     BackendCircuitBreakerConfig,
+    BackendCodeRange,
     BackendConfig,
     BackendPoolMemberConfig,
+    BackendSessionAffinityConfig,
+    BackendSessionIdConfig,
     GatewayConfig,
     NamedValueConfig,
 )
@@ -147,6 +150,41 @@ def test_a_default_breaker_applies_when_neither_declares_one() -> None:
     pool = BackendConfig(url="https://pool.invalid", type="pool", pool=[_member("a")])
 
     assert pool_member_breaker(pool, member).failure_count == 3
+
+
+def test_circuit_breaker_supports_documented_failure_condition_shape() -> None:
+    """APIM circuit breakers use status ranges, error reasons, and retry-after.
+
+    https://learn.microsoft.com/en-us/azure/api-management/backends
+    """
+    breaker = BackendCircuitBreakerConfig(
+        failure_count=2,
+        interval_seconds=60,
+        trip_duration_seconds=30,
+        status_code_ranges=[BackendCodeRange(min=500, max=599)],
+        error_reasons=["Server errors"],
+        accept_retry_after=True,
+    )
+
+    assert breaker.status_code_ranges[0].min == 500
+    assert breaker.error_reasons == ["Server errors"]
+    assert breaker.accept_retry_after is True
+
+
+def test_session_affinity_uses_a_cookie_session_id() -> None:
+    """APIM pool session awareness is configured with a cookie session ID.
+
+    https://learn.microsoft.com/en-us/azure/api-management/backends
+    """
+    pool = BackendConfig(
+        type="pool",
+        pool=[_member("a")],
+        session_affinity=BackendSessionAffinityConfig(
+            session_id=BackendSessionIdConfig(source="Cookie", name="SessionId")
+        ),
+    )
+
+    assert pool.session_affinity.session_id.name == "SessionId"
 
 
 # --- selection -------------------------------------------------------------

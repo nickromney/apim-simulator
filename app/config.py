@@ -32,7 +32,6 @@ class ApiVersionSetConfig(BaseModel):
     versioning_scheme: ApiVersioningScheme
     version_header_name: str | None = None
     version_query_name: str | None = None
-    default_version: str | None = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.versioning_scheme == ApiVersioningScheme.Header and not self.version_header_name:
@@ -450,6 +449,63 @@ class BackendPoolMemberConfig(BaseModel):
     weight: int = 1
     priority: int = 1
 
+    @model_validator(mode="before")
+    @classmethod
+    def _map_arm_id(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "backend_id" not in value and value.get("id"):
+            backend_id = str(value["id"]).rstrip("/").rsplit("/", 1)[-1]
+            return {**value, "backend_id": backend_id}
+        return value
+
+
+class BackendCodeRange(BaseModel):
+    """Inclusive HTTP status range used by a backend failure condition."""
+
+    min: int
+    max: int
+
+
+def _duration_seconds(value: Any) -> Any:
+    if not isinstance(value, str) or not value.upper().startswith("PT"):
+        return value
+    match = re.fullmatch(
+        r"PT(?:(?P<hours>\d+(?:\.\d+)?)H)?(?:(?P<minutes>\d+(?:\.\d+)?)M)?(?:(?P<seconds>\d+(?:\.\d+)?)S)?",
+        value.upper(),
+    )
+    if match is None:
+        return value
+    return (
+        float(match.group("hours") or 0) * 3600
+        + float(match.group("minutes") or 0) * 60
+        + float(match.group("seconds") or 0)
+    )
+
+
+class BackendSessionIdConfig(BaseModel):
+    """Cookie source used for backend-pool session awareness."""
+
+    source: str = "Cookie"
+    name: str
+
+    @model_validator(mode="after")
+    def _cookie_only(self) -> BackendSessionIdConfig:
+        if self.source.casefold() != "cookie":
+            raise ValueError("backend pool session affinity only supports Cookie source")
+        return self
+
+
+class BackendSessionAffinityConfig(BaseModel):
+    """APIM's pool sessionAffinity.sessionId configuration."""
+
+    session_id: BackendSessionIdConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_arm_session_id(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "session_id" not in value and value.get("sessionId"):
+            return {**value, "session_id": value["sessionId"]}
+        return value
+
 
 class BackendCircuitBreakerConfig(BaseModel):
     # Adapted from the ARM backend circuitBreaker.rules shape: trip after
@@ -458,7 +514,39 @@ class BackendCircuitBreakerConfig(BaseModel):
     failure_count: int = 3
     interval_seconds: float = 60.0
     trip_duration_seconds: float = 30.0
+    status_code_ranges: list[BackendCodeRange] = Field(default_factory=list)
+    error_reasons: list[str] = Field(default_factory=list)
+    accept_retry_after: bool = False
+    # Legacy exact statuses remain supported and are used when no ranges exist.
     error_statuses: list[int] = Field(default_factory=lambda: [500, 502, 503, 504])
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_arm_rule(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        mapped = dict(value)
+        failure = mapped.get("failureCondition") or mapped.get("failure_condition")
+        if isinstance(failure, dict):
+            mapped = {**failure, **mapped}
+        aliases = {
+            "count": "failure_count",
+            "trip_threshold": "failure_count",
+            "interval": "interval_seconds",
+            "trip_duration": "trip_duration_seconds",
+            "tripDuration": "trip_duration_seconds",
+            "statusCodeRanges": "status_code_ranges",
+            "errorReasons": "error_reasons",
+            "acceptRetryAfter": "accept_retry_after",
+        }
+        for source, target in aliases.items():
+            if target not in mapped and source in mapped:
+                mapped[target] = mapped[source]
+        if "interval_seconds" in mapped:
+            mapped["interval_seconds"] = _duration_seconds(mapped["interval_seconds"])
+        if "trip_duration_seconds" in mapped:
+            mapped["trip_duration_seconds"] = _duration_seconds(mapped["trip_duration_seconds"])
+        return mapped
 
 
 class BackendConfig(BaseModel):
@@ -466,6 +554,7 @@ class BackendConfig(BaseModel):
     description: str | None = None
     type: str = "single"  # single|pool
     pool: list[BackendPoolMemberConfig] = Field(default_factory=list)
+    session_affinity: BackendSessionAffinityConfig | None = None
     circuit_breaker: BackendCircuitBreakerConfig | None = None
     auth_type: str = "none"  # none|basic|managed_identity|client_certificate
     basic_username: str | None = None
@@ -476,6 +565,21 @@ class BackendConfig(BaseModel):
     header_credentials: dict[str, str] = Field(default_factory=dict)
     query_credentials: dict[str, str] = Field(default_factory=dict)
     client_certificate_thumbprints: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_arm_pool(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        mapped = dict(value)
+        if "circuit_breaker" not in mapped and mapped.get("circuitBreaker") is not None:
+            mapped["circuit_breaker"] = mapped["circuitBreaker"]
+        pool = mapped.get("pool")
+        if isinstance(pool, dict):
+            if "session_affinity" not in mapped and pool.get("sessionAffinity") is not None:
+                mapped["session_affinity"] = pool["sessionAffinity"]
+            mapped["pool"] = pool.get("services") or pool.get("members") or []
+        return mapped
 
     @model_validator(mode="after")
     def _validate_backend_shape(self) -> BackendConfig:
@@ -666,6 +770,7 @@ class RouteConfig(BaseModel):
     products: list[str] = Field(default_factory=list)
     api_version_set: str | None = None
     api_version: str | None = None
+    api_protocols: list[str] | None = Field(default=None, exclude=True, repr=False)
     subscription_header_names: list[str] | None = None
     subscription_query_param_names: list[str] | None = None
     authz: RouteAuthzConfig | None = None
@@ -909,6 +1014,7 @@ def _operation_route(
         api_path_prefix=api_base,
         api_upstream_path_prefix=api.upstream_path_prefix,
         upstream_path_uses_operation_prefix=op.upstream_path_prefix is not None,
+        api_protocols=list(api.protocols),
         backend=op.backend or api.backend,
         products=list(op_products or []),
         api_version_set=op.api_version_set or api.api_version_set,
@@ -947,6 +1053,9 @@ class ApiConfig(BaseModel):
     upstream_base_url: str
     upstream_path_prefix: str = ""
     backend: str | None = None
+    # Learn documents the protocols property but not the omitted-field default;
+    # preserve legacy simulator configs by exposing both schemes until set.
+    protocols: list[str] = Field(default_factory=lambda: ["http", "https"])
     products: list[str] = Field(default_factory=list)
     api_version_set: str | None = None
     api_version: str | None = None

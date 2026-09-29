@@ -15,6 +15,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -24,6 +25,8 @@ from starlette.responses import StreamingResponse
 
 from app.backend_pool import (
     apply_backend_credentials,
+    backend_connection_failure_matches,
+    backend_failure_condition_matches,
     pool_member_breaker,
     record_backend_result,
     render_backend_value,
@@ -533,6 +536,11 @@ async def _read_upstream_response(
     if pool.pool_backend is not None:
         headers["x-apim-backend-pool"] = pool.pool_backend_id
         headers["x-apim-backend-id"] = pool.backend_id
+        if pool.session_cookie_name and pool.session_id != pool.backend_id:
+            # APIM documents the cookie-based session mechanism but not the
+            # exact cookie attributes; Path=/ keeps the local cookie usable
+            # for every operation in the API.
+            headers["set-cookie"] = f"{pool.session_cookie_name}={pool.backend_id}; Path=/"
 
     status_code = int(upstream_response.status_code)
     if not (100 <= status_code <= 599):
@@ -1127,7 +1135,18 @@ def _choose_backend(
     if backend is not None and (backend.type or "single").lower() == "pool":
         pool.pool_backend = backend
         pool.pool_backend_id = backend_id
-        selection = select_pool_member(cfg, backend_health, backend_id, backend, now=time.time())
+        affinity = backend.session_affinity
+        if affinity is not None:
+            pool.session_cookie_name = affinity.session_id.name
+            pool.session_id = request.cookies.get(pool.session_cookie_name)
+        selection = select_pool_member(
+            cfg,
+            backend_health,
+            backend_id,
+            backend,
+            now=time.time(),
+            session_id=pool.session_id,
+        )
         if selection is None:
             request.state.apim_result_reason = "backend_pool_exhausted"
             # APIM's circuit-breaker documentation defines 503 availability
@@ -1162,12 +1181,20 @@ class _PoolState:
     backend: Any
     backend_id: str
     backend_health: dict[str, Any]
+    session_id: str | None = None
+    session_cookie_name: str | None = None
 
     @property
     def is_pool(self) -> bool:
         return self.pool_backend is not None and self.backend is not None
 
-    def trip_and_reselect(self, cfg: GatewayConfig, policy_req: PolicyRequest) -> str | None:
+    def trip_and_reselect(
+        self,
+        cfg: GatewayConfig,
+        policy_req: PolicyRequest,
+        *,
+        trip_duration_seconds: float | None = None,
+    ) -> str | None:
         """Record this member as failed and pick another, if the pool has one.
 
         Returns the new member's base URL, or None when this is not a pool or
@@ -1177,8 +1204,25 @@ class _PoolState:
             return None
         now = time.time()
         breaker = pool_member_breaker(self.pool_backend, self.backend)
-        record_backend_result(self.backend_health, breaker, self.backend_id, now=now, failed=True)
-        reselected = select_pool_member(cfg, self.backend_health, self.pool_backend_id, self.pool_backend, now=now)
+        record_backend_result(
+            self.backend_health,
+            breaker,
+            self.backend_id,
+            now=now,
+            failed=True,
+            trip_duration_seconds=trip_duration_seconds,
+        )
+        entry = self.backend_health.get(self.backend_id, {})
+        if float(entry.get("open_until", 0.0)) <= now:
+            return None
+        reselected = select_pool_member(
+            cfg,
+            self.backend_health,
+            self.pool_backend_id,
+            self.pool_backend,
+            now=now,
+            session_id=self.session_id,
+        )
         if reselected is None:
             return None
         self.backend_id, self.backend = reselected
@@ -1196,6 +1240,81 @@ class _UpstreamAttempt:
     error: Exception | None
     upstream_url: str
     pool: _PoolState
+
+
+def _retry_after_seconds(value: str | None, *, now: float) -> float | None:
+    """Parse the HTTP Retry-After delta or date form."""
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        return max(0.0, parsedate_to_datetime(value).timestamp() - now)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _breaker_retry_duration(pool: _PoolState, response: httpx.Response) -> float | None:
+    """Return an accepted Retry-After duration when the response trips a pool breaker."""
+    if not pool.is_pool:
+        return None
+    breaker = pool_member_breaker(pool.pool_backend, pool.backend)
+    if not backend_failure_condition_matches(breaker, response.status_code):
+        return None
+    if not breaker.accept_retry_after:
+        return None
+    return _retry_after_seconds(response.headers.get("retry-after"), now=time.time())
+
+
+async def _retry_response(
+    *,
+    response: httpx.Response,
+    attempt: int,
+    max_attempts: int,
+    pool: _PoolState,
+    cfg: GatewayConfig,
+    policy_req: PolicyRequest,
+    route: Any,
+    upstream_url: str,
+) -> tuple[bool, str]:
+    """Close a retryable response and fail over only for breaker failures."""
+    if response.status_code not in cfg.proxy_retry_statuses or attempt >= max_attempts:
+        return False, upstream_url
+    trip_duration = _breaker_retry_duration(pool, response)
+    await response.aclose()
+    if trip_duration is None and pool.is_pool:
+        breaker = pool_member_breaker(pool.pool_backend, pool.backend)
+        breaker_failure = backend_failure_condition_matches(breaker, response.status_code)
+    else:
+        breaker_failure = pool.is_pool
+    if not breaker_failure:
+        return True, upstream_url
+    base_url = pool.trip_and_reselect(cfg, policy_req, trip_duration_seconds=trip_duration)
+    if base_url is None:
+        return True, upstream_url
+    return True, route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+
+
+def _record_final_pool_result(pool: _PoolState, response: httpx.Response) -> None:
+    if not pool.is_pool:
+        return
+    breaker = pool_member_breaker(pool.pool_backend, pool.backend)
+    record_backend_result(
+        pool.backend_health,
+        breaker,
+        pool.backend_id,
+        now=time.time(),
+        failed=backend_failure_condition_matches(breaker, response.status_code),
+        trip_duration_seconds=_breaker_retry_duration(pool, response),
+    )
+
+
+def _transport_failure_trips_breaker(pool: _PoolState) -> bool:
+    if not pool.is_pool:
+        return False
+    return backend_connection_failure_matches(pool_member_breaker(pool.pool_backend, pool.backend))
 
 
 async def _send_upstream_with_retries(
@@ -1224,9 +1343,13 @@ async def _send_upstream_with_retries(
     attempts_used = 0
     start = time.perf_counter()
 
-    def _failover() -> None:
+    def _failover(*, trip_duration_seconds: float | None = None) -> None:
         nonlocal upstream_url
-        base_url = pool.trip_and_reselect(cfg, policy_req)
+        base_url = pool.trip_and_reselect(
+            cfg,
+            policy_req,
+            trip_duration_seconds=trip_duration_seconds,
+        )
         if base_url is not None:
             upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
 
@@ -1249,27 +1372,27 @@ async def _send_upstream_with_retries(
             )
         except httpx.RequestError as exc:
             last_exc = exc
-            _failover()
-            if attempt >= max_attempts:
-                break
+            if _transport_failure_trips_breaker(pool):
+                _failover()
             continue
 
-        if upstream_response.status_code in cfg.proxy_retry_statuses and attempt < max_attempts:
-            await upstream_response.aclose()
+        should_retry, upstream_url = await _retry_response(
+            response=upstream_response,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            pool=pool,
+            cfg=cfg,
+            policy_req=policy_req,
+            route=route,
+            upstream_url=upstream_url,
+        )
+        if should_retry:
             upstream_response = None
-            _failover()
             continue
         break
 
-    if pool.is_pool and upstream_response is not None:
-        breaker = pool_member_breaker(pool.pool_backend, pool.backend)
-        record_backend_result(
-            pool.backend_health,
-            breaker,
-            pool.backend_id,
-            now=time.time(),
-            failed=upstream_response.status_code in breaker.error_statuses,
-        )
+    if upstream_response is not None:
+        _record_final_pool_result(pool, upstream_response)
 
     return _UpstreamAttempt(
         response=upstream_response,
@@ -2082,6 +2205,8 @@ async def execute_gateway_request(request: Request) -> Response:
             backend=backend,
             backend_id=backend_id,
             backend_health=backend_health,
+            session_id=choice.pool.session_id,
+            session_cookie_name=choice.pool.session_cookie_name,
         ),
     )
     upstream_response = attempt_result.response

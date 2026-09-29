@@ -9,6 +9,7 @@ from app.config import (
     ApiVersionSetConfig,
     GatewayConfig,
     OperationConfig,
+    RouteConfig,
 )
 from app.main import create_app
 from app.urls import http_url
@@ -249,3 +250,112 @@ def test_segment_versioning_matches_operations_after_the_version_segment() -> No
 
     assert response.status_code == 200
     assert response.json() == {"host": "v2", "path": "/health"}
+
+
+def test_versioned_api_requires_a_requested_version_unless_original_exists() -> None:
+    """APIM requires an identifier for versioned APIs, except for Original.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-versions
+    """
+    config = GatewayConfig(
+        allow_anonymous=True,
+        api_version_sets={
+            "public": ApiVersionSetConfig(
+                display_name="Public",
+                versioning_scheme=ApiVersioningScheme.Header,
+                version_header_name="X-Api-Version",
+            )
+        },
+        routes=[
+            RouteConfig(
+                name="v1",
+                path_prefix="/api",
+                upstream_base_url=http_url("v1"),
+                api_version_set="public",
+                api_version="v1",
+            )
+        ],
+    )
+
+    app = create_app(config=config)
+    with TestClient(app) as client:
+        missing = client.get("/api/health")
+        unknown = client.get("/api/health", headers={"X-Api-Version": "v9"})
+
+    assert missing.status_code == 404
+    assert missing.json() == {"statusCode": 404, "message": "Resource not found"}
+    assert unknown.status_code == 404
+
+
+def test_original_api_version_handles_unversioned_requests() -> None:
+    """APIM's Original API answers on the default URL without an identifier.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-versions
+    """
+    config = GatewayConfig(
+        allow_anonymous=True,
+        api_version_sets={
+            "public": ApiVersionSetConfig(
+                display_name="Public",
+                versioning_scheme=ApiVersioningScheme.Header,
+                version_header_name="X-Api-Version",
+            )
+        },
+        routes=[
+            RouteConfig(
+                name="original",
+                path_prefix="/api",
+                upstream_base_url=http_url("original"),
+                api_version_set="public",
+                api_version=None,
+            ),
+            RouteConfig(
+                name="v1",
+                path_prefix="/api",
+                upstream_base_url=http_url("v1"),
+                api_version_set="public",
+                api_version="v1",
+            ),
+        ],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"host": request.url.host})
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"host": "original"}
+
+
+def test_api_protocols_allow_forwarded_https_and_reject_disallowed_scheme() -> None:
+    """APIM API protocols restrict the schemes accepted by an API.
+
+    https://learn.microsoft.com/en-us/rest/api/apimanagement/apis/create-or-update
+    """
+    config = GatewayConfig(
+        allow_anonymous=True,
+        apis={
+            "secure": ApiConfig(
+                name="Secure",
+                path="secure",
+                upstream_base_url=http_url("upstream"),
+                protocols=["https"],
+                operations={"health": OperationConfig(name="Health", url_template="/health")},
+            )
+        },
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True})
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        allowed = client.get("/secure/health", headers={"X-Forwarded-Proto": "https"})
+        rejected = client.get("/secure/health", headers={"X-Forwarded-Proto": "http"})
+
+    assert allowed.status_code == 200
+    assert rejected.status_code == 404
+    assert rejected.json() == {"statusCode": 404, "message": "Resource not found"}

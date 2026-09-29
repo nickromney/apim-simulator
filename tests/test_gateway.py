@@ -2775,7 +2775,6 @@ def test_management_api_version_set_crud_endpoints_work_for_api_authored_configs
                 "display_name": "Public",
                 "versioning_scheme": "Header",
                 "version_header_name": "x-api-version",
-                "default_version": "v1",
             },
         )
         fetched = client.get("/apim/management/api-version-sets/public", headers=headers)
@@ -2784,7 +2783,7 @@ def test_management_api_version_set_crud_endpoints_work_for_api_authored_configs
     assert created.status_code == 200
     assert created.json()["versioning_scheme"] == "Header"
     assert fetched.status_code == 200
-    assert fetched.json()["default_version"] == "v1"
+    assert "default_version" not in fetched.json()
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] is True
 
@@ -3611,7 +3610,10 @@ def test_mtls_mode_optional_allows_requests_without_cert() -> None:
 
 
 def test_mtls_trusted_cert_by_thumbprint() -> None:
-    """When trusted_certificates is configured, certs matching thumbprint are accepted."""
+    """When trusted_certificates is configured, thumbprints match case-insensitively.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-client-certificate-policy
+    """
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
@@ -3652,7 +3654,10 @@ def test_mtls_trusted_cert_by_thumbprint() -> None:
 
 
 def test_mtls_trusted_cert_by_subject() -> None:
-    """When trusted_certificates is configured, certs matching subject are accepted."""
+    """A trusted identity requires an exact subject claim match.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-client-certificate-policy
+    """
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
@@ -3676,23 +3681,74 @@ def test_mtls_trusted_cert_by_subject() -> None:
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
-        # Matching subject (contains)
+        # Matching subject (exact)
+        resp = client.get(
+            "/api/test",
+            headers={"X-Client-Cert-Subject": "CN=allowed-client"},
+        )
+        assert resp.status_code == 200
+
+        # Substring matches are not accepted.
         resp = client.get(
             "/api/test",
             headers={"X-Client-Cert-Subject": "CN=allowed-client,O=test"},
         )
-        assert resp.status_code == 200
-
-        # Non-matching subject
-        resp = client.get(
-            "/api/test",
-            headers={"X-Client-Cert-Subject": "CN=other-client,O=test"},
-        )
         assert resp.status_code == 403
 
 
+def test_mtls_trusted_identity_requires_all_configured_claims() -> None:
+    """All claims on one identity must match; identities are the OR boundary.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-client-certificate-policy
+    """
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            client_certificate=ClientCertificateConfig(
+                mode=ClientCertificateMode.Required,
+                trusted_certificates=[
+                    TrustedClientCertificateConfig(
+                        name="allowed-client",
+                        subject="CN=allowed-client",
+                        issuer="CN=internal-ca",
+                    ),
+                    TrustedClientCertificateConfig(name="fallback", thumbprint="FALLBACK"),
+                ],
+            ),
+            routes=[
+                RouteConfig(
+                    name="default",
+                    path_prefix="/api",
+                    upstream_base_url=_http_url("upstream"),
+                )
+            ],
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
+    )
+    with TestClient(app) as client:
+        matching = client.get(
+            "/api/test",
+            headers={
+                "X-Client-Cert-Subject": "CN=allowed-client",
+                "X-Client-Cert-Issuer": "CN=internal-ca",
+            },
+        )
+        missing_issuer = client.get(
+            "/api/test",
+            headers={"X-Client-Cert-Subject": "CN=allowed-client"},
+        )
+        fallback = client.get("/api/test", headers={"X-Client-Cert-Thumbprint": "fallback"})
+
+    assert matching.status_code == 200
+    assert missing_issuer.status_code == 403
+    assert fallback.status_code == 200
+
+
 def test_mtls_trusted_cert_by_issuer() -> None:
-    """When trusted_certificates is configured, certs matching issuer are accepted."""
+    """When trusted_certificates is configured, issuer matches are exact.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-client-certificate-policy
+    """
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
@@ -3719,14 +3775,14 @@ def test_mtls_trusted_cert_by_issuer() -> None:
         # Matching issuer
         resp = client.get(
             "/api/test",
-            headers={"X-Client-Cert-Issuer": "CN=internal-ca,O=myorg"},
+            headers={"X-Client-Cert-Issuer": "CN=internal-ca"},
         )
         assert resp.status_code == 200
 
-        # Non-matching issuer
+        # Substring matches are not accepted.
         resp = client.get(
             "/api/test",
-            headers={"X-Client-Cert-Issuer": "CN=external-ca"},
+            headers={"X-Client-Cert-Issuer": "CN=internal-ca,O=myorg"},
         )
         assert resp.status_code == 403
 

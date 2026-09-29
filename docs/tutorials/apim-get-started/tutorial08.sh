@@ -33,8 +33,8 @@ verify_tutorial() {
   fetched_version_set="$(management_get "/apim/management/api-version-sets/$VERSION_SET_ID")"
   json_expect_summary \
     "$fetched_version_set" \
-    "{\"default_version\":\"v1\",\"id\":\"$VERSION_SET_ID\",\"version_header_name\":\"x-api-version\"}" \
-    'summary = {"default_version": data.get("default_version"), "id": data.get("id"), "version_header_name": data.get("version_header_name")}'
+    "{\"id\":\"$VERSION_SET_ID\",\"version_header_name\":\"x-api-version\"}" \
+    'summary = {"id": data.get("id"), "version_header_name": data.get("version_header_name")}'
 
   echo
   echo '$ curl -i -H "x-api-version: v1" "'"$APIM_BASE"'/'"$VERSIONED_PATH"'/echo"'
@@ -107,13 +107,13 @@ wait_for_gateway
 
 echo "Creating version set '$VERSION_SET_ID'"
 version_set_response="$(management_put "/apim/management/api-version-sets/$VERSION_SET_ID" "$(cat <<JSON
-{"display_name":"Public","versioning_scheme":"Header","version_header_name":"x-api-version","default_version":"v1"}
+{"display_name":"Public","versioning_scheme":"Header","version_header_name":"x-api-version"}
 JSON
 )")"
 json_expect_summary \
   "$version_set_response" \
-  "{\"default_version\":\"v1\",\"id\":\"$VERSION_SET_ID\",\"version_header_name\":\"x-api-version\",\"versioning_scheme\":\"Header\"}" \
-  'summary = {"default_version": data.get("default_version"), "id": data.get("id"), "version_header_name": data.get("version_header_name"), "versioning_scheme": data.get("versioning_scheme")}'
+  "{\"id\":\"$VERSION_SET_ID\",\"version_header_name\":\"x-api-version\",\"versioning_scheme\":\"Header\"}" \
+  'summary = {"id": data.get("id"), "version_header_name": data.get("version_header_name"), "versioning_scheme": data.get("versioning_scheme")}'
 echo
 
 echo "Creating versioned APIs"

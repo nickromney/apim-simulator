@@ -421,20 +421,22 @@ def _extract_client_cert_context(request: Request, cert_cfg: ClientCertificateCo
 
 
 def _cert_matches_trusted(cert: ClientCertContext, trusted: TrustedClientCertificateConfig) -> bool:
-    """Check if client cert matches a trusted certificate config."""
-    if trusted.thumbprint:
-        if cert.thumbprint and cert.thumbprint.upper() == trusted.thumbprint.upper():
-            return True
-    if trusted.subject:
-        if cert.subject and trusted.subject in cert.subject:
-            return True
-    if trusted.issuer:
-        if cert.issuer and trusted.issuer in cert.issuer:
-            return True
-    # If no matching criteria specified, no match
-    if not trusted.thumbprint and not trusted.subject and not trusted.issuer:
-        return False
-    return False
+    """Check every configured claim on one trusted identity.
+
+    Microsoft documents OR across identities and AND across the claims on an
+    identity. Subject and issuer are distinguished-name claims, not substring
+    filters.
+    https://learn.microsoft.com/en-us/azure/api-management/validate-client-certificate-policy
+    """
+    criteria = (
+        (trusted.thumbprint, cert.thumbprint, str.casefold),
+        (trusted.subject, cert.subject, lambda value: value),
+        (trusted.issuer, cert.issuer, lambda value: value),
+    )
+    configured = [(expected, actual, normalize) for expected, actual, normalize in criteria if expected is not None]
+    return bool(configured) and all(
+        actual is not None and normalize(actual) == normalize(expected) for expected, actual, normalize in configured
+    )
 
 
 def require_admin(request: Request) -> None:
