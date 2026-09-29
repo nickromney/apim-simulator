@@ -837,7 +837,7 @@ def _policy_document_stack(
         cached = policy_cache.get(cache_key)
         if cached is not None:
             return cached
-        doc = parse_policies_xml(xml, policy_fragments=cfg.policy_fragments)
+        doc = parse_policies_xml(xml, policy_fragments=cfg.policy_fragments, gateway_config=cfg)
         policy_cache[cache_key] = doc
         return doc
 

@@ -11,6 +11,7 @@ from app.config import (
     BackendConfig,
     GatewayConfig,
     GroupConfig,
+    NamedValueConfig,
     OperationConfig,
     ProductConfig,
     RouteConfig,
@@ -283,6 +284,25 @@ def test_management_service_raises_not_found_for_missing_resources() -> None:
     with pytest.raises(HTTPException, match="Tag not found") as tag_exc:
         service.delete_tag(cfg, "missing")
     assert tag_exc.value.status_code == 404
+
+
+def test_policy_save_rejects_a_missing_named_value_reference() -> None:
+    """APIM rejects a saved policy that references an unknown named value.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    cfg = GatewayConfig(
+        named_values={"present": NamedValueConfig(value="ok")},
+    )
+    service, _, _ = _make_service(cfg)
+
+    with pytest.raises(HTTPException, match="unknown named value") as exc_info:
+        service.validate_policy_xml(
+            cfg,
+            "<policies><inbound><set-body>{{missing}}</set-body></inbound></policies>",
+        )
+
+    assert exc_info.value.status_code == 400
 
 
 def test_upsert_backend_accepts_pool_fields() -> None:

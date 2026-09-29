@@ -1,6 +1,6 @@
 <policies>
   <inbound>
-    <set-body>{"method":"{method}","path":"{path}"}</set-body>
+    <set-body>@("{\&quot;method\&quot;:\&quot;" + context.Request.Method + "\&quot;,\&quot;path\&quot;:\&quot;" + context.Request.Url.Path + "\&quot;}")</set-body>
   </inbound>
   <backend><forward-request /></backend>
   <outbound />

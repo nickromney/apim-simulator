@@ -96,6 +96,35 @@ def test_config_from_tofu_show_json_mvp() -> None:
     assert cfg.subscription.subscriptions["sub1"].products == ["app-a"]
 
 
+def test_tofu_import_rejects_policy_referencing_a_missing_named_value() -> None:
+    """Terraform/OpenTofu policy import validates named-value references.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_api.app",
+                "type": "azurerm_api_management_api",
+                "name": "app",
+                "values": {"name": "app", "path": "app", "service_url": http_url("upstream")},
+            },
+            {
+                "address": "azurerm_api_management_api_policy.app",
+                "type": "azurerm_api_management_api_policy",
+                "name": "app",
+                "values": {
+                    "api_name": "app",
+                    "xml_content": "<policies><inbound><set-body>{{missing}}</set-body></inbound></policies>",
+                },
+            },
+        ]
+    )
+
+    with pytest.raises(ValueError, match="unknown named value"):
+        config_from_tofu_show_json(tf)
+
+
 def test_import_maps_product_publish_state_approval_and_subscription_state() -> None:
     tf = _tf_json(
         [

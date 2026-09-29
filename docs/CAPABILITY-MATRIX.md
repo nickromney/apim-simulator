@@ -128,7 +128,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | `rewrite-uri` | Yes | - | Path rewriting |
 | `set-variable` | Yes | - | Writes to request-scoped `variables` |
 | `set-query-parameter` | Yes | - | Mutates outbound upstream query only |
-| `set-body` | Yes | - | Literal or templated body: the request body in inbound/backend, the response body in outbound ([set-body](https://learn.microsoft.com/en-us/azure/api-management/set-body-policy)) |
+| `set-body` | Yes | - | Literal text is preserved verbatim; request/response data uses APIM policy expressions. The request body is changed in inbound/backend and the response body in outbound ([set-body](https://learn.microsoft.com/en-us/azure/api-management/set-body-policy)) |
 | `include-fragment` | Yes | - | Config-backed via `policy_fragments` |
 | `return-response` | Yes | - | Short-circuit with custom response; in outbound it replaces the response and ends the section ([return-response](https://learn.microsoft.com/en-us/azure/api-management/return-response-policy)) |
 | `choose`/`when`/`otherwise` | Yes | - | Conditional logic |
@@ -226,7 +226,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
-| Named values | Yes | `azurerm_api_management_named_value` | Resolved in policies and backend credentials |
+| Named values | Yes | `azurerm_api_management_named_value` | `{{name}}` references are substituted in policy attributes and text before execution; unknown references are rejected at config load, management save, and Terraform/OpenTofu import. Values are single-pass and cannot nest ([named values](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties)) |
 | Secret values | Yes | - | Masked in traces |
 | Key Vault refs | Partial | - | Imported and resolved via local env overrides (`APIM_NAMED_VALUE_*`) |
 

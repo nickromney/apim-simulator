@@ -31,6 +31,7 @@ from app.effective_policy import (
     effective_policy_xml,
     policy_xml_documents_for_target,
 )
+from app.named_values import validate_named_value_references
 from app.openapi_import import parse_api_import
 from app.policy import parse_policies_xml
 from app.security import OIDCVerifier
@@ -246,17 +247,27 @@ class ManagementService:
         if xml is None:
             return
         try:
-            parse_policies_xml(xml.strip() or EMPTY_POLICY_XML, policy_fragments=cfg.policy_fragments)
+            parse_policies_xml(
+                xml.strip() or EMPTY_POLICY_XML,
+                policy_fragments=cfg.policy_fragments,
+                gateway_config=cfg,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except HTTPException as exc:
             raise HTTPException(status_code=400, detail=exc.detail) from exc
 
-    def validate_fragment_xml(self, xml: str) -> None:
+    def validate_fragment_xml(self, cfg: GatewayConfig, xml: str) -> None:
         from defusedxml import ElementTree
 
         try:
             ElementTree.fromstring(f"<fragment>{xml}</fragment>")
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=400, detail="Invalid policy fragment XML") from exc
+        try:
+            validate_named_value_references(xml, cfg)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     def coerce_api_versioning_scheme(self, raw: str) -> ApiVersioningScheme:
         normalized = (raw or "").strip().lower()
@@ -659,7 +670,7 @@ class ManagementService:
         return self.persist_or_apply_config(cfg)
 
     def upsert_policy_fragment(self, cfg: GatewayConfig, fragment_id: str, xml: str) -> GatewayConfig:
-        self.validate_fragment_xml(xml)
+        self.validate_fragment_xml(cfg, xml)
         cfg.policy_fragments[fragment_id] = xml
         return self.persist_or_apply_config(cfg)
 
@@ -682,7 +693,10 @@ class ManagementService:
         return self.persist_or_apply_config(cfg)
 
     def import_tofu_show(self, current: GatewayConfig, tf: dict[str, Any]) -> Any:
-        result = import_from_tofu_show_json(tf)
+        try:
+            result = import_from_tofu_show_json(tf)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         imported = result.config
         imported.allowed_origins = current.allowed_origins
         imported.allow_anonymous = current.allow_anonymous

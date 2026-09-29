@@ -4,7 +4,6 @@ import asyncio
 import ipaddress
 import json
 import math
-import re
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -27,7 +26,11 @@ from app.apim_expr import (
     is_apim_expression,
 )
 from app.config import GatewayConfig
-from app.named_values import mask_secret_data, resolve_named_values_in_text
+from app.named_values import (
+    mask_secret_data,
+    resolve_named_values_in_text,
+    validate_named_value_references,
+)
 from app.policy_errors import element_name
 
 
@@ -72,6 +75,7 @@ class PolicyTraceCollector:
 @dataclass
 class PolicyRuntime:
     gateway_config: GatewayConfig | None = None
+    policy_named_values_resolved: bool = False
     http_client: httpx.AsyncClient | None = None
     timeout_seconds: float = 30.0
     trace: PolicyTraceCollector | None = None
@@ -3260,12 +3264,10 @@ class PolicyDocument:
     outbound: list[PolicyNode]
     on_error: list[PolicyNode]
     sections_present: frozenset[str] = frozenset()
+    named_values_resolved: bool = False
     # Where the document was authored (global, product:<id>, api:<id>,
     # operation:<api>/<op>). Subscription throttles count per scope.
     scope: str = ""
-
-
-POLICY_VALUE_PATTERN = re.compile(r"\{([^{}]+)\}")
 
 
 def _stringify_policy_value(value: Any) -> str:
@@ -3322,42 +3324,11 @@ def _record_jwt_validation(runtime: PolicyRuntime | None, payload: dict[str, Any
     runtime.trace.jwt_validations.append(_trace_safe_value(runtime, payload))
 
 
-def _resolve_policy_token(req: PolicyRequest, token: str) -> str | None:
-    normalized = token.strip()
-    lowered = normalized.lower()
-
-    if lowered == "method":
-        return req.method
-    if lowered == "path":
-        return req.path
-    if lowered == "subscription_id":
-        return _stringify_policy_value(req.variables.get("subscription_id"))
-    if lowered.startswith("header:"):
-        name = lowered.split(":", 1)[1].strip()
-        return _stringify_policy_value(req.headers.get(name))
-    if lowered.startswith("query:"):
-        name = normalized.split(":", 1)[1].strip()
-        return _stringify_policy_value(req.query.get(name))
-    if lowered.startswith("var:") or lowered.startswith("variable:"):
-        name = normalized.split(":", 1)[1].strip()
-        return _stringify_policy_value(req.variables.get(name))
-    return None
-
-
 def evaluate_policy_value(template: str, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> Any:
     source = template or ""
-    if runtime and runtime.gateway_config:
+    if runtime and runtime.gateway_config and not runtime.policy_named_values_resolved:
         source = resolve_named_values_in_text(source, runtime.gateway_config)
-    if is_apim_expression(source):
-        return evaluate_apim_expression(source, build_expression_context(req))
-
-    def _replace(match: re.Match[str]) -> str:
-        resolved = _resolve_policy_token(req, match.group(1))
-        if resolved is None:
-            return match.group(0)
-        return resolved
-
-    return POLICY_VALUE_PATTERN.sub(_replace, source)
+    return evaluate_apim_expression(source, build_expression_context(req)) if is_apim_expression(source) else source
 
 
 def render_policy_value(template: str, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> str:
@@ -4132,6 +4103,18 @@ def _rate_limit_key(req: PolicyRequest) -> str | None:
     return _subscription_throttle_key(req, "rate-limit")
 
 
+def _resolve_policy_tree_named_values(root: ElementTree.Element, config: GatewayConfig) -> None:
+    """Apply APIM named values to every policy attribute and text node."""
+    for element in root.iter():
+        element.attrib.update(
+            {name: resolve_named_values_in_text(value, config) for name, value in element.attrib.items()}
+        )
+        if element.text is not None:
+            element.text = resolve_named_values_in_text(element.text, config)
+        if element.tail is not None:
+            element.tail = resolve_named_values_in_text(element.tail, config)
+
+
 def _parse_choose(
     el: ElementTree.Element,
     *,
@@ -4303,13 +4286,40 @@ def _parse_node(
     return parser(el)
 
 
-def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = None) -> PolicyDocument:
+def _resolve_policy_fragment_named_values(policy_fragments: dict[str, str], config: GatewayConfig) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for fragment_id, fragment_xml in policy_fragments.items():
+        validate_named_value_references(fragment_xml, config)
+        try:
+            root = ElementTree.fromstring(fragment_xml)
+        except ElementTree.ParseError:
+            try:
+                root = ElementTree.fromstring(f"<fragment>{fragment_xml}</fragment>")
+            except ElementTree.ParseError:
+                resolved[fragment_id] = fragment_xml
+                continue
+        _resolve_policy_tree_named_values(root, config)
+        resolved[fragment_id] = ElementTree.tostring(root, encoding="unicode")
+    return resolved
+
+
+def parse_policies_xml(
+    xml: str,
+    *,
+    policy_fragments: dict[str, str] | None = None,
+    gateway_config: GatewayConfig | None = None,
+) -> PolicyDocument:
+    if gateway_config is not None:
+        validate_named_value_references(xml, gateway_config)
+        policy_fragments = _resolve_policy_fragment_named_values(policy_fragments or {}, gateway_config)
     try:
         root = ElementTree.fromstring(xml)
     except ElementTree.ParseError as exc:
         raise HTTPException(status_code=500, detail="Invalid policies XML") from exc
     if root.tag != "policies":
         raise HTTPException(status_code=500, detail="Policies XML must have <policies> root")
+    if gateway_config is not None:
+        _resolve_policy_tree_named_values(root, gateway_config)
 
     fragments = policy_fragments or {}
     sections_present: set[str] = set()
@@ -4327,6 +4337,7 @@ def parse_policies_xml(xml: str, *, policy_fragments: dict[str, str] | None = No
         outbound=section("outbound"),
         on_error=section("on-error"),
         sections_present=frozenset(sections_present),
+        named_values_resolved=gateway_config is not None,
     )
 
 
@@ -4405,6 +4416,8 @@ async def _apply_section_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
+    if runtime is not None:
+        runtime.policy_named_values_resolved = bool(docs) and all(doc.named_values_resolved for doc in docs)
     for scope, step in _effective_section_steps(docs, section_name):
         req.variables["_policy_scope"] = scope
         req.variables["_policy_step"] = element_name(step)

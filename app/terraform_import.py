@@ -42,6 +42,7 @@ from app.config import (
     SubscriptionState,
     TagConfig,
     UserConfig,
+    validate_policy_config,
 )
 from app.openapi_import import parse_api_import
 from app.urls import http_url
@@ -1608,7 +1609,7 @@ def _assemble_config(acc: _ImportAccumulator) -> GatewayConfig:
     if not query_param_names:
         cfg.subscription.query_param_names = ["subscription-key"]
     cfg.routes = cfg.materialize_routes()
-    return cfg
+    return validate_policy_config(cfg)
 
 
 def import_from_tofu_show_json(

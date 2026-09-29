@@ -324,3 +324,26 @@ def test_management_policy_save_rejects_malformed_xml() -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid policies XML"
+
+
+def test_management_policy_save_rejects_unknown_named_value() -> None:
+    """Saving a policy with an unknown named value returns a client error.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties
+    """
+    config = _subscribed_config(
+        products={"p1": ProductConfig(name="p1")},
+        subscription_products=["p1"],
+        route_products=["p1"],
+    )
+    config.tenant_access = TenantAccessConfig(enabled=True, primary_key="t1")
+
+    with _client(config) as client:
+        response = client.put(
+            "/apim/management/policies/product/p1",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={"xml": "<policies><inbound><set-body>{{missing}}</set-body></inbound></policies>"},
+        )
+
+    assert response.status_code == 400
+    assert "unknown named value" in response.json()["detail"]
