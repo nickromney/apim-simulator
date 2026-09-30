@@ -59,6 +59,11 @@ def _project_portal_api(api_id: str, api: ApiConfig) -> dict[str, Any]:
         "api_version": api.api_version,
         "revision": api.revision,
         "revision_description": api.revision_description,
+        "change_log": [
+            {"release": release.name, "revision": release.revision, "notes": release.notes}
+            for release in api.releases.values()
+            if release.notes
+        ],
         "operations": [
             {
                 "id": operation_id,
@@ -331,6 +336,15 @@ PORTAL_HTML = """<!doctype html>
             el("code", { text: "/" + api.path }),
             " — " + api.name + revision + ", " + api.operations.length + " operations",
           ]);
+          if (api.change_log.length) {
+            const entries = el("ul", { class: "change-log" }, api.change_log.map((entry) =>
+              el("li", {}, [
+                el("strong", { text: entry.revision ? "Revision " + entry.revision : entry.release }),
+                " — " + entry.notes,
+              ]),
+            ));
+            item.append(el("details", {}, [el("summary", { text: "Change log" }), entries]));
+          }
           return item;
         }),
       );

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from typing import Any
 
 from fastapi import Request
 
-from app.config import ApiVersioningScheme, GatewayConfig, RouteConfig, RouteMatch
+from app.config import ApiConfig, ApiVersioningScheme, GatewayConfig, RouteConfig, RouteMatch
 from app.security import AuthContext, build_client_principal
 
 HOP_BY_HOP_HEADERS = {
@@ -287,6 +288,9 @@ def _resolve_route_candidate(
 ) -> tuple[RouteMatch, ResolvedRoute] | None:
     if not _route_matches_host(route, request_hosts) or not _route_protocol_allowed(route, request):
         return None
+    api_config = config.apis.get(route.api_id or "")
+    if api_config is not None and api_config.is_online is False:
+        return None
     if not route.api_version_set:
         match = route.match(method=request.method, path=path, query=request.query_params)
         if match is None:
@@ -316,8 +320,66 @@ def _resolve_route_candidate(
     return (match, resolved) if match is not None else None
 
 
+def _api_matches_revision_version(
+    config: GatewayConfig, api_id: str, api: ApiConfig, request: Request, path: str
+) -> bool:
+    """Whether this same-path API is selected by the request's version selector."""
+    candidate_config = config.model_copy(update={"apis": {api_id: api}, "routes": []})
+    candidate_config.routes = candidate_config.materialize_routes()
+    for route in candidate_config.routes:
+        version_set_id = route.api_version_set
+        version_set = candidate_config.api_version_sets.get(version_set_id or "")
+        if version_set is None:
+            continue
+        requested_version, _ = _read_version(request, config=candidate_config, route=route, path=path)
+        if requested_version is None:
+            if route.api_version is None:
+                return True
+        elif _version_matches(route, requested_version, version_set.versioning_scheme):
+            return True
+    return False
+
+
+def _select_api_revision(config: GatewayConfig, request: Request) -> tuple[GatewayConfig, str] | None:
+    # APIM places the revision selector on the API path itself, before the
+    # operation path. Resolve against that revision's saved API snapshot, then
+    # match the normalized public path so the selector never reaches upstream.
+    path = request.scope["path"]
+    revision_match = re.match(r"^(.*?);rev=([^/]+)(/.*|$)", path, flags=re.IGNORECASE)
+    if revision_match is None:
+        return config, path
+    api_path, revision_id, suffix = revision_match.groups()
+    api_entries = [
+        (api_id, candidate)
+        for api_id, candidate in config.apis.items()
+        if ("/" + candidate.path.strip("/")).rstrip("/").casefold() == (api_path.rstrip("/") or "/").casefold()
+    ]
+    normalized_path = f"{api_path}{suffix}"
+    if len(api_entries) > 1:
+        api_entries = [
+            entry for entry in api_entries if _api_matches_revision_version(config, *entry, request, normalized_path)
+        ]
+    if len(api_entries) != 1:
+        return None
+    api_id, api = api_entries[0]
+    revision = api.revisions.get(revision_id)
+    if revision is None or revision.is_online is False or not revision.definition:
+        return None
+    revision_api = ApiConfig.model_validate(
+        {**revision.definition, "revisions": api.revisions, "releases": api.releases}
+    )
+    config = config.model_copy(update={"apis": {api_id: revision_api}, "routes": []})
+    config.routes = config.materialize_routes()
+    request.scope["path"] = normalized_path
+    request.scope["raw_path"] = normalized_path.encode()
+    return config, normalized_path
+
+
 def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | None:
-    path = request.url.path
+    selected = _select_api_revision(config, request)
+    if selected is None:
+        return None
+    config, path = selected
     request_host_groups = _request_host_candidate_groups(request)
     if not request_host_groups:
         request_host_groups = [[]]

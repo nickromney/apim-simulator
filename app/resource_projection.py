@@ -387,6 +387,10 @@ def project_summary(config: GatewayConfig, *, trace_store: dict[str, Any] | None
             project_subscription(config, config_key, subscription)
             for config_key, subscription in config.subscription.subscriptions.items()
         ],
+        "subscription_key_names": {
+            "header_names": config.subscription.header_names,
+            "query_param_names": config.subscription.query_param_names,
+        },
         "backends": [project_backend(config, backend_id, backend) for backend_id, backend in config.backends.items()],
         "named_values": [
             project_named_value(config, named_value_id, named_value)

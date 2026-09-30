@@ -91,6 +91,8 @@ def test_project_summary_uses_service_scoped_ids_and_masks_secrets() -> None:
         },
         subscription=SubscriptionConfig(
             required=True,
+            header_names=["X-Api-Key"],
+            query_param_names=["api_key"],
             subscriptions={
                 "starter-dev": Subscription(
                     id="starter-dev",
@@ -203,6 +205,10 @@ def test_project_summary_uses_service_scoped_ids_and_masks_secrets() -> None:
     assert payload["apis"][0]["resource_id"] == "service/lab-sim/apis/hello"
     assert payload["apis"][0]["revision"] == "2"
     assert payload["apis"][0]["tags"] == ["starter"]
+    assert payload["subscription_key_names"] == {
+        "header_names": ["X-Api-Key"],
+        "query_param_names": ["api_key"],
+    }
     assert payload["apis"][0]["operations"][0]["resource_id"] == "service/lab-sim/apis/hello/operations/getHello"
     assert payload["apis"][0]["operations"][0]["tags"] == ["starter"]
     assert payload["apis"][0]["operations"][0]["description"] == "Return a greeting"

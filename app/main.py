@@ -262,12 +262,16 @@ async def _watch_config(
             current = _ConfigFingerprint.read(path)
             if current is None or not current.succeeds(seen):
                 continue
-            seen = current
-            logger.info("config file changed, reloading...")
             manager = resolve_manager()
             if manager is None:
                 logger.warning("config watcher skipped reload because management service was unavailable")
                 continue
+            seen = current
+            consume_saved_save = getattr(manager, "consume_saved_config_fingerprint", None)
+            if consume_saved_save is not None and consume_saved_save(path):
+                logger.debug("config watcher observed a management save")
+                continue
+            logger.info("config file changed, reloading...")
             manager.reload_config()
         except Exception as exc:  # noqa: BLE001 - a watcher must outlive one bad reload
             logger.warning("config watcher error: %s", exc)
@@ -396,7 +400,7 @@ def _build_gateway_router(*, require_management_plane: Callable[[], ManagementSe
     @router.post("/apim/admin/subscriptions/{subscription_id}/rotate")
     async def rotate_subscription_key(subscription_id: str, request: Request, key: str = "secondary") -> dict:
         require_admin(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg: GatewayConfig = request.app.state.gateway_config.model_copy(deep=True)
         updated, new_key = require_management_plane().rotate_subscription_key(cfg, subscription_id, key)
         sub = updated.subscription.find_by_id(subscription_id)
         if sub is None:

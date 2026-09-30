@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -322,6 +322,10 @@ class ApiRevisionConfig(BaseModel):
     is_current: bool | None = None
     is_online: bool | None = None
     source_api_id: str | None = None
+    # Snapshot of the routable API definition. The enclosing ApiConfig owns the
+    # currently published definition; each revision owns its independently
+    # editable copy here.
+    definition: dict[str, Any] = Field(default_factory=dict)
 
 
 class ApiReleaseConfig(BaseModel):
@@ -1083,6 +1087,7 @@ class ApiConfig(BaseModel):
     # Learn documents the protocols property but not the omitted-field default;
     # preserve legacy simulator configs by exposing both schemes until set.
     protocols: list[str] = Field(default_factory=lambda: ["http", "https"])
+    translate_required_query_parameters: Literal["template", "query"] = "template"
     products: list[str] = Field(default_factory=list)
     api_version_set: str | None = None
     api_version: str | None = None

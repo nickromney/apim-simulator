@@ -1,8 +1,13 @@
-# Bootstrap slice for enforced contract coverage.
-# Expand this file iteratively until it covers every supported/adapted contract
-# documented in docs/SCOPE.md and docs/CAPABILITY-MATRIX.md.
+# Enforced owner-test contracts for the documented fidelity subset.
+# Historical entries may still use `partial`; new entries should use the
+# supported/adapted/unsupported vocabulary documented in
+# docs/FIDELITY-CONTRACTS.md.
 version: 1
-scope: bootstrap
+scope: fidelity-subset
+taxonomy:
+  supported: Documentation-backed behavior for a named local subset.
+  adapted: Useful local behavior with an explicitly documented APIM difference.
+  unsupported: Outside the project; reject rather than silently approximate.
 contracts:
   - id: GW-HEALTH
     status: supported
@@ -117,9 +122,10 @@ contracts:
     doc_refs:
       - docs/SCOPE.md#supported-now
       - docs/CAPABILITY-MATRIX.md#products-and-subscriptions
+      - docs/FIDELITY-CONTRACTS.md#products-publication-and-subscriptions--verified-subset
     owner_tests:
-      - tests/test_gateway.py::test_unpublished_product_denies_access_even_with_grant
-      - tests/test_gateway.py::test_grant_on_unpublished_product_does_not_authorize_published_route
+      - tests/test_gateway.py::test_unpublished_product_allows_access_with_valid_subscription
+      - tests/test_gateway.py::test_grant_on_unpublished_product_authorizes_mixed_product_route
       - tests/test_gateway.py::test_published_product_still_authorizes_when_sibling_is_unpublished
     fixture_or_golden: null
     assertion_kind: http-json
@@ -131,6 +137,7 @@ contracts:
     doc_refs:
       - docs/SCOPE.md#supported-now
       - docs/CAPABILITY-MATRIX.md#products-and-subscriptions
+      - docs/FIDELITY-CONTRACTS.md#products-publication-and-subscriptions--verified-subset
     owner_tests:
       - tests/test_gateway.py::test_submitted_subscription_key_is_rejected_until_approved_via_management_plane
     fixture_or_golden: null
@@ -143,6 +150,7 @@ contracts:
     doc_refs:
       - docs/SCOPE.md#supported-now
       - docs/CAPABILITY-MATRIX.md#developer-portal
+      - docs/FIDELITY-CONTRACTS.md#products-publication-and-subscriptions--verified-subset
     owner_tests:
       - tests/test_portal.py::test_catalog_filters_unpublished_and_group_restricted_products
     fixture_or_golden: null
@@ -210,14 +218,17 @@ contracts:
     assertion_kind: http-json
 
   - id: MGMT-OPENAPI-IMPORT
-    status: partial
+    status: supported
     surface: management
     module: app/openapi_import.py
     doc_refs:
       - docs/NEXT-FEATURES.md#better-import-fidelity
       - docs/CAPABILITY-MATRIX.md#management-plane
+      - docs/FIDELITY-CONTRACTS.md#openapi-import--verified-subset
     owner_tests:
       - tests/test_gateway.py::test_management_api_import_openapi_endpoint_creates_routable_api
+      - tests/test_openapi_import.py::*
+      - tests/test_import_mock_contract.py::*
     fixture_or_golden: null
     assertion_kind: http-json
 
@@ -324,6 +335,7 @@ contracts:
     doc_refs:
       - docs/SCOPE.md#supported-now
       - docs/CAPABILITY-MATRIX.md#backends
+      - docs/FIDELITY-CONTRACTS.md#cache-throttling-backend-pools-and-ai-policies--adapted-contracts
     owner_tests:
       - tests/test_backend_pool.py::test_pool_round_robin_alternates_members
       - tests/test_backend_pool.py::test_pool_fails_over_and_opens_circuit
@@ -338,6 +350,7 @@ contracts:
     doc_refs:
       - docs/SCOPE.md#supported-now
       - docs/CAPABILITY-MATRIX.md#policies
+      - docs/FIDELITY-CONTRACTS.md#policy-expressions-and-policy-scopes--verified-subset
     owner_tests:
       - tests/test_policy_scopes.py::test_product_policy_applies_for_authorizing_product
       - tests/test_policy_scopes.py::test_product_policy_runs_before_api_when_api_calls_base_first
@@ -352,6 +365,7 @@ contracts:
     doc_refs:
       - docs/SCOPE.md#supported-now
       - docs/AI-GATEWAY.md#llm-token-limit
+      - docs/FIDELITY-CONTRACTS.md#cache-throttling-backend-pools-and-ai-policies--adapted-contracts
     owner_tests:
       - tests/test_policy_llm.py::test_llm_token_limit_consumes_actual_usage_then_blocks
       - tests/test_policy_llm.py::test_llm_token_limit_estimate_blocks_before_backend
@@ -366,6 +380,7 @@ contracts:
     doc_refs:
       - docs/SCOPE.md#supported-now
       - docs/AI-GATEWAY.md#llm-emit-token-metric
+      - docs/FIDELITY-CONTRACTS.md#cache-throttling-backend-pools-and-ai-policies--adapted-contracts
     owner_tests:
       - tests/test_policy_llm.py::test_llm_emit_token_metric_emits_usage_with_dimensions
     fixture_or_golden: inline-xml
@@ -417,3 +432,17 @@ contracts:
       - tests/test_sample_compat.py::test_sample_compat_harness_is_green_for_supported_and_adapted_fixtures
     fixture_or_golden: tests/fixtures/apim_samples/manifest.json
     assertion_kind: fixture-harness
+
+  - id: MGMT-REVISION-SNAPSHOTS
+    status: supported
+    surface: management
+    module: app/management_service.py
+    doc_refs:
+      - docs/FIDELITY-CONTRACTS.md#revisions-and-releases--local-snapshot-contract
+      - docs/portal-ui-pass.md
+    owner_tests:
+      - tests/test_gateway.py::test_api_revisions_route_isolated_snapshots_and_release_promotes_revision
+      - tests/test_gateway.py::test_creating_api_starts_with_current_revision_one
+      - tests/test_gateway.py::test_explicit_revision_selects_versioned_api_and_does_not_fall_through_snapshots
+    fixture_or_golden: null
+    assertion_kind: http-json

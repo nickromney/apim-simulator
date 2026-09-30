@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.config import (
     ApiConfig,
+    ApiReleaseConfig,
     GatewayConfig,
     GroupConfig,
     OperationConfig,
@@ -102,7 +103,20 @@ def test_portal_page_and_users_are_served_when_enabled() -> None:
 
 @pytest.mark.contract("PORTAL-CATALOG-VISIBILITY")
 def test_catalog_filters_unpublished_and_group_restricted_products() -> None:
-    config = _portal_config()
+    config = _portal_config(
+        apis={
+            "hello": ApiConfig(
+                name="hello",
+                path="hello",
+                upstream_base_url=http_url("upstream"),
+                products=["starter", "gated"],
+                operations={"greet": OperationConfig(name="greet", method="GET", url_template="/greet")},
+                releases={
+                    "release-2": ApiReleaseConfig(name="release-2", revision="2", notes="Adds the new greeting variant")
+                },
+            )
+        }
+    )
     with _client(config) as client:
         everyone = client.get("/apim/portal/catalog", headers={"X-Apim-Portal-User": "dev-1"})
         assert everyone.status_code == 200
@@ -116,6 +130,10 @@ def test_catalog_filters_unpublished_and_group_restricted_products() -> None:
         starter = next(p for p in everyone.json()["products"] if p["id"] == "starter")
         assert [api["id"] for api in starter["apis"]] == ["hello"]
         assert starter["apis"][0]["operations"][0]["url_template"] == "/greet"
+        assert starter["apis"][0]["change_log"] == [
+            {"release": "release-2", "revision": "2", "notes": "Adds the new greeting variant"}
+        ]
+        assert "Change log" in client.get("/apim/portal").text
         # Consumer projection must not leak the upstream target.
         assert "upstream_base_url" not in starter["apis"][0]
 

@@ -311,7 +311,8 @@ def test_import_openapi_from_local_file(capsys: pytest.CaptureFixture[str]) -> N
         assert exit_code == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["api"]["path"] == "mock-backend"
-        assert payload["api"]["upstream_base_url"] == "http://mock-backend:8080/api"
+        # APIM selects HTTPS servers; this local sample advertises only HTTP.
+        assert payload["api"]["upstream_base_url"] == ""
         assert sorted(op["id"] for op in payload["api"]["operations"]) == ["echo", "health"]
         assert payload["import"]["operation_count"] == 2
 
