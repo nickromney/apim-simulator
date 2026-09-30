@@ -10,8 +10,10 @@ from fastapi.testclient import TestClient
 
 from app.config import (
     ApiConfig,
+    ApiSchemaConfig,
     GatewayConfig,
     OperationConfig,
+    OperationRepresentationConfig,
     OperationResponseMetadataConfig,
     RouteConfig,
 )
@@ -41,7 +43,15 @@ def _run(
             name="Echo",
             method=method,
             url_template="/echo",
-            responses=[OperationResponseMetadataConfig(status_code=code) for code in declared],
+            responses=[
+                OperationResponseMetadataConfig(
+                    status_code=code,
+                    representations=[
+                        OperationRepresentationConfig(content_type="application/json", schema_id="Response")
+                    ],
+                )
+                for code in declared
+            ],
         )
     }
     config = GatewayConfig(
@@ -55,6 +65,12 @@ def _run(
                 upstream_base_url="http://upstream",
                 policies_xml=_policy(outbound),
                 operations=ops,
+                schemas={
+                    "Response": ApiSchemaConfig(
+                        content_type="application/json",
+                        value='{"type":"object"}',
+                    )
+                },
             )
         },
     )
