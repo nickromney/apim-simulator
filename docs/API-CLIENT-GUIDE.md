@@ -186,11 +186,9 @@ Typical changes:
 
 ## When Bruno Or Postman Are Not Enough
 
-Use Proxyman or the HAR file when the issue is browser-specific:
-
-- [`examples/todo-app/api-clients/proxyman/todo-through-apim.har`](../examples/todo-app/api-clients/proxyman/todo-through-apim.har)
-
-Regenerate the HAR with:
+Use Proxyman or a HAR capture when the issue is browser-specific. The HAR is
+not committed; generate it locally (it is written to
+`examples/todo-app/api-clients/proxyman/todo-through-apim.har`) with:
 
 ```bash
 make export-todo-har

@@ -41,7 +41,7 @@ that Prometheus, Loki, and Tempo all see the expected APIM and todo signals.
 
 - Bruno collection: [`examples/todo-app/api-clients/bruno/`](api-clients/bruno/)
 - Postman collection: [`examples/todo-app/api-clients/postman/`](api-clients/postman/)
-- Proxyman HAR capture: [`examples/todo-app/api-clients/proxyman/todo-through-apim.har`](api-clients/proxyman/todo-through-apim.har)
+- Proxyman HAR capture: generated locally by `make export-todo-har` into `api-clients/proxyman/todo-through-apim.har` (not committed)
 
 The Bruno and Postman local environment files default to localhost, but the
 base URL and subscription key are just variables, so the same collections can

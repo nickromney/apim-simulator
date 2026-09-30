@@ -633,9 +633,9 @@ For the repo-specific Bruno and Postman workflow, use
 
 Use Proxyman when the browser behaves differently from manual API clients.
 
-The repo includes a HAR file:
-
-- [`examples/todo-app/api-clients/proxyman/todo-through-apim.har`](../examples/todo-app/api-clients/proxyman/todo-through-apim.har)
+The HAR capture of the todo flow is not committed. It is written to
+`examples/todo-app/api-clients/proxyman/todo-through-apim.har` when you
+generate it (see below).
 
 Why it matters:
 
@@ -643,7 +643,7 @@ Why it matters:
 - Proxyman lets you inspect what the browser actually sent
 - you can prove the browser did or did not call APIM
 
-Regenerate the HAR with:
+Generate the HAR with:
 
 ```bash
 make export-todo-har

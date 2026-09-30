@@ -44,3 +44,21 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == "v${RELEASE_VERSION}" ]]
 }
+
+@test "release_version resolves a linked worktree, whose .git is a file" {
+  local worktree="$BATS_TEST_TMPDIR/linked-worktree"
+  git -C "$REPO_ROOT" worktree add --quiet --detach "$worktree" "$RELEASE_COMMIT"
+
+  run "$SCRIPT" --execute --source "$worktree" --commit "$RELEASE_COMMIT"
+  git -C "$REPO_ROOT" worktree remove --force "$worktree"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "v${RELEASE_VERSION}" ]]
+}
+
+@test "release_version rejects a directory that is not a git checkout" {
+  run "$SCRIPT" --execute --source "$BATS_TEST_TMPDIR" --commit "$RELEASE_COMMIT"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"source is not a git checkout"* ]]
+}
