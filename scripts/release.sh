@@ -17,7 +17,6 @@ RELEASE_FILES=(
   app/main.py
   examples/hello-api/main.py
   examples/todo-app/api-fastapi-container-app/main.py
-  examples/todo-app/api-clients/proxyman/todo-through-apim.har
   ui/package.json
   ui/package-lock.json
   examples/todo-app/frontend-astro/package.json

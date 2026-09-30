@@ -190,9 +190,6 @@ versions = {
     ),
     "ui/package.json": package_version(root / "ui/package.json"),
     "examples/todo-app/frontend-astro/package.json": package_version(root / "examples/todo-app/frontend-astro/package.json"),
-    "examples/todo-app/api-clients/proxyman/todo-through-apim.har": json.loads(
-        (root / "examples/todo-app/api-clients/proxyman/todo-through-apim.har").read_text(encoding="utf-8")
-    )["log"]["creator"]["version"],
 }
 
 expected = next(iter(versions.values()))

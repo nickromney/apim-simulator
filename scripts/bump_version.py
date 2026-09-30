@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -17,12 +16,6 @@ def replace_once(path: Path, pattern: str, replacement: str) -> None:
     path.write_text(updated, encoding="utf-8")
 
 
-def update_har(path: Path, version: str) -> None:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    payload["log"]["creator"]["version"] = version
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
-
 def main() -> None:
     if len(sys.argv) != 2 or not SEMVER_RE.fullmatch(sys.argv[1]):
         raise SystemExit("usage: bump_version.py X.Y.Z")
@@ -37,7 +30,6 @@ def main() -> None:
         r'^TODO_SERVICE_VERSION = "[^"]+"$',
         f'TODO_SERVICE_VERSION = "{version}"',
     )
-    update_har(ROOT / "examples/todo-app/api-clients/proxyman/todo-through-apim.har", version)
 
 
 if __name__ == "__main__":

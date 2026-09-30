@@ -290,6 +290,47 @@ case "$url" in
       fi
     fi
     ;;
+  "http://localhost:8000/apim/management/products/portal-premium")
+    response_body='{"id":"portal-premium","name":"Portal Premium","state":"published","require_subscription":true,"approval_required":true}'
+    ;;
+  "http://localhost:8000/apim/management/apis/portal-hello")
+    response_body='{"id":"portal-hello","path":"portal-hello","products":["portal-premium"]}'
+    ;;
+  "http://localhost:8000/apim/management/apis/portal-hello/operations/health")
+    response_body='{"id":"health","method":"GET","url_template":"/health"}'
+    ;;
+  "http://localhost:8000/apim/management/subscriptions/demo-dev-portal-premium")
+    if [[ "$method" == "DELETE" ]]; then
+      rm -f "$STATE_DIR/portal-approved"
+      response_body='{"deleted":true,"subscription_id":"demo-dev-portal-premium","remaining":0}'
+    elif [[ "$method" == "PATCH" ]]; then
+      : >"$STATE_DIR/portal-approved"
+      response_body='{"id":"demo-dev-portal-premium","state":"active","products":["portal-premium"]}'
+    else
+      response_body='{"id":"demo-dev-portal-premium","state":"submitted","products":["portal-premium"]}'
+    fi
+    ;;
+  "http://localhost:8000/apim/portal")
+    response_body='<!doctype html><title>APIM portal</title>'
+    ;;
+  "http://localhost:8000/apim/portal/catalog")
+    response_body='{"products":[{"id":"portal-premium","approval_required":true,"apis":[{"id":"portal-hello"}]}]}'
+    ;;
+  "http://localhost:8000/apim/portal/subscriptions")
+    if [[ "$method" == "POST" ]]; then
+      response_body='{"id":"demo-dev-portal-premium","state":"submitted","keys":{"primary":"sub-demo-dev-portal-premium-primary","secondary":"sub-demo-dev-portal-premium-secondary"}}'
+    else
+      response_body='{"subscriptions":[{"id":"demo-dev-portal-premium","state":"active"}]}'
+    fi
+    ;;
+  "http://localhost:8000/portal-hello/health")
+    if [[ -f "$STATE_DIR/portal-approved" ]]; then
+      response_body='{"status":"ok","path":"/api/health"}'
+    else
+      response_status=401
+      response_body='{"statusCode":401,"message":"Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription."}'
+    fi
+    ;;
   *)
     response_body='{}'
     ;;

@@ -68,7 +68,8 @@ done
 shell_cli_maybe_execute_or_preview_summary usage \
   "would resolve APIM simulator release version from source ${SOURCE_REPO}"
 
-if [[ ! -d "${SOURCE_REPO}/.git" ]]; then
+# A linked worktree or submodule has a .git file, not a directory, so ask git.
+if ! git -C "${SOURCE_REPO}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "release_version.sh: source is not a git checkout: ${SOURCE_REPO}" >&2
   exit 1
 fi
