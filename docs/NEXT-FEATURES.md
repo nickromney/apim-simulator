@@ -2,6 +2,12 @@
 
 This file tracks open areas that would materially expand the simulator. It is not an acceptance log for work that has already shipped.
 
+Feature status and evidence boundaries live in
+[FIDELITY-CONTRACTS.md](FIDELITY-CONTRACTS.md) and the owner-test matrix in
+[`contracts/contract_matrix.yml`](../contracts/contract_matrix.yml). A roadmap
+item becomes supported only after its named subset, exclusions, Microsoft Learn
+reference, and owner tests are explicit.
+
 ## Highest-Value Next Work
 
 ### Broader Sample Compatibility Coverage
@@ -16,11 +22,17 @@ Good additions are:
 
 ### Better Import Fidelity
 
-Improve Terraform/OpenTofu and OpenAPI projection where it increases day-to-day usefulness:
+The bounded OpenAPI 2 JSON and 3.0.x importer now projects operation IDs,
+parameters, schemas, request/response representations, and examples. It follows
+first-HTTPS server selection, required-query translation, body omission for
+GET/HEAD/OPTIONS, and documented reimport operation matching. See the
+[implemented contract](FIDELITY-CONTRACTS.md#openapi-import--verified-subset).
 
-- richer OpenAPI schema and request/response metadata projection
-- clearer compatibility-report output for partially supported resources
-- tighter mapping between imported metadata and the management API surface
+Further work needs separate contracts for additional serialization, parameter
+schema constraints, referenced components, `x-ms-paths`, and OpenAPI 3.1.
+External references and inferred security definitions remain excluded. Add
+Azure comparison fixtures before extending fidelity claims beyond the
+Microsoft documentation and local regressions.
 
 ### Broader Local Management Workflows
 
@@ -29,6 +41,16 @@ Expand low-risk local CRUD and operator-console workflows where they make the si
 - better editing flows for descriptive resources
 - stronger persistence ergonomics for config-authored resources
 - clearer management summaries for large imported configs
+- explicit concurrent-edit conflict handling (atomic save failure preservation
+  is implemented; ETags and multi-writer coordination remain outside scope)
+
+### Runtime revision fidelity
+
+Management-created revisions now support independent snapshots, `;rev=N`
+routing, offline state, promotion and local release notes. Remaining work is
+reconstructing complete snapshots from Terraform-imported revisions, arbitrary
+source-API cloning, and broader live Azure differential fixtures. See the
+[revision contract](FIDELITY-CONTRACTS.md#revisions-and-releases--local-snapshot-contract).
 
 ### More End-To-End Example Coverage
 
@@ -61,7 +83,6 @@ directory.
 - Full APIM expression-engine compatibility
 - `quota-by-key` bandwidth enforcement
 - `llm-semantic-cache-lookup`/`-store` and `llm-content-safety` (both simulate other Azure services; see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
-- Load-balanced backend pools with circuit breakers (the natural next AI-gateway step if demand appears)
 - Developer portal CMS, theming, email, and notification features (the adapted consumer workflows ship at `/apim/portal`)
 - Full ARM or SDK wire compatibility
 

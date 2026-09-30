@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.config import (
     ApiConfig,
@@ -26,6 +29,7 @@ from app.config import (
     TagConfig,
     UserConfig,
     load_config,
+    validate_policy_config,
 )
 from app.effective_policy import (
     EMPTY_POLICY_XML,
@@ -37,6 +41,59 @@ from app.openapi_import import parse_api_import
 from app.policy import parse_policies_xml
 from app.security import OIDCVerifier
 from app.terraform_import import import_from_tofu_show_json
+
+_REVISION_METADATA_FIELDS = {"revisions", "releases"}
+_NONCURRENT_REVISION_IMMUTABLE_FIELDS = {"name", "path", "protocols", "api_version", "version_description"}
+
+
+def _api_revision_definition(api: ApiConfig) -> dict[str, Any]:
+    return api.model_dump(mode="python", exclude=_REVISION_METADATA_FIELDS)
+
+
+def _validated_revision_definition(definition: dict[str, Any]) -> dict[str, Any]:
+    try:
+        api = ApiConfig.model_validate({**definition, "revisions": {}, "releases": {}})
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from exc
+    return api.model_dump(mode="python", exclude=_REVISION_METADATA_FIELDS)
+
+
+def _ensure_initial_api_revision(api: ApiConfig) -> None:
+    """APIM creates revision 1 as the current revision when an API is added."""
+    if api.revisions:
+        return
+    revision_id = api.revision or "1"
+    api.revision = revision_id
+    api.is_current = True
+    if api.is_online is None:
+        api.is_online = True
+    api.revisions[revision_id] = ApiRevisionConfig(
+        revision=revision_id,
+        description=api.revision_description,
+        is_current=True,
+        is_online=api.is_online,
+        source_api_id=api.source_api_id,
+        definition=_api_revision_definition(api),
+    )
+
+
+def _sync_current_revision_definitions(cfg: GatewayConfig) -> None:
+    """Keep the current revision URL aligned with direct edits to its API."""
+    for api in cfg.apis.values():
+        current_id = api.revision or next(
+            (revision_id for revision_id, revision in api.revisions.items() if revision.is_current), None
+        )
+        current = api.revisions.get(current_id) if current_id else None
+        if current is not None:
+            current.definition = _api_revision_definition(api)
+
+
+def _apply_revision_definition(api: ApiConfig, definition: dict[str, Any]) -> None:
+    validated = ApiConfig.model_validate({**definition, "revisions": {}, "releases": {}})
+    for field_name in ApiConfig.model_fields:
+        if field_name not in _REVISION_METADATA_FIELDS:
+            setattr(api, field_name, getattr(validated, field_name))
+
 
 logger = logging.getLogger("apim-simulator")
 
@@ -52,15 +109,60 @@ class ManagementService:
         self.app = app
         self._serialize_gateway_config = serialize_gateway_config
         self._build_oidc_verifiers = build_oidc_verifiers
+        self._saved_config_path: str | None = None
+        self._saved_config_digest: str | None = None
+
+    def _prepare_config(self, cfg: GatewayConfig) -> tuple[GatewayConfig, dict[str, OIDCVerifier]]:
+        cfg.routes = cfg.materialize_routes()
+        validate_policy_config(cfg)
+        return cfg, self._build_oidc_verifiers(cfg)
+
+    def _publish_config(
+        self,
+        cfg: GatewayConfig,
+        oidc_verifiers: dict[str, OIDCVerifier],
+        *,
+        clear_result_caches: bool,
+    ) -> GatewayConfig:
+        self.app.state.gateway_config = cfg
+        self.app.state.oidc_verifiers = oidc_verifiers
+        self.app.state.policy_cache = {}
+        if clear_result_caches:
+            self.app.state.policy_response_cache = {}
+            self.app.state.policy_value_cache = {}
+        return cfg
+
+    @staticmethod
+    def _result_cache_inputs(cfg: GatewayConfig) -> tuple[Any, ...]:
+        return (
+            cfg.policies_xml,
+            cfg.policies_xml_documents,
+            cfg.policy_fragments,
+            cfg.named_values,
+            {key: value.policies_xml for key, value in cfg.products.items()},
+            cfg.apis,
+            cfg.routes,
+            cfg.backends,
+        )
+
+    def consume_saved_config_fingerprint(self, path: Path) -> bool:
+        """Skip the watcher reload caused by this service's own atomic save."""
+        if self._saved_config_path != str(path) or self._saved_config_digest is None:
+            return False
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            return False
+        if digest != self._saved_config_digest:
+            return False
+        self._saved_config_path = None
+        self._saved_config_digest = None
+        return True
 
     def reload_config(self) -> GatewayConfig:
         new_config = load_config()
-        new_config.routes = new_config.materialize_routes()
-        self.app.state.gateway_config = new_config
-        self.app.state.oidc_verifiers = self._build_oidc_verifiers(new_config)
-        self.app.state.policy_cache = {}
-        self.app.state.policy_response_cache = {}
-        self.app.state.policy_value_cache = {}
+        new_config, oidc_verifiers = self._prepare_config(new_config)
+        self._publish_config(new_config, oidc_verifiers, clear_result_caches=True)
         metrics = getattr(self.app.state, "gateway_metrics", None)
         if metrics is not None:
             metrics.config_reloads.add(1, {"result": "success"})
@@ -73,24 +175,56 @@ class ManagementService:
         return new_config
 
     def apply_runtime_config(self, cfg: GatewayConfig) -> GatewayConfig:
-        cfg.routes = cfg.materialize_routes()
-        self.app.state.gateway_config = cfg
-        self.app.state.oidc_verifiers = self._build_oidc_verifiers(cfg)
-        self.app.state.policy_cache = {}
-        self.app.state.policy_response_cache = {}
-        self.app.state.policy_value_cache = {}
-        return cfg
+        prepared, oidc_verifiers = self._prepare_config(cfg)
+        return self._publish_config(prepared, oidc_verifiers, clear_result_caches=True)
+
+    def _write_config_atomically(self, path: Path, payload: str) -> None:
+        """Write and fsync beside the target, then atomically replace it."""
+        temporary_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+            ) as temporary:
+                temporary_path = temporary.name
+                temporary.write(payload)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                try:
+                    os.unlink(temporary_path)
+                except FileNotFoundError:
+                    pass
 
     def persist_or_apply_config(self, cfg: GatewayConfig) -> GatewayConfig:
-        config_path = os.getenv("APIM_CONFIG_PATH", "").strip()
-        if not config_path:
-            return self.apply_runtime_config(cfg)
-
+        staged = cfg.model_copy(deep=True)
+        _sync_current_revision_definitions(staged)
         try:
-            Path(config_path).write_text(self._serialize_gateway_config(cfg), encoding="utf-8")
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail="Unable to persist config update") from exc
-        return self.reload_config()
+            staged, oidc_verifiers = self._prepare_config(staged)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid config update: {exc}") from exc
+        config_path = os.getenv("APIM_CONFIG_PATH", "").strip()
+        payload = self._serialize_gateway_config(staged) if config_path else None
+        previous = getattr(self.app.state, "gateway_config", None)
+        clear_result_caches = previous is None or self._result_cache_inputs(previous) != self._result_cache_inputs(
+            staged
+        )
+        if config_path:
+            self._saved_config_path = config_path
+            self._saved_config_digest = hashlib.sha256((payload or "").encode("utf-8")).hexdigest()
+            try:
+                self._write_config_atomically(Path(config_path), payload or "")
+            except OSError as exc:
+                self._saved_config_path = None
+                self._saved_config_digest = None
+                raise HTTPException(status_code=500, detail="Unable to persist config update") from exc
+            metrics = getattr(self.app.state, "gateway_metrics", None)
+            if metrics is not None:
+                metrics.config_reloads.add(1, {"result": "success"})
+        self._publish_config(staged, oidc_verifiers, clear_result_caches=clear_result_caches)
+        return staged
 
     def upsert_product(self, cfg: GatewayConfig, product_id: str, body: Any) -> GatewayConfig:
         existing = cfg.products.get(product_id)
@@ -411,29 +545,52 @@ class ManagementService:
         self.require_api_authoring_mode(cfg)
         self.validate_policy_xml(cfg, body.policies_xml)
         try:
-            imported = parse_api_import(content_format=body.content_format, content_value=body.content_value)
+            imported = parse_api_import(
+                content_format=body.content_format,
+                content_value=body.content_value,
+                translate_required_query_parameters=body.translate_required_query_parameters,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         existing = cfg.apis.get(api_id)
-        upstream_base_url = body.upstream_base_url or imported.upstream_base_url
-        if not upstream_base_url and existing is not None:
-            upstream_base_url = existing.upstream_base_url
-        if not upstream_base_url:
-            raise HTTPException(
-                status_code=400,
-                detail="Imported API is missing an upstream base URL; provide upstream_base_url explicitly.",
-            )
+        upstream_base_url = (
+            body.upstream_base_url if body.upstream_base_url is not None else (imported.upstream_base_url or "")
+        )
 
         operations: dict[str, OperationConfig] = {}
         existing_operations = existing.operations if existing is not None else {}
+        used_operation_ids: set[str] = set()
         for imported_operation in imported.operations:
-            preserved = existing_operations.get(imported_operation.name)
-            operations[imported_operation.name] = OperationConfig(
-                name=preserved.name if preserved is not None else imported_operation.name,
+            matched_id = imported_operation.source_operation_id
+            preserved = existing_operations.get(matched_id or "") if existing is not None else None
+            operation_id = (
+                imported_operation.name
+                if existing is None
+                else (matched_id if preserved is not None else imported_operation.generated_name)
+            )
+            preserved = preserved or next(
+                (
+                    item
+                    for item in existing_operations.values()
+                    if item.method.upper() == imported_operation.method
+                    and item.url_template.split("?", maxsplit=1)[0]
+                    == imported_operation.url_template.split("?", maxsplit=1)[0]
+                ),
+                None,
+            )
+            operation_id = operation_id or imported_operation.name
+            base_id = operation_id
+            suffix = 1
+            while operation_id in used_operation_ids:
+                tail = f"-{suffix}"
+                operation_id = f"{base_id[:76].rstrip('-')}{tail}"
+                suffix += 1
+            operations[operation_id] = OperationConfig(
+                name=imported_operation.display_name,
                 method=imported_operation.method,
                 url_template=imported_operation.url_template,
-                description=preserved.description if preserved is not None else None,
+                description=imported_operation.description,
                 upstream_base_url=preserved.upstream_base_url if preserved is not None else None,
                 upstream_path_prefix=preserved.upstream_path_prefix if preserved is not None else None,
                 backend=preserved.backend if preserved is not None else None,
@@ -447,10 +604,11 @@ class ManagementService:
                 authz=preserved.authz if preserved is not None else None,
                 policies_xml=preserved.policies_xml if preserved is not None else None,
                 tags=preserved.tags if preserved is not None else [],
-                template_parameters=preserved.template_parameters if preserved is not None else [],
-                request=preserved.request if preserved is not None else None,
-                responses=preserved.responses if preserved is not None else [],
+                template_parameters=imported_operation.template_parameters,
+                request=imported_operation.request,
+                responses=imported_operation.responses,
             )
+            used_operation_ids.add(operation_id)
 
         cfg.apis[api_id] = ApiConfig(
             name=body.name or (existing.name if existing is not None else api_id),
@@ -462,6 +620,7 @@ class ManagementService:
                 if body.protocols is not None
                 else (existing.protocols if existing is not None else ["http", "https"])
             ),
+            translate_required_query_parameters=body.translate_required_query_parameters,
             backend=body.backend if body.backend is not None else (existing.backend if existing is not None else None),
             products=body.products
             if body.products is not None
@@ -495,10 +654,12 @@ class ManagementService:
             else (existing.policies_xml if existing else None),
             tags=existing.tags if existing is not None else [],
             operations=operations,
-            schemas=existing.schemas if existing is not None else {},
+            schemas=imported.schemas,
             revisions=existing.revisions if existing is not None else {},
             releases=existing.releases if existing is not None else {},
         )
+        if existing is None:
+            _ensure_initial_api_revision(cfg.apis[api_id])
         return self.persist_or_apply_config(cfg), imported
 
     def upsert_api(self, cfg: GatewayConfig, api_id: str, body: Any) -> GatewayConfig:
@@ -511,6 +672,7 @@ class ManagementService:
             upstream_base_url=body.upstream_base_url,
             upstream_path_prefix=body.upstream_path_prefix,
             protocols=body.protocols,
+            translate_required_query_parameters=body.translate_required_query_parameters,
             backend=body.backend,
             products=body.products,
             api_version_set=body.api_version_set,
@@ -530,6 +692,8 @@ class ManagementService:
             revisions=existing.revisions if existing is not None else {},
             releases=existing.releases if existing is not None else {},
         )
+        if existing is None:
+            _ensure_initial_api_revision(cfg.apis[api_id])
         return self.persist_or_apply_config(cfg)
 
     def delete_api(self, cfg: GatewayConfig, api_id: str) -> GatewayConfig:
@@ -541,17 +705,56 @@ class ManagementService:
     def upsert_api_revision(self, cfg: GatewayConfig, api_id: str, revision_id: str, body: Any) -> GatewayConfig:
         self.require_api_authoring_mode(cfg)
         api = self._get_api_or_404(cfg, api_id)
+        if not api.revisions:
+            _ensure_initial_api_revision(api)
         existing = api.revisions.get(revision_id)
+        definition = (
+            dict(existing.definition) if existing is not None and existing.definition else _api_revision_definition(api)
+        )
+        if body.definition is not None:
+            definition.update(body.definition)
+        current_id = api.revision or next(
+            (candidate_id for candidate_id, candidate in api.revisions.items() if candidate.is_current), None
+        )
+        if current_id is not None and revision_id != current_id:
+            changed_fields = [
+                field for field in _NONCURRENT_REVISION_IMMUTABLE_FIELDS if definition.get(field) != getattr(api, field)
+            ]
+            if changed_fields:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot change {', '.join(sorted(changed_fields))} on a non-current API revision",
+                )
+        # Validate the complete snapshot before storing it, so a malformed
+        # revision cannot poison route materialization for every request.
+        validated_definition = _validated_revision_definition(definition)
+        validated_api = ApiConfig.model_validate({**validated_definition, "revisions": {}, "releases": {}})
+        self.validate_policy_xml(cfg, validated_api.policies_xml)
+        for operation in validated_api.operations.values():
+            self.validate_policy_xml(cfg, operation.policies_xml)
         revision = ApiRevisionConfig(
             revision=revision_id,
             description=body.description
             if body.description is not None
             else (existing.description if existing else None),
-            is_current=body.is_current if body.is_current is not None else (existing.is_current if existing else None),
-            is_online=body.is_online if body.is_online is not None else (existing.is_online if existing else None),
+            is_current=(
+                body.is_current
+                if body.is_current is not None
+                else (
+                    existing.is_current
+                    if existing is not None and existing.is_current is not None
+                    else revision_id == current_id
+                )
+            ),
+            is_online=(
+                body.is_online
+                if body.is_online is not None
+                else (existing.is_online if existing is not None and existing.is_online is not None else True)
+            ),
             source_api_id=(
                 body.source_api_id if body.source_api_id is not None else (existing.source_api_id if existing else None)
             ),
+            definition=validated_definition,
         )
         api.revisions[revision_id] = revision
         if revision.is_current:
@@ -585,6 +788,9 @@ class ManagementService:
             notes=body.notes if body.notes is not None else (existing.notes if existing is not None else None),
             revision=body.revision,
         )
+        # In APIM, creating a release is the operation that promotes the chosen
+        # revision and optionally publishes its change-log note.
+        self._set_current_revision(api, body.revision, api.revisions[body.revision])
         return self.persist_or_apply_config(cfg)
 
     def delete_api_release(self, cfg: GatewayConfig, api_id: str, release_id: str) -> GatewayConfig:
@@ -822,8 +1028,11 @@ class ManagementService:
         return named_value
 
     def _set_current_revision(self, api: ApiConfig, revision_id: str, revision: ApiRevisionConfig) -> None:
+        definition = _validated_revision_definition(revision.definition or _api_revision_definition(api))
+        _apply_revision_definition(api, definition)
         for candidate_id, candidate in api.revisions.items():
             candidate.is_current = candidate_id == revision_id
+        revision.is_current = True
         api.revision = revision_id
         api.revision_description = revision.description
         api.source_api_id = revision.source_api_id

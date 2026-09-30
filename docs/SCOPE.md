@@ -2,11 +2,17 @@
 
 This repository is not trying to clone all of Azure API Management. It is a local learning and iteration tool with a deliberate bias toward gateway behaviour, policy experimentation, auth flows, networking scenarios, and management-surface workflows that are useful in development.
 
+The project promises fidelity only for a named feature subset. Read
+[FIDELITY-CONTRACTS.md](FIDELITY-CONTRACTS.md) with the contract matrix before
+relying on a behavior. Contracts use `supported` for a documentation-backed
+subset, `adapted` when local behavior intentionally differs from APIM, and
+`unsupported` for features outside the project.
+
 ## Supported Now
 
 - Config-driven gateway routing and upstream proxying
 - Service metadata, APIs, operations, products, subscriptions, version sets, backends, named values, policy fragments, tags, users, groups, loggers, and diagnostics in local config
-- Product publish state and approval-required flows, with full APIM subscription lifecycle states; unpublished-product gateway rejection remains an explicitly documented simulator adaptation
+- Product publish state and approval-required flows, with APIM subscription lifecycle states; publication controls consumer-portal discovery while authorized gateway access remains available for unpublished products, as documented by Microsoft
 - An adapted consumer developer-portal surface at `/apim/portal`: catalog browsing, group-scoped product visibility, subscription sign-up, and a try-it console
 - Tenant-key-protected management APIs, replay, trace summaries, and the operator console
 - Terraform/OpenTofu import plus static compatibility reporting
@@ -43,7 +49,7 @@ This repository is not trying to clone all of Azure API Management. It is a loca
   - `llm-token-limit` / `azure-openai-token-limit` (adapted token counting, including SSE streams; see [AI-GATEWAY.md](AI-GATEWAY.md))
   - `llm-emit-token-metric` / `azure-openai-emit-token-metric` (adapted to an OTEL counter)
   - `emit-metric` (adapted to an OTEL counter)
-  - `validate-content` (size, content-type map, JSON well-formedness; schema enforcement deferred)
+  - `validate-content` (size, content-type map, JSON well-formedness, and the supported JSON Schema subset)
   - `validate-parameters` (headers and query against operation metadata)
   - `validate-status-code` (adapted: `prevent` mutates the response to 502)
 - Curated Azure-Samples/APIM compatibility fixtures with documented supported, adapted, and unsupported cases
@@ -56,8 +62,9 @@ This repository is not trying to clone all of Azure API Management. It is a loca
 
 - External cache backends for the `cache-*` policies
 - `quota-by-key` bandwidth enforcement
-- `llm-semantic-cache-lookup`/`-store`, `llm-content-safety`, and load-balanced backend pools (see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
+- `llm-semantic-cache-lookup`/`-store` and `llm-content-safety` (see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
 - Full APIM policy expression compatibility
+- Reconstruction of complete revision snapshots from Terraform-imported metadata, arbitrary source-API revision cloning, and broader Azure release infrastructure
 - Broader control-plane parity beyond the current local CRUD and inspection surface
 - Broader Azure-Samples/APIM fixture coverage beyond the curated set
 

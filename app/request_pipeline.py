@@ -32,7 +32,7 @@ from app.backend_pool import (
     render_backend_value,
     select_pool_member,
 )
-from app.config import GatewayConfig, ProductState, RouteConfig, SubscriptionScope
+from app.config import GatewayConfig, RouteConfig, SubscriptionScope
 from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
@@ -105,13 +105,6 @@ def extract_roles(claims: dict) -> set[str]:
     return set().union(*(_roles_in(source) for source in _role_claim_sources(claims)))
 
 
-def product_is_published(cfg: GatewayConfig, product_id: str) -> bool:
-    product = cfg.products.get(product_id)
-    if product is None:
-        return True
-    return product.state == ProductState.Published
-
-
 def allowed_products_for_route(route: RouteConfig) -> list[str]:
     if route.products:
         return list(route.products)
@@ -133,19 +126,16 @@ def effective_product_id_for_call(
         SubscriptionScope.Service,
     }:
         return ""
-    published = [p for p in allowed_products if product_is_published(cfg, p)]
     if auth.subscription is not None:
         granted = set(auth.subscription_products)
-        matched = next((p for p in published if p in granted), "")
+        matched = next((p for p in allowed_products if p in granted), "")
         if matched:
             return matched
     # Without an accepted key APIM serves an open product's context.
-    open_products = [p for p in published if (cfg.products.get(p) and not cfg.products[p].require_subscription)]
+    open_products = [p for p in allowed_products if (cfg.products.get(p) and not cfg.products[p].require_subscription)]
     if open_products:
         return open_products[0]
-    if published:
-        return published[0]
-    return ""
+    return allowed_products[0]
 
 
 def _subscription_scope_applies(route: RouteConfig, auth: AuthContext, allowed_products: list[str]) -> bool:
@@ -186,16 +176,18 @@ def _enforce_non_product_scope(
     return True
 
 
-def _subscription_required(cfg: GatewayConfig, published_products: list[str], bypassed: bool) -> bool:
-    """Whether a call must present a key: only when every published product requires one.
+def _subscription_required(cfg: GatewayConfig, allowed_products: list[str], bypassed: bool) -> bool:
+    """Whether a call must present a key: only when every associated product requires one.
 
     One open product is enough to serve a keyless request (APIM: "An API can be
-    associated with at most one open product"):
+    associated with at most one open product"). Product publication controls
+    developer-portal discovery, not gateway access:
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-add-products
     https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
     """
     if bypassed:
         return False
-    return all((cfg.products.get(p).require_subscription if cfg.products.get(p) else True) for p in published_products)
+    return all((cfg.products.get(p).require_subscription if cfg.products.get(p) else True) for p in allowed_products)
 
 
 def _reject_key_scoped_elsewhere(
@@ -247,15 +239,7 @@ def enforce_product_grant(
     if _enforce_non_product_scope(route, auth, allowed_products, cfg, request):
         return ""
 
-    published_products = [p for p in allowed_products if product_is_published(cfg, p)]
-    if not published_products:
-        # The simulator keeps this product-state gate as an explicit adaptation;
-        # APIM says unpublishing hides a product from the portal without
-        # invalidating existing keys or product-context access:
-        # https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
-        raise HTTPException(status_code=403, detail="Product is not published")
-
-    require_sub = _subscription_required(cfg, published_products, subscription_is_bypassed)
+    require_sub = _subscription_required(cfg, allowed_products, subscription_is_bypassed)
     _reject_key_scoped_elsewhere(
         cfg,
         route,
@@ -268,9 +252,7 @@ def enforce_product_grant(
         if auth.subscription is None:
             raise subscription_key_error(request, cfg, route, missing=True)
         granted = set(auth.subscription_products)
-        if not set(published_products).intersection(granted):
-            if set(allowed_products).intersection(granted):
-                raise HTTPException(status_code=403, detail="Product is not published")
+        if not set(allowed_products).intersection(granted):
             raise subscription_key_error(request, cfg, route, missing=False)
 
     return effective_product_id_for_call(cfg, allowed_products, auth)
@@ -878,8 +860,9 @@ def _admit_request(request: Request, cfg: GatewayConfig) -> _AdmittedRequest:
     """Decide whether this call may proceed, and against which product.
 
     Refusals are annotated with the reason the access log reports before being
-    re-raised, so an operator can tell a missing subscription from an
-    unpublished product without reading the policy.
+    re-raised, so an operator can tell a missing subscription from a
+    subscription-scope mismatch without reading the policy. Product state only
+    affects developer-portal discovery, as in Azure API Management.
     """
     from app.telemetry import set_current_span_attributes
 
@@ -1442,8 +1425,6 @@ def _product_grant_reason(exc: HTTPException) -> str:
     """Why a product grant was refused, in the vocabulary the access log uses."""
     if exc.status_code == 401:
         return "missing_subscription"
-    if exc.detail == "Product is not published":
-        return "product_not_published"
     return "subscription_not_authorized"
 
 

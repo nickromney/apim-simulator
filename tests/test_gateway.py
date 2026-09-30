@@ -1764,10 +1764,10 @@ def _product_gate_config(
 
 
 @pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
-def test_unpublished_product_denies_access_even_with_grant() -> None:
-    """The simulator's product-state check keeps 403 but uses the gateway envelope.
+def test_unpublished_product_allows_access_with_valid_subscription() -> None:
+    """An unpublished product remains accessible through the gateway.
 
-    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-add-products
     """
     issuer = _http_url("issuer.example")
     audience = "api"
@@ -1778,14 +1778,31 @@ def test_unpublished_product_denies_access_even_with_grant() -> None:
         issuer=issuer,
         audience=audience,
         jwks=jwks,
-        products={"p1": ProductConfig(name="p1", state=ProductState.NotPublished)},
+        products={
+            "p1": ProductConfig(
+                name="p1",
+                state=ProductState.NotPublished,
+                policies_xml="""\
+<policies>
+  <inbound>
+    <set-header name="x-product" exists-action="override"><value>unpublished-product</value></set-header>
+  </inbound>
+  <backend><forward-request /></backend>
+  <outbound />
+  <on-error />
+</policies>
+""",
+            )
+        },
         subscription_products=["p1"],
         route_products=["p1"],
     )
 
-    app = create_app(
-        config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)))
-    )
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.headers.get("x-product") == "unpublished-product"
+        return httpx.Response(200)
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     with TestClient(app) as client:
         resp = client.get(
             "/api/v1/health",
@@ -1794,15 +1811,14 @@ def test_unpublished_product_denies_access_even_with_grant() -> None:
                 "Ocp-Apim-Subscription-Key": "good",
             },
         )
-    assert resp.status_code == 403
-    assert resp.json() == {"statusCode": 403, "message": "Product is not published"}
+    assert resp.status_code == 200
 
 
 @pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
-def test_grant_on_unpublished_product_does_not_authorize_published_route() -> None:
-    """The simulator's product-state check keeps 403 but uses the gateway envelope.
+def test_grant_on_unpublished_product_authorizes_mixed_product_route() -> None:
+    """A valid grant works when an API is associated with mixed product states.
 
-    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-add-products
     """
     issuer = _http_url("issuer.example")
     audience = "api"
@@ -1832,8 +1848,7 @@ def test_grant_on_unpublished_product_does_not_authorize_published_route() -> No
                 "Ocp-Apim-Subscription-Key": "good",
             },
         )
-    assert resp.status_code == 403
-    assert resp.json() == {"statusCode": 403, "message": "Product is not published"}
+    assert resp.status_code == 200
 
 
 @pytest.mark.contract("AUTH-PRODUCT-PUBLISH-STATE")
@@ -2745,13 +2760,14 @@ def test_management_api_import_openapi_endpoint_creates_routable_api() -> None:
                 "path": "store",
                 "content_format": "openapi+json",
                 "content_value": spec,
+                "upstream_base_url": _http_url("upstream/api"),
             },
         )
         routed = client.get("/store/pets")
 
     assert imported.status_code == 200
     assert imported.json()["import"]["operation_count"] == 1
-    assert imported.json()["api"]["operations"][0]["id"] == "listPets"
+    assert imported.json()["api"]["operations"][0]["id"] == "listpets"
     assert routed.status_code == 200
     assert routed.json() == {"ok": True}
     assert upstream_urls == [_http_url("upstream/api/pets")]
@@ -2842,6 +2858,220 @@ def test_management_api_revision_and_release_crud_endpoints_work() -> None:
     assert deleted_release.status_code == 200
     assert deleted_revision.status_code == 200
     assert deleted_revision.json()["deleted"] is True
+
+
+@pytest.mark.contract("MGMT-REVISION-SNAPSHOTS")
+def test_api_revisions_route_isolated_snapshots_and_release_promotes_revision() -> None:
+    upstream_hosts: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        upstream_hosts.append(req.url.host)
+        return httpx.Response(200, json={"upstream": req.url.host})
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+            apis={
+                "weather": ApiConfig(
+                    name="weather",
+                    path="weather",
+                    upstream_base_url=_http_url("weather-v1"),
+                    operations={"get": OperationConfig(name="get", method="GET", url_template="/forecast")},
+                )
+            },
+        ),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+        invalid_revision = client.put(
+            "/apim/management/apis/weather/revisions/2",
+            headers=headers,
+            json={"definition": {"path": None}},
+        )
+        forbidden_path_change = client.put(
+            "/apim/management/apis/weather/revisions/2",
+            headers=headers,
+            json={"definition": {"path": "weather-v2"}},
+        )
+        forbidden_protocol_change = client.put(
+            "/apim/management/apis/weather/revisions/2",
+            headers=headers,
+            json={"definition": {"protocols": ["https"]}},
+        )
+        invalid_policy = client.put(
+            "/apim/management/apis/weather/revisions/2",
+            headers=headers,
+            json={"definition": {"policies_xml": "<policies"}},
+        )
+        invalid_operation_policy = client.put(
+            "/apim/management/apis/weather/revisions/2",
+            headers=headers,
+            json={
+                "definition": {
+                    "operations": {
+                        "get": {
+                            "name": "get",
+                            "method": "GET",
+                            "url_template": "/forecast",
+                            "policies_xml": "<policies",
+                        }
+                    }
+                }
+            },
+        )
+        created = client.put(
+            "/apim/management/apis/weather/revisions/2",
+            headers=headers,
+            json={
+                "description": "Use the new forecast backend",
+                "is_online": True,
+                "definition": {"upstream_base_url": _http_url("weather-v2")},
+            },
+        )
+        initial_revision = client.get("/apim/management/apis/weather/revisions", headers=headers)
+        current_before_release = client.get("/weather/forecast")
+        explicit_revision = client.get("/weather;rev=2/forecast")
+        released = client.put(
+            "/apim/management/apis/weather/releases/public",
+            headers=headers,
+            json={"revision": "2", "notes": "Forecast backend updated"},
+        )
+        current_after_release = client.get("/weather/forecast")
+        edited_current = client.put(
+            "/apim/management/apis/weather",
+            headers=headers,
+            json={"path": "weather", "upstream_base_url": _http_url("weather-v3")},
+        )
+        explicit_edited_current = client.get("/weather;rev=2/forecast")
+        offline = client.put(
+            "/apim/management/apis/weather/revisions/2",
+            headers=headers,
+            json={"is_online": False},
+        )
+        offline_request = client.get("/weather;rev=2/forecast")
+
+    assert initial_revision.status_code == 200
+    assert [revision["id"] for revision in initial_revision.json()] == ["1", "2"]
+    assert invalid_revision.status_code == 400
+    assert forbidden_path_change.status_code == 400
+    assert forbidden_protocol_change.status_code == 400
+    assert invalid_policy.status_code == 400
+    assert invalid_operation_policy.status_code == 400
+    assert created.status_code == 200
+    assert created.json()["definition"]["upstream_base_url"] == _http_url("weather-v2")
+    assert created.json()["is_current"] is False
+    assert created.json()["is_online"] is True
+    assert current_before_release.json() == {"upstream": "weather-v1"}
+    assert explicit_revision.json() == {"upstream": "weather-v2"}
+    assert released.status_code == 200
+    assert released.json()["notes"] == "Forecast backend updated"
+    assert current_after_release.json() == {"upstream": "weather-v2"}
+    assert edited_current.status_code == 200
+    assert explicit_edited_current.json() == {"upstream": "weather-v3"}
+    assert offline.status_code == 200
+    assert offline_request.status_code == 404
+    assert upstream_hosts == ["weather-v1", "weather-v2", "weather-v2", "weather-v3"]
+
+
+@pytest.mark.contract("MGMT-REVISION-SNAPSHOTS")
+def test_creating_api_starts_with_current_revision_one() -> None:
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
+        ),
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={"ok": True}))
+        ),
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Apim-Tenant-Key": "t1"}
+        created = client.put(
+            "/apim/management/apis/hello",
+            headers=headers,
+            json={"name": "Hello", "path": "hello", "upstream_base_url": _http_url("hello-backend")},
+        )
+        operation = client.put(
+            "/apim/management/apis/hello/operations/get-hello",
+            headers=headers,
+            json={"name": "Get hello", "method": "GET", "url_template": "/"},
+        )
+        revisions = client.get("/apim/management/apis/hello/revisions", headers=headers)
+        explicit_initial_revision = client.get("/hello;rev=1")
+
+    assert created.status_code == 200
+    assert operation.status_code == 200
+    assert created.json()["revision"] == "1"
+    assert revisions.status_code == 200
+    assert len(revisions.json()) == 1
+    assert revisions.json()[0]["id"] == "1"
+    assert revisions.json()[0]["is_current"] is True
+    assert revisions.json()[0]["is_online"] is True
+    assert explicit_initial_revision.status_code == 200
+
+
+@pytest.mark.contract("MGMT-REVISION-SNAPSHOTS")
+def test_explicit_revision_selects_versioned_api_and_does_not_fall_through_snapshots() -> None:
+    def versioned_api(api_id: str, version: str, *, item_upstream: str, include_missing: bool) -> ApiConfig:
+        operations = {
+            "item": OperationConfig(name="item", method="GET", url_template="/items"),
+        }
+        if include_missing:
+            operations["missing"] = OperationConfig(name="missing", method="GET", url_template="/missing")
+        api = ApiConfig(
+            name=api_id,
+            path="shared",
+            upstream_base_url=_http_url(item_upstream),
+            api_version_set="shared-versions",
+            api_version=version,
+            revision="1",
+            is_current=True,
+            is_online=True,
+            operations=operations,
+        )
+        initial_definition = api.model_dump(mode="python", exclude={"revisions", "releases"})
+        revision_definition = dict(initial_definition)
+        revision_definition["upstream_base_url"] = _http_url(f"{item_upstream}-revision")
+        if version == "v2":
+            revision_definition["operations"] = {"item": initial_definition["operations"]["item"]}
+        api.revisions = {
+            "1": ApiRevisionConfig(revision="1", is_current=True, is_online=True, definition=initial_definition),
+            "2": ApiRevisionConfig(revision="2", is_current=False, is_online=True, definition=revision_definition),
+        }
+        return api
+
+    app = create_app(
+        config=GatewayConfig(
+            allow_anonymous=True,
+            api_version_sets={
+                "shared-versions": ApiVersionSetConfig(
+                    display_name="Shared API versions",
+                    versioning_scheme=ApiVersioningScheme.Header,
+                    version_header_name="X-Api-Version",
+                )
+            },
+            apis={
+                "v1": versioned_api("v1", "v1", item_upstream="shared-v1", include_missing=True),
+                "v2": versioned_api("v2", "v2", item_upstream="shared-v2", include_missing=True),
+            },
+        ),
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, json={"upstream": req.url.host}))
+        ),
+    )
+
+    with TestClient(app) as client:
+        headers = {"X-Api-Version": "v2"}
+        revision_item = client.get("/shared;rev=2/items", headers=headers)
+        missing_from_revision = client.get("/shared;rev=2/missing", headers=headers)
+
+    assert revision_item.status_code == 200
+    assert revision_item.json() == {"upstream": "shared-v2-revision"}
+    assert missing_from_revision.status_code == 404
 
 
 def test_management_tag_crud_and_links_persist_without_parent_put_wiping_assignments(

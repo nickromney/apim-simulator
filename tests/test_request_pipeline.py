@@ -93,17 +93,26 @@ def test_enforce_product_grant_returns_empty_when_route_has_no_products() -> Non
     assert enforce_product_grant(cfg, route, _auth(), subscription_is_bypassed=False) == ""
 
 
-def test_enforce_product_grant_rejects_unpublished_product() -> None:
-    """Product access errors keep their status while using the gateway envelope.
+def test_enforce_product_grant_allows_unpublished_product_with_valid_grant() -> None:
+    """Product publication controls portal discovery, not gateway access.
 
-    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-add-products
     """
     cfg = GatewayConfig(products={"starter": ProductConfig(name="starter", state=ProductState.NotPublished)})
     route = RouteConfig(name="r1", path_prefix="/api", upstream_base_url=http_url("upstream"), products=["starter"])
-    with pytest.raises(HTTPException) as exc:
-        enforce_product_grant(cfg, route, _auth(products=["starter"]), subscription_is_bypassed=False)
-    assert exc.value.status_code == 403
-    assert exc.value.detail == "Product is not published"
+    assert enforce_product_grant(cfg, route, _auth(products=["starter"]), subscription_is_bypassed=False) == "starter"
+
+
+def test_unpublished_open_product_allows_keyless_access() -> None:
+    """An unpublished open product remains open at the gateway.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-add-products
+    """
+    cfg = GatewayConfig(
+        products={"open": ProductConfig(name="open", state=ProductState.NotPublished, require_subscription=False)}
+    )
+    route = RouteConfig(name="r1", path_prefix="/api", upstream_base_url=http_url("upstream"), products=["open"])
+    assert enforce_product_grant(cfg, route, _auth(subscription=False), subscription_is_bypassed=False) == "open"
 
 
 def test_enforce_product_grant_requires_subscription_key() -> None:
@@ -122,7 +131,7 @@ def test_enforce_product_grant_requires_subscription_key() -> None:
     )
 
 
-def test_enforce_product_grant_picks_first_published_granted_product() -> None:
+def test_enforce_product_grant_picks_first_granted_product_regardless_of_publication() -> None:
     cfg = GatewayConfig(
         products={
             "closed": ProductConfig(name="closed", state=ProductState.NotPublished),
@@ -135,7 +144,7 @@ def test_enforce_product_grant_picks_first_published_granted_product() -> None:
         upstream_base_url=http_url("upstream"),
         products=["closed", "starter"],
     )
-    assert enforce_product_grant(cfg, route, _auth(products=["starter"]), subscription_is_bypassed=False) == "starter"
+    assert enforce_product_grant(cfg, route, _auth(products=["closed"]), subscription_is_bypassed=False) == "closed"
 
 
 @pytest.mark.parametrize(

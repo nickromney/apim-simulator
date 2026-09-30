@@ -3,15 +3,21 @@
 This document maps simulator features to Azure APIM concepts and their Terraform resource equivalents.
 
 The management surface below is available when `tenant_access.enabled` is `true`.
+For the narrower fidelity promise, see [FIDELITY-CONTRACTS.md](FIDELITY-CONTRACTS.md)
+and [contracts/contract_matrix.yml](../contracts/contract_matrix.yml). The
+matrix below is a capability inventory, not a claim of full APIM parity.
 
 ## Legend
 
 | Status | Meaning |
 |--------|---------|
-| Yes | Fully implemented |
-| Partial | Basic support, not all options |
-| No | Not implemented |
+| Yes | Implemented subset; read the note and fidelity contract for its boundary |
+| Partial | Implemented subset with adaptations or missing options |
+| No | Not implemented or explicitly out of scope |
 | N/A | Not applicable to simulator |
+
+New contract entries use `supported`, `adapted`, and `unsupported`. Historical
+rows retain the older labels so the matrix remains easy to scan.
 
 ## Gateway / Service Level
 
@@ -47,8 +53,8 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Feature | Simulator | Terraform Resource | Notes |
 |---------|-----------|-------------------|-------|
 | API definition | Yes | `azurerm_api_management_api` | `apis` map in config |
-| API revision metadata | Partial | `azurerm_api_management_api.revision` / `revision_description` | Imported and exposed read-only; multiple APIM revisions collapse into one active local API for runtime behaviour |
-| API releases | Partial | `azurerm_api_management_api_release` | Imported and exposed read-only via `/apim/management/apis/{api_id}/releases` |
+| API revision metadata | Partial | `azurerm_api_management_api.revision` / `revision_description` | Metadata is imported and exposed through local management CRUD; multiple APIM revisions collapse into one active local API for runtime behavior. Management-created snapshots support revision URLs, policies, offline state and promotion. Imported metadata does not reconstruct complete snapshots. See [fidelity contract](FIDELITY-CONTRACTS.md#revisions-and-releases--local-snapshot-contract) |
+| API releases | Partial | `azurerm_api_management_api_release` | Imported and exposed through CRUD at `/apim/management/apis/{api_id}/releases`; local releases promote snapshots and record change-log notes |
 | Operations | Yes | `azurerm_api_management_api_operation` | `operations` within API |
 | API schemas | Partial | `azurerm_api_management_api_schema` | Imported and exposed read-only via `/apim/management/apis/{api_id}/schemas`; write endpoints are not implemented |
 | Operation descriptions and template params | Yes | `azurerm_api_management_api_operation` | Imported from operation metadata blocks and projected through management APIs |
@@ -59,7 +65,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Template parameters | Yes | - | Matched values are exposed as `context.Request.MatchedParameters` |
 | API Version Sets | Yes | `azurerm_api_management_api_version_set` | Header/Query/Segment schemes; a version identifier is required, except an API with `api_version: null` models APIM's unversioned Original API. No simulator-only default-version fallback. Segment-version requests expose the public versioned path through `context.Request.Url.Path` while the upstream route remains normalized |
 | API protocols | Yes | `azurerm_api_management_api.protocols` | `ApiConfig.protocols` accepts `http`/`https`; the request scheme uses the first `X-Forwarded-Proto` value when present, and a disallowed scheme returns the existing 404 Resource not found envelope because Learn documents the property but not the rejection response |
-| OpenAPI import | Partial | `azurerm_api_management_api` (import block) | Supports inline/link OpenAPI and Swagger JSON import through Terraform/OpenTofu and `/apim/management/apis/{api_id}/import`; full schema/request/response extraction is narrower than explicit APIM resources |
+| OpenAPI import | Partial | `azurerm_api_management_api` (import block) | Bounded projection implements the documented OpenAPI 2/3.0.x projection, first HTTPS server selection, required-query translation, operation ID normalization, and GET/HEAD/OPTIONS body omission. Unsupported constructs are rejected; see [fidelity contract](FIDELITY-CONTRACTS.md#openapi-import--verified-subset) |
 | GraphQL | No | `azurerm_api_management_api` | Not implemented |
 | WebSocket | No | `azurerm_api_management_api` | Not implemented |
 
@@ -70,7 +76,7 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Products | Yes | `azurerm_api_management_product` | `products` map |
 | Product-API association | Yes | `azurerm_api_management_product_api` | `products` list on route/API |
 | Product-group association | Yes | `azurerm_api_management_product_group` | Descriptive link resources under `/apim/management/products/{product_id}/groups` |
-| Product publish state | Adapted | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; the simulator rejects product-context access whose only configured products are unpublished with an enveloped 403. API-, all-APIs-, and service-scoped subscriptions do not select product context and are not blocked by product publication. APIM documents that unpublishing hides a product from the developer portal but does not invalidate existing keys or product-context access. Config-authored products default to `published` |
+| Product publish state | Yes | `azurerm_api_management_product.published` | `state`: `published`, `not_published`; publication filters the consumer portal, while a valid product subscription continues to authorize gateway access. API-, all-APIs-, and service-scoped subscriptions do not select product context. Config-authored products default to `published`. See [subscriptions](https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions) |
 | Subscriptions | Yes | `azurerm_api_management_subscription` | `subscription.subscriptions`; product scope remains the `products` list, API scope uses `api_id`, all-APIs scope uses `all_apis`, and the service-scoped all-access form uses explicit `service_scoped: true` (never enabled by default). Terraform import maps `api_id` and `product_id`; when neither is present it imports all-APIs scope. Unknown or conflicting scope fields are rejected. |
 | Primary/secondary keys | Yes | - | `keys.primary`, `keys.secondary` |
 | Subscription state | Yes | `azurerm_api_management_subscription.state` | `active`, `suspended`, `cancelled`, `submitted`, `rejected`, `expired`; only `active` keys authenticate, and inactive keys return APIM's 401 invalid-key envelope |
@@ -187,14 +193,14 @@ The management surface below is available when `tenant_access.enabled` is `true`
 | Tenant access keys | Yes | `azurerm_api_management.tenant_access` | Primary/secondary |
 | Management summary | Yes | - | `/apim/management/summary` |
 | API CRUD | Yes | `azurerm_api_management_api` | `/apim/management/apis` |
-| OpenAPI import via management API | Partial | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/import`; imports operations and upstream URL, but not full schema/request/response parity |
+| OpenAPI import via management API | Partial | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/import`; bounded projection includes operations, parameters, schemas, representations, examples, and reimport policy matching. Accepts OpenAPI 2 JSON and 3.0.x through 3.0.3; OpenAPI 3.1 is outside the contract until explicitly implemented |
 | Operation CRUD | Yes | `azurerm_api_management_api_operation` | `/apim/management/apis/{api_id}/operations` |
 | Product CRUD | Yes | `azurerm_api_management_product` | `/apim/management/products` |
 | Backend CRUD | Yes | `azurerm_api_management_backend` | `/apim/management/backends` |
 | Named value CRUD | Yes | `azurerm_api_management_named_value` | `/apim/management/named-values` |
-| API schema inspection | Yes | `azurerm_api_management_api_schema` | `/apim/management/apis/{api_id}/schemas` and `/apim/management/apis/{api_id}/schemas/{schema_id}` |
-| API revision CRUD | Partial | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/revisions`; revision metadata and current-release bookkeeping are supported, but runtime revision branching remains collapsed to one active API |
-| API release CRUD | Partial | `azurerm_api_management_api_release` | `/apim/management/apis/{api_id}/releases`; descriptive metadata only |
+| API schema inspection | Yes | `azurerm_api_management_api_schema` | `/apim/management/apis/{api_id}/schemas` and `/apim/management/apis/{api_id}/schemas/{schema_id}`; the supported JSON Schema subset is also used by validation policies |
+| API revision CRUD | Partial | `azurerm_api_management_api` | `/apim/management/apis/{api_id}/revisions`; management-created snapshots support independent definitions, policies, revision URLs, offline state and current-revision promotion; imported metadata alone remains collapsed |
+| API release CRUD | Partial | `azurerm_api_management_api_release` | `/apim/management/apis/{api_id}/releases`; releases promote saved revisions and expose local consumer change-log notes |
 | API version set CRUD | Yes | `azurerm_api_management_api_version_set` | `/apim/management/api-version-sets` |
 | Logger inspection | Yes | `azurerm_api_management_logger` | `/apim/management/loggers` and `/apim/management/loggers/{logger_id}` |
 | Diagnostic inspection | Yes | `azurerm_api_management_diagnostic` | `/apim/management/diagnostics` and `/apim/management/diagnostics/{diagnostic_id}` |

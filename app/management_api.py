@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -47,6 +47,7 @@ from app.config import (
 )
 from app.management_service import ManagementService
 from app.named_values import mask_secret_data
+from app.policy_inspection import inspect_effective_policy
 from app.portal import (
     PORTAL_HTML,
     create_portal_subscription,
@@ -137,6 +138,7 @@ class ApiUpsert(BaseModel):
     subscription_header_names: list[str] | None = None
     subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None
+    translate_required_query_parameters: Literal["template", "query"] = "template"
 
 
 class OperationUpsert(BaseModel):
@@ -175,6 +177,7 @@ class ApiImportRequest(BaseModel):
     subscription_header_names: list[str] | None = None
     subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None
+    translate_required_query_parameters: Literal["template", "query"] = "template"
 
 
 class ApiVersionSetUpsert(BaseModel):
@@ -190,6 +193,7 @@ class ApiRevisionUpsert(BaseModel):
     is_current: bool | None = None
     is_online: bool | None = None
     source_api_id: str | None = None
+    definition: dict[str, Any] | None = None
 
 
 class ApiReleaseUpsert(BaseModel):
@@ -284,6 +288,12 @@ OperationUpsert.model_rebuild()
 
 def _masked(cfg: GatewayConfig, payload: Any) -> Any:
     return mask_secret_data(payload, cfg)
+
+
+def _config_for_management_write(request: Request) -> GatewayConfig:
+    """Keep endpoint edits isolated until the service publishes them."""
+    cfg: GatewayConfig = request.app.state.gateway_config
+    return cfg.model_copy(deep=True)
 
 
 def _summary_payload(cfg: GatewayConfig, request: Request | None = None) -> dict[str, Any]:
@@ -440,7 +450,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.post("/apim/management/apis/{api_id}/import")
     async def import_api(api_id: str, request: Request, body: ApiImportRequest) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated, imported = require_management_plane().import_api(cfg, api_id, body)
         api = _get_api_or_404(updated, api_id)
         return {
@@ -456,7 +466,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.put("/apim/management/apis/{api_id}")
     async def upsert_api(api_id: str, request: Request, body: ApiUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_api(cfg, api_id, body)
         api = _get_api_or_404(updated, api_id)
         return _masked(updated, project_api(updated, api_id, api))
@@ -464,7 +474,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.delete("/apim/management/apis/{api_id}")
     async def delete_api(api_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_api(cfg, api_id)
         return {"deleted": True, "api_id": api_id, "remaining": len(updated.apis)}
 
@@ -520,7 +530,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
         api_id: str, revision_id: str, request: Request, body: ApiRevisionUpsert
     ) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_api_revision(cfg, api_id, revision_id, body)
         stored = _get_api_revision_or_404(updated, api_id, revision_id)
         return _masked(updated, project_api_revision(updated, api_id, revision_id, stored))
@@ -528,7 +538,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.delete("/apim/management/apis/{api_id}/revisions/{revision_id}")
     async def delete_api_revision(api_id: str, revision_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_api_revision(cfg, api_id, revision_id)
         return {
             "deleted": True,
@@ -559,7 +569,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
         api_id: str, release_id: str, request: Request, body: ApiReleaseUpsert
     ) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_api_release(cfg, api_id, release_id, body)
         stored = _get_api_release_or_404(updated, api_id, release_id)
         return _masked(updated, project_api_release(updated, api_id, release_id, stored))
@@ -567,7 +577,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.delete("/apim/management/apis/{api_id}/releases/{release_id}")
     async def delete_api_release(api_id: str, release_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_api_release(cfg, api_id, release_id)
         return {
             "deleted": True,
@@ -597,14 +607,14 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.put("/apim/management/apis/{api_id}/tags/{tag_id}")
     async def put_api_tag(api_id: str, tag_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().link_api_tag(cfg, api_id, tag_id)
         return _masked(updated, project_api_tag_link(updated, api_id, tag_id, updated.tags[tag_id]))
 
     @router.delete("/apim/management/apis/{api_id}/tags/{tag_id}")
     async def delete_api_tag(api_id: str, tag_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         require_management_plane().unlink_api_tag(cfg, api_id, tag_id)
         return {"deleted": True, "api_id": api_id, "tag_id": tag_id}
 
@@ -647,7 +657,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.put("/apim/management/apis/{api_id}/operations/{operation_id}/tags/{tag_id}")
     async def put_api_operation_tag(api_id: str, operation_id: str, tag_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().link_operation_tag(cfg, api_id, operation_id, tag_id)
         return _masked(
             updated,
@@ -657,7 +667,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.delete("/apim/management/apis/{api_id}/operations/{operation_id}/tags/{tag_id}")
     async def delete_api_operation_tag(api_id: str, operation_id: str, tag_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         require_management_plane().unlink_operation_tag(cfg, api_id, operation_id, tag_id)
         return {"deleted": True, "api_id": api_id, "operation_id": operation_id, "tag_id": tag_id}
 
@@ -666,7 +676,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
         api_id: str, operation_id: str, request: Request, body: OperationUpsert
     ) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_api_operation(cfg, api_id, operation_id, body)
         operation = _get_operation_or_404(updated, api_id, operation_id)
         return _masked(updated, project_operation(updated, api_id, operation_id, operation))
@@ -674,7 +684,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
     @router.delete("/apim/management/apis/{api_id}/operations/{operation_id}")
     async def delete_api_operation(api_id: str, operation_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_api_operation(cfg, api_id, operation_id)
         return {
             "deleted": True,
@@ -697,10 +707,22 @@ def _build_policy_router(*, require_management_plane: Callable[[], ManagementSer
         return require_management_plane().policy_xml_for_target(target)
 
     @router.get("/apim/management/policies/{scope_type}/{scope_name:path}")
-    async def management_get_policy(scope_type: str, scope_name: str, request: Request) -> dict[str, Any]:
+    async def management_get_policy(
+        scope_type: str, scope_name: str, request: Request, effective: bool = False, product_id: str | None = None
+    ) -> dict[str, Any]:
         require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
         target = _policy_scope_target(cfg, scope_type, scope_name)
+        if effective:
+            return {
+                "scope_type": scope_type,
+                "scope_name": scope_name,
+                "effective": True,
+                "product_id": product_id,
+                "xml": inspect_effective_policy(
+                    cfg, scope_type=scope_type, scope_name=scope_name, target=target, product_id=product_id
+                ),
+            }
         return {
             "scope_type": scope_type,
             "scope_name": scope_name,
@@ -715,7 +737,7 @@ def _build_policy_router(*, require_management_plane: Callable[[], ManagementSer
         body: PolicyUpdate,
     ) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         manager = require_management_plane()
         updated = manager.put_policy(cfg, scope_type, scope_name, body.xml)
         return {
@@ -796,7 +818,7 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
     @router.put("/apim/management/products/{product_id}")
     async def upsert_product(product_id: str, request: Request, body: ProductUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_product(cfg, product_id, body)
         product = _get_product_or_404(updated, product_id)
         return _masked(updated, project_product(updated, product_id, product))
@@ -804,7 +826,7 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
     @router.delete("/apim/management/products/{product_id}")
     async def delete_product(product_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_product(cfg, product_id)
         return {"deleted": True, "product_id": product_id, "remaining": len(updated.products)}
 
@@ -830,14 +852,14 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
     @router.put("/apim/management/products/{product_id}/groups/{group_id}")
     async def put_product_group(product_id: str, group_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().link_product_group(cfg, product_id, group_id)
         return _masked(updated, project_product_group_link(updated, product_id, group_id, updated.groups[group_id]))
 
     @router.delete("/apim/management/products/{product_id}/groups/{group_id}")
     async def delete_product_group(product_id: str, group_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         require_management_plane().unlink_product_group(cfg, product_id, group_id)
         return {"deleted": True, "product_id": product_id, "group_id": group_id}
 
@@ -863,14 +885,14 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
     @router.put("/apim/management/products/{product_id}/tags/{tag_id}")
     async def put_product_tag(product_id: str, tag_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().link_product_tag(cfg, product_id, tag_id)
         return _masked(updated, project_product_tag_link(updated, product_id, tag_id, updated.tags[tag_id]))
 
     @router.delete("/apim/management/products/{product_id}/tags/{tag_id}")
     async def delete_product_tag(product_id: str, tag_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         require_management_plane().unlink_product_tag(cfg, product_id, tag_id)
         return {"deleted": True, "product_id": product_id, "tag_id": tag_id}
 
@@ -890,7 +912,7 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
     @router.put("/apim/management/tags/{tag_id}")
     async def upsert_tag(tag_id: str, request: Request, body: TagUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_tag(cfg, tag_id, body)
         tag = _get_tag_or_404(updated, tag_id)
         return _masked(updated, project_tag(updated, tag_id, tag))
@@ -898,7 +920,7 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
     @router.delete("/apim/management/tags/{tag_id}")
     async def delete_tag(tag_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_tag(cfg, tag_id)
         return {"deleted": True, "tag_id": tag_id, "remaining": len(updated.tags)}
 
@@ -931,7 +953,7 @@ def _build_subscriptions_router(*, require_management_plane: Callable[[], Manage
     @router.post("/apim/management/subscriptions")
     async def create_subscription(request: Request, body: SubscriptionUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         manager = require_management_plane()
         updated = manager.create_subscription(cfg, body)
         entry = manager.find_subscription_entry(updated, body.id)
@@ -943,7 +965,7 @@ def _build_subscriptions_router(*, require_management_plane: Callable[[], Manage
     @router.patch("/apim/management/subscriptions/{subscription_id}")
     async def update_subscription(request: Request, subscription_id: str, body: SubscriptionUpdate) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         manager = require_management_plane()
         updated = manager.update_subscription(cfg, subscription_id, body)
         entry = manager.find_subscription_entry(updated, subscription_id)
@@ -955,7 +977,7 @@ def _build_subscriptions_router(*, require_management_plane: Callable[[], Manage
     @router.delete("/apim/management/subscriptions/{subscription_id}")
     async def delete_subscription(subscription_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_subscription(cfg, subscription_id)
         return {
             "deleted": True,
@@ -968,7 +990,7 @@ def _build_subscriptions_router(*, require_management_plane: Callable[[], Manage
         subscription_id: str, request: Request, key: str = "secondary"
     ) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         manager = require_management_plane()
         updated, new_key = manager.rotate_subscription_key(cfg, subscription_id, key)
         entry = manager.find_subscription_entry(updated, subscription_id)
@@ -1024,7 +1046,7 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
 
     @router.post("/apim/portal/subscriptions", status_code=201)
     async def portal_request_subscription(request: Request, body: PortalSubscriptionRequest) -> dict[str, Any]:
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         _require_portal_enabled(cfg)
         user_id = _portal_user_id(request, cfg)
         subscription = create_portal_subscription(cfg, user_id, body.product_id, body.name)
@@ -1057,7 +1079,7 @@ def _build_infrastructure_router(*, require_management_plane: Callable[[], Manag
     @router.put("/apim/management/backends/{backend_id}")
     async def upsert_backend(backend_id: str, request: Request, body: BackendUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_backend(cfg, backend_id, body)
         backend = _get_backend_or_404(updated, backend_id)
         return _masked(updated, project_backend(updated, backend_id, backend))
@@ -1065,7 +1087,7 @@ def _build_infrastructure_router(*, require_management_plane: Callable[[], Manag
     @router.delete("/apim/management/backends/{backend_id}")
     async def delete_backend(backend_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_backend(cfg, backend_id)
         return {"deleted": True, "backend_id": backend_id, "remaining": len(updated.backends)}
 
@@ -1117,7 +1139,7 @@ def _build_infrastructure_router(*, require_management_plane: Callable[[], Manag
     @router.put("/apim/management/named-values/{named_value_id}")
     async def upsert_named_value(named_value_id: str, request: Request, body: NamedValueUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_named_value(cfg, named_value_id, body)
         named_value = _get_named_value_or_404(updated, named_value_id)
         return _masked(updated, project_named_value(updated, named_value_id, named_value))
@@ -1125,7 +1147,7 @@ def _build_infrastructure_router(*, require_management_plane: Callable[[], Manag
     @router.delete("/apim/management/named-values/{named_value_id}")
     async def delete_named_value(named_value_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_named_value(cfg, named_value_id)
         return {"deleted": True, "named_value_id": named_value_id, "remaining": len(updated.named_values)}
 
@@ -1159,7 +1181,7 @@ def _build_versioning_router(*, require_management_plane: Callable[[], Managemen
         version_set_id: str, request: Request, body: ApiVersionSetUpsert
     ) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_api_version_set(cfg, version_set_id, body)
         return _masked(
             updated,
@@ -1169,7 +1191,7 @@ def _build_versioning_router(*, require_management_plane: Callable[[], Managemen
     @router.delete("/apim/management/api-version-sets/{version_set_id}")
     async def delete_api_version_set(version_set_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_api_version_set(cfg, version_set_id)
         return {"deleted": True, "version_set_id": version_set_id, "remaining": len(updated.api_version_sets)}
 
@@ -1194,14 +1216,14 @@ def _build_versioning_router(*, require_management_plane: Callable[[], Managemen
     @router.put("/apim/management/policy-fragments/{fragment_id}")
     async def upsert_policy_fragment(fragment_id: str, request: Request, body: PolicyFragmentUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_policy_fragment(cfg, fragment_id, body.xml)
         return _masked(updated, project_policy_fragment(updated, fragment_id, updated.policy_fragments[fragment_id]))
 
     @router.delete("/apim/management/policy-fragments/{fragment_id}")
     async def delete_policy_fragment(fragment_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_policy_fragment(cfg, fragment_id)
         return {"deleted": True, "fragment_id": fragment_id, "remaining": len(updated.policy_fragments)}
 
@@ -1228,7 +1250,7 @@ def _build_identity_router(*, require_management_plane: Callable[[], ManagementS
     @router.put("/apim/management/users/{user_id}")
     async def upsert_user(user_id: str, request: Request, body: UserUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_user(cfg, user_id, body)
         user = _get_user_or_404(updated, user_id)
         return _masked(updated, project_user(updated, user_id, user))
@@ -1236,7 +1258,7 @@ def _build_identity_router(*, require_management_plane: Callable[[], ManagementS
     @router.delete("/apim/management/users/{user_id}")
     async def delete_user(user_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_user(cfg, user_id)
         return {"deleted": True, "user_id": user_id, "remaining": len(updated.users)}
 
@@ -1268,14 +1290,14 @@ def _build_identity_router(*, require_management_plane: Callable[[], ManagementS
     @router.put("/apim/management/groups/{group_id}/users/{user_id}")
     async def put_group_user(group_id: str, user_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().link_group_user(cfg, group_id, user_id)
         return _masked(updated, project_group_user_link(updated, group_id, user_id, updated.users[user_id]))
 
     @router.delete("/apim/management/groups/{group_id}/users/{user_id}")
     async def delete_group_user(group_id: str, user_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         require_management_plane().unlink_group_user(cfg, group_id, user_id)
         return {"deleted": True, "group_id": group_id, "user_id": user_id}
 
@@ -1289,7 +1311,7 @@ def _build_identity_router(*, require_management_plane: Callable[[], ManagementS
     @router.put("/apim/management/groups/{group_id}")
     async def upsert_group(group_id: str, request: Request, body: GroupUpsert) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_group(cfg, group_id, body)
         group = _get_group_or_404(updated, group_id)
         return _masked(updated, project_group(updated, group_id, group))
@@ -1297,7 +1319,7 @@ def _build_identity_router(*, require_management_plane: Callable[[], ManagementS
     @router.delete("/apim/management/groups/{group_id}")
     async def delete_group(group_id: str, request: Request) -> dict[str, Any]:
         require_tenant_access(request)
-        cfg: GatewayConfig = request.app.state.gateway_config
+        cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_group(cfg, group_id)
         return {"deleted": True, "group_id": group_id, "remaining": len(updated.groups)}
 
@@ -1311,7 +1333,7 @@ def _build_imports_router(*, require_management_plane: Callable[[], ManagementSe
     @router.post("/apim/management/import/tofu-show")
     async def import_tofu_show_json(request: Request, tf: dict[str, Any]) -> dict:
         require_tenant_access(request)
-        current: GatewayConfig = request.app.state.gateway_config
+        current = _config_for_management_write(request)
         result = require_management_plane().import_tofu_show(current, tf)
         imported = result.config
         return {

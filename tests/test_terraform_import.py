@@ -312,7 +312,7 @@ def test_import_from_tofu_show_json_supports_openapi_version_sets_and_backend_cr
     assert cfg.apis["sample-api"].api_version_set == "sample-version-set"
     assert cfg.apis["sample-api"].subscription_header_names == ["X-Sample-Key"]
     assert cfg.apis["sample-api"].subscription_query_param_names == ["sample-key"]
-    assert sorted(cfg.apis["sample-api"].operations) == ["createWidget", "health"]
+    assert sorted(cfg.apis["sample-api"].operations) == ["createwidget", "health"]
     assert cfg.backends["sample-backend"].authorization_scheme == "Bearer"
     assert cfg.backends["sample-backend"].authorization_parameter == "{{backend-secret}}"
     assert cfg.named_values["backend-secret"].value_from_key_vault is not None

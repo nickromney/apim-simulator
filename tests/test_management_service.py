@@ -212,6 +212,29 @@ def test_persist_or_apply_config_returns_http_500_when_write_fails(tmp_path, mon
     assert exc_info.value.status_code == 500
 
 
+def test_invalid_config_is_rejected_before_disk_or_runtime_publication(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "apim.json"
+    config_path.write_text('{"products": {"starter": {"name": "Disk"}}}\n', encoding="utf-8")
+    monkeypatch.setenv("APIM_CONFIG_PATH", str(config_path))
+    original_bytes = config_path.read_bytes()
+    current = GatewayConfig(products={"starter": ProductConfig(name="Live")})
+    service, app, _ = _make_service(current)
+    app.state.policy_response_cache = {"cached": "response"}
+    app.state.policy_value_cache = {"cached": "value"}
+    invalid = current.model_copy(deep=True)
+    invalid.policies_xml = "<policies><inbound><set-body>{{missing}}</set-body></inbound></policies>"
+
+    with pytest.raises(HTTPException, match="unknown named value") as exc_info:
+        service.persist_or_apply_config(invalid)
+
+    assert exc_info.value.status_code == 400
+    assert config_path.read_bytes() == original_bytes
+    assert app.state.gateway_config is current
+    assert app.state.gateway_config.products["starter"].name == "Live"
+    assert app.state.policy_response_cache == {"cached": "response"}
+    assert app.state.policy_value_cache == {"cached": "value"}
+
+
 def test_subscription_error_paths_and_primary_rotation() -> None:
     cfg = GatewayConfig(
         subscription=SubscriptionConfig(

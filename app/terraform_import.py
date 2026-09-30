@@ -1193,6 +1193,9 @@ def _apply_api_import_document(res: TFResource, acc: _ImportAccumulator, candida
             content_format=str(import_block.get("content_format") or ""),
             content_value=str(import_block.get("content_value") or ""),
             fetcher=acc.fetcher,
+            translate_required_query_parameters=str(
+                res.values.get("translate_required_query_parameters") or "template"
+            ),
         )
     except ValueError as exc:
         _unsupported(str(exc))
@@ -1202,13 +1205,21 @@ def _apply_api_import_document(res: TFResource, acc: _ImportAccumulator, candida
         return
 
     # An explicit service_url on the resource outranks the document's own.
-    if imported.upstream_base_url and not res.values.get("service_url"):
-        candidate.upstream_base_url = imported.upstream_base_url
+    if not res.values.get("service_url"):
+        candidate.upstream_base_url = imported.upstream_base_url or ""
+    candidate.translate_required_query_parameters = str(
+        res.values.get("translate_required_query_parameters") or "template"
+    )
+    candidate.schemas = imported.schemas
     for operation in imported.operations:
         candidate.operations[operation.name] = OperationConfig(
-            name=operation.name,
+            name=operation.display_name,
             method=operation.method,
             url_template=operation.url_template,
+            description=operation.description,
+            template_parameters=operation.template_parameters,
+            request=operation.request,
+            responses=operation.responses,
         )
 
     acc.diagnostics.append(

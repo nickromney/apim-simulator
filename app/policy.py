@@ -3128,6 +3128,19 @@ def _coerce_parameter_value(value: str, schema: dict[str, Any]) -> Any:
     return value
 
 
+def _typed_parameter_enum(values: list[str], schema: dict[str, Any]) -> list[Any]:
+    """ARM metadata stores enum values as strings, even for numeric parameters."""
+    typed: list[Any] = []
+    for value in values:
+        try:
+            typed.append(_coerce_parameter_value(value, schema))
+        except (TypeError, ValueError):
+            # Keep an invalid authored enum member unmatchable rather than
+            # turning a metadata error into a failure to parse the caller.
+            typed.append(value)
+    return typed
+
+
 # Public response for a validation failure on a response
 # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
 _INTERNAL_ERROR_PUBLIC_MESSAGE = "The request could not be processed due to an internal error. Contact the API owner."
@@ -3581,7 +3594,7 @@ class ValidateParameters(PolicyNode):
         if schema is None:
             return None
         if getattr(parameter, "values", None):
-            schema = {**schema, "enum": list(parameter.values)}
+            schema = {**schema, "enum": _typed_parameter_enum(parameter.values, schema)}
         return self._validate_parameter_value(req, runtime, kind, parameter.name, values[0], schema, action)
 
     def _validate_parameter_value(
@@ -3829,7 +3842,7 @@ class ValidateHeaders(PolicyNode):
         if schema is None or not values:
             return None
         if getattr(header, "values", None):
-            schema = {**schema, "enum": list(header.values)}
+            schema = {**schema, "enum": _typed_parameter_enum(header.values, schema)}
         try:
             coerced = _coerce_parameter_value(values[0], schema)
         except (TypeError, ValueError) as exc:
@@ -5958,6 +5971,36 @@ def _fragment_elements(xml: str, *, section_name: str) -> list[ElementTree.Eleme
             raise HTTPException(status_code=500, detail="policy fragment cannot contain policy sections")
         return list(root)
     return [root]
+
+
+def _expand_inspection_fragments(
+    parent: ElementTree.Element, fragments: dict[str, str], config: GatewayConfig | None
+) -> None:
+    children: list[ElementTree.Element] = []
+    for child in list(parent):
+        if child.tag == "include-fragment":
+            fragment_id = child.attrib.get("fragment-id", "")
+            if config is not None:
+                fragment_id = resolve_named_values_in_text(fragment_id, config)
+            fragment = fragments.get(fragment_id)
+            if fragment is None:
+                raise HTTPException(status_code=500, detail=f"Unknown policy fragment: {fragment_id}")
+            children.extend(_fragment_elements(fragment, section_name=""))
+        else:
+            _expand_inspection_fragments(child, fragments, config)
+            children.append(child)
+    parent[:] = children
+
+
+def expand_policy_fragments_xml(xml: str, fragments: dict[str, str], config: GatewayConfig | None = None) -> str:
+    """Expand includes for Calculate effective policy after policy validation.
+
+    Microsoft documents that this view displays included fragment content:
+    https://learn.microsoft.com/en-us/azure/api-management/policy-fragments
+    """
+    root = ElementTree.fromstring(xml)
+    _expand_inspection_fragments(root, fragments, config)
+    return ElementTree.tostring(root, encoding="unicode")
 
 
 def _parse_children(
