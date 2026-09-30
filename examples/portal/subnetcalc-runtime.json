@@ -1,12 +1,4 @@
 {
-  "schema_version": 1,
-  "service": {
-    "name": "apim-simulator",
-    "display_name": "Local APIM Simulator",
-    "public_network_access_enabled": null,
-    "virtual_network_type": null,
-    "hostname_configurations": []
-  },
   "allowed_origins": [
     "http://localhost:3000",
     "http://localhost:3007",
@@ -14,227 +6,81 @@
     "http://localhost:8000"
   ],
   "allow_anonymous": true,
-  "client_certificate": {
-    "mode": "disabled",
-    "trusted_certificates": [],
-    "subject_header": "X-Client-Cert-Subject",
-    "issuer_header": "X-Client-Cert-Issuer",
-    "thumbprint_header": "X-Client-Cert-Thumbprint",
-    "cert_header": "X-Client-Cert"
-  },
-  "oidc": null,
-  "oidc_providers": {},
   "products": {
     "default": {
       "name": "Default",
       "description": "Anonymous local development product",
-      "state": "published",
-      "require_subscription": false,
-      "approval_required": false,
-      "subscriptions_limit": null,
-      "groups": [],
-      "tags": [],
-      "policies_xml": null
+      "require_subscription": false
     }
   },
-  "named_values": {},
-  "loggers": {},
-  "diagnostics": {},
   "users": {
     "demo-dev": {
       "id": "demo-dev",
       "email": "demo-dev@dev.test",
       "name": "Demo Developer",
-      "first_name": null,
-      "last_name": null,
-      "note": null,
-      "state": "active",
-      "confirmation": null
+      "state": "active"
     }
   },
   "groups": {
     "developers": {
       "id": "developers",
       "name": "Developers",
-      "description": null,
-      "external_id": null,
-      "type": "custom",
       "users": [
         "demo-dev"
       ]
     }
   },
-  "tags": {},
-  "subscription": {
-    "required": true,
-    "header_names": [
-      "Ocp-Apim-Subscription-Key"
-    ],
-    "query_param_names": [
-      "subscription-key"
-    ],
-    "keys": {},
-    "subscriptions": {},
-    "bypass": []
-  },
-  "admin_token": null,
   "tenant_access": {
     "enabled": true,
     "primary_key": "local-dev-tenant-key",
     "secondary_key": "local-dev-tenant-key-secondary"
   },
   "portal": {
-    "enabled": true,
-    "user_header": "X-Apim-Portal-User"
+    "enabled": true
   },
-  "proxy_timeout_seconds": 30.0,
-  "proxy_max_attempts": 1,
-  "proxy_retry_statuses": [
-    502,
-    503,
-    504
-  ],
-  "proxy_streaming": true,
-  "inject_simulator_identity_headers": false,
-  "emit_simulator_response_headers": false,
-  "propagate_simulator_correlation_id": false,
-  "max_request_body_bytes": 1048576,
-  "cache_enabled": false,
-  "cache_ttl_seconds": 5.0,
-  "cache_max_entries": 1024,
   "trace_enabled": true,
-  "api_version_sets": {},
-  "policy_fragments": {},
-  "policies_xml": null,
-  "policies_xml_documents": [],
-  "backends": {},
   "apis": {
     "default": {
       "name": "Default",
       "path": "api",
       "upstream_base_url": "http://mock-backend:8080",
       "upstream_path_prefix": "/api",
-      "backend": null,
-      "protocols": [
-        "http",
-        "https"
-      ],
-      "translate_required_query_parameters": "template",
       "products": [
         "default"
       ],
-      "api_version_set": null,
-      "api_version": null,
-      "revision": null,
-      "revision_description": null,
-      "version_description": null,
-      "source_api_id": null,
-      "is_current": null,
-      "is_online": null,
-      "subscription_header_names": null,
-      "subscription_query_param_names": null,
-      "policies_xml": null,
-      "tags": [],
       "operations": {
         "health": {
           "name": "Health",
-          "method": "GET",
-          "url_template": "/health",
-          "description": null,
-          "upstream_base_url": null,
-          "upstream_path_prefix": null,
-          "backend": null,
-          "products": null,
-          "api_version_set": null,
-          "api_version": null,
-          "subscription_header_names": null,
-          "subscription_query_param_names": null,
-          "authz": null,
-          "policies_xml": null,
-          "tags": [],
-          "template_parameters": [],
-          "request": null,
-          "responses": []
+          "url_template": "/health"
         },
         "echo": {
           "name": "Echo",
-          "method": "GET",
-          "url_template": "/echo",
-          "description": null,
-          "upstream_base_url": null,
-          "upstream_path_prefix": null,
-          "backend": null,
-          "products": null,
-          "api_version_set": null,
-          "api_version": null,
-          "subscription_header_names": null,
-          "subscription_query_param_names": null,
-          "authz": null,
-          "policies_xml": null,
-          "tags": [],
-          "template_parameters": [],
-          "request": null,
-          "responses": []
+          "url_template": "/echo"
         }
-      },
-      "schemas": {},
-      "revisions": {},
-      "releases": {}
+      }
     },
     "subnetcalc-simulator-comparison": {
       "name": "Subnet Calculator Simulator Comparison",
       "path": "subnetcalc-simulator-comparison",
       "upstream_base_url": "https://example.invalid/api/v1",
-      "upstream_path_prefix": "",
-      "backend": null,
-      "protocols": [
-        "http",
-        "https"
-      ],
-      "translate_required_query_parameters": "template",
-      "products": [],
-      "api_version_set": null,
-      "api_version": null,
       "revision": "2",
       "revision_description": "Revision 2: clarify health operation description for simulator comparison",
-      "version_description": null,
-      "source_api_id": null,
       "is_current": true,
       "is_online": true,
-      "subscription_header_names": null,
-      "subscription_query_param_names": null,
       "policies_xml": "<policies><inbound><base /><return-response><set-status code=\"200\" reason=\"OK\" /><set-header name=\"Content-Type\" exists-action=\"override\"><value>application/json</value></set-header><set-body>{\"service\":\"subnetcalc\",\"revision\":\"2\"}</set-body></return-response></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>",
-      "tags": [],
       "operations": {
         "health": {
           "name": "Health",
-          "method": "GET",
           "url_template": "/health",
           "description": "Returns subnet calculator service health. Updated in revision 2.",
-          "upstream_base_url": null,
-          "upstream_path_prefix": null,
-          "backend": null,
-          "products": null,
-          "api_version_set": null,
-          "api_version": null,
-          "subscription_header_names": null,
-          "subscription_query_param_names": null,
-          "authz": null,
-          "policies_xml": "",
-          "tags": [],
-          "template_parameters": [],
-          "request": null,
-          "responses": []
+          "policies_xml": ""
         }
       },
-      "schemas": {},
       "revisions": {
         "1": {
           "revision": "1",
-          "description": null,
           "is_current": false,
           "is_online": true,
-          "source_api_id": null,
           "definition": {
             "name": "Subnet Calculator Simulator Comparison",
             "path": "subnetcalc-simulator-comparison",
@@ -289,7 +135,6 @@
           "description": "Revision 2: clarify health operation description for simulator comparison",
           "is_current": true,
           "is_online": true,
-          "source_api_id": null,
           "definition": {
             "name": "Subnet Calculator Simulator Comparison",
             "path": "subnetcalc-simulator-comparison",
@@ -353,51 +198,17 @@
       "name": "Subnet Calculator",
       "path": "subnetcalc-openapi",
       "upstream_base_url": "https://example.invalid/api/v1",
-      "upstream_path_prefix": "",
-      "backend": null,
-      "protocols": [
-        "http",
-        "https"
-      ],
-      "translate_required_query_parameters": "template",
-      "products": [],
-      "api_version_set": null,
-      "api_version": null,
       "revision": "1",
-      "revision_description": null,
-      "version_description": null,
-      "source_api_id": null,
       "is_current": true,
       "is_online": true,
-      "subscription_header_names": null,
-      "subscription_query_param_names": null,
-      "policies_xml": null,
-      "tags": [],
       "operations": {
         "health": {
           "name": "Health",
-          "method": "GET",
           "url_template": "/health",
-          "description": null,
-          "upstream_base_url": null,
-          "upstream_path_prefix": null,
-          "backend": null,
-          "products": null,
-          "api_version_set": null,
-          "api_version": null,
-          "subscription_header_names": null,
-          "subscription_query_param_names": null,
-          "authz": null,
-          "policies_xml": null,
-          "tags": [],
-          "template_parameters": [],
-          "request": null,
           "responses": [
             {
               "status_code": 200,
-              "description": "Healthy",
-              "headers": [],
-              "representations": []
+              "description": "Healthy"
             }
           ]
         },
@@ -405,50 +216,27 @@
           "name": "IPv4 subnet information",
           "method": "POST",
           "url_template": "/ipv4/subnet-info",
-          "description": null,
-          "upstream_base_url": null,
-          "upstream_path_prefix": null,
-          "backend": null,
-          "products": null,
-          "api_version_set": null,
-          "api_version": null,
-          "subscription_header_names": null,
-          "subscription_query_param_names": null,
-          "authz": null,
-          "policies_xml": null,
-          "tags": [],
-          "template_parameters": [],
           "request": {
-            "description": null,
-            "headers": [],
-            "query_parameters": [],
             "representations": [
               {
                 "content_type": "application/json",
-                "form_parameters": [],
                 "examples": [
                   {
                     "name": "default",
-                    "summary": null,
-                    "description": null,
                     "value": {
                       "network": "10.0.0.0/24",
                       "mode": "standard"
-                    },
-                    "external_value": null
+                    }
                   }
                 ],
-                "schema_id": "IPv4SubnetRequest",
-                "type_name": null
+                "schema_id": "IPv4SubnetRequest"
               }
             ]
           },
           "responses": [
             {
               "status_code": 200,
-              "description": "Subnet information",
-              "headers": [],
-              "representations": []
+              "description": "Subnet information"
             }
           ]
         }
@@ -456,8 +244,6 @@
       "schemas": {
         "IPv4SubnetRequest": {
           "content_type": "application/vnd.oai.openapi+json",
-          "value": null,
-          "definitions": {},
           "components": {
             "schemas": {
               "IPv4SubnetRequest": {
@@ -483,10 +269,8 @@
       "revisions": {
         "1": {
           "revision": "1",
-          "description": null,
           "is_current": true,
           "is_online": true,
-          "source_api_id": null,
           "definition": {
             "name": "Subnet Calculator",
             "path": "subnetcalc-openapi",
@@ -620,10 +404,7 @@
             }
           }
         }
-      },
-      "releases": {}
+      }
     }
-  },
-  "routes": []
+  }
 }
-
