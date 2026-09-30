@@ -1,0 +1,71 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Subnet Calculator",
+    "version": "1.0.0",
+    "description": "Small API contract adapted from platform/apps/subnetcalc. Portal comparison fixture; backend is intentionally a placeholder."
+  },
+  "servers": [
+    {
+      "url": "https://example.invalid/api/v1"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Health",
+        "responses": {
+          "200": {
+            "description": "Healthy"
+          }
+        }
+      }
+    },
+    "/ipv4/subnet-info": {
+      "post": {
+        "operationId": "subnet-info-ipv4",
+        "summary": "IPv4 subnet information",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IPv4SubnetRequest"
+              },
+              "example": {
+                "network": "10.0.0.0/24",
+                "mode": "standard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Subnet information"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "IPv4SubnetRequest": {
+        "type": "object",
+        "required": [
+          "network"
+        ],
+        "properties": {
+          "network": {
+            "type": "string",
+            "example": "10.0.0.0/24"
+          },
+          "mode": {
+            "type": "string",
+            "example": "standard"
+          }
+        }
+      }
+    }
+  }
+}
