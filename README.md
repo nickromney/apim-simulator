@@ -343,6 +343,10 @@ make up-ui
 ```
 
 Then open `http://localhost:3007`, use `Load Local Demo`, and connect to `http://localhost:8000`.
+The console supports API/operation authoring, bounded OpenAPI import, scoped
+policy editing and effective-policy inspection, and metadata-driven request
+testing with traces. See the [operator workflow](docs/OPERATOR-CONSOLE.md) and
+[fidelity contracts](docs/FIDELITY-CONTRACTS.md) for supported behavior and limits.
 
 ### Management CLI
 

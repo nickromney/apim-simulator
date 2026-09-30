@@ -1,0 +1,5 @@
+# Optional local fixture for the portal creation/revision comparison.
+services:
+  apim-simulator:
+    environment:
+      APIM_CONFIG_SOURCE_PATH: /app/examples/portal/subnetcalc-runtime.json
