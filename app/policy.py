@@ -2666,6 +2666,12 @@ def _record_validation_error(
         "Details": details,
         "Action": action,
     }
+    # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+    # https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    # The validation docs distinguish private Details in LastError from the
+    # public response, and use a different Reason for response validation.
+    req.variables["_policy_error_detail"] = details
+    req.variables["_policy_error_reason"] = "Response not allowed" if req.in_outbound else "Bad request"
     if errors_variable_name:
         existing = req.variables.get(errors_variable_name)
         errors = existing if isinstance(existing, list) else []
@@ -4664,7 +4670,7 @@ def _parse_emit_metric(el: ElementTree.Element) -> EmitMetric:
 def _parse_validate_content(el: ElementTree.Element) -> ValidateContent:
     _reject_unknown_attributes(
         el,
-        {"unspecified-content-type-action", "max-size", "size-exceeded-action", "errors-variable-name"},
+        {"id", "unspecified-content-type-action", "max-size", "size-exceeded-action", "errors-variable-name"},
         "validate-content",
     )
     max_size_raw = _required_attr(el, "max-size", "validate-content").strip()
@@ -4748,7 +4754,7 @@ def _parse_validate_content(el: ElementTree.Element) -> ValidateContent:
 def _parse_validate_parameters(el: ElementTree.Element) -> ValidateParameters:
     _reject_unknown_attributes(
         el,
-        {"specified-parameter-action", "unspecified-parameter-action", "errors-variable-name"},
+        {"id", "specified-parameter-action", "unspecified-parameter-action", "errors-variable-name"},
         "validate-parameters",
     )
     headers_el = el.find("headers")
@@ -4797,7 +4803,7 @@ def _parse_validate_parameters(el: ElementTree.Element) -> ValidateParameters:
 def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
     _reject_unknown_attributes(
         el,
-        {"unspecified-status-code-action", "errors-variable-name"},
+        {"id", "unspecified-status-code-action", "errors-variable-name"},
         "validate-status-code",
     )
     status_codes: list[tuple[int, str]] = []
@@ -4826,7 +4832,7 @@ def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
 def _parse_validate_headers(el: ElementTree.Element) -> ValidateHeaders:
     _reject_unknown_attributes(
         el,
-        {"specified-header-action", "unspecified-header-action", "errors-variable-name"},
+        {"id", "specified-header-action", "unspecified-header-action", "errors-variable-name"},
         "validate-headers",
     )
     overrides: list[tuple[str, str]] = []
