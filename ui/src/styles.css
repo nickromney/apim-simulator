@@ -1,18 +1,16 @@
-/* The console uses the system Segoe UI stack to match the Azure portal without external font requests. */
-
-:root {
-  color-scheme: light;
-  --bg: #f2ede1;
-  --panel: rgba(248, 244, 234, 0.9);
-  --panel-strong: rgba(255, 250, 242, 0.94);
-  --ink: #1a1711;
-  --muted: #655f54;
-  --line: rgba(26, 23, 17, 0.18);
-  --accent: #be5d26;
-  --accent-soft: rgba(190, 93, 38, 0.14);
-  --shadow: 0 24px 60px rgba(58, 40, 20, 0.16);
-  --radius: 24px;
+textarea,
+pre {
+  font-family: Consolas, "Courier New", monospace;
 }
+
+.field-label {
+  color: #605e5c;
+  font-size: 0.76rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The console uses the system Segoe UI stack to match the Azure portal without external font requests. */
 
 * {
   box-sizing: border-box;
@@ -22,12 +20,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  font-family: "IBM Plex Sans Condensed", sans-serif;
   color: var(--ink);
-  background:
-    radial-gradient(circle at top left, rgba(190, 93, 38, 0.18), transparent 32%),
-    radial-gradient(circle at bottom right, rgba(18, 112, 95, 0.16), transparent 34%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.42), transparent 50%), var(--bg);
 }
 
 body::before {
@@ -53,34 +46,18 @@ select,
 input,
 textarea {
   border: 1px solid var(--line);
-  border-radius: 16px;
   background: rgba(255, 252, 247, 0.88);
   color: var(--ink);
 }
 
 button {
   cursor: pointer;
-  transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    background 180ms ease;
-}
-
-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 12px 24px rgba(70, 44, 18, 0.1);
 }
 
 input,
 textarea,
 select {
   width: 100%;
-  padding: 0.9rem 1rem;
-}
-
-textarea,
-pre {
-  font-family: "IBM Plex Mono", monospace;
 }
 
 #root {
@@ -89,9 +66,7 @@ pre {
 
 .console-shell {
   position: relative;
-  max-width: 1600px;
   margin: 0 auto;
-  padding: 2rem;
 }
 
 .ambient {
@@ -117,19 +92,12 @@ pre {
 }
 
 .masthead {
-  position: relative;
-  display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(20rem, 0.9fr);
-  gap: 1.5rem;
-  align-items: start;
-  margin-bottom: 1.25rem;
 }
 
 .eyebrow {
   margin: 0 0 0.4rem;
-  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--accent);
 }
 
 .masthead h1 {
@@ -167,33 +135,12 @@ pre {
   pointer-events: none;
 }
 
-.connection-panel {
-  display: grid;
-  gap: 0.85rem;
-  padding: 1.25rem;
-}
-
 .connection-actions {
-  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.connection-panel button,
-.policy-actions button,
-.replay-form button,
-.status-bar button,
-.subscription-actions button {
-  border: 0;
-  background: linear-gradient(135deg, #17120e, #3b2415);
-  color: #f8f2e8;
-  padding: 0.9rem 1.1rem;
 }
 
 .connection-panel :where(.secondary-button) {
   border: 1px solid var(--line);
-  background: rgba(255, 252, 247, 0.94);
-  color: var(--ink);
 }
 
 .connection-hint {
@@ -212,7 +159,6 @@ pre {
   justify-content: space-between;
   gap: 1rem;
   align-items: center;
-  padding: 1rem 1.25rem;
   margin-bottom: 1.25rem;
 }
 
@@ -222,16 +168,10 @@ pre {
   gap: 1.25rem;
 }
 
-.panel {
-  padding: 1.3rem;
-}
-
 .panel-head {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  align-items: end;
-  margin-bottom: 1rem;
 }
 
 .panel-head h2 {
@@ -316,11 +256,6 @@ pre {
   gap: 1rem;
 }
 
-.policy-editor textarea {
-  min-height: 24rem;
-  resize: vertical;
-}
-
 .policy-actions,
 .subscription-actions,
 .replay-row {
@@ -339,7 +274,6 @@ pre {
 
 .trace-layout {
   display: grid;
-  grid-template-columns: minmax(16rem, 0.75fr) minmax(0, 1.25fr);
   gap: 1rem;
 }
 
@@ -350,14 +284,6 @@ pre {
   gap: 0.3rem 0.8rem;
   align-items: center;
   text-align: left;
-  padding: 0.9rem 1rem;
-  margin-bottom: 0.65rem;
-  background: var(--panel-strong);
-}
-
-.trace-chip.active {
-  background: linear-gradient(135deg, rgba(190, 93, 38, 0.16), rgba(18, 112, 95, 0.12));
-  border-color: rgba(190, 93, 38, 0.4);
 }
 
 .trace-chip small {
@@ -367,13 +293,9 @@ pre {
 
 .trace-detail,
 .replay-output pre {
-  min-height: 20rem;
   margin: 0;
   padding: 1rem;
-  border-radius: 18px;
   border: 1px solid rgba(26, 23, 17, 0.08);
-  background: rgba(16, 12, 8, 0.94);
-  color: #f3ede3;
   overflow: auto;
 }
 
@@ -419,7 +341,6 @@ pre {
   padding: 0.65rem;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
 }
 
 .trace-facts dt {
@@ -447,7 +368,6 @@ pre {
 .policy-steps h3 span {
   padding: 0.1rem 0.45rem;
   border-radius: 99px;
-  background: rgba(255, 255, 255, 0.12);
   font-family: "IBM Plex Mono", monospace;
   font-size: 0.75rem;
 }
@@ -470,7 +390,6 @@ pre {
 }
 
 .policy-steps li::marker {
-  color: #e29a68;
   font-family: "IBM Plex Mono", monospace;
 }
 
@@ -484,8 +403,6 @@ pre {
   margin: 0.45rem 0 0;
   padding: 0.65rem;
   border-radius: 9px;
-  background: rgba(0, 0, 0, 0.3);
-  color: #d4c8b8;
   font-size: 0.76rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -494,7 +411,6 @@ pre {
 
 .raw-trace summary {
   cursor: pointer;
-  color: #e29a68;
 }
 
 .subscription-grid {
@@ -504,9 +420,6 @@ pre {
 }
 
 .subscription-card {
-  padding: 1rem;
-  border-radius: 20px;
-  background: var(--panel-strong);
   border: 1px solid rgba(26, 23, 17, 0.08);
 }
 
@@ -544,7 +457,6 @@ pre {
 
 .state-pill {
   padding: 0.45rem 0.7rem;
-  border-radius: 999px;
   background: var(--accent-soft);
 }
 
@@ -558,18 +470,9 @@ label {
   gap: 0.45rem;
 }
 
-.field-label {
-  font-size: 0.85rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
 /* API and operation authoring workspace */
 .workspace-grid {
   display: grid;
-  grid-template-columns: minmax(15rem, 0.72fr) minmax(32rem, 1.9fr);
-  gap: 1.25rem;
   align-items: start;
 }
 
@@ -582,21 +485,6 @@ label {
 
 .explorer-panel {
   position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 2rem);
-  display: flex;
-  flex-direction: column;
-}
-
-.small-button,
-.secondary-button,
-.danger-button,
-.text-button,
-.form-title button,
-.button-row button {
-  padding: 0.65rem 0.85rem;
-  border-radius: 12px;
-  font-weight: 600;
 }
 
 .secondary-button {
@@ -629,32 +517,23 @@ button:disabled {
 .test-form textarea,
 .policy-toolbar select,
 .policy-editor textarea {
-  border-radius: 12px;
   background: var(--panel-strong);
 }
 
 .explorer-tree {
   display: grid;
-  gap: 0.55rem;
   overflow: auto;
-  min-height: 10rem;
   padding-right: 0.2rem;
 }
 
 .tree-api {
   display: grid;
-  gap: 0.25rem;
 }
 
 .tree-item {
   width: 100%;
   display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.7rem 0.75rem;
   text-align: left;
-  background: rgba(255, 252, 247, 0.68);
-  border-radius: 12px;
 }
 
 .tree-item > span:first-child:not(.method-pill),
@@ -664,48 +543,25 @@ button:disabled {
   gap: 0.15rem;
 }
 
-.tree-item strong,
-.tree-item small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .tree-item small {
   color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.tree-item.selected {
-  border-color: rgba(190, 93, 38, 0.55);
-  background: linear-gradient(135deg, rgba(190, 93, 38, 0.15), rgba(18, 112, 95, 0.09));
 }
 
 .tree-count {
   margin-left: auto;
   min-width: 1.7rem;
   padding: 0.15rem 0.4rem;
-  border-radius: 99px;
-  background: var(--accent-soft);
   text-align: center;
   font-size: 0.8rem;
 }
 
 .tree-operation {
-  margin-left: 0.7rem;
-  width: calc(100% - 0.7rem);
   padding: 0.55rem 0.65rem;
 }
 
 .method-pill {
   flex: 0 0 auto;
-  min-width: 3.6rem;
-  padding: 0.25rem 0.45rem;
-  border-radius: 8px;
-  background: rgba(18, 112, 95, 0.13);
-  color: #0a5b4c;
   font-family: "IBM Plex Mono", monospace;
-  font-size: 0.72rem;
   font-weight: 600;
   text-align: center;
 }
@@ -722,9 +578,7 @@ button:disabled {
 
 .explorer-foot span,
 .metadata-strip span {
-  padding: 0.35rem 0.55rem;
   border: 1px solid var(--line);
-  border-radius: 99px;
 }
 
 .resource-heading,
@@ -736,14 +590,9 @@ button:disabled {
   gap: 1rem;
 }
 
-.resource-heading {
-  margin-bottom: 1rem;
-}
-
 .resource-heading h2 {
   margin: 0;
   font-family: "Fraunces", serif;
-  font-size: clamp(1.6rem, 3vw, 2.35rem);
 }
 
 .resource-heading p:last-child,
@@ -755,32 +604,18 @@ button:disabled {
 
 .workflow-tabs {
   display: flex;
-  gap: 0.4rem;
-  padding: 0.3rem;
   margin: 0 0 1rem;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(26, 23, 17, 0.04);
 }
 
 .workflow-tabs button {
-  flex: 1;
-  padding: 0.65rem 0.9rem;
   border: 0;
   background: transparent;
-  font-weight: 600;
-}
-
-.workflow-tabs button.active {
-  background: var(--panel-strong);
-  box-shadow: 0 4px 14px rgba(58, 40, 20, 0.1);
 }
 
 .details-layout,
 .policy-workspace,
 .test-workspace {
   display: grid;
-  gap: 1rem;
 }
 
 .compact-form,
@@ -791,20 +626,11 @@ button:disabled {
 .manual-replay,
 .scope-note {
   min-width: 0;
-  padding: 1rem;
-  border: 1px solid rgba(26, 23, 17, 0.1);
-  border-radius: 18px;
-  background: rgba(255, 250, 242, 0.7);
-}
-
-.form-title {
-  margin-bottom: 0.9rem;
 }
 
 .form-title h3,
 .response-heading h3 {
   margin: 0;
-  font-size: 1.1rem;
 }
 
 .form-grid {
@@ -880,16 +706,10 @@ button:disabled {
 .policy-toolbar {
   display: grid;
   grid-template-columns: minmax(12rem, 1fr) minmax(12rem, 1fr) auto;
-  gap: 0.7rem;
   align-items: end;
 }
 
-.policy-editor {
-  margin-top: 1rem;
-}
-
 .policy-editor textarea {
-  min-height: 25rem;
   resize: vertical;
 }
 
@@ -905,7 +725,6 @@ button:disabled {
 
 .test-form {
   display: grid;
-  gap: 0.75rem;
 }
 
 .test-target {
@@ -1000,11 +819,6 @@ button:disabled {
   max-height: 24rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.trace-panel,
-.subscription-panel {
-  grid-column: 1 / -1;
 }
 
 .trace-list {
@@ -1133,28 +947,18 @@ body::before,
 }
 .masthead {
   display: flex;
-  min-height: 52px;
   margin: 0 -1.5rem 0.85rem;
-  padding: 0 1.5rem;
   align-items: center;
-  gap: 1.5rem;
-  background: #0078d4;
   color: #fff;
 }
 .brand-lockup {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 0.55rem;
 }
 .brand-mark {
   display: grid;
-  width: 26px;
-  height: 26px;
   place-items: center;
-  background: #fff;
-  color: #0078d4;
-  font-size: 1rem;
   font-weight: 700;
 }
 .brand-lockup h1 {
@@ -1167,13 +971,11 @@ body::before,
 .brand-context {
   padding-left: 0.55rem;
   border-left: 1px solid rgba(255, 255, 255, 0.45);
-  font-size: 0.9rem;
 }
 .service-nav {
   display: flex;
   align-self: stretch;
   align-items: stretch;
-  gap: 0.2rem;
 }
 .service-nav a {
   display: flex;
@@ -1270,7 +1072,6 @@ body::before,
   color: #242424;
 }
 .workspace-grid {
-  grid-template-columns: minmax(15rem, 0.65fr) minmax(32rem, 2fr);
   gap: 0.75rem;
 }
 .panel,
@@ -1305,11 +1106,7 @@ body::before,
   letter-spacing: 0.04em;
 }
 .resource-heading {
-  padding-bottom: 0.65rem;
   border-bottom: 1px solid #edebe9;
-}
-.resource-heading h2 {
-  font-size: 1.35rem;
 }
 .workflow-tabs {
   gap: 0;
@@ -1378,12 +1175,6 @@ textarea,
 select {
   padding: 0.45rem 0.55rem;
 }
-.field-label {
-  color: #605e5c;
-  font-size: 0.76rem;
-  letter-spacing: 0;
-  text-transform: none;
-}
 .explorer-panel {
   top: 0.75rem;
   max-height: calc(100vh - 1.5rem);
@@ -1400,7 +1191,6 @@ select {
 }
 .tree-item {
   gap: 0.55rem;
-  padding: 0.48rem 0.55rem;
   border-radius: 2px;
   background: #fff;
 }
@@ -1408,9 +1198,6 @@ select {
   border-color: #0078d4;
   background: #f0f7fd;
   box-shadow: inset 3px 0 #0078d4;
-}
-.tree-item small {
-  font-size: 0.78rem;
 }
 .tree-operation {
   width: 100%;
@@ -1468,9 +1255,6 @@ select {
   border: 1px solid #edebe9;
   border-radius: 2px;
   background: #fff;
-}
-.form-title {
-  margin-bottom: 0.65rem;
 }
 .form-title h3,
 .response-heading h3 {
@@ -1553,12 +1337,6 @@ select {
   .masthead {
     margin: 0 -0.7rem 0.65rem;
     padding: 0.6rem 0.7rem;
-    gap: 0.5rem;
-  }
-  .service-nav {
-    order: 3;
-    flex-basis: 100%;
-    min-height: 32px;
   }
   .service-nav a {
     padding: 0 0.5rem;
@@ -1585,9 +1363,6 @@ select {
 }
 
 /* Keep the simulator identity distinct while retaining familiar portal controls. */
-.masthead {
-  background: #087e78;
-}
 .brand-mark {
   color: #087e78;
   background: #e8f3f2;
@@ -1605,15 +1380,9 @@ select {
   background-color: #fff;
   color: #242424;
 }
-textarea,
-pre {
-  font-family: Consolas, "Courier New", monospace;
-}
 .explorer-panel {
-  display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: auto auto minmax(10rem, 1fr) auto;
-  gap: 0 0.65rem;
 }
 .explorer-panel > .panel-head,
 .explorer-panel > .search-field,
@@ -1678,15 +1447,10 @@ pre {
   grid-template-areas:
     "frontend inbound backend"
     "frontend outbound backend";
-  gap: 0.55rem;
-  min-height: 16rem;
 }
 .policy-stage-card {
   display: grid;
-  min-height: 102px;
   align-content: start;
-  gap: 0.5rem;
-  padding: 0.7rem;
   border: 1px solid #d2d0ce;
   border-radius: 2px;
   color: #242424;
@@ -1756,10 +1520,8 @@ pre {
 .policy-stage-card > small {
   align-self: end;
   color: #605e5c;
-  font-size: 0.72rem;
 }
 .policy-editor textarea {
-  min-height: 21rem;
   background: #f8f8f8;
   font-family: Consolas, "Courier New", monospace;
   font-size: 0.82rem;
@@ -1769,7 +1531,6 @@ pre {
   top: 0;
   z-index: 30;
   margin-top: 0;
-  padding: 0.65rem 0.9rem;
   background: #087e78;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
 }
@@ -1831,26 +1592,17 @@ button.policy-stage-card {
 }
 .service-nav button {
   align-self: stretch;
-  padding: 0 0.9rem;
-  border: 0;
   border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 0.88rem;
-  font-weight: 500;
   white-space: nowrap;
 }
 .service-nav button:hover {
   transform: none;
-  background: rgba(255, 255, 255, 0.1);
   box-shadow: none;
 }
 .service-nav button.active {
   border-bottom-color: #fff;
   background: rgba(255, 255, 255, 0.14);
   color: #fff;
-  font-weight: 650;
 }
 .connection-control {
   position: relative;
@@ -2306,7 +2058,6 @@ button.policy-stage-card {
 
 /* Resource names have separate readable navigation columns. */
 .workspace-grid.app-page-apis {
-  grid-template-columns: minmax(17rem, 0.85fr) minmax(18rem, 0.9fr) minmax(0, 2.2fr);
   align-items: start;
 }
 .explorer-panel {
@@ -2351,11 +2102,6 @@ button.policy-stage-card {
   }
   .workspace-grid.app-page-apis > .workspace-panel {
     grid-column: 1 / -1;
-  }
-}
-@media (max-width: 650px) {
-  .workspace-grid.app-page-apis {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 
