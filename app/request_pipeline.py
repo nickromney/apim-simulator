@@ -1125,6 +1125,12 @@ class _BackendChoice:
     pool: _PoolState
 
 
+def _build_policy_upstream_url(route: RouteConfig, policy_req: PolicyRequest, base_url: str) -> str:
+    if policy_req.variables.get("_rewrite_uri_applied"):
+        return route.build_rewritten_upstream_url(policy_req.path, upstream_base_url=base_url)
+    return route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+
+
 def _choose_backend(
     *,
     cfg: GatewayConfig,
@@ -1316,7 +1322,7 @@ async def _retry_response(
     base_url = pool.trip_and_reselect(cfg, policy_req, trip_duration_seconds=trip_duration)
     if base_url is None:
         return True, upstream_url
-    return True, route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+    return True, _build_policy_upstream_url(route, policy_req, base_url)
 
 
 def _record_final_pool_result(pool: _PoolState, response: httpx.Response) -> None:
@@ -1373,7 +1379,7 @@ async def _send_upstream_with_retries(
             trip_duration_seconds=trip_duration_seconds,
         )
         if base_url is not None:
-            upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+            upstream_url = _build_policy_upstream_url(route, policy_req, base_url)
 
     for attempt in range(1, max_attempts + 1):
         attempts_used = attempt
@@ -1634,6 +1640,7 @@ def _build_policy_request(
             "_request_query": upstream_query,
             "_request_path": request.url.path,
             "_matched_parameters": dict(resolved.matched_parameters),
+            "_matched_query_parameters": set(getattr(resolved, "matched_query_parameters", ())),
         },
         body=body,
     )
@@ -2231,7 +2238,7 @@ async def execute_gateway_request(request: Request) -> Response:
 
     _record_selected_backend(trace_collector, backend_id, upstream_base_url)
 
-    upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=upstream_base_url)
+    upstream_url = _build_policy_upstream_url(route, policy_req, upstream_base_url)
     policy_req.variables["upstream_url"] = upstream_url
     trace_base["upstream_url"] = upstream_url
 
