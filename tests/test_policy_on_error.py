@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import GatewayConfig, RouteConfig
@@ -231,6 +232,99 @@ def test_outbound_expression_failure_enters_on_error() -> None:
     assert response.headers["err-source"] == "set-header"
     assert response.headers["err-section"] == "outbound"
     assert response.headers["err-reason"] == "ExpressionValueEvaluationFailure"
+
+
+@pytest.mark.parametrize(
+    ("refusal", "message"),
+    [
+        (
+            '<validate-status-code id="status" unspecified-status-code-action="prevent" />',
+            "Response status code 200 is not allowed.",
+        ),
+        (
+            '<validate-content id="content" unspecified-content-type-action="prevent" max-size="100" '
+            'size-exceeded-action="prevent"><content type="application/json" validate-as="json" '
+            'action="prevent" /></validate-content>',
+            "Unspecified content type text/plain is not allowed.",
+        ),
+        (
+            '<validate-headers id="headers" specified-header-action="ignore" '
+            'unspecified-header-action="prevent"><header name="content-length" '
+            'action="ignore" /></validate-headers>',
+            "Unspecified header content-type is not allowed.",
+        ),
+    ],
+)
+def test_outbound_validation_refusal_enters_on_error(refusal: str, message: str) -> None:
+    """Outbound validation prevent errors jump to on-error with response details.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+    https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    https://learn.microsoft.com/en-us/azure/api-management/validate-headers-policy
+    """
+    policy = f"""
+    <policies>
+      <outbound>{refusal}</outbound>
+      <on-error>{ERROR_HEADERS}</on-error>
+    </policies>
+    """
+    with _client(policy) as client:
+        response = client.get("/api/x")
+
+    assert response.status_code == 502
+    assert response.text == "The request could not be processed due to an internal error. Contact the API owner."
+    assert response.headers["err-source"] in {"validate-status-code", "validate-content", "validate-headers"}
+    assert response.headers["err-reason"] == "Response not allowed"
+    assert response.headers["err-message"] == message
+    assert response.headers["err-section"] == "outbound"
+    assert response.headers["err-status"] == "502"
+    assert response.headers["err-scope"] == "route:on-error-test"
+    assert response.headers["err-policy-id"] in {"status", "content", "headers"}
+
+
+def test_outbound_return_response_does_not_enter_on_error() -> None:
+    """A deliberate outbound return-response is not an error.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    https://learn.microsoft.com/en-us/azure/api-management/return-response-policy
+    """
+    policy = f"""
+    <policies>
+      <outbound><return-response><set-status code="202" /></return-response></outbound>
+      <on-error>{ERROR_HEADERS}</on-error>
+    </policies>
+    """
+    with _client(policy) as client:
+        response = client.get("/api/x")
+
+    assert response.status_code == 202
+    assert "err-source" not in response.headers
+
+
+def test_outbound_validation_on_error_response_replaces_refusal() -> None:
+    """A return-response in on-error replaces an outbound validation refusal.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
+    https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+    """
+    policy = """
+    <policies>
+      <outbound><validate-status-code unspecified-status-code-action="prevent" /></outbound>
+      <on-error>
+        <return-response>
+          <set-status code="418" />
+          <set-header name="err-source"><value>@(context.LastError.Source)</value></set-header>
+        </return-response>
+      </on-error>
+    </policies>
+    """
+    with _client(policy) as client:
+        response = client.get("/api/x")
+
+    assert response.status_code == 418
+    assert response.headers["err-source"] == "validate-status-code"
+    assert response.text == ""
 
 
 def test_last_error_reports_the_policy_reason_and_envelope_message() -> None:

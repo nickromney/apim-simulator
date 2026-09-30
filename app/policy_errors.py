@@ -3,10 +3,11 @@
 Spec: https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
 
 Processing "immediately jumps to the on-error policy section" when an error
-occurs. The predefined-errors table lists the deliberate refusals of
-rate-limit, quota, ip-filter, check-header and validate-jwt as errors, so a
-response produced by those policies enters on-error just like an exception.
-return-response and mock-response are not errors.
+occurs. The predefined-errors table lists deliberate policy refusals as
+errors, and the validation policy logs state that a prevent error is
+propagated to context.LastError, so responses produced by those policies enter
+on-error just like an exception. return-response and mock-response are not
+errors.
 
 Policy nodes carry the optional ``id`` attribute and parser-built nested path
 so ``Path`` and ``PolicyId`` can be exposed through on-error.
@@ -34,6 +35,7 @@ ERROR_RESPONSE_POLICIES = frozenset(
         "validate-content",
         "validate-parameters",
         "validate-headers",
+        "validate-status-code",
         "llm-token-limit",
     }
 )
@@ -118,15 +120,18 @@ def response_last_error(
     path: str = "",
     policy_id: str = "",
     reason: str | None = None,
+    details: str | None = None,
 ) -> dict[str, str] | None:
     """LastError for a refusal response, or None when the response is not an error.
 
     A policy that knows its predefined Reason records it; otherwise the Reason is
-    inferred from the message text.
+    inferred from the message text. Validation policies pass their private
+    details separately because APIM deliberately returns a generic public
+    response for outbound validation failures.
     """
     if source not in ERROR_RESPONSE_POLICIES:
         return None
-    message = _refusal_message(body)
+    message = details if details is not None else _refusal_message(body)
     return build_last_error(
         source=source,
         reason=reason or _reason_for(source, message),
