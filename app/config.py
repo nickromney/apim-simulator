@@ -596,6 +596,7 @@ class BackendConfig(BaseModel):
 class RouteMatch:
     parameters: dict[str, str]
     precedence: tuple[int, ...]
+    query_parameters: frozenset[str] = frozenset()
 
 
 _TEMPLATE_PARAMETER = re.compile(r"^\{(\*?[^{}]+)\}$")
@@ -682,17 +683,21 @@ def _query_items(query: Any) -> list[tuple[str, str]]:
     return [(str(key), str(value)) for key, value in query.items()]
 
 
-def _match_query_parts(template: list[tuple[str, str]], query: Any) -> tuple[dict[str, str], tuple[int, ...]] | None:
+def _match_query_parts(
+    template: list[tuple[str, str]], query: Any
+) -> tuple[dict[str, str], tuple[int, ...], frozenset[str]] | None:
     values: dict[str, list[str]] = {}
     for key, value in _query_items(query):
         values.setdefault(key.casefold(), []).append(value)
 
     parameters: dict[str, str] = {}
     precedence: list[int] = []
+    matched_names: set[str] = set()
     for name, expected in template:
         actual_values = values.get(name.casefold(), [])
         if not actual_values:
             return None
+        matched_names.add(name)
         parameter = _template_parameter(expected)
         actual = actual_values[0]
         if parameter:
@@ -702,7 +707,7 @@ def _match_query_parts(template: list[tuple[str, str]], query: Any) -> tuple[dic
             return None
         else:
             precedence.append(3)
-    return parameters, tuple(precedence)
+    return parameters, tuple(precedence), frozenset(matched_names)
 
 
 def _match_operation(api_path: str, url_template: str, path: str, query: Any) -> RouteMatch | None:
@@ -715,7 +720,7 @@ def _match_operation(api_path: str, url_template: str, path: str, query: Any) ->
     if query_match is None:
         return None
     path_parameters, path_precedence = path_match
-    query_parameters, query_precedence = query_match
+    query_parameters, query_precedence, matched_query_parameters = query_match
     path_parameters.update(query_parameters)
     precedence = (
         len(template_segments),
@@ -723,7 +728,11 @@ def _match_operation(api_path: str, url_template: str, path: str, query: Any) ->
         len(query_template),
         *query_precedence,
     )
-    return RouteMatch(parameters=path_parameters, precedence=precedence)
+    return RouteMatch(
+        parameters=path_parameters,
+        precedence=precedence,
+        query_parameters=matched_query_parameters,
+    )
 
 
 def _match_path_prefix(prefix: str, path: str) -> RouteMatch | None:
@@ -797,7 +806,11 @@ class RouteConfig(BaseModel):
         # score follows observed APIM precedence: literals, then parameters,
         # then wildcards; declaration order is used only for exact ties.
         method_precedence = 1 if self.methods else 0
-        return RouteMatch(path_match.parameters, (*path_match.precedence, method_precedence))
+        return RouteMatch(
+            path_match.parameters,
+            (*path_match.precedence, method_precedence),
+            path_match.query_parameters,
+        )
 
     def matches_path(self, path: str, query: Any = None) -> bool:
         return self._path_match(path, query=query) is not None
@@ -812,6 +825,20 @@ class RouteConfig(BaseModel):
         return _match_path_prefix(self.path_prefix, path)
 
     def build_upstream_url(self, path: str, *, upstream_base_url: str | None = None) -> str:
+        return self._build_upstream_url(path, upstream_base_url=upstream_base_url)
+
+    def build_rewritten_upstream_url(self, path: str, *, upstream_base_url: str | None = None) -> str:
+        """Build a rewrite-uri target relative to the backend service URL.
+
+        The rewrite-uri template is relative to the backend service path; it
+        does not inherit the route's public or operation path prefixes.
+        https://learn.microsoft.com/en-us/azure/api-management/rewrite-uri-policy
+        """
+        base = (upstream_base_url or self.upstream_base_url).rstrip("/")
+        target_path = path if path.startswith("/") else f"/{path}"
+        return base + target_path
+
+    def _build_upstream_url(self, path: str, *, upstream_base_url: str | None = None) -> str:
         source_prefix = self.path_prefix
         if self.url_template is not None and not self.upstream_path_uses_operation_prefix:
             source_prefix = self.api_path_prefix or self.path_prefix

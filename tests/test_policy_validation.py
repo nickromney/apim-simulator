@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
 
 from app.config import (
     ApiConfig,
+    ApiSchemaConfig,
     GatewayConfig,
     NamedValueConfig,
     OperationConfig,
     OperationParameterConfig,
+    OperationRepresentationConfig,
     OperationRequestMetadataConfig,
     OperationResponseMetadataConfig,
 )
 from app.policy import (
+    MultiValueMap,
     PolicyRequest,
     PolicyRuntime,
     apply_inbound,
@@ -158,7 +162,10 @@ def test_validate_content_records_apim_error_shape_and_generic_outbound_message(
             "Name": "application/json",
             "Type": "ResponseBody",
             "ValidationRule": "IncorrectMessage",
-            "Details": "Body of the response is not valid JSON for content type application/json",
+            "Details": (
+                "Body of the response is not valid JSON for content type application/json. "
+                "Expecting property name enclosed in double quotes Line: 1, Position: 2"
+            ),
             "Action": "prevent",
         }
     ]
@@ -208,7 +215,7 @@ def test_validate_content_maps_missing_and_any_content_types() -> None:
     assert blocked.status_code == 400
 
 
-def test_validate_content_accepts_optional_type_and_rejects_unimplemented_options() -> None:
+def test_validate_content_accepts_optional_type_and_schema_options() -> None:
     """Type is optional; unsupported schema overrides must not be ignored.
 
     https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
@@ -219,12 +226,12 @@ def test_validate_content_accepts_optional_type_and_rejects_unimplemented_option
     )
     assert apply_inbound([doc], _request(body=b"plain", headers={"content-type": "text/plain"})) is None
 
-    with pytest.raises(Exception, match="schema-id"):
-        parse_policies_xml(
-            '<policies><inbound><validate-content unspecified-content-type-action="ignore" max-size="100" '
-            'size-exceeded-action="prevent"><content validate-as="json" action="ignore" '
-            'schema-id="schema" /></validate-content></inbound></policies>'
-        )
+    parse_policies_xml(
+        '<policies><inbound><validate-content unspecified-content-type-action="ignore" max-size="100" '
+        'size-exceeded-action="prevent"><content validate-as="json" action="ignore" '
+        'schema-id="schema" allow-additional-properties="false" '
+        'case-insensitive-property-names="true" /></validate-content></inbound></policies>'
+    )
 
 
 def test_validation_policy_required_attributes_and_unimplemented_modes_are_rejected() -> None:
@@ -302,6 +309,293 @@ def _operation_config() -> GatewayConfig:
             )
         },
     )
+
+
+def _schema_operation_config(
+    *,
+    request_schema: dict[str, Any] | None = None,
+    response_schema: dict[str, Any] | None = None,
+    schemas: dict[str, ApiSchemaConfig] | None = None,
+) -> GatewayConfig:
+    representations: list[OperationRepresentationConfig] = []
+    if request_schema is not None:
+        representations.append(OperationRepresentationConfig(content_type="application/json", schema_id="Request"))
+    response_representations: list[OperationRepresentationConfig] = []
+    if response_schema is not None:
+        response_representations.append(
+            OperationRepresentationConfig(content_type="application/json", schema_id="Response")
+        )
+    api_schemas = dict(schemas or {})
+    if request_schema is not None:
+        api_schemas.setdefault(
+            "Request", ApiSchemaConfig(content_type="application/json", value=json.dumps(request_schema))
+        )
+    if response_schema is not None:
+        api_schemas.setdefault(
+            "Response", ApiSchemaConfig(content_type="application/json", value=json.dumps(response_schema))
+        )
+    return GatewayConfig(
+        allow_anonymous=True,
+        apis={
+            "demo-api": ApiConfig(
+                name="Demo",
+                path="api",
+                upstream_base_url="http://upstream",
+                schemas=api_schemas,
+                operations={
+                    "echo": OperationConfig(
+                        name="Echo",
+                        method="POST",
+                        url_template="/echo",
+                        request=OperationRequestMetadataConfig(representations=representations),
+                        responses=[
+                            OperationResponseMetadataConfig(
+                                status_code=200,
+                                representations=response_representations,
+                            )
+                        ],
+                    )
+                },
+            )
+        },
+    )
+
+
+def test_validate_content_enforces_operation_json_schema() -> None:
+    """validate-content enforces required properties, types, and additional properties.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    """
+    schema = {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": False,
+        "properties": {"name": {"type": "string"}, "age": {"type": "integer", "minimum": 0}},
+    }
+    config = _schema_operation_config(request_schema=schema)
+    doc = _doc(
+        inbound='<validate-content unspecified-content-type-action="prevent" max-size="1000" '
+        'size-exceeded-action="prevent" errors-variable-name="contentErrors">'
+        '<content type="application/json" validate-as="json" action="prevent" />'
+        "</validate-content>"
+    )
+    runtime = PolicyRuntime(gateway_config=config)
+    valid = _request(
+        body=b'{"name":"Ada","age":3}',
+        headers={"content-type": "application/json"},
+        variables=_operation_variables(),
+    )
+    assert apply_inbound([doc], valid, runtime) is None
+
+    invalid = _request(
+        body=b'{"name":3,"extra":true}',
+        headers={"content-type": "application/json"},
+        variables=_operation_variables(),
+    )
+    blocked = apply_inbound([doc], invalid, runtime)
+    assert blocked is not None
+    assert blocked.status_code == 400
+    assert "does not conform to the definition Request" in blocked.body.decode()
+    assert invalid.variables["contentErrors"][0]["ValidationRule"] == "IncorrectMessage"
+
+
+def test_validate_content_schema_overrides_and_case_insensitive_names() -> None:
+    """validate-content supports schema-id, schema-ref, overrides, and case-insensitive names.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    """
+    schema = {
+        "components": {
+            "schemas": {
+                "Address": {
+                    "type": "object",
+                    "required": ["street"],
+                    "additionalProperties": False,
+                    "properties": {"street": {"type": "string"}},
+                }
+            }
+        }
+    }
+    config = _schema_operation_config(
+        schemas={"Shared": ApiSchemaConfig(content_type="application/json", value=json.dumps(schema))}
+    )
+    doc = _doc(
+        inbound='<validate-content unspecified-content-type-action="prevent" max-size="1000" '
+        'size-exceeded-action="prevent"><content type="application/json" validate-as="json" action="prevent" '
+        'schema-id="Shared" schema-ref="#/components/schemas/Address" allow-additional-properties="true" '
+        'case-insensitive-property-names="true" /></validate-content>'
+    )
+    req = _request(
+        body=b'{"STREET":"Main","extra":true}',
+        headers={"content-type": "application/json"},
+        variables=_operation_variables(),
+    )
+    assert apply_inbound([doc], req, PolicyRuntime(gateway_config=config)) is None
+
+    schema["components"]["schemas"]["Address"]["additionalProperties"] = True
+    config.apis["demo-api"].schemas["Shared"].value = json.dumps(schema)
+    strict_doc = _doc(
+        inbound='<validate-content unspecified-content-type-action="prevent" max-size="1000" '
+        'size-exceeded-action="prevent"><content type="application/json" validate-as="json" action="prevent" '
+        'schema-id="Shared" schema-ref="#/components/schemas/Address" allow-additional-properties="false" '
+        'case-insensitive-property-names="true" /></validate-content>'
+    )
+    blocked = apply_inbound([strict_doc], req, PolicyRuntime(gateway_config=config))
+    assert blocked is not None
+    assert blocked.status_code == 400
+
+
+def test_validate_content_reports_missing_api_schema() -> None:
+    """validate-content reports an ApiSchema error when schema-id cannot be resolved.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    """
+    config = _schema_operation_config(
+        schemas={"Empty": ApiSchemaConfig(content_type="application/json", value=json.dumps({"type": "object"}))}
+    )
+    doc = _doc(
+        inbound='<validate-content unspecified-content-type-action="prevent" max-size="1000" '
+        'size-exceeded-action="prevent" errors-variable-name="contentErrors">'
+        '<content type="application/json" validate-as="json" action="prevent" schema-id="Missing" />'
+        "</validate-content>"
+    )
+    req = _request(
+        body=b"{}",
+        headers={"content-type": "application/json"},
+        variables=_operation_variables(),
+    )
+    blocked = apply_inbound([doc], req, PolicyRuntime(gateway_config=config))
+    assert blocked is not None
+    assert blocked.status_code == 400
+    assert (
+        blocked.body.decode() == "The request could not be processed due to an internal error. Contact the API owner."
+    )
+    assert req.variables["contentErrors"][0]["Type"] == "ApiSchema"
+    assert req.variables["contentErrors"][0]["ValidationRule"] == ""
+
+
+def test_validate_content_reports_missing_definition() -> None:
+    """validate-content reports MissingDefinition for an absent operation definition.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validation-policies
+    """
+    config = _operation_config()
+    config.apis["demo-api"].schemas = {
+        "Api": ApiSchemaConfig(
+            content_type="application/json",
+            definitions={"Root": {"type": "object"}},
+        )
+    }
+    config.apis["demo-api"].operations["echo"].request.representations = [
+        OperationRepresentationConfig(
+            content_type="application/json",
+            schema_id="Api",
+            type_name="Missing",
+        )
+    ]
+    doc = _doc(
+        inbound='<validate-content unspecified-content-type-action="prevent" max-size="1000" '
+        'size-exceeded-action="prevent" errors-variable-name="contentErrors">'
+        '<content type="application/json" validate-as="json" action="prevent" />'
+        "</validate-content>"
+    )
+    req = _request(
+        body=b"{}",
+        headers={"content-type": "application/json"},
+        variables=_operation_variables(),
+    )
+    blocked = apply_inbound([doc], req, PolicyRuntime(gateway_config=config))
+    assert blocked is not None
+    assert req.variables["contentErrors"][0]["ValidationRule"] == "MissingDefinition"
+    assert "definition Missing" in req.variables["contentErrors"][0]["Details"]
+
+
+def test_validate_content_uses_response_schema_for_status_code() -> None:
+    """validate-content validates an outbound response against its status representation schema.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    """
+    config = _schema_operation_config(response_schema={"type": "object", "required": ["ok"]})
+    doc = _doc(
+        outbound='<validate-content unspecified-content-type-action="prevent" max-size="1000" '
+        'size-exceeded-action="prevent"><content type="application/json" validate-as="json" action="prevent" />'
+        "</validate-content>"
+    )
+    req = PolicyRequest(
+        method="GET",
+        path="/api/echo",
+        query={},
+        headers={},
+        variables=_operation_variables(),
+        response_status_code=200,
+        response_headers={"content-type": "application/json"},
+        response_body=b"{}",
+    )
+    blocked = asyncio.run(apply_outbound_async([doc], req, PolicyRuntime(gateway_config=config)))
+    assert blocked is not None
+    assert blocked.status_code == 502
+    assert (
+        blocked.body.decode() == "The request could not be processed due to an internal error. Contact the API owner."
+    )
+
+
+def test_validate_parameters_validates_values_and_rejects_multiple_values() -> None:
+    """validate-parameters validates declared values and rejects repeated scalar parameters.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-parameters-policy
+    """
+    config = _operation_config()
+    config.apis["demo-api"].operations["echo"].request.query_parameters[0].type = "integer"
+    doc = _doc(
+        inbound='<validate-parameters specified-parameter-action="prevent" unspecified-parameter-action="ignore" '
+        'errors-variable-name="parameterErrors" />'
+    )
+    runtime = PolicyRuntime(gateway_config=config)
+    invalid = _request(
+        headers={"x-required-header": "1"},
+        query={"mode": "not-an-integer"},
+        variables=_operation_variables(),
+    )
+    blocked = apply_inbound([doc], invalid, runtime)
+    assert blocked is not None
+    assert blocked.status_code == 400
+    assert "couldn't be parsed according to the definition" in blocked.body.decode()
+
+    repeated = _request(
+        headers={"x-required-header": "1"},
+        query=MultiValueMap({"mode": ["1", "2"]}),
+        variables=_operation_variables(),
+    )
+    blocked = apply_inbound([doc], repeated, runtime)
+    assert blocked is not None
+    assert b"cannot contain multiple values for the query parameter mode" in blocked.body
+
+
+def test_validate_headers_validates_response_header_values() -> None:
+    """validate-headers validates response header values against declared types.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-headers-policy
+    """
+    config = _operation_config()
+    config.apis["demo-api"].operations["echo"].responses = [
+        OperationResponseMetadataConfig(
+            status_code=200,
+            headers=[OperationParameterConfig(name="x-count", required=True, type="integer")],
+        )
+    ]
+    doc = _doc(outbound='<validate-headers specified-header-action="prevent" unspecified-header-action="ignore" />')
+    req = PolicyRequest(
+        method="POST",
+        path="/api/echo",
+        query={},
+        headers={},
+        variables=_operation_variables(),
+        response_status_code=200,
+        response_headers={"x-count": "not-an-integer"},
+    )
+    blocked = asyncio.run(apply_outbound_async([doc], req, PolicyRuntime(gateway_config=config)))
+    assert blocked is not None
+    assert blocked.status_code == 502
 
 
 def test_policy_rejects_a_missing_named_value_reference() -> None:
@@ -563,3 +857,19 @@ def test_validate_status_code_allows_declared_and_explicit_codes() -> None:
         asyncio.run(apply_outbound_async([doc], req, runtime))
         assert req.response_status_code == status
         assert req.response_body == b"ok"
+
+
+def test_json_schema_violation_reports_where_the_rejected_value_starts() -> None:
+    """IncorrectMessage details carry the Line and Position of the rejected value.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    """
+    from app.policy import SchemaViolation, _json_line_position, _validation_message
+
+    body = '{\n  "name": "Ada",\n  "age": "forty"\n}'
+
+    assert _json_line_position(body, ("age",)) == (3, 10)
+    assert _json_line_position(body, ()) == (1, 1)
+    assert _json_line_position('{"items": [1, "x"]}', ("items", 1)) == (1, 15)
+    assert _json_line_position('{"Name": 1}', ("name",), case_insensitive=True) == (1, 10)
+    assert _validation_message(SchemaViolation("bad", ("age",)), (3, 10)) == "bad Line: 3, Position: 10"

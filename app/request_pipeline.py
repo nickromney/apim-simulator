@@ -1125,6 +1125,12 @@ class _BackendChoice:
     pool: _PoolState
 
 
+def _build_policy_upstream_url(route: RouteConfig, policy_req: PolicyRequest, base_url: str) -> str:
+    if policy_req.variables.get("_rewrite_uri_applied"):
+        return route.build_rewritten_upstream_url(policy_req.path, upstream_base_url=base_url)
+    return route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+
+
 def _choose_backend(
     *,
     cfg: GatewayConfig,
@@ -1316,7 +1322,7 @@ async def _retry_response(
     base_url = pool.trip_and_reselect(cfg, policy_req, trip_duration_seconds=trip_duration)
     if base_url is None:
         return True, upstream_url
-    return True, route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+    return True, _build_policy_upstream_url(route, policy_req, base_url)
 
 
 def _record_final_pool_result(pool: _PoolState, response: httpx.Response) -> None:
@@ -1373,7 +1379,7 @@ async def _send_upstream_with_retries(
             trip_duration_seconds=trip_duration_seconds,
         )
         if base_url is not None:
-            upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+            upstream_url = _build_policy_upstream_url(route, policy_req, base_url)
 
     for attempt in range(1, max_attempts + 1):
         attempts_used = attempt
@@ -1634,6 +1640,7 @@ def _build_policy_request(
             "_request_query": upstream_query,
             "_request_path": request.url.path,
             "_matched_parameters": dict(resolved.matched_parameters),
+            "_matched_query_parameters": set(getattr(resolved, "matched_query_parameters", ())),
         },
         body=body,
     )
@@ -1726,7 +1733,7 @@ async def _run_on_error(
     last_error: dict[str, str],
     status_code: int,
     default: ResponseSpec,
-) -> ResponseSpec:
+) -> tuple[ResponseSpec, bool]:
     """Run the effective on-error section for an error and return what the caller gets.
 
     Docs: https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies
@@ -1748,17 +1755,45 @@ async def _run_on_error(
         response_body=default.body,
         response_media_type=default.media_type,
     )
+    # Microsoft documents the jump into on-error but is silent about a new
+    # error raised while executing on-error; let it propagate as before rather
+    # than recursively entering the same section.
     override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
     if override is not None:
-        return override
+        return override, True
     headers.clear()
     if isinstance(failure_req.headers, MultiValueMap):
         headers.update(dict(failure_req.headers))
-    return ResponseSpec(
-        status_code=failure_req.response_status_code or status_code,
-        headers=headers,
-        body=failure_req.response_body,
-        media_type=failure_req.response_media_type,
+    return (
+        ResponseSpec(
+            status_code=failure_req.response_status_code or status_code,
+            headers=headers,
+            body=failure_req.response_body,
+            media_type=failure_req.response_media_type,
+        ),
+        False,
+    )
+
+
+def _last_error_for_response(
+    *,
+    source: str,
+    response: ResponseSpec,
+    policy_req: PolicyRequest,
+    section: str,
+) -> dict[str, str] | None:
+    """Build LastError for a policy refusal, including validation details."""
+    detail = policy_req.variables.get("_policy_error_detail")
+    details = detail if source.startswith("validate-") and isinstance(detail, str) else None
+    return response_last_error(
+        source,
+        response.body,
+        scope=str(policy_req.variables.get("_policy_scope") or ""),
+        section=section,
+        path=str(policy_req.variables.get("_policy_path") or ""),
+        policy_id=str(policy_req.variables.get("_policy_id") or ""),
+        reason=policy_req.variables.get("_policy_error_reason"),
+        details=details,
     )
 
 
@@ -1785,7 +1820,7 @@ async def _on_error_for_exception(
             headers={"content-type": "application/json"},
             body=json.dumps({"detail": exc.detail}).encode(),
         )
-    result = await _run_on_error(
+    result, _ = await _run_on_error(
         policy_docs=policy_docs,
         policy_req=policy_req,
         policy_runtime=policy_runtime,
@@ -1804,9 +1839,9 @@ async def _guarded_stage(
     """Run inbound or backend policy; errors go through on-error.
 
     Returns the response that ends the call (or None) and whether on-error was
-    consulted. A deliberate refusal from rate-limit, quota, ip-filter,
-    check-header or validate-jwt is one of the docs' predefined errors, so it
-    enters on-error too; return-response and mock-response do not.
+    consulted. A deliberate refusal from an error-producing policy is one of
+    the docs' predefined or validation errors, so it enters on-error too;
+    return-response and mock-response do not.
     """
     try:
         early = await apply_stage(policy_docs, policy_req, policy_runtime)
@@ -1817,21 +1852,15 @@ async def _guarded_stage(
     if early is None:
         return None, False
     source = str(policy_req.variables.get("_policy_step") or "")
-    # validate-jwt's body may be the configured failed-validation message; the
-    # predefined Reason follows the underlying failure it recorded.
-    detail = policy_req.variables.get("_policy_error_detail") if source == "validate-jwt" else None
-    last_error = response_last_error(
-        source,
-        str(detail).encode() if detail else early.body,
-        scope=str(policy_req.variables.get("_policy_scope") or ""),
+    last_error = _last_error_for_response(
+        source=source,
+        response=early,
+        policy_req=policy_req,
         section=section,
-        path=str(policy_req.variables.get("_policy_path") or ""),
-        policy_id=str(policy_req.variables.get("_policy_id") or ""),
-        reason=policy_req.variables.get("_policy_error_reason"),
     )
     if last_error is None:
         return early, False
-    result = await _run_on_error(
+    result, _ = await _run_on_error(
         policy_docs=policy_docs,
         policy_req=policy_req,
         policy_runtime=policy_runtime,
@@ -1859,9 +1888,9 @@ async def _guarded_outbound(
     attempts_used: int,
     elapsed_seconds: float,
 ) -> _OutboundResult | Response:
-    """Run outbound policy; an exception in it jumps to on-error and replaces the response."""
+    """Run outbound policy; failures jump to on-error and replace the response."""
     try:
-        return await _run_outbound_stage(
+        outbound = await _run_outbound_stage(
             policy_docs=policy_docs,
             policy_runtime=policy_runtime,
             request=request,
@@ -1873,27 +1902,81 @@ async def _guarded_outbound(
         spec = await _on_error_for_exception(
             exc=exc, section="outbound", policy_docs=policy_docs, policy_req=policy_req, policy_runtime=policy_runtime
         )
-    request.state.apim_result_reason = "policy_on_error_override"
-    return _policy_response(
-        body=spec.body,
-        status_code=spec.status_code,
-        headers=_copy_headers(spec.headers),
-        media_type=spec.media_type,
-        correlation_id=correlation_id,
-        trace_id=trace_id,
-        trace_store=trace_store,
-        trace_base=trace_base,
-        trace_collector=trace_collector,
-        cfg=cfg,
-        extra={
-            "attempts": attempts_used,
-            "status": spec.status_code,
-            "elapsed_ms": int(elapsed_seconds * 1000),
-            "cache": None,
-            "reason": "policy_on_error_override",
-        },
+        request.state.apim_result_reason = "policy_on_error_override"
+        return _policy_response(
+            body=spec.body,
+            status_code=spec.status_code,
+            headers=_copy_headers(spec.headers),
+            media_type=spec.media_type,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
+            cfg=cfg,
+            extra={
+                "attempts": attempts_used,
+                "status": spec.status_code,
+                "elapsed_ms": int(elapsed_seconds * 1000),
+                "cache": None,
+                "reason": "policy_on_error_override",
+            },
+            policy_req=policy_req,
+            policy_runtime=policy_runtime,
+        )
+
+    source = str(policy_req.variables.get("_policy_step") or "")
+    refusal = ResponseSpec(
+        status_code=outbound.status_code,
+        headers=outbound.headers,
+        body=outbound.content,
+        media_type=outbound.media_type,
+    )
+    last_error = _last_error_for_response(
+        source=source,
+        response=refusal,
+        policy_req=policy_req,
+        section="outbound",
+    )
+    if last_error is None:
+        return outbound
+    result, override = await _run_on_error(
+        policy_docs=policy_docs,
         policy_req=policy_req,
         policy_runtime=policy_runtime,
+        last_error=last_error,
+        status_code=refusal.status_code,
+        default=refusal,
+    )
+    request.state.apim_result_reason = "policy_on_error_override"
+    if override:
+        return _policy_response(
+            body=result.body,
+            status_code=result.status_code,
+            headers=_copy_headers(result.headers),
+            media_type=result.media_type,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            trace_store=trace_store,
+            trace_base=trace_base,
+            trace_collector=trace_collector,
+            cfg=cfg,
+            extra={
+                "attempts": attempts_used,
+                "status": result.status_code,
+                "elapsed_ms": int(elapsed_seconds * 1000),
+                "cache": None,
+                "reason": "policy_on_error_override",
+            },
+            policy_req=policy_req,
+            policy_runtime=policy_runtime,
+        )
+    return _OutboundResult(
+        result.status_code,
+        _copy_headers(result.headers),
+        result.body,
+        result.media_type,
+        replaced=True,
     )
 
 
@@ -2231,7 +2314,7 @@ async def execute_gateway_request(request: Request) -> Response:
 
     _record_selected_backend(trace_collector, backend_id, upstream_base_url)
 
-    upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=upstream_base_url)
+    upstream_url = _build_policy_upstream_url(route, policy_req, upstream_base_url)
     policy_req.variables["upstream_url"] = upstream_url
     trace_base["upstream_url"] = upstream_url
 

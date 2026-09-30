@@ -6,17 +6,19 @@ import binascii
 import ipaddress
 import json
 import math
+import re
 import time
-from collections.abc import Callable, Iterator, MutableMapping
+from collections.abc import Callable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 import jwt
 from defusedxml import ElementTree
 from fastapi import HTTPException
+from jsonschema import Draft4Validator, FormatChecker, SchemaError
 from jwt.algorithms import ECAlgorithm, HMACAlgorithm, RSAAlgorithm
 from jwt.exceptions import ExpiredSignatureError, ImmatureSignatureError, InvalidSignatureError, InvalidTokenError
 
@@ -472,12 +474,61 @@ class AuthenticationCertificate(PolicyNode):
         return None
 
 
+_REWRITE_URI_PARAMETER = re.compile(r"\{(\*?[^{}]+)\}")
+
+
+def _rewrite_uri_target(template: str, req: PolicyRequest) -> tuple[str, list[tuple[str, str]]]:
+    parsed = urlsplit(template)
+    matched = {str(name): str(value) for name, value in req.variables.get("_matched_parameters", {}).items()}
+    missing: set[str] = set()
+
+    def replace_parameter(match: re.Match[str]) -> str:
+        name = match.group(1).removeprefix("*")
+        if name not in matched:
+            missing.add(name)
+            return match.group(0)
+        return matched[name]
+
+    path = _REWRITE_URI_PARAMETER.sub(replace_parameter, parsed.path or "/")
+    query = [
+        (_REWRITE_URI_PARAMETER.sub(replace_parameter, name), _REWRITE_URI_PARAMETER.sub(replace_parameter, value))
+        for name, value in parse_qsl(parsed.query, keep_blank_values=True)
+    ]
+    if missing:
+        # The policy reference says extra template path parameters cannot be
+        # added, but does not define the gateway's exact configuration/runtime
+        # error for an unmatched placeholder.
+        names = ", ".join(sorted(missing))
+        raise HTTPException(status_code=500, detail=f"rewrite-uri unmatched template parameter: {names}")
+    return path, query
+
+
+def _rewrite_uri_copies_unmatched(value: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> bool:
+    rendered = render_policy_value(value, req, runtime).strip().lower()
+    if rendered not in {"true", "false"}:
+        raise HTTPException(status_code=500, detail="rewrite-uri copy-unmatched-params must be true or false")
+    return rendered == "true"
+
+
 @dataclass(frozen=True)
 class RewriteUri(PolicyNode):
     template: str
+    copy_unmatched_params: str = "true"
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        req.path = render_policy_value(self.template, req, runtime)
+        rendered = render_policy_value(self.template, req, runtime)
+        req.path, template_query = _rewrite_uri_target(rendered, req)
+        original_query = req.query.as_dict_lists()
+        req.query.clear()
+        for name, value in template_query:
+            req.query.set_list(name, req.query.get_list(name, []) + [value])
+        if _rewrite_uri_copies_unmatched(self.copy_unmatched_params, req, runtime):
+            matched_names = {str(name).casefold() for name in req.variables.get("_matched_query_parameters", set())}
+            for name, values in original_query.items():
+                if name.casefold() in matched_names:
+                    continue
+                req.query.set_list(name, req.query.get_list(name, []) + list(values))
+        req.variables["_rewrite_uri_applied"] = True
         _record_step(runtime, "rewrite-uri", {"path": req.path})
         return None
 
@@ -2647,6 +2698,15 @@ def _validation_action(value: str | None, *, default: str) -> str:
     return action
 
 
+def _boolean_attribute(value: str | None, *, name: str) -> bool | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized not in {"true", "false"}:
+        raise HTTPException(status_code=500, detail=f"Unsupported {name}: {value}")
+    return normalized == "true"
+
+
 def _record_validation_error(
     req: PolicyRequest,
     runtime: PolicyRuntime | None,
@@ -2666,6 +2726,12 @@ def _record_validation_error(
         "Details": details,
         "Action": action,
     }
+    # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+    # https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    # The validation docs distinguish private Details in LastError from the
+    # public response, and use a different Reason for response validation.
+    req.variables["_policy_error_detail"] = details
+    req.variables["_policy_error_reason"] = "Response not allowed" if req.in_outbound else "Bad request"
     if errors_variable_name:
         existing = req.variables.get(errors_variable_name)
         errors = existing if isinstance(existing, list) else []
@@ -2686,6 +2752,382 @@ def _operation_request_metadata(req: PolicyRequest, runtime: PolicyRuntime | Non
     return operation
 
 
+@dataclass(frozen=True)
+class _SchemaResolution:
+    schema: dict[str, Any] | None
+    definition_name: str
+    error_rule: str | None = None
+    error_details: str | None = None
+    error_type: str | None = None
+
+
+def _json_schema_document(api_schema: Any) -> dict[str, Any] | None:
+    raw = getattr(api_schema, "value", None)
+    if raw:
+        try:
+            value = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+    definitions = getattr(api_schema, "definitions", {})
+    components = getattr(api_schema, "components", {})
+    if definitions or components:
+        return {"definitions": definitions, "components": components}
+    return None
+
+
+def _schema_map(document: dict[str, Any], api_schema: Any) -> dict[str, Any]:
+    definitions = document.get("definitions")
+    if not isinstance(definitions, dict):
+        definitions = getattr(api_schema, "definitions", {})
+    components = document.get("components")
+    component_schemas = components.get("schemas", {}) if isinstance(components, dict) else {}
+    if not isinstance(component_schemas, dict):
+        component_schemas = {}
+    return {**(definitions if isinstance(definitions, dict) else {}), **component_schemas}
+
+
+def _json_pointer(document: Any, reference: str) -> Any | None:
+    if reference == "#":
+        return document
+    if not reference.startswith("#/"):
+        return None
+    current = document
+    for token in reference[2:].split("/"):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(token.replace("~1", "/").replace("~0", "~"))
+    return current
+
+
+def _schema_node_from_document(document: dict[str, Any], api_schema: Any, *, wanted: str | None) -> _SchemaResolution:
+    definitions = _schema_map(document, api_schema)
+
+    def with_registry(node: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **node,
+            **{key: document[key] for key in ("definitions", "components") if key in document},
+        }
+
+    if wanted and wanted in definitions and isinstance(definitions[wanted], dict):
+        return _SchemaResolution(with_registry(definitions[wanted]), wanted)
+    if wanted and definitions:
+        return _SchemaResolution(
+            None,
+            wanted,
+            error_rule="MissingDefinition",
+            error_details=f"API's schema does not contain definition {wanted}.",
+        )
+    if definitions:
+        name, node = next(iter(definitions.items()))
+        if isinstance(node, dict):
+            return _SchemaResolution(with_registry(node), str(name))
+    schema_keywords = {"type", "properties", "$ref", "allOf", "anyOf", "oneOf", "enum"}
+    if schema_keywords.intersection(document):
+        return _SchemaResolution(document, wanted or "root")
+    return _SchemaResolution(None, wanted or "", error_details="API's schema does not specify definitions.")
+
+
+def _resolve_schema_node(
+    api_schema: Any,
+    *,
+    schema_id: str | None,
+    schema_ref: str | None,
+    definition_name: str | None,
+) -> _SchemaResolution:
+    document = _json_schema_document(api_schema)
+    wanted = definition_name or schema_id
+    if document is None:
+        return _SchemaResolution(
+            None,
+            wanted or "",
+            error_details="API's schema does not exist or it could not be resolved.",
+            error_type="ApiSchema",
+        )
+    if schema_ref:
+        node = _json_pointer(document, schema_ref)
+        return (
+            _SchemaResolution(
+                {
+                    **node,
+                    **{key: document[key] for key in ("definitions", "components") if key in document},
+                },
+                schema_ref,
+            )
+            if isinstance(node, dict)
+            else _SchemaResolution(
+                None,
+                schema_ref,
+                error_rule="MissingDefinition",
+                error_details=f"API's schema does not contain definition {schema_ref}.",
+            )
+        )
+    return _schema_node_from_document(document, api_schema, wanted=wanted)
+
+
+def _operation_representation(req: PolicyRequest, runtime: PolicyRuntime | None, content_type: str) -> Any | None:
+    operation = _operation_request_metadata(req, runtime)
+    if operation is None:
+        return None
+    if req.in_outbound:
+        response = next(
+            (item for item in operation.responses if item.status_code == req.response_status_code),
+            None,
+        )
+        representations = getattr(response, "representations", []) if response is not None else []
+    else:
+        request = getattr(operation, "request", None)
+        representations = getattr(request, "representations", []) if request is not None else []
+    return next(
+        (item for item in representations if item.content_type.casefold() == content_type.casefold()),
+        None,
+    )
+
+
+def _content_schema(
+    req: PolicyRequest,
+    runtime: PolicyRuntime | None,
+    *,
+    content_type: str,
+    schema_id: str | None,
+    schema_ref: str | None,
+) -> _SchemaResolution | None:
+    if runtime is None or runtime.gateway_config is None:
+        return None
+    api = runtime.gateway_config.apis.get(str(req.variables.get("api_id") or ""))
+    if api is None:
+        return None
+    representation = _operation_representation(req, runtime, content_type)
+    selected_id = schema_id or getattr(representation, "schema_id", None)
+    type_name = getattr(representation, "type_name", None)
+    if selected_id is None and type_name is None and representation is None:
+        return _SchemaResolution(
+            None,
+            content_type,
+            error_rule="MissingDefinition",
+            error_details=(
+                f"API's schema does not contain definition {content_type}, which is associated with the content type "
+                f"{content_type}."
+            ),
+        )
+    if selected_id is None:
+        selected_id = next(
+            (
+                key
+                for key, value in api.schemas.items()
+                if getattr(value, "content_type", "").casefold() == content_type.casefold()
+            ),
+            None,
+        )
+    if not api.schemas:
+        return _SchemaResolution(
+            None,
+            selected_id or type_name or "",
+            error_details="API's schema does not exist or it could not be resolved.",
+            error_type="ApiSchema",
+        )
+    if selected_id is None:
+        return _SchemaResolution(
+            None,
+            type_name or content_type,
+            error_rule="MissingDefinition",
+            error_details=(
+                f"API's schema does not contain definition {type_name or content_type}, which is associated with the "
+                f"content type {content_type}."
+            ),
+        )
+    api_schema = api.schemas.get(selected_id)
+    if api_schema is None:
+        return _SchemaResolution(
+            None,
+            selected_id,
+            error_details="API's schema does not exist or it could not be resolved.",
+            error_type="ApiSchema",
+        )
+    return _resolve_schema_node(
+        api_schema,
+        schema_id=selected_id,
+        schema_ref=schema_ref,
+        definition_name=type_name,
+    )
+
+
+def _normalise_schema_object(
+    value: dict[str, Any], *, allow_additional: bool | None, case_insensitive: bool
+) -> dict[str, Any]:
+    out = {
+        key: _normalise_json_schema(item, allow_additional=allow_additional, case_insensitive=case_insensitive)
+        for key, item in value.items()
+    }
+    if case_insensitive and isinstance(out.get("properties"), dict):
+        out["properties"] = {str(name).casefold(): schema for name, schema in out["properties"].items()}
+        if isinstance(out.get("required"), list):
+            out["required"] = [str(name).casefold() for name in out["required"]]
+    if allow_additional is not None and (
+        "additionalProperties" in out
+        or "properties" in out
+        or "patternProperties" in out
+        or out.get("type") == "object"
+    ):
+        out["additionalProperties"] = allow_additional
+    if out.get("nullable") is True:
+        out.pop("nullable", None)
+        schema_type = out.get("type")
+        if isinstance(schema_type, str):
+            out["type"] = [schema_type, "null"]
+        elif "type" not in out:
+            out["anyOf"] = [{"type": "null"}, dict(out)]
+    return out
+
+
+def _normalise_json_schema(value: Any, *, allow_additional: bool | None, case_insensitive: bool) -> Any:
+    if isinstance(value, list):
+        return [
+            _normalise_json_schema(item, allow_additional=allow_additional, case_insensitive=case_insensitive)
+            for item in value
+        ]
+    if not isinstance(value, dict):
+        return value
+    return _normalise_schema_object(
+        value,
+        allow_additional=allow_additional,
+        case_insensitive=case_insensitive,
+    )
+
+
+def _normalise_json_value(value: Any, *, case_insensitive: bool) -> Any:
+    if isinstance(value, list):
+        return [_normalise_json_value(item, case_insensitive=case_insensitive) for item in value]
+    if not isinstance(value, dict):
+        return value
+    return {
+        (key.casefold() if case_insensitive else key): _normalise_json_value(item, case_insensitive=case_insensitive)
+        for key, item in value.items()
+    }
+
+
+@dataclass(frozen=True)
+class SchemaViolation:
+    message: str
+    path: tuple[Any, ...] = ()
+
+
+def _first_schema_error(schema: dict[str, Any], value: Any) -> SchemaViolation | None:
+    try:
+        validator = Draft4Validator(schema, format_checker=FormatChecker())
+        error = next(iter(sorted(validator.iter_errors(value), key=lambda item: list(item.path))), None)
+    except SchemaError as exc:
+        return SchemaViolation(f"schema is invalid: {exc.message}")
+    return SchemaViolation(error.message, tuple(error.path)) if error is not None else None
+
+
+_JSON_DECODER = json.JSONDecoder()
+
+
+def _skip_json_whitespace(text: str, index: int) -> int:
+    while index < len(text) and text[index] in " \t\r\n":
+        index += 1
+    return index
+
+
+def _json_object_member(text: str, index: int, key: str, case_insensitive: bool) -> int | None:
+    """Index of the value for `key` in the object starting at `index`, if present."""
+    index = _skip_json_whitespace(text, index + 1)
+    while index < len(text) and text[index] == '"':
+        name, index = json.decoder.scanstring(text, index + 1)
+        index = _skip_json_whitespace(text, _skip_json_whitespace(text, index) + 1)
+        matches = name.casefold() == str(key).casefold() if case_insensitive else name == key
+        if matches:
+            return index
+        _, index = _JSON_DECODER.raw_decode(text, index)
+        index = _skip_json_whitespace(text, _skip_json_whitespace(text, index) + 1)
+    return None
+
+
+def _json_array_item(text: str, index: int, position: int) -> int | None:
+    """Index of item `position` in the array starting at `index`, if present."""
+    index = _skip_json_whitespace(text, index + 1)
+    for _ in range(position):
+        if index >= len(text) or text[index] == "]":
+            return None
+        _, index = _JSON_DECODER.raw_decode(text, index)
+        index = _skip_json_whitespace(text, _skip_json_whitespace(text, index) + 1)
+    return index if index < len(text) and text[index] != "]" else None
+
+
+def _json_value_index(text: str, path: tuple[Any, ...], case_insensitive: bool) -> int:
+    """Where the value at `path` starts in the JSON text; the root when it can't be found."""
+    index = _skip_json_whitespace(text, 0)
+    for step in path:
+        if index >= len(text):
+            return 0
+        found = (
+            _json_array_item(text, index, step)
+            if isinstance(step, int) and text[index] == "["
+            else _json_object_member(text, index, step, case_insensitive)
+            if text[index] == "{"
+            else None
+        )
+        if found is None:
+            return index
+        index = found
+    return index
+
+
+def _json_line_position(text: str, path: tuple[Any, ...], case_insensitive: bool = False) -> tuple[int, int]:
+    """1-based line and column of the value the schema rejected."""
+    index = _json_value_index(text, path, case_insensitive)
+    line = text.count("\n", 0, index) + 1
+    return line, index - (text.rfind("\n", 0, index) + 1) + 1
+
+
+def _validation_message(error: SchemaViolation, position: tuple[int, int] = (1, 1)) -> str:
+    # Learn documents the Message, LineNumber and LinePosition placeholders but
+    # not APIM's exact .NET validator messages or position convention. Bodies
+    # report the line and column where the rejected value starts; a parameter
+    # or header value is a single value, so it starts at line 1, column 1.
+    line, column = position
+    return f"{error.message} Line: {line}, Position: {column}"
+
+
+def _parameter_values(values: Any, name: str) -> list[str]:
+    get_list = getattr(values, "get_list", None)
+    if callable(get_list):
+        return get_list(name, [])
+    if isinstance(values, Mapping):
+        value = values.get(name)
+        return [] if value is None else [str(value)]
+    return []
+
+
+def _parameter_schema(
+    req: PolicyRequest, runtime: PolicyRuntime | None, parameter: Any
+) -> tuple[dict[str, Any] | None, _SchemaResolution | None]:
+    schema_id = getattr(parameter, "schema_id", None)
+    if schema_id:
+        resolution = _content_schema(req, runtime, content_type="", schema_id=schema_id, schema_ref=None)
+        if resolution is None or resolution.schema is None:
+            return None, resolution
+        return resolution.schema, None
+    return {"type": getattr(parameter, "type", "string")}, None
+
+
+def _coerce_parameter_value(value: str, schema: dict[str, Any]) -> Any:
+    value_type = schema.get("type")
+    if isinstance(value_type, list):
+        value_type = next((item for item in value_type if item != "null"), value_type[0] if value_type else None)
+    if value_type == "integer":
+        return int(value)
+    if value_type == "number":
+        return float(value)
+    if value_type == "boolean":
+        lowered = value.casefold()
+        if lowered not in {"true", "false"}:
+            raise ValueError(f"'{value}' is not a valid boolean")
+        return lowered == "true"
+    return value
+
+
 # Public response for a validation failure on a response
 # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
 _INTERNAL_ERROR_PUBLIC_MESSAGE = "The request could not be processed due to an internal error. Contact the API owner."
@@ -2696,6 +3138,10 @@ class ValidateContentType:
     content_type: str | None
     validate_as: str
     action: str
+    schema_id: str | None = None
+    schema_ref: str | None = None
+    allow_additional_properties: bool | None = None
+    case_insensitive_property_names: bool = False
 
 
 @dataclass(frozen=True)
@@ -2754,12 +3200,9 @@ class ValidateContent(PolicyNode):
     ) -> ResponseSpec | None:
         if matched.validate_as != "json":
             return None
-        # Learn describes schema-based IncorrectMessage details, but this
-        # simulator deliberately defers schema selection/enforcement. The
-        # existing JSON well-formedness check therefore has no definition name.
         try:
-            json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+            value = json.loads(body.decode("utf-8"))
+        except UnicodeDecodeError:
             return self._fail(
                 req,
                 runtime,
@@ -2771,6 +3214,95 @@ class ValidateContent(PolicyNode):
                 f"{content_type}",
                 public_message=f"Body of the {'response' if req.in_outbound else 'request'} is not valid JSON for content type "
                 f"{content_type}",
+            )
+        except json.JSONDecodeError as exc:
+            noun = "response" if req.in_outbound else "request"
+            resolution = _content_schema(
+                req,
+                runtime,
+                content_type=content_type,
+                schema_id=matched.schema_id,
+                schema_ref=matched.schema_ref,
+            )
+            if resolution is not None and resolution.schema is not None:
+                details = (
+                    f"Body of the {noun} does not conform to the definition {resolution.definition_name}, "
+                    f"which is associated with the content type {content_type}.{exc.msg} "
+                    f"Line: {exc.lineno}, Position: {exc.colno}"
+                )
+                return self._fail(
+                    req,
+                    runtime,
+                    action=matched.action,
+                    name=content_type,
+                    error_type="ResponseBody" if req.in_outbound else "RequestBody",
+                    validation_rule="IncorrectMessage",
+                    details=details,
+                    public_message=details,
+                )
+            return self._fail(
+                req,
+                runtime,
+                action=matched.action,
+                name=content_type,
+                error_type="ResponseBody" if req.in_outbound else "RequestBody",
+                validation_rule="IncorrectMessage",
+                details=(
+                    f"Body of the {noun} is not valid JSON for content type {content_type}. "
+                    f"{exc.msg} Line: {exc.lineno}, Position: {exc.colno}"
+                ),
+                public_message=(
+                    f"Body of the {noun} is not valid JSON for content type {content_type}. "
+                    f"{exc.msg} Line: {exc.lineno}, Position: {exc.colno}"
+                ),
+            )
+        resolution = _content_schema(
+            req,
+            runtime,
+            content_type=content_type,
+            schema_id=matched.schema_id,
+            schema_ref=matched.schema_ref,
+        )
+        if resolution is None:
+            return None
+        if resolution.schema is None:
+            return self._fail(
+                req,
+                runtime,
+                action=matched.action,
+                name=content_type if resolution.error_rule == "MissingDefinition" else "",
+                error_type=resolution.error_type or ("ResponseBody" if req.in_outbound else "RequestBody"),
+                validation_rule=resolution.error_rule or "",
+                details=resolution.error_details or "API's schema cannot be resolved.",
+                public_message=_INTERNAL_ERROR_PUBLIC_MESSAGE,
+            )
+        schema = _normalise_json_schema(
+            resolution.schema,
+            allow_additional=matched.allow_additional_properties,
+            case_insensitive=matched.case_insensitive_property_names,
+        )
+        error = _first_schema_error(
+            schema,
+            _normalise_json_value(value, case_insensitive=matched.case_insensitive_property_names),
+        )
+        if error is not None:
+            noun = "response" if req.in_outbound else "request"
+            position = _json_line_position(
+                body.decode("utf-8"), error.path, case_insensitive=matched.case_insensitive_property_names
+            )
+            details = (
+                f"Body of the {noun} does not conform to the definition {resolution.definition_name}, "
+                f"which is associated with the content type {content_type}.{_validation_message(error, position)}"
+            )
+            return self._fail(
+                req,
+                runtime,
+                action=matched.action,
+                name=content_type,
+                error_type="ResponseBody" if req.in_outbound else "RequestBody",
+                validation_rule="IncorrectMessage",
+                details=details,
+                public_message=details,
             )
         return None
 
@@ -2926,18 +3458,28 @@ class ValidateParameters(PolicyNode):
         rule: str,
         details: str,
         action: str,
+        error_type: str | None = None,
+        public_message: str | None = None,
     ) -> ResponseSpec | None:
         if action == "ignore":
             return None
-        error_type = {"header": "RequestHeader", "query": "QueryParameter", "path": "PathParameter"}[kind]
+        resolved_error_type = (
+            error_type
+            or {
+                "header": "RequestHeader",
+                "query": "QueryParameter",
+                "path": "PathParameter",
+            }[kind]
+        )
         return self._fail(
             req,
             runtime,
             action=action,
             name=name,
-            error_type=error_type,
+            error_type=resolved_error_type,
             validation_rule=rule,
             details=details,
+            public_message=public_message,
         )
 
     def _check_kind(
@@ -2967,6 +3509,12 @@ class ValidateParameters(PolicyNode):
                 )
                 if outcome is not None:
                     return outcome
+            if name not in present:
+                continue
+            values = self._values_for_kind(req, kind, param.name)
+            outcome = self._validate_parameter(req, runtime, kind, param, values, specified_action)
+            if outcome is not None:
+                return outcome
         for name in sorted(present - declared_names):
             outcome = self._failure(
                 req,
@@ -2981,10 +3529,105 @@ class ValidateParameters(PolicyNode):
                 return outcome
         return None
 
+    @staticmethod
+    def _values_for_kind(req: PolicyRequest, kind: str, name: str) -> list[str]:
+        sources = {
+            "header": req.headers,
+            "query": req.query,
+            "path": req.variables.get("_matched_parameters", {}),
+        }
+        return _parameter_values(sources[kind], name)
+
+    def _validate_parameter(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        kind: str,
+        parameter: Any,
+        values: list[str],
+        specified_action: str | None,
+    ) -> ResponseSpec | None:
+        action = self._action_for(
+            kind=kind,
+            name=parameter.name,
+            specified=True,
+            group_action=specified_action,
+        )
+        if len(values) > 1:
+            return self._failure(
+                req,
+                runtime,
+                kind=kind,
+                name=parameter.name,
+                rule="IncorrectMessage",
+                details=f"Request cannot contain multiple values for the {kind} parameter {parameter.name}.",
+                action=action,
+            )
+        if not values:
+            return None
+        schema, resolution = _parameter_schema(req, runtime, parameter)
+        if resolution is not None and resolution.schema is None:
+            return self._failure(
+                req,
+                runtime,
+                kind=kind,
+                name="",
+                rule=resolution.error_rule or "",
+                details=resolution.error_details or "API's schema cannot be resolved.",
+                action=action,
+                error_type="ApiSchema" if resolution.error_rule is None else None,
+                public_message=_INTERNAL_ERROR_PUBLIC_MESSAGE,
+            )
+        if schema is None:
+            return None
+        if getattr(parameter, "values", None):
+            schema = {**schema, "enum": list(parameter.values)}
+        return self._validate_parameter_value(req, runtime, kind, parameter.name, values[0], schema, action)
+
+    def _validate_parameter_value(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        kind: str,
+        name: str,
+        value: str,
+        schema: dict[str, Any],
+        action: str,
+    ) -> ResponseSpec | None:
+        try:
+            coerced = _coerce_parameter_value(value, schema)
+        except (TypeError, ValueError) as exc:
+            details = f"Value of the {kind} parameter {name} cannot be parsed according to the definition. {exc}"
+            return self._failure(
+                req,
+                runtime,
+                kind=kind,
+                name=name,
+                rule="IncorrectMessage",
+                details=details,
+                action=action,
+                public_message=details.replace("cannot be parsed", "couldn't be parsed"),
+            )
+        error = _first_schema_error(schema, coerced)
+        if error is None:
+            return None
+        details = (
+            f"Value of the {kind} parameter {name} does not conform to the definition.{_validation_message(error)}"
+        )
+        return self._failure(
+            req,
+            runtime,
+            kind=kind,
+            name=name,
+            rule="IncorrectMessage",
+            details=details,
+            action=action,
+            public_message=f"The value of the {kind} parameter {name} does not conform to the definition."
+            f"{_validation_message(error)}",
+        )
+
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         """Check headers, query, and path parameters against the operation contract."""
-        # Learn also validates parameter values against schema definitions;
-        # schema/value enforcement remains deferred in this simulator.
         operation = _operation_request_metadata(req, runtime)
         request_meta = getattr(operation, "request", None)
         checks = (
@@ -3038,6 +3681,7 @@ class ValidateParameters(PolicyNode):
         error_type: str,
         validation_rule: str,
         details: str,
+        public_message: str | None = None,
     ) -> ResponseSpec | None:
         _record_validation_error(
             req,
@@ -3058,7 +3702,11 @@ class ValidateParameters(PolicyNode):
                 headers={"content-type": "text/plain"},
                 body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             )
-        return ResponseSpec(status_code=400, headers={"content-type": "text/plain"}, body=details.encode("utf-8"))
+        return ResponseSpec(
+            status_code=400,
+            headers={"content-type": "text/plain"},
+            body=(public_message or details).encode("utf-8"),
+        )
 
 
 @dataclass(frozen=True)
@@ -3151,22 +3799,72 @@ class ValidateHeaders(PolicyNode):
             media_type="text/plain",
         )
 
-    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        if not req.in_outbound:
+    def _validate_value(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        header: Any,
+        values: list[str],
+        action: str,
+    ) -> ResponseSpec | None:
+        if len(values) > 1:
+            return self._fail(
+                req,
+                runtime,
+                name=header.name,
+                action=action,
+                rule="IncorrectMessage",
+                details=f"Response cannot contain multiple values for the header {header.name}.",
+            )
+        schema, resolution = _parameter_schema(req, runtime, header)
+        if resolution is not None and resolution.schema is None:
+            return self._fail(
+                req,
+                runtime,
+                name="",
+                action=action,
+                rule=resolution.error_rule or "ValidationError",
+                details=resolution.error_details or "API's schema cannot be resolved.",
+            )
+        if schema is None or not values:
             return None
-        # Learn validates response-header values against schema definitions;
-        # this implementation covers presence and unspecified names only.
-        operation = _operation_request_metadata(req, runtime)
-        responses = list(getattr(operation, "responses", []) or [])
-        response = next(
-            (item for item in responses if item.status_code == req.response_status_code),
-            None,
+        if getattr(header, "values", None):
+            schema = {**schema, "enum": list(header.values)}
+        try:
+            coerced = _coerce_parameter_value(values[0], schema)
+        except (TypeError, ValueError) as exc:
+            return self._fail(
+                req,
+                runtime,
+                name=header.name,
+                action=action,
+                rule="IncorrectMessage",
+                details=f"Value of the header {header.name} couldn't be parsed according to the definition. {exc}",
+            )
+        error = _first_schema_error(schema, coerced)
+        if error is None:
+            return None
+        return self._fail(
+            req,
+            runtime,
+            name=header.name,
+            action=action,
+            rule="IncorrectMessage",
+            details=(
+                f"Value of the header {header.name} does not conform to the definition.{_validation_message(error)}"
+            ),
         )
-        declared = list(getattr(response, "headers", []) or [])
-        declared_names = {header.name.casefold() for header in declared}
-        headers = req.response_headers or {}
+
+    def _check_declared_headers(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        declared: list[Any],
+        headers: Any,
+    ) -> ResponseSpec | None:
+        present_names = {name.casefold() for name in headers}
         for header in declared:
-            if header.required and header.name.casefold() not in {name.casefold() for name in headers}:
+            if header.required and header.name.casefold() not in present_names:
                 outcome = self._fail(
                     req,
                     runtime,
@@ -3177,6 +3875,25 @@ class ValidateHeaders(PolicyNode):
                 )
                 if outcome is not None:
                     return outcome
+            if header.name.casefold() in present_names:
+                outcome = self._validate_value(
+                    req,
+                    runtime,
+                    header,
+                    _parameter_values(headers, header.name),
+                    self._action_for(header.name, specified=True),
+                )
+                if outcome is not None:
+                    return outcome
+        return None
+
+    def _check_unspecified_headers(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        headers: Any,
+        declared_names: set[str],
+    ) -> ResponseSpec | None:
         for name in sorted(headers):
             if name.casefold() in declared_names:
                 continue
@@ -3191,6 +3908,23 @@ class ValidateHeaders(PolicyNode):
             if outcome is not None:
                 return outcome
         return None
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        if not req.in_outbound:
+            return None
+        operation = _operation_request_metadata(req, runtime)
+        responses = list(getattr(operation, "responses", []) or [])
+        response = next(
+            (item for item in responses if item.status_code == req.response_status_code),
+            None,
+        )
+        declared = list(getattr(response, "headers", []) or [])
+        declared_names = {header.name.casefold() for header in declared}
+        headers = req.response_headers or {}
+        declared_outcome = self._check_declared_headers(req, runtime, declared, headers)
+        if declared_outcome is not None:
+            return declared_outcome
+        return self._check_unspecified_headers(req, runtime, headers, declared_names)
 
 
 @dataclass(frozen=True)
@@ -4127,10 +4861,22 @@ def _parse_set_body(el: ElementTree.Element) -> SetBody:
 
 
 def _parse_rewrite_uri(el: ElementTree.Element) -> RewriteUri:
+    _reject_unknown_attributes(el, {"id", "template", "copy-unmatched-params"}, "rewrite-uri")
     template = el.attrib.get("template")
     if not template:
         raise HTTPException(status_code=500, detail="rewrite-uri missing template")
-    return RewriteUri(template=template)
+    stripped_template = template.strip()
+    has_expression = "@(" in stripped_template or "@{" in stripped_template
+    if has_expression and not is_apim_expression(stripped_template):
+        raise HTTPException(status_code=500, detail="rewrite-uri template must be a complete policy expression")
+    if is_apim_expression(stripped_template) and not stripped_template.endswith((")", "}")):
+        raise HTTPException(status_code=500, detail="rewrite-uri template must be a complete policy expression")
+    copy_unmatched_params = el.attrib.get("copy-unmatched-params", "true").strip()
+    if not is_apim_expression(copy_unmatched_params) and copy_unmatched_params.lower() not in {"true", "false"}:
+        # Learn defines the accepted values but not the policy-validation
+        # status or message for an invalid value.
+        raise HTTPException(status_code=500, detail="rewrite-uri copy-unmatched-params must be true or false")
+    return RewriteUri(template=template, copy_unmatched_params=copy_unmatched_params)
 
 
 def _parse_authentication_basic(el: ElementTree.Element) -> AuthenticationBasic:
@@ -4664,7 +5410,7 @@ def _parse_emit_metric(el: ElementTree.Element) -> EmitMetric:
 def _parse_validate_content(el: ElementTree.Element) -> ValidateContent:
     _reject_unknown_attributes(
         el,
-        {"unspecified-content-type-action", "max-size", "size-exceeded-action", "errors-variable-name"},
+        {"id", "unspecified-content-type-action", "max-size", "size-exceeded-action", "errors-variable-name"},
         "validate-content",
     )
     max_size_raw = _required_attr(el, "max-size", "validate-content").strip()
@@ -4687,23 +5433,24 @@ def _parse_validate_content(el: ElementTree.Element) -> ValidateContent:
         validate_as = (child.attrib.get("validate-as") or "json").strip().lower()
         if validate_as != "json":
             raise HTTPException(status_code=500, detail=f"Unsupported validate-as: {validate_as}")
-        unsupported = (
-            "schema-id",
-            "schema-ref",
-            "allow-additional-properties",
-            "case-insensitive-property-names",
-        )
-        for attribute in unsupported:
-            if attribute in child.attrib:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"validate-content does not implement {attribute}",
-                )
         content_types.append(
             ValidateContentType(
                 content_type=content_type or None,
                 validate_as=validate_as,
                 action=_validation_action(child.attrib.get("action"), default="prevent"),
+                schema_id=(child.attrib.get("schema-id") or "").strip() or None,
+                schema_ref=(child.attrib.get("schema-ref") or "").strip() or None,
+                allow_additional_properties=_boolean_attribute(
+                    child.attrib.get("allow-additional-properties"),
+                    name="allow-additional-properties",
+                ),
+                case_insensitive_property_names=(
+                    _boolean_attribute(
+                        child.attrib.get("case-insensitive-property-names"),
+                        name="case-insensitive-property-names",
+                    )
+                    or False
+                ),
             )
         )
     map_el = el.find("content-type-map")
@@ -4748,7 +5495,7 @@ def _parse_validate_content(el: ElementTree.Element) -> ValidateContent:
 def _parse_validate_parameters(el: ElementTree.Element) -> ValidateParameters:
     _reject_unknown_attributes(
         el,
-        {"specified-parameter-action", "unspecified-parameter-action", "errors-variable-name"},
+        {"id", "specified-parameter-action", "unspecified-parameter-action", "errors-variable-name"},
         "validate-parameters",
     )
     headers_el = el.find("headers")
@@ -4797,7 +5544,7 @@ def _parse_validate_parameters(el: ElementTree.Element) -> ValidateParameters:
 def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
     _reject_unknown_attributes(
         el,
-        {"unspecified-status-code-action", "errors-variable-name"},
+        {"id", "unspecified-status-code-action", "errors-variable-name"},
         "validate-status-code",
     )
     status_codes: list[tuple[int, str]] = []
@@ -4826,7 +5573,7 @@ def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
 def _parse_validate_headers(el: ElementTree.Element) -> ValidateHeaders:
     _reject_unknown_attributes(
         el,
-        {"specified-header-action", "unspecified-header-action", "errors-variable-name"},
+        {"id", "specified-header-action", "unspecified-header-action", "errors-variable-name"},
         "validate-headers",
     )
     overrides: list[tuple[str, str]] = []
