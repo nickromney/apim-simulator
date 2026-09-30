@@ -45,6 +45,7 @@ class ResolvedRoute:
     upstream_path: str
     api_version: str | None = None
     matched_parameters: dict[str, str] = field(default_factory=dict)
+    matched_query_parameters: frozenset[str] = frozenset()
 
 
 def _normalize_host(host: str) -> str:
@@ -272,6 +273,7 @@ def _resolve_versioned_route(
         upstream_path=upstream_path,
         api_version=requested_version,
         matched_parameters=match.parameters,
+        matched_query_parameters=match.query_parameters,
     )
 
 
@@ -289,7 +291,12 @@ def _resolve_route_candidate(
         match = route.match(method=request.method, path=path, query=request.query_params)
         if match is None:
             return None
-        return match, ResolvedRoute(route=route, upstream_path=path, matched_parameters=match.parameters)
+        return match, ResolvedRoute(
+            route=route,
+            upstream_path=path,
+            matched_parameters=match.parameters,
+            matched_query_parameters=match.query_parameters,
+        )
     if not route.matches_api_path(path):
         return None
     resolved = _resolve_versioned_route(

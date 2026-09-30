@@ -6,12 +6,13 @@ import binascii
 import ipaddress
 import json
 import math
+import re
 import time
 from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 import jwt
@@ -472,12 +473,61 @@ class AuthenticationCertificate(PolicyNode):
         return None
 
 
+_REWRITE_URI_PARAMETER = re.compile(r"\{(\*?[^{}]+)\}")
+
+
+def _rewrite_uri_target(template: str, req: PolicyRequest) -> tuple[str, list[tuple[str, str]]]:
+    parsed = urlsplit(template)
+    matched = {str(name): str(value) for name, value in req.variables.get("_matched_parameters", {}).items()}
+    missing: set[str] = set()
+
+    def replace_parameter(match: re.Match[str]) -> str:
+        name = match.group(1).removeprefix("*")
+        if name not in matched:
+            missing.add(name)
+            return match.group(0)
+        return matched[name]
+
+    path = _REWRITE_URI_PARAMETER.sub(replace_parameter, parsed.path or "/")
+    query = [
+        (_REWRITE_URI_PARAMETER.sub(replace_parameter, name), _REWRITE_URI_PARAMETER.sub(replace_parameter, value))
+        for name, value in parse_qsl(parsed.query, keep_blank_values=True)
+    ]
+    if missing:
+        # The policy reference says extra template path parameters cannot be
+        # added, but does not define the gateway's exact configuration/runtime
+        # error for an unmatched placeholder.
+        names = ", ".join(sorted(missing))
+        raise HTTPException(status_code=500, detail=f"rewrite-uri unmatched template parameter: {names}")
+    return path, query
+
+
+def _rewrite_uri_copies_unmatched(value: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> bool:
+    rendered = render_policy_value(value, req, runtime).strip().lower()
+    if rendered not in {"true", "false"}:
+        raise HTTPException(status_code=500, detail="rewrite-uri copy-unmatched-params must be true or false")
+    return rendered == "true"
+
+
 @dataclass(frozen=True)
 class RewriteUri(PolicyNode):
     template: str
+    copy_unmatched_params: str = "true"
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        req.path = render_policy_value(self.template, req, runtime)
+        rendered = render_policy_value(self.template, req, runtime)
+        req.path, template_query = _rewrite_uri_target(rendered, req)
+        original_query = req.query.as_dict_lists()
+        req.query.clear()
+        for name, value in template_query:
+            req.query.set_list(name, req.query.get_list(name, []) + [value])
+        if _rewrite_uri_copies_unmatched(self.copy_unmatched_params, req, runtime):
+            matched_names = {str(name).casefold() for name in req.variables.get("_matched_query_parameters", set())}
+            for name, values in original_query.items():
+                if name.casefold() in matched_names:
+                    continue
+                req.query.set_list(name, req.query.get_list(name, []) + list(values))
+        req.variables["_rewrite_uri_applied"] = True
         _record_step(runtime, "rewrite-uri", {"path": req.path})
         return None
 
@@ -4127,10 +4177,22 @@ def _parse_set_body(el: ElementTree.Element) -> SetBody:
 
 
 def _parse_rewrite_uri(el: ElementTree.Element) -> RewriteUri:
+    _reject_unknown_attributes(el, {"id", "template", "copy-unmatched-params"}, "rewrite-uri")
     template = el.attrib.get("template")
     if not template:
         raise HTTPException(status_code=500, detail="rewrite-uri missing template")
-    return RewriteUri(template=template)
+    stripped_template = template.strip()
+    has_expression = "@(" in stripped_template or "@{" in stripped_template
+    if has_expression and not is_apim_expression(stripped_template):
+        raise HTTPException(status_code=500, detail="rewrite-uri template must be a complete policy expression")
+    if is_apim_expression(stripped_template) and not stripped_template.endswith((")", "}")):
+        raise HTTPException(status_code=500, detail="rewrite-uri template must be a complete policy expression")
+    copy_unmatched_params = el.attrib.get("copy-unmatched-params", "true").strip()
+    if not is_apim_expression(copy_unmatched_params) and copy_unmatched_params.lower() not in {"true", "false"}:
+        # Learn defines the accepted values but not the policy-validation
+        # status or message for an invalid value.
+        raise HTTPException(status_code=500, detail="rewrite-uri copy-unmatched-params must be true or false")
+    return RewriteUri(template=template, copy_unmatched_params=copy_unmatched_params)
 
 
 def _parse_authentication_basic(el: ElementTree.Element) -> AuthenticationBasic:
