@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -13,8 +14,11 @@ from app.config import (
     ApiVersioningScheme,
     ApiVersionSetConfig,
     BackendCircuitBreakerConfig,
+    BackendCodeRange,
     BackendConfig,
     BackendPoolMemberConfig,
+    BackendSessionAffinityConfig,
+    BackendSessionIdConfig,
     ClientCertificateMode,
     DiagnosticConfig,
     DiagnosticDataMaskingConfig,
@@ -196,6 +200,24 @@ def _backend_pool_members(values: dict[str, Any]) -> list[BackendPoolMemberConfi
     return members
 
 
+def _backend_session_affinity(values: dict[str, Any]) -> BackendSessionAffinityConfig | None:
+    pool = values.get("pool")
+    if not isinstance(pool, dict):
+        return None
+    raw = pool.get("session_affinity") or pool.get("sessionAffinity")
+    if not isinstance(raw, dict):
+        return None
+    session_id = raw.get("session_id") or raw.get("sessionId")
+    if not isinstance(session_id, dict) or not session_id.get("name"):
+        return None
+    return BackendSessionAffinityConfig(
+        session_id=BackendSessionIdConfig(
+            source=str(session_id.get("source") or "Cookie"),
+            name=str(session_id["name"]),
+        )
+    )
+
+
 def _first_present(block: dict[str, Any], *names: str) -> Any:
     """The first of these keys the block actually carries.
 
@@ -222,6 +244,59 @@ def _status_code_list(value: Any) -> list[int]:
     return codes
 
 
+def _duration_seconds(value: Any) -> float:
+    """Read legacy seconds or the ISO-8601 duration used by ARM."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip().upper()
+    match = re.fullmatch(
+        r"PT(?:(?P<hours>\d+(?:\.\d+)?)H)?(?:(?P<minutes>\d+(?:\.\d+)?)M)?(?:(?P<seconds>\d+(?:\.\d+)?)S)?",
+        text,
+    )
+    if match is None:
+        return float(text)
+    return (
+        float(match.group("hours") or 0) * 3600
+        + float(match.group("minutes") or 0) * 60
+        + float(match.group("seconds") or 0)
+    )
+
+
+def _breaker_scalar_kwargs(block: dict[str, Any]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    scalar_fields = (
+        ("failure_count", ("failure_count", "failureCount", "trip_threshold"), int),
+        ("interval_seconds", ("interval_seconds", "intervalSeconds", "interval"), _duration_seconds),
+        ("trip_duration_seconds", ("trip_duration_seconds", "tripDurationSeconds", "trip_duration"), _duration_seconds),
+    )
+    for target, names, converter in scalar_fields:
+        value = _first_present(block, *names)
+        if value is not None:
+            kwargs[target] = converter(value)
+    return kwargs
+
+
+def _breaker_condition_kwargs(block: dict[str, Any]) -> dict[str, Any]:
+    kwargs = _breaker_scalar_kwargs(block)
+    statuses = _status_code_list(_first_present(block, "error_statuses", "errorStatuses"))
+    if statuses:
+        kwargs["error_statuses"] = statuses
+    ranges = _first_present(block, "status_code_ranges", "statusCodeRanges")
+    if isinstance(ranges, list):
+        kwargs["status_code_ranges"] = [
+            BackendCodeRange(min=int(item["min"]), max=int(item["max"]))
+            for item in ranges
+            if isinstance(item, dict) and item.get("min") is not None and item.get("max") is not None
+        ]
+    reasons = _first_present(block, "error_reasons", "errorReasons")
+    if isinstance(reasons, list):
+        kwargs["error_reasons"] = [str(reason) for reason in reasons]
+    accept_retry_after = _coerce_bool(_first_present(block, "accept_retry_after", "acceptRetryAfter"))
+    if accept_retry_after is not None:
+        kwargs["accept_retry_after"] = accept_retry_after
+    return kwargs
+
+
 def _backend_circuit_breaker(values: dict[str, Any]) -> BackendCircuitBreakerConfig | None:
     """Read a backend circuit breaker, in whichever spelling the source used.
 
@@ -236,21 +311,11 @@ def _backend_circuit_breaker(values: dict[str, Any]) -> BackendCircuitBreakerCon
     rules = block.get("rules")
     if isinstance(rules, list) and rules and isinstance(rules[0], dict):
         block = rules[0]
+    failure = _first_present(block, "failure_condition", "failureCondition")
+    if isinstance(failure, dict):
+        block = {**block, **failure}
 
-    kwargs: dict[str, Any] = {}
-    failure_count = _first_present(block, "failure_count", "failureCount", "trip_threshold")
-    if failure_count is not None:
-        kwargs["failure_count"] = int(failure_count)
-    interval = _first_present(block, "interval_seconds", "intervalSeconds", "interval")
-    if interval is not None:
-        kwargs["interval_seconds"] = float(interval)
-    trip = _first_present(block, "trip_duration_seconds", "tripDurationSeconds", "trip_duration")
-    if trip is not None:
-        kwargs["trip_duration_seconds"] = float(trip)
-    statuses = _status_code_list(_first_present(block, "error_statuses", "errorStatuses", "status_code_ranges"))
-    if statuses:
-        kwargs["error_statuses"] = statuses
-
+    kwargs = _breaker_condition_kwargs(block)
     return BackendCircuitBreakerConfig(**kwargs) if kwargs else None
 
 
@@ -1088,6 +1153,7 @@ def _import_backend(res: TFResource, acc: _ImportAccumulator) -> None:
     credentials = _first_block(res.values.get("credentials")) or {}
     authorization = _first_block(credentials.get("authorization")) or {}
     pool_members = _backend_pool_members(res.values)
+    session_affinity = _backend_session_affinity(res.values)
     breaker = _backend_circuit_breaker(res.values)
     backend_type = str(res.values.get("type") or ("pool" if pool_members else "single"))
     acc.backends[res.name] = BackendConfig(
@@ -1095,6 +1161,7 @@ def _import_backend(res: TFResource, acc: _ImportAccumulator) -> None:
         description=str(res.values.get("description")) if res.values.get("description") else None,
         type=backend_type,
         pool=pool_members,
+        session_affinity=session_affinity,
         circuit_breaker=breaker,
         authorization_scheme=(str(authorization.get("scheme")) if authorization.get("scheme") else None),
         authorization_parameter=(str(authorization.get("parameter")) if authorization.get("parameter") else None),
@@ -1216,6 +1283,7 @@ def _import_api(res: TFResource, acc: _ImportAccumulator) -> None:
         name=api_name,
         path=str(res.values.get("path") or api_name),
         upstream_base_url=str(res.values.get("service_url") or http_url("upstream")),
+        protocols=_string_list(res.values.get("protocols")) or ["http", "https"],
         api_version_set=_resource_name_from_id(version_set_id, acc.id_to_name) if version_set_id else None,
         api_version=(str(res.values.get("version")) if res.values.get("version") else None),
         revision=revision,

@@ -1,7 +1,7 @@
 <policies>
   <inbound>
     <choose>
-      <when condition="header('x-mode') == 'drop'">
+      <when condition='@(context.Request.Headers.GetValueOrDefault("x-mode", "") == "drop")'>
         <cache-remove-value key="@(context.Request.Headers.GetValueOrDefault(&quot;x-user&quot;,&quot;&quot;))" />
         <return-response>
           <set-status code="200" reason="ok" />

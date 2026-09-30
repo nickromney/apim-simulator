@@ -15,6 +15,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -24,6 +25,8 @@ from starlette.responses import StreamingResponse
 
 from app.backend_pool import (
     apply_backend_credentials,
+    backend_connection_failure_matches,
+    backend_failure_condition_matches,
     pool_member_breaker,
     record_backend_result,
     render_backend_value,
@@ -34,6 +37,7 @@ from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
 from app.policy import (
+    MultiValueMap,
     PolicyRequest,
     PolicyRuntime,
     PolicyTraceCollector,
@@ -47,7 +51,7 @@ from app.policy import (
     parse_policies_xml,
 )
 from app.policy_errors import build_last_error, exception_last_error, response_last_error
-from app.proxy import apply_claim_headers, build_upstream_headers, filter_response_headers, resolve_route
+from app.proxy import HOP_BY_HOP_HEADERS, apply_claim_headers, build_upstream_headers, resolve_route
 from app.security import AuthContext, authenticate_request, subscription_bypassed, validate_client_certificate
 
 APIM_ROUTE_NAME_ATTR = "apim.route.name"
@@ -361,6 +365,25 @@ def attach_trace(
     _store_trace(trace_store, trace_id, trace)
 
 
+def _response_with_headers(
+    *, content: bytes, status_code: int, headers: dict[str, str] | MultiValueMap, media_type: str | None
+) -> Response:
+    response = Response(content=content, status_code=status_code, media_type=media_type)
+    pairs = headers.as_header_pairs() if isinstance(headers, MultiValueMap) else list(headers.items())
+    if (
+        not any(name.lower() == "content-length" for name, _ in pairs)
+        and status_code not in {204, 304}
+        and not 100 <= status_code < 200
+    ):
+        pairs.append(("content-length", str(len(content))))
+    response.raw_headers = [(name.lower().encode("latin-1"), value.encode("latin-1")) for name, value in pairs]
+    return response
+
+
+def _copy_headers(headers: dict[str, str] | MultiValueMap) -> dict[str, str] | MultiValueMap:
+    return headers.copy() if isinstance(headers, MultiValueMap) else dict(headers)
+
+
 def cached_gateway_response(
     *,
     cached: tuple[float, int, dict[str, str], str | None, bytes] | None,
@@ -386,7 +409,7 @@ def cached_gateway_response(
         return None
 
     body_bytes = bytes(cached_body)
-    out_headers = dict(cached_headers)
+    out_headers = _copy_headers(cached_headers)
     media_type = (
         cached_media_type if cached_media_type is None or isinstance(cached_media_type, str) else str(cached_media_type)
     )
@@ -414,8 +437,8 @@ def cached_gateway_response(
     final_req = PolicyRequest(
         method=policy_req.method,
         path=policy_req.path,
-        query=dict(policy_req.query),
-        headers=dict(policy_req.headers),
+        query=policy_req.query.copy(),
+        headers=policy_req.headers.copy(),
         variables=policy_req.variables,
         body=policy_req.body,
         response_status_code=cached_status,
@@ -440,11 +463,8 @@ def cached_gateway_response(
             "cache": "hit",
         },
     )
-    return Response(
-        content=body_bytes,
-        status_code=cached_status,
-        headers=out_headers,
-        media_type=media_type,
+    return _response_with_headers(
+        content=body_bytes, status_code=cached_status, headers=out_headers, media_type=media_type
     )
 
 
@@ -477,8 +497,8 @@ def _policy_response(
         PolicyRequest(
             method=policy_req.method,
             path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=dict(policy_req.headers),
+            query=policy_req.query.copy(),
+            headers=policy_req.headers.copy(),
             variables=policy_req.variables,
             body=policy_req.body,
             response_status_code=status_code,
@@ -498,7 +518,7 @@ def _policy_response(
         cfg=cfg,
         extra=extra,
     )
-    return Response(content=body, status_code=status_code, headers=headers, media_type=media_type)
+    return _response_with_headers(content=body, status_code=status_code, headers=headers, media_type=media_type)
 
 
 @dataclass
@@ -506,7 +526,7 @@ class _UpstreamPayload:
     """The upstream response, normalised and buffered if anything needs the body."""
 
     status_code: int
-    headers: dict[str, str]
+    headers: dict[str, str] | MultiValueMap
     media_type: str | None
     content: bytes
     buffered: bool
@@ -528,11 +548,19 @@ async def _read_upstream_response(
     when something downstream must see all of it: the cache, a policy that
     asked to buffer, or a non-streaming configuration.
     """
-    headers = filter_response_headers(dict(upstream_response.headers))
+    headers = MultiValueMap()
+    for name, value in upstream_response.headers.multi_items():
+        if name.lower() not in HOP_BY_HOP_HEADERS:
+            headers.set_list(name, headers.get_list(name, []) + [value])
     _add_simulator_response_headers(headers, cfg, correlation_id)
     if pool.pool_backend is not None:
         headers["x-apim-backend-pool"] = pool.pool_backend_id
         headers["x-apim-backend-id"] = pool.backend_id
+        if pool.session_cookie_name and pool.session_id != pool.backend_id:
+            # APIM documents the cookie-based session mechanism but not the
+            # exact cookie attributes; Path=/ keeps the local cookie usable
+            # for every operation in the API.
+            headers["set-cookie"] = f"{pool.session_cookie_name}={pool.backend_id}; Path=/"
 
     status_code = int(upstream_response.status_code)
     if not (100 <= status_code <= 599):
@@ -586,8 +614,8 @@ async def _handle_backend_error_status(
     failure_req = PolicyRequest(
         method=request.method,
         path=policy_req.path,
-        query=dict(policy_req.query),
-        headers=dict(policy_req.headers),
+        query=policy_req.query.copy(),
+        headers=policy_req.headers.copy(),
         variables={
             **policy_req.variables,
             "error": "backend_response_failure",
@@ -597,11 +625,13 @@ async def _handle_backend_error_status(
                 message=f"Backend returned HTTP {status_code}",
                 scope=str(policy_req.variables.get("_policy_scope") or ""),
                 section="backend",
+                path=str(policy_req.variables.get("_policy_path") or ""),
+                policy_id=str(policy_req.variables.get("_policy_id") or ""),
             ),
         },
         body=policy_req.body,
         response_status_code=status_code,
-        response_headers=dict(upstream.headers),
+        response_headers=_copy_headers(upstream.headers),
         response_body=upstream.content,
         response_media_type=upstream.media_type,
     )
@@ -611,7 +641,7 @@ async def _handle_backend_error_status(
         return _policy_response(
             body=override.body,
             status_code=override.status_code,
-            headers=dict(override.headers),
+            headers=_copy_headers(override.headers),
             media_type=override.media_type,
             correlation_id=correlation_id,
             trace_id=trace_id,
@@ -685,7 +715,7 @@ async def _apply_outbound_policies(
     outbound_req = PolicyRequest(
         method=request.method,
         path=policy_req.path,
-        query=dict(policy_req.query),
+        query=policy_req.query.copy(),
         headers=response_headers,
         variables=policy_req.variables,
         body=policy_req.body,
@@ -970,8 +1000,8 @@ async def _fail_upstream_unavailable(
         failure_req = PolicyRequest(
             method=request.method,
             path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=dict(policy_req.headers),
+            query=policy_req.query.copy(),
+            headers=policy_req.headers.copy(),
             variables={
                 **policy_req.variables,
                 "error": "upstream_unavailable",
@@ -1020,7 +1050,7 @@ async def _fail_upstream_unavailable(
     return _policy_response(
         body=override.body,
         status_code=override.status_code,
-        headers=dict(override.headers),
+        headers=_copy_headers(override.headers),
         media_type=override.media_type,
         correlation_id=correlation_id,
         trace_id=trace_id,
@@ -1080,7 +1110,7 @@ def _gateway_cache_key(
     return request_cache_key(
         method=policy_req.method,
         upstream_url=upstream_url,
-        query=policy_req.query,
+        query=dict(policy_req.query),
         authorization=policy_req.headers.get("authorization", ""),
         subscription_key=policy_req.headers.get("ocp-apim-subscription-key", ""),
     )
@@ -1127,7 +1157,18 @@ def _choose_backend(
     if backend is not None and (backend.type or "single").lower() == "pool":
         pool.pool_backend = backend
         pool.pool_backend_id = backend_id
-        selection = select_pool_member(cfg, backend_health, backend_id, backend, now=time.time())
+        affinity = backend.session_affinity
+        if affinity is not None:
+            pool.session_cookie_name = affinity.session_id.name
+            pool.session_id = request.cookies.get(pool.session_cookie_name)
+        selection = select_pool_member(
+            cfg,
+            backend_health,
+            backend_id,
+            backend,
+            now=time.time(),
+            session_id=pool.session_id,
+        )
         if selection is None:
             request.state.apim_result_reason = "backend_pool_exhausted"
             # APIM's circuit-breaker documentation defines 503 availability
@@ -1162,12 +1203,20 @@ class _PoolState:
     backend: Any
     backend_id: str
     backend_health: dict[str, Any]
+    session_id: str | None = None
+    session_cookie_name: str | None = None
 
     @property
     def is_pool(self) -> bool:
         return self.pool_backend is not None and self.backend is not None
 
-    def trip_and_reselect(self, cfg: GatewayConfig, policy_req: PolicyRequest) -> str | None:
+    def trip_and_reselect(
+        self,
+        cfg: GatewayConfig,
+        policy_req: PolicyRequest,
+        *,
+        trip_duration_seconds: float | None = None,
+    ) -> str | None:
         """Record this member as failed and pick another, if the pool has one.
 
         Returns the new member's base URL, or None when this is not a pool or
@@ -1177,8 +1226,25 @@ class _PoolState:
             return None
         now = time.time()
         breaker = pool_member_breaker(self.pool_backend, self.backend)
-        record_backend_result(self.backend_health, breaker, self.backend_id, now=now, failed=True)
-        reselected = select_pool_member(cfg, self.backend_health, self.pool_backend_id, self.pool_backend, now=now)
+        record_backend_result(
+            self.backend_health,
+            breaker,
+            self.backend_id,
+            now=now,
+            failed=True,
+            trip_duration_seconds=trip_duration_seconds,
+        )
+        entry = self.backend_health.get(self.backend_id, {})
+        if float(entry.get("open_until", 0.0)) <= now:
+            return None
+        reselected = select_pool_member(
+            cfg,
+            self.backend_health,
+            self.pool_backend_id,
+            self.pool_backend,
+            now=now,
+            session_id=self.session_id,
+        )
         if reselected is None:
             return None
         self.backend_id, self.backend = reselected
@@ -1196,6 +1262,81 @@ class _UpstreamAttempt:
     error: Exception | None
     upstream_url: str
     pool: _PoolState
+
+
+def _retry_after_seconds(value: str | None, *, now: float) -> float | None:
+    """Parse the HTTP Retry-After delta or date form."""
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        return max(0.0, parsedate_to_datetime(value).timestamp() - now)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _breaker_retry_duration(pool: _PoolState, response: httpx.Response) -> float | None:
+    """Return an accepted Retry-After duration when the response trips a pool breaker."""
+    if not pool.is_pool:
+        return None
+    breaker = pool_member_breaker(pool.pool_backend, pool.backend)
+    if not backend_failure_condition_matches(breaker, response.status_code):
+        return None
+    if not breaker.accept_retry_after:
+        return None
+    return _retry_after_seconds(response.headers.get("retry-after"), now=time.time())
+
+
+async def _retry_response(
+    *,
+    response: httpx.Response,
+    attempt: int,
+    max_attempts: int,
+    pool: _PoolState,
+    cfg: GatewayConfig,
+    policy_req: PolicyRequest,
+    route: Any,
+    upstream_url: str,
+) -> tuple[bool, str]:
+    """Close a retryable response and fail over only for breaker failures."""
+    if response.status_code not in cfg.proxy_retry_statuses or attempt >= max_attempts:
+        return False, upstream_url
+    trip_duration = _breaker_retry_duration(pool, response)
+    await response.aclose()
+    if trip_duration is None and pool.is_pool:
+        breaker = pool_member_breaker(pool.pool_backend, pool.backend)
+        breaker_failure = backend_failure_condition_matches(breaker, response.status_code)
+    else:
+        breaker_failure = pool.is_pool
+    if not breaker_failure:
+        return True, upstream_url
+    base_url = pool.trip_and_reselect(cfg, policy_req, trip_duration_seconds=trip_duration)
+    if base_url is None:
+        return True, upstream_url
+    return True, route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
+
+
+def _record_final_pool_result(pool: _PoolState, response: httpx.Response) -> None:
+    if not pool.is_pool:
+        return
+    breaker = pool_member_breaker(pool.pool_backend, pool.backend)
+    record_backend_result(
+        pool.backend_health,
+        breaker,
+        pool.backend_id,
+        now=time.time(),
+        failed=backend_failure_condition_matches(breaker, response.status_code),
+        trip_duration_seconds=_breaker_retry_duration(pool, response),
+    )
+
+
+def _transport_failure_trips_breaker(pool: _PoolState) -> bool:
+    if not pool.is_pool:
+        return False
+    return backend_connection_failure_matches(pool_member_breaker(pool.pool_backend, pool.backend))
 
 
 async def _send_upstream_with_retries(
@@ -1224,9 +1365,13 @@ async def _send_upstream_with_retries(
     attempts_used = 0
     start = time.perf_counter()
 
-    def _failover() -> None:
+    def _failover(*, trip_duration_seconds: float | None = None) -> None:
         nonlocal upstream_url
-        base_url = pool.trip_and_reselect(cfg, policy_req)
+        base_url = pool.trip_and_reselect(
+            cfg,
+            policy_req,
+            trip_duration_seconds=trip_duration_seconds,
+        )
         if base_url is not None:
             upstream_url = route.build_upstream_url(policy_req.path, upstream_base_url=base_url)
 
@@ -1236,8 +1381,8 @@ async def _send_upstream_with_retries(
             method,
             upstream_url,
             content=policy_req.body if attempt == 1 or buffer_request_body else b"",
-            headers=policy_req.headers,
-            params=policy_req.query,
+            headers=policy_req.headers.as_header_pairs(),
+            params=policy_req.query.as_pairs(),
             timeout=timeout,
         )
         try:
@@ -1249,27 +1394,27 @@ async def _send_upstream_with_retries(
             )
         except httpx.RequestError as exc:
             last_exc = exc
-            _failover()
-            if attempt >= max_attempts:
-                break
+            if _transport_failure_trips_breaker(pool):
+                _failover()
             continue
 
-        if upstream_response.status_code in cfg.proxy_retry_statuses and attempt < max_attempts:
-            await upstream_response.aclose()
+        should_retry, upstream_url = await _retry_response(
+            response=upstream_response,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            pool=pool,
+            cfg=cfg,
+            policy_req=policy_req,
+            route=route,
+            upstream_url=upstream_url,
+        )
+        if should_retry:
             upstream_response = None
-            _failover()
             continue
         break
 
-    if pool.is_pool and upstream_response is not None:
-        breaker = pool_member_breaker(pool.pool_backend, pool.backend)
-        record_backend_result(
-            pool.backend_health,
-            breaker,
-            pool.backend_id,
-            now=time.time(),
-            failed=upstream_response.status_code in breaker.error_statuses,
-        )
+    if upstream_response is not None:
+        _record_final_pool_result(pool, upstream_response)
 
     return _UpstreamAttempt(
         response=upstream_response,
@@ -1368,14 +1513,22 @@ def _uncached_response(
         )
 
     if streaming:
-        return StreamingResponse(
+        response = StreamingResponse(
             upstream_response.aiter_bytes(),
             status_code=status_code,
-            headers=response_headers,
             media_type=media_type,
             background=BackgroundTask(upstream_response.aclose),
         )
-    return Response(content=content, status_code=status_code, headers=response_headers, media_type=media_type)
+        pairs = (
+            response_headers.as_header_pairs()
+            if isinstance(response_headers, MultiValueMap)
+            else list(response_headers.items())
+        )
+        response.raw_headers = [(name.lower().encode("latin-1"), value.encode("latin-1")) for name, value in pairs]
+        return response
+    return _response_with_headers(
+        content=content, status_code=status_code, headers=response_headers, media_type=media_type
+    )
 
 
 @dataclass(frozen=True)
@@ -1430,9 +1583,22 @@ def _build_policy_request(
     address by name, plus the underscore-prefixed entries the pipeline uses to
     pass state between its own stages.
     """
-    upstream_query = dict(request.query_params)
+    upstream_query = MultiValueMap()
+    for name, value in request.query_params.multi_items():
+        upstream_query.set_list(name, upstream_query.get_list(name, []) + [value])
     api = cfg.apis.get(route.api_id or "")
     operation = api.operations.get(route.operation_id or "") if api is not None else None
+    expression_headers = headers.copy()
+    incoming_values: dict[str, list[str]] = {}
+    for name_bytes, value_bytes in request.scope.get("headers", []):
+        name = name_bytes.decode("latin-1")
+        lowered = name.lower()
+        incoming_values.setdefault(lowered, []).append(value_bytes.decode("latin-1"))
+    for lowered, values in incoming_values.items():
+        expression_headers.set_list(
+            lowered,
+            values if expression_headers.get_list(lowered) is None else expression_headers.get_list(lowered, []),
+        )
     return PolicyRequest(
         method=request.method,
         path=resolved.upstream_path,
@@ -1447,6 +1613,12 @@ def _build_policy_request(
             "subscription_id": auth.subscription.id if auth.subscription else "",
             "products": auth.subscription_products,
             "product_id": effective_product_id,
+            "user_id": str(auth.claims.get("sub") or (subscription_owner or "").removeprefix("portal:")),
+            # APIM's deployment dimensions have no equivalent local service
+            # metadata; these stable local values are the simulator mapping.
+            "location": "local",
+            "gateway_id": "local",
+            "backend_id": route.backend or "",
             "client_ip": forwarding.client_ip,
             "correlation_id": correlation_id,
             "incoming_host": forwarding.incoming_host,
@@ -1458,8 +1630,9 @@ def _build_policy_request(
             "rate_limit_store": request.app.state.rate_limit_store,
             "quota_store": request.app.state.quota_store,
             "original_request_url": str(request.url),
-            "_request_headers": dict(headers),
-            "_request_query": dict(upstream_query),
+            "_request_headers": expression_headers,
+            "_request_query": upstream_query,
+            "_request_path": request.url.path,
             "_matched_parameters": dict(resolved.matched_parameters),
         },
         body=body,
@@ -1517,7 +1690,7 @@ def _store_and_respond(
     request.app.state.cache[cache_key] = (
         time.time() + cfg.cache_ttl_seconds,
         status_code,
-        dict(response_headers),
+        _copy_headers(response_headers),
         media_type,
         content,
     )
@@ -1566,7 +1739,7 @@ async def _run_on_error(
     failure_req = PolicyRequest(
         method=policy_req.method,
         path=policy_req.path,
-        query=dict(policy_req.query),
+        query=policy_req.query.copy(),
         headers=headers,
         variables={**policy_req.variables, "_last_error": last_error},
         body=policy_req.body,
@@ -1578,6 +1751,9 @@ async def _run_on_error(
     override = await apply_on_error_async(policy_docs, failure_req, policy_runtime)
     if override is not None:
         return override
+    headers.clear()
+    if isinstance(failure_req.headers, MultiValueMap):
+        headers.update(dict(failure_req.headers))
     return ResponseSpec(
         status_code=failure_req.response_status_code or status_code,
         headers=headers,
@@ -1599,6 +1775,8 @@ async def _on_error_for_exception(
         str(policy_req.variables.get("_policy_step") or "multiple"),
         scope=str(policy_req.variables.get("_policy_scope") or ""),
         section=section,
+        path=str(policy_req.variables.get("_policy_path") or ""),
+        policy_id=str(policy_req.variables.get("_policy_id") or ""),
     )
     default = _apim_500_response()
     if isinstance(exc, HTTPException):
@@ -1647,6 +1825,8 @@ async def _guarded_stage(
         str(detail).encode() if detail else early.body,
         scope=str(policy_req.variables.get("_policy_scope") or ""),
         section=section,
+        path=str(policy_req.variables.get("_policy_path") or ""),
+        policy_id=str(policy_req.variables.get("_policy_id") or ""),
         reason=policy_req.variables.get("_policy_error_reason"),
     )
     if last_error is None:
@@ -1697,7 +1877,7 @@ async def _guarded_outbound(
     return _policy_response(
         body=spec.body,
         status_code=spec.status_code,
-        headers=dict(spec.headers),
+        headers=_copy_headers(spec.headers),
         media_type=spec.media_type,
         correlation_id=correlation_id,
         trace_id=trace_id,
@@ -1770,8 +1950,8 @@ async def _respond_without_backend(
         PolicyRequest(
             method=policy_req.method,
             path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=dict(policy_req.headers),
+            query=policy_req.query.copy(),
+            headers=policy_req.headers.copy(),
             variables=policy_req.variables,
             body=policy_req.body,
             response_status_code=outbound.status_code,
@@ -1852,7 +2032,7 @@ async def _short_circuit_policy_stages(
         return _policy_response(
             body=early.body,
             status_code=early.status_code,
-            headers=dict(early.headers),
+            headers=_copy_headers(early.headers),
             media_type=early.media_type,
             correlation_id=correlation_id,
             trace_id=trace_id,
@@ -1885,20 +2065,30 @@ def _record_selected_backend(trace_collector: Any, backend_id: str | None, upstr
 
 def _initial_upstream_headers(
     request: Request, auth: AuthContext, cfg: GatewayConfig, correlation_id: str | None
-) -> dict[str, str]:
+) -> MultiValueMap:
     """The backend request headers before any policy runs, keyed in lower case.
 
     Simulator identity and correlation headers are added only when the config
     opts in; APIM itself adds neither.
     """
-    headers = {
-        key.lower(): value
-        for key, value in build_upstream_headers(
-            request,
-            auth,
-            inject_simulator_identity_headers=cfg.inject_simulator_identity_headers,
-        ).items()
-    }
+    headers = MultiValueMap(
+        {
+            key.lower(): value
+            for key, value in build_upstream_headers(
+                request,
+                auth,
+                inject_simulator_identity_headers=cfg.inject_simulator_identity_headers,
+            ).items()
+        }
+    )
+    raw_headers = [
+        (name.decode("latin-1"), value.decode("latin-1")) for name, value in request.scope.get("headers", [])
+    ]
+    for name in {key.lower() for key, _ in raw_headers}:
+        if name == "x-forwarded-for" or headers.get_list(name) is None:
+            continue
+        values = [value for key, value in raw_headers if key.lower() == name]
+        headers.set_list(name, values)
     if cfg.propagate_simulator_correlation_id and correlation_id:
         headers.setdefault("x-correlation-id", correlation_id)
     return headers
@@ -2029,6 +2219,7 @@ async def execute_gateway_request(request: Request) -> Response:
     pool_backend = choice.pool.pool_backend
     pool_backend_id = choice.pool.pool_backend_id
     backend_health = choice.pool.backend_health
+    policy_req.variables["backend_id"] = backend_id or ""
 
     request.state.apim_backend_id = backend_id or "direct"
     set_current_span_attributes(
@@ -2082,6 +2273,8 @@ async def execute_gateway_request(request: Request) -> Response:
             backend=backend,
             backend_id=backend_id,
             backend_health=backend_health,
+            session_id=choice.pool.session_id,
+            session_cookie_name=choice.pool.session_cookie_name,
         ),
     )
     upstream_response = attempt_result.response
@@ -2091,6 +2284,7 @@ async def execute_gateway_request(request: Request) -> Response:
     backend = attempt_result.pool.backend
     upstream_url = attempt_result.upstream_url
     elapsed_seconds = attempt_result.elapsed_seconds
+    policy_req.variables["backend_id"] = backend_id or ""
 
     request.state.apim_upstream_attempts = attempts_used
 
@@ -2172,8 +2366,8 @@ async def execute_gateway_request(request: Request) -> Response:
         PolicyRequest(
             method=policy_req.method,
             path=policy_req.path,
-            query=dict(policy_req.query),
-            headers=dict(policy_req.headers),
+            query=policy_req.query.copy(),
+            headers=policy_req.headers.copy(),
             variables=policy_req.variables,
             body=policy_req.body,
             response_status_code=upstream_status_code,

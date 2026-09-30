@@ -23,12 +23,15 @@ from app.backend_pool import (
 )
 from app.config import (
     BackendCircuitBreakerConfig,
+    BackendCodeRange,
     BackendConfig,
     BackendPoolMemberConfig,
+    BackendSessionAffinityConfig,
+    BackendSessionIdConfig,
     GatewayConfig,
     NamedValueConfig,
 )
-from app.policy import PolicyRequest
+from app.policy import PolicyRequest, issue_local_managed_identity_token
 
 
 def _member(backend_id: str, *, weight: int = 1, priority: int = 1) -> BackendPoolMemberConfig:
@@ -147,6 +150,41 @@ def test_a_default_breaker_applies_when_neither_declares_one() -> None:
     pool = BackendConfig(url="https://pool.invalid", type="pool", pool=[_member("a")])
 
     assert pool_member_breaker(pool, member).failure_count == 3
+
+
+def test_circuit_breaker_supports_documented_failure_condition_shape() -> None:
+    """APIM circuit breakers use status ranges, error reasons, and retry-after.
+
+    https://learn.microsoft.com/en-us/azure/api-management/backends
+    """
+    breaker = BackendCircuitBreakerConfig(
+        failure_count=2,
+        interval_seconds=60,
+        trip_duration_seconds=30,
+        status_code_ranges=[BackendCodeRange(min=500, max=599)],
+        error_reasons=["Server errors"],
+        accept_retry_after=True,
+    )
+
+    assert breaker.status_code_ranges[0].min == 500
+    assert breaker.error_reasons == ["Server errors"]
+    assert breaker.accept_retry_after is True
+
+
+def test_session_affinity_uses_a_cookie_session_id() -> None:
+    """APIM pool session awareness is configured with a cookie session ID.
+
+    https://learn.microsoft.com/en-us/azure/api-management/backends
+    """
+    pool = BackendConfig(
+        type="pool",
+        pool=[_member("a")],
+        session_affinity=BackendSessionAffinityConfig(
+            session_id=BackendSessionIdConfig(source="Cookie", name="SessionId")
+        ),
+    )
+
+    assert pool.session_affinity.session_id.name == "SessionId"
 
 
 # --- selection -------------------------------------------------------------
@@ -275,15 +313,14 @@ def test_basic_auth_returns_credentials_for_the_upstream_call() -> None:
     assert auth == ("user", "pass")
 
 
-def test_basic_auth_defers_to_an_authorization_header_the_caller_already_set() -> None:
-    """A policy that set Authorization itself must win over backend config."""
+def test_basic_auth_replaces_an_authorization_header_the_caller_already_set() -> None:
+    """Backend basic authentication replaces a caller's Authorization header."""
     req = _policy_request(authorization="Bearer caller-token")
     auth = apply_backend_credentials(
         _backend(auth_type="basic", basic_username="user", basic_password="pass"), req, _config()
     )
 
-    assert auth is None
-    assert req.headers["authorization"] == "Bearer caller-token"
+    assert auth == ("user", "pass")
 
 
 @pytest.mark.parametrize(
@@ -300,24 +337,25 @@ def test_basic_auth_needs_both_halves(username: str | None, password: str | None
     assert auth is None
 
 
-def test_managed_identity_is_signalled_as_a_header() -> None:
-    """The simulator has no real identity to present, so it says so instead."""
+def test_managed_identity_uses_a_local_bearer_token() -> None:
+    """The simulator uses an opaque local bearer-token adaptation."""
     req = _policy_request()
     auth = apply_backend_credentials(
         _backend(auth_type="managed_identity", managed_identity_resource="https://vault.invalid"), req, _config()
     )
 
     assert auth is None
-    assert req.headers["x-apim-managed-identity"] == "true"
-    assert req.headers["x-apim-managed-identity-resource"] == "https://vault.invalid"
+    assert req.headers["authorization"].startswith("Bearer local-apim-mi.")
+    assert "x-apim-managed-identity" not in req.headers
+    assert "x-apim-managed-identity-resource" not in req.headers
 
 
 def test_managed_identity_without_a_resource_sets_only_the_flag() -> None:
     req = _policy_request()
     apply_backend_credentials(_backend(auth_type="managed_identity"), req, _config())
 
-    assert req.headers["x-apim-managed-identity"] == "true"
-    assert "x-apim-managed-identity-resource" not in req.headers
+    assert req.headers["authorization"].startswith("Bearer local-apim-mi.")
+    assert "x-apim-managed-identity" not in req.headers
 
 
 def test_client_certificate_auth_is_signalled_as_a_header() -> None:
@@ -499,7 +537,7 @@ def test_the_managed_identity_resource_is_rendered() -> None:
         _config(named_values={"scope": ".default"}),
     )
 
-    assert req.headers["x-apim-managed-identity-resource"] == "acme/.default"
+    assert req.headers["authorization"] == f"Bearer {issue_local_managed_identity_token('acme/.default')}"
 
 
 def test_an_explicit_authorization_is_rendered_from_both_halves() -> None:

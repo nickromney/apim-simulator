@@ -25,7 +25,6 @@ Running:
 Waiting for gateway health at http://localhost:8000/apim/health
 Creating version set 'public'
 {
-  "default_version": "v1",
   "id": "public",
   "version_header_name": "x-api-version",
   "versioning_scheme": "Header"
@@ -50,7 +49,6 @@ Setup complete. Run ./docs/tutorials/apim-get-started/tutorial08.sh --verify to 
 Verifying version routing
 $ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/api-version-sets/public"
 {
-  "default_version": "v1",
   "id": "public",
   "version_header_name": "x-api-version"
 }

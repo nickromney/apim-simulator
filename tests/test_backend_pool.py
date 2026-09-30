@@ -9,8 +9,11 @@ from fastapi.testclient import TestClient
 from app.backend_pool import record_backend_result, select_pool_member
 from app.config import (
     BackendCircuitBreakerConfig,
+    BackendCodeRange,
     BackendConfig,
     BackendPoolMemberConfig,
+    BackendSessionAffinityConfig,
+    BackendSessionIdConfig,
     GatewayConfig,
     RouteConfig,
 )
@@ -205,3 +208,86 @@ def test_record_backend_result_trips_open_circuit() -> None:
     health: dict = {}
     record_backend_result(health, breaker, "backend-a", now=10.0, failed=True)
     assert health["backend-a"]["open_until"] == 40.0
+
+
+def test_retry_status_that_is_not_a_breaker_failure_retries_same_member() -> None:
+    """Retry selection must not trip a breaker outside its failure condition.
+
+    https://learn.microsoft.com/en-us/azure/api-management/backends
+    """
+    config = _pool_config(
+        members=[
+            BackendPoolMemberConfig(backend_id="backend-a"),
+            BackendPoolMemberConfig(backend_id="backend-b"),
+        ],
+        circuit_breaker=BackendCircuitBreakerConfig(
+            failure_count=1,
+            status_code_ranges=[BackendCodeRange(min=500, max=500)],
+        ),
+        proxy_max_attempts=2,
+    )
+    calls: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.host)
+        return httpx.Response(503, text="retry")
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        response = client.get("/api/health")
+
+    assert response.status_code == 503
+    assert calls == ["backend-a", "backend-a"]
+
+
+def test_circuit_breaker_accepts_retry_after_duration() -> None:
+    """acceptRetryAfter uses the backend Retry-After duration when tripping.
+
+    https://learn.microsoft.com/en-us/azure/api-management/backends
+    """
+    config = _pool_config(
+        members=[BackendPoolMemberConfig(backend_id="backend-a")],
+        circuit_breaker=BackendCircuitBreakerConfig(
+            failure_count=1,
+            trip_duration_seconds=30,
+            accept_retry_after=True,
+        ),
+        proxy_max_attempts=1,
+    )
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, headers={"Retry-After": "120"}, text="retry")
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 503
+
+    assert app.state.backend_health["backend-a"]["open_until"] - time.time() > 100
+
+
+def test_pool_session_affinity_sets_cookie_and_reuses_member() -> None:
+    """APIM pool session awareness routes later cookie-bearing calls alike.
+
+    https://learn.microsoft.com/en-us/azure/api-management/backends
+    """
+    config = _pool_config(
+        members=[
+            BackendPoolMemberConfig(backend_id="backend-a"),
+            BackendPoolMemberConfig(backend_id="backend-b"),
+        ]
+    )
+    config.backends["llm-pool"].session_affinity = BackendSessionAffinityConfig(
+        session_id=BackendSessionIdConfig(source="Cookie", name="SessionId")
+    )
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"host": req.url.host})
+
+    app = create_app(config=config, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with TestClient(app) as client:
+        first = client.get("/api/health")
+        second = client.get("/api/health")
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json() == {"host": "backend-a"}
+    assert first.headers["set-cookie"].startswith("SessionId=backend-a")

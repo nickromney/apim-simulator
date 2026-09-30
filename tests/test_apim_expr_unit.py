@@ -188,6 +188,61 @@ def test_header_and_query_overrides_are_preferred_when_they_are_dicts() -> None:
     assert context.request.query_get("mode") == "override"
 
 
+def test_request_collections_expose_arrays_and_joined_lookup_values() -> None:
+    """APIM exposes request headers/query values as arrays and joins lookups with commas.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    context = _context(
+        variables={
+            "_request_headers": {"X-Test": ["one", "two"]},
+            "_request_query": {"item": ["a", "b"]},
+        }
+    )
+    assert context.request.headers["x-test"] == ["one", "two"]
+    assert context.request.headers_get("X-Test", "missing") == "one,two"
+    assert context.request.query["ITEM"] == ["a", "b"]
+    assert context.request.query_get("item", "missing") == "a,b"
+
+
+def test_request_body_as_string_consumes_unless_preserved() -> None:
+    """IMessageBody.As uses the original stream unless preserveContent is true.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    request = _request(body=b"hello")
+    context = build_expression_context(request)
+    assert evaluate_apim_expression("@(context.Request.Body.As<string>())", context) == "hello"
+    assert request.body == b""
+    context = build_expression_context(request)
+    assert context.request.body is None
+
+
+def test_request_body_as_json_preserves_when_requested() -> None:
+    """IMessageBody.As<JObject>(true) reads a copy and leaves the body available.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    request = _request(body=b'{"ok": true}')
+    context = build_expression_context(request)
+    assert evaluate_apim_expression('@(context.Request.Body.As<JObject>(true)["ok"])', context) is True
+    assert request.body == b'{"ok": true}'
+
+
+def test_response_body_has_the_same_preserve_content_semantics() -> None:
+    """Response IMessageBody.As follows the same consuming-stream rule.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
+    request = _request(response_body=b'{"ok": true}')
+    context = build_expression_context(request)
+    assert evaluate_apim_expression('@(context.Response.Body.As<JObject>(true)["ok"])', context) is True
+    assert request.response_body == b'{"ok": true}'
+    context = build_expression_context(request)
+    assert evaluate_apim_expression("@(context.Response.Body.As<string>())", context) == '{"ok": true}'
+    assert request.response_body == b""
+
+
 def test_missing_header_and_query_keys_read_as_the_default() -> None:
     context = _context()
     assert context.request.headers_get("absent") == ""
@@ -202,6 +257,15 @@ def test_context_carries_method_path_ip_and_subscription() -> None:
     assert context.request.path == "/api/items"
     assert context.request.ip_address == "10.1.2.3"
     assert context.subscription.id == "sub-1"
+
+
+def test_request_url_path_includes_a_segment_version_from_the_public_url() -> None:
+    """Path-based APIM versioning includes the version identifier in the request URL.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-versions
+    """
+    context = _context(variables={"_request_path": "/products/v2/items"})
+    assert context.request.path == "/products/v2/items"
 
 
 def test_an_absent_ip_or_subscription_reads_as_an_empty_string() -> None:
@@ -403,10 +467,14 @@ def test_string_methods_translate() -> None:
 
 
 def test_body_accessors_translate() -> None:
+    """Body reads consume unless preserveContent is requested.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions
+    """
     context = _context()
     body = CalloutResponse(status_code=200, headers={}, content=b'{"a": 1}')
     context.variables["resp"] = body
-    assert evaluate_apim_expression('@(context.Variables["resp"].Body.As<JObject>()["a"])', context) == 1
+    assert evaluate_apim_expression('@(context.Variables["resp"].Body.As<JObject>(true)["a"])', context) == 1
     assert evaluate_apim_expression('@(context.Variables["resp"].Body.As<string>())', context) == '{"a": 1}'
 
 

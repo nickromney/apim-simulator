@@ -116,7 +116,7 @@ management_post "/apim/management/subscriptions" "$(cat <<JSON
 JSON
 )" >/dev/null
 management_put "/apim/management/api-version-sets/public" "$(cat <<JSON
-{"display_name":"Public","versioning_scheme":"Header","version_header_name":"x-api-version","default_version":"v1"}
+{"display_name":"Public","versioning_scheme":"Header","version_header_name":"x-api-version"}
 JSON
 )" >/dev/null
 management_put "/apim/management/apis/$APIM_API_ID/revisions/1" "$(cat <<JSON

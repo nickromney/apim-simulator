@@ -7,7 +7,7 @@ import ipaddress
 import json
 import math
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -40,9 +40,97 @@ from app.policy_errors import element_name
 @dataclass(frozen=True)
 class ResponseSpec:
     status_code: int
-    headers: dict[str, str]
+    headers: dict[str, str] | MultiValueMap
     body: bytes = b""
     media_type: str | None = None
+    # ASGI's http.response.start has no reason-phrase field; retain the APIM
+    # value for direct policy consumers while the live server selects its
+    # standard phrase.
+    reason: str | None = None
+
+
+class MultiValueMap(MutableMapping[str, str]):
+    """Case-insensitive HTTP collection retaining every value.
+
+    APIM exposes headers and query values as ``string[]``. Policy code still
+    needs a convenient scalar view for existing gateway plumbing, so indexing
+    and ``get`` return the APIM comma-joined representation while expressions
+    use ``as_dict_lists`` and see the underlying arrays.
+    """
+
+    def __init__(self, values: MutableMapping[str, Any] | dict[str, Any] | None = None):
+        self._values: dict[str, tuple[str, list[str]]] = {}
+        for key, value in (values or {}).items():
+            self[key] = value
+
+    def _stored_key(self, key: str) -> str | None:
+        lowered = str(key).lower()
+        return next((stored for stored in self._values if stored.lower() == lowered), None)
+
+    def __getitem__(self, key: str) -> str:
+        stored = self._stored_key(key)
+        if stored is None:
+            raise KeyError(key)
+        return ",".join(self._values[stored][1])
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        name = str(key)
+        stored = self._stored_key(name) or name
+        values = value if isinstance(value, (list, tuple)) else [value]
+        self._values[stored] = (stored, [str(item) for item in values])
+
+    def __delitem__(self, key: str) -> None:
+        stored = self._stored_key(key)
+        if stored is None:
+            raise KeyError(key)
+        del self._values[stored]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def get_list(self, key: str, default: list[str] | None = None) -> list[str] | None:
+        stored = self._stored_key(key)
+        if stored is None:
+            return default
+        return list(self._values[stored][1])
+
+    def set_list(self, key: str, values: list[str]) -> None:
+        self[key] = values
+
+    def as_dict_lists(self) -> dict[str, list[str]]:
+        return {name: list(values) for name, (_, values) in self._values.items()}
+
+    def as_pairs(self) -> list[tuple[str, str]]:
+        return [(name, value) for name, (_, values) in self._values.items() for value in values]
+
+    def as_header_pairs(self) -> list[tuple[str, str]]:
+        separate = {
+            "cookie",
+            "date",
+            "expires",
+            "if-modified-since",
+            "if-unmodified-since",
+            "last-modified",
+            "proxy-authenticate",
+            "retry-after",
+            "set-cookie",
+            "user-agent",
+            "warning",
+            "www-authenticate",
+        }
+        pairs: list[tuple[str, str]] = []
+        for name, (_, values) in self._values.items():
+            if name.lower() in separate:
+                pairs.extend((name, value) for value in values)
+            else:
+                pairs.append((name, ",".join(values)))
+        return pairs
+
+    def copy(self) -> MultiValueMap:
+        return MultiValueMap(self.as_dict_lists())
 
 
 @dataclass
@@ -60,6 +148,12 @@ class PolicyRequest:
     # Which policy section is executing. Policies that act on "the message"
     # (set-body, validate-content) act on the response in outbound.
     section: str = "inbound"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.query, MultiValueMap):
+            self.query = MultiValueMap(self.query)
+        if not isinstance(self.headers, MultiValueMap):
+            self.headers = MultiValueMap(self.headers)
 
     @property
     def in_outbound(self) -> bool:
@@ -85,10 +179,26 @@ class PolicyRuntime:
     openid_cache: dict[str, tuple[float, dict[str, Any], dict[str, Any]]] = field(default_factory=dict)
     response_cache: dict[str, Any] = field(default_factory=dict)
     value_cache: dict[str, Any] = field(default_factory=dict)
+    backend_variable_initializers: list[tuple[str, Any]] = field(default_factory=list)
     deferred_actions: list[Any] = field(default_factory=list)
     llm_metric_emitter: Any = None
     custom_metric_emitter: Any = None
     clock: Callable[[], float] | None = None
+
+
+def issue_local_managed_identity_token(resource: str, client_id: str | None = None) -> str:
+    """Issue a deterministic opaque token for the local managed-identity adapter.
+
+    The simulator has no Microsoft Entra tenant, so this is intentionally not a
+    real access token. The payload keeps the selected resource and identity
+    visible to local tests without forwarding the old simulator marker headers.
+    """
+    payload = json.dumps(
+        {"resource": resource, "client_id": client_id or "system-assigned"},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    encoded = base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+    return f"local-apim-mi.{encoded}"
 
 
 @dataclass(frozen=True)
@@ -131,12 +241,20 @@ class Always(Condition):
 
 
 @dataclass(frozen=True)
+class BooleanConstant(Condition):
+    value: bool
+
+    def __call__(self, req: PolicyRequest) -> bool:
+        return self.value
+
+
+@dataclass(frozen=True)
 class HeaderEquals(Condition):
     name: str
     value: str
 
     def __call__(self, req: PolicyRequest) -> bool:
-        return req.headers.get(self.name.lower(), "") == self.value
+        return req.headers.get(self.name, "") == self.value
 
 
 @dataclass(frozen=True)
@@ -145,7 +263,7 @@ class HeaderStartsWith(Condition):
     prefix: str
 
     def __call__(self, req: PolicyRequest) -> bool:
-        return req.headers.get(self.name.lower(), "").startswith(self.prefix)
+        return req.headers.get(self.name, "").startswith(self.prefix)
 
 
 @dataclass(frozen=True)
@@ -181,72 +299,22 @@ class ExpressionCondition(Condition):
         return evaluate_apim_condition(self.expression, build_expression_context(req))
 
 
-def _strip_condition_quotes(value: str) -> str:
-    """Drop one matched pair of surrounding quotes, single or double."""
-    value = value.strip()
-    if (value.startswith("'") and value.endswith("'")) or (value.startswith('"') and value.endswith('"')):
-        return value[1:-1]
-    return value
-
-
-def _condition_call_argument(expr: str, opener: str) -> str:
-    """The argument of a `name(...)` call at the head of a condition expression."""
-    return _strip_condition_quotes(expr.split(opener, 1)[1].split(")", 1)[0])
-
-
-def _parse_header_starts_with(expr: str) -> Condition:
-    prefix = _strip_condition_quotes(expr.split(".startswith(", 1)[1].rsplit(")", 1)[0])
-    return HeaderStartsWith(name=_condition_call_argument(expr, "header(").lower(), prefix=prefix)
-
-
-def _parse_header_equals(expr: str) -> Condition:
-    left, right = expr.split("==", 1)
-    return HeaderEquals(name=_condition_call_argument(left, "header(").lower(), value=_strip_condition_quotes(right))
-
-
-def _parse_query_equals(expr: str) -> Condition:
-    left, right = expr.split("==", 1)
-    return QueryEquals(name=_condition_call_argument(left, "query("), value=_strip_condition_quotes(right))
-
-
-def _parse_method_is(expr: str) -> Condition:
-    return MethodIs(method=_strip_condition_quotes(expr.split("==", 1)[1]))
-
-
-def _parse_path_starts_with(expr: str) -> Condition:
-    return PathStartsWith(prefix=_strip_condition_quotes(expr.split("path.startswith(", 1)[1].rsplit(")", 1)[0]))
-
-
-# Recognisers for the condition mini-language, in precedence order. The
-# startswith form must be tried before the equality form, because a
-# `header(x).startswith(y)` expression can also contain "==" inside its prefix.
-_CONDITION_FORMS: tuple[tuple[Callable[[str], bool], Callable[[str], Condition]], ...] = (
-    (lambda e: e.startswith("header(") and ").startswith(" in e, _parse_header_starts_with),
-    (lambda e: e.startswith("header(") and "==" in e, _parse_header_equals),
-    (lambda e: e.startswith("query(") and "==" in e, _parse_query_equals),
-    (lambda e: e.startswith("method") and "==" in e, _parse_method_is),
-    (lambda e: e.startswith("path.startswith("), _parse_path_starts_with),
-)
-
-
 def parse_condition(expr: str | None) -> Condition:
     """Parse a `<when condition="...">` expression.
 
-    An empty condition always fires. An `@`-prefixed one is a full policy
-    expression evaluated at request time; everything else is the small
-    comparison language recognised by _CONDITION_FORMS.
+    A condition is required. An `@`-prefixed one is a policy expression
+    evaluated at request time, and the choose policy also accepts the Boolean
+    constants true and false. The old simulator-only comparison mini-language
+    is rejected.
     """
-    if not expr:
-        return Always()
+    if expr is None or not expr.strip():
+        raise HTTPException(status_code=500, detail="choose when requires condition")
 
     expr = expr.strip()
+    if expr.lower() in {"true", "false"}:
+        return BooleanConstant(value=expr.lower() == "true")
     if expr.startswith("@"):
         return ExpressionCondition(expression=expr)
-
-    for matches, build in _CONDITION_FORMS:
-        if matches(expr):
-            return build(expr)
-
     raise HTTPException(status_code=500, detail=f"Unsupported policy condition: {expr}")
 
 
@@ -260,10 +328,49 @@ class PolicyNode:
         return self.apply(req, runtime)
 
 
+def _annotate_policy_node(node: PolicyNode, *, policy_id: str | None, path: str) -> PolicyNode:
+    """Attach parser metadata without changing the public node dataclasses."""
+    object.__setattr__(node, "_policy_id", policy_id or "")
+    object.__setattr__(node, "_policy_path", path)
+    return node
+
+
 @dataclass(frozen=True)
 class NoOp(PolicyNode):
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         return None
+
+
+_SET_HEADER_ACTIONS = {"override", "skip", "append", "delete"}
+_IMMUTABLE_HEADERS = {"connection", "content-length", "keep-alive", "transfer-encoding"}
+
+
+def _render_exists_action(value: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> str:
+    action = render_policy_value(value or "override", req, runtime).lower()
+    if action not in _SET_HEADER_ACTIONS:
+        raise HTTPException(status_code=500, detail=f"unsupported exists-action: {action}")
+    return action
+
+
+def _protected_header_action(req: PolicyRequest, name: str, action: str) -> bool:
+    # Learn specifies these mutation limitations, but not whether a forbidden
+    # mutation is ignored or raises; preserve the existing header locally.
+    lowered = name.lower()
+    if lowered in _IMMUTABLE_HEADERS:
+        return True
+    if action == "delete" and lowered == "x-forwarded-for":
+        return True
+    return req.in_outbound and action == "delete" and lowered == "server"
+
+
+def _sync_expression_header(req: PolicyRequest, name: str, values: list[str] | None) -> None:
+    expression_headers = req.variables.get("_request_headers")
+    if not isinstance(expression_headers, MultiValueMap) or expression_headers is req.headers:
+        return
+    if values is None:
+        expression_headers.pop(name, None)
+    else:
+        expression_headers.set_list(name, values)
 
 
 @dataclass(frozen=True)
@@ -271,26 +378,97 @@ class SetHeader(PolicyNode):
     name: str
     value: str
     exists_action: str = "override"
+    values: tuple[str, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        key = self.name
-        action = (self.exists_action or "override").lower()
-        rendered = render_policy_value(self.value, req, runtime)
+        key = render_policy_value(self.name, req, runtime).strip()
+        action = _render_exists_action(self.exists_action, req, runtime)
+        rendered_values = tuple(render_policy_value(value, req, runtime) for value in (self.values or (self.value,)))
         if action == "delete":
+            if _protected_header_action(req, key, action):
+                return None
             req.headers.pop(key, None)
+            _sync_expression_header(req, key, None)
             _record_step(runtime, "set-header", {"name": key, "action": "delete"})
             return None
 
-        if action == "skip" and key in req.headers:
+        if action == "skip" and req.headers.get_list(key) is not None:
             _record_step(runtime, "set-header", {"name": key, "action": "skip"})
             return None
 
-        if action == "append" and key in req.headers:
-            req.headers[key] = f"{req.headers[key]},{rendered}"
+        if _protected_header_action(req, key, action):
+            return None
+        if action == "append" and req.headers.get_list(key) is not None:
+            values = req.headers.get_list(key, []) + list(rendered_values)
+            req.headers.set_list(key, values)
         else:
-            req.headers[key] = rendered
+            values = list(rendered_values)
+            req.headers.set_list(key, values)
+        _sync_expression_header(req, key, values)
 
-        _record_step(runtime, "set-header", {"name": key, "action": action, "value": rendered})
+        _record_step(runtime, "set-header", {"name": key, "action": action, "value": ",".join(rendered_values)})
+        return None
+
+
+@dataclass(frozen=True)
+class AuthenticationBasic(PolicyNode):
+    username: str
+    password: str
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        username = render_policy_value(self.username, req, runtime)
+        password = render_policy_value(self.password, req, runtime)
+        credentials = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+        req.headers["authorization"] = f"Basic {credentials}"
+        _record_step(runtime, "authentication-basic", {"header": "authorization"})
+        return None
+
+
+@dataclass(frozen=True)
+class AuthenticationManagedIdentity(PolicyNode):
+    resource: str
+    client_id: str | None = None
+    output_token_variable_name: str | None = None
+    ignore_error: bool = False
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        resource = render_policy_value(self.resource, req, runtime)
+        if not resource:
+            if self.output_token_variable_name:
+                req.variables[self.output_token_variable_name] = None
+            if self.ignore_error:
+                return None
+            raise HTTPException(status_code=500, detail="authentication-managed-identity token acquisition failed")
+
+        token = issue_local_managed_identity_token(resource, self.client_id)
+        req.headers["authorization"] = f"Bearer {token}"
+        if self.output_token_variable_name:
+            req.variables[self.output_token_variable_name] = token
+            _record_variable_write(runtime, self.output_token_variable_name, token, "authentication-managed-identity")
+        _record_step(runtime, "authentication-managed-identity", {"resource": resource})
+        return None
+
+
+@dataclass(frozen=True)
+class AuthenticationCertificate(PolicyNode):
+    thumbprint: str | None = None
+    certificate_id: str | None = None
+    body: str | None = None
+    password: str | None = None
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        # Learn documents certificate selection, but is silent on a local
+        # gateway without a certificate store; marker headers are the local
+        # transport adaptation and are removed before ordinary proxying.
+        if self.thumbprint is not None:
+            req.headers["x-apim-authentication-certificate-thumbprint"] = render_policy_value(
+                self.thumbprint, req, runtime
+            )
+        elif self.certificate_id is not None:
+            req.headers["x-apim-authentication-certificate-id"] = render_policy_value(self.certificate_id, req, runtime)
+        else:
+            req.headers["x-apim-authentication-certificate"] = "present"
+        _record_step(runtime, "authentication-certificate", {"configured": True})
         return None
 
 
@@ -321,26 +499,29 @@ class SetQueryParameter(PolicyNode):
     name: str
     value: str
     exists_action: str = "override"
+    values: tuple[str, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        key = self.name
-        action = (self.exists_action or "override").lower()
-        rendered = render_policy_value(self.value, req, runtime)
+        key = render_policy_value(self.name, req, runtime).strip()
+        action = _render_exists_action(self.exists_action, req, runtime)
+        rendered_values = tuple(render_policy_value(value, req, runtime) for value in (self.values or (self.value,)))
         if action == "delete":
             req.query.pop(key, None)
             _record_step(runtime, "set-query-parameter", {"name": key, "action": "delete"})
             return None
 
-        if action == "skip" and key in req.query:
+        if action == "skip" and req.query.get_list(key) is not None:
             _record_step(runtime, "set-query-parameter", {"name": key, "action": "skip"})
             return None
 
-        if action == "append" and key in req.query:
-            req.query[key] = f"{req.query[key]},{rendered}"
+        if action == "append" and req.query.get_list(key) is not None:
+            req.query.set_list(key, req.query.get_list(key, []) + list(rendered_values))
         else:
-            req.query[key] = rendered
+            req.query.set_list(key, list(rendered_values))
 
-        _record_step(runtime, "set-query-parameter", {"name": key, "action": action, "value": rendered})
+        _record_step(
+            runtime, "set-query-parameter", {"name": key, "action": action, "value": ",".join(rendered_values)}
+        )
         return None
 
 
@@ -361,34 +542,64 @@ class SetBody(PolicyNode):
 
 
 @dataclass(frozen=True)
+class _ReturnResponseStatus:
+    code: str
+    reason: str | None
+
+
+@dataclass(frozen=True)
 class ReturnResponse(PolicyNode):
-    status_code: int
-    reason: str | None = None
-    headers: list[SetHeader] = field(default_factory=list)
-    body: str | None = None
-    media_type: str | None = None
+    response_variable_name: str | None = None
+    actions: tuple[SetHeader | SetBody | _ReturnResponseStatus, ...] = ()
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        out_headers: dict[str, str] = {}
+        source = req.variables.get(self.response_variable_name) if self.response_variable_name else None
+        if self.response_variable_name and not isinstance(source, CalloutResponse):
+            raise HTTPException(
+                status_code=500,
+                detail=f"return-response response variable is not a response: {self.response_variable_name}",
+            )
+
+        if isinstance(source, CalloutResponse):
+            status_code = source.StatusCode
+            out_headers = MultiValueMap(dict(source.Headers))
+            response_body = source.Body.AsString().encode("utf-8")
+            reason = source.ReasonPhrase or None
+        else:
+            status_code = 200
+            out_headers = MultiValueMap()
+            response_body = b""
+            reason = None
+
         temp_req = PolicyRequest(
             method=req.method,
             path=req.path,
             query=dict(req.query),
             headers=out_headers,
             variables=req.variables,
-            body=req.body,
-            response_status_code=req.response_status_code,
+            body=response_body,
+            response_status_code=status_code,
+            response_headers=out_headers,
+            response_body=response_body,
+            response_media_type=req.response_media_type,
+            section=req.section,
         )
-        for header in self.headers:
-            header.apply(temp_req, runtime)
+        for action in self.actions:
+            if isinstance(action, _ReturnResponseStatus):
+                temp_req.response_status_code = int(render_policy_value(action.code, temp_req, runtime))
+                reason = render_policy_value(action.reason, temp_req, runtime) if action.reason is not None else None
+            elif isinstance(action, SetHeader):
+                action.apply(temp_req, runtime)
+            else:
+                temp_req.response_body = render_policy_value(action.value, temp_req, runtime).encode("utf-8")
 
-        body = render_policy_value(self.body or "", req, runtime)
-        _record_step(runtime, "return-response", {"status_code": self.status_code})
+        _record_step(runtime, "return-response", {"status_code": temp_req.response_status_code or 200})
         return ResponseSpec(
-            status_code=self.status_code,
+            status_code=temp_req.response_status_code or 200,
             headers=out_headers,
-            body=body.encode("utf-8"),
-            media_type=self.media_type or out_headers.get("content-type"),
+            body=temp_req.response_body,
+            media_type=temp_req.response_media_type or out_headers.get("content-type"),
+            reason=reason,
         )
 
 
@@ -431,13 +642,11 @@ def _mock_operation(req: PolicyRequest, runtime: PolicyRuntime | None) -> Any | 
 def _mock_representation(operation: Any, *, status_code: int, content_type: str | None) -> Any | None:
     """The response representation to mock.
 
-    Prefers the response declared for this status code, falling back to the
-    first declared response: a mock-response naming a status the operation does
-    not document is still better served by an example than by an empty body.
+    APIM selects a representation only from the response matching the
+    requested status code. A requested content type must also match exactly,
+    case-insensitively; otherwise the response has no content.
     """
     candidates = [item for item in operation.responses if item.status_code == status_code]
-    if not candidates and operation.responses:
-        candidates = [operation.responses[0]]
     if not candidates:
         return None
 
@@ -445,13 +654,93 @@ def _mock_representation(operation: Any, *, status_code: int, content_type: str 
     if not representations:
         return None
     if content_type:
-        matched = next(
-            (r for r in representations if r.content_type.lower() == content_type.lower()),
-            None,
-        )
-        if matched is not None:
-            return matched
+        return next((r for r in representations if r.content_type.lower() == content_type.lower()), None)
     return representations[0]
+
+
+def _schema_definition(schema: Any, schema_id: str) -> Any | None:
+    definitions = getattr(schema, "definitions", {})
+    if schema_id in definitions:
+        return definitions[schema_id]
+    components = getattr(schema, "components", {})
+    component_schemas = components.get("schemas", {}) if isinstance(components, dict) else {}
+    return component_schemas.get(schema_id)
+
+
+def _schema_composite_sample(schema: dict[str, Any], definitions: dict[str, Any], seen: set[str]) -> Any | None:
+    for key in ("oneOf", "anyOf", "allOf"):
+        options = schema.get(key)
+        if isinstance(options, list) and options:
+            return _schema_sample(options[0], definitions, seen)
+    enum = schema.get("enum")
+    return enum[0] if isinstance(enum, list) and enum else None
+
+
+def _schema_structured_sample(schema: dict[str, Any], definitions: dict[str, Any], seen: set[str]) -> Any | None:
+    schema_type = schema.get("type")
+    if schema_type == "object" or "properties" in schema:
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            return {}
+        return {name: _schema_sample(value, definitions, seen) for name, value in properties.items()}
+    if schema_type == "array":
+        item = _schema_sample(schema.get("items", {}), definitions, seen)
+        return [] if item is None else [item]
+    return None
+
+
+def _schema_scalar_sample(schema_type: Any) -> Any | None:
+    return {
+        "string": "",
+        "integer": 0,
+        "number": 0,
+        "boolean": False,
+    }.get(schema_type)
+
+
+def _schema_sample(schema: Any, definitions: dict[str, Any], seen: set[str]) -> Any | None:
+    """Generate a sample for the simple JSON Schema shapes modeled locally.
+
+    APIM supports richer schema dialects and XML representations. The local
+    adaptation handles simple JSON object/array/scalar schemas; unsupported
+    constructs produce no body.
+    """
+    if not isinstance(schema, dict):
+        return None
+    if "example" in schema:
+        return schema["example"]
+    if "default" in schema:
+        return schema["default"]
+    if "$ref" in schema:
+        reference = str(schema["$ref"]).rsplit("/", 1)[-1]
+        if reference in seen:
+            return None
+        return _schema_sample(definitions.get(reference), definitions, seen | {reference})
+    composite = _schema_composite_sample(schema, definitions, seen)
+    if composite is not None:
+        return composite
+    structured = _schema_structured_sample(schema, definitions, seen)
+    return structured if structured is not None else _schema_scalar_sample(schema.get("type"))
+
+
+def _mock_schema_sample(api_id: str, operation: Any, representation: Any, runtime: PolicyRuntime) -> Any | None:
+    schema_id = getattr(representation, "schema_id", None)
+    if not schema_id or runtime.gateway_config is None:
+        return None
+    api = runtime.gateway_config.apis.get(api_id)
+    if api is None or "json" not in representation.content_type.lower():
+        return None
+    schema = api.schemas.get(schema_id)
+    if schema is None:
+        return None
+    root = _schema_definition(schema, schema_id)
+    if root is None:
+        try:
+            root = json.loads(schema.value) if schema.value else None
+        except (TypeError, json.JSONDecodeError):
+            root = None
+    definitions = getattr(schema, "definitions", {})
+    return _schema_sample(root, definitions if isinstance(definitions, dict) else {}, set())
 
 
 def _mock_response_sample(
@@ -477,6 +766,13 @@ def _mock_response_sample(
                 _encode_mock_response_example(example.value, content_type=resolved_content_type),
                 resolved_content_type,
             )
+    if runtime is not None:
+        api_id = str(req.variables.get("api_id") or "")
+        schema_sample = _mock_schema_sample(api_id, operation, representation, runtime)
+        if schema_sample is not None:
+            return _encode_mock_response_example(
+                schema_sample, content_type=resolved_content_type
+            ), resolved_content_type
     return b"", resolved_content_type
 
 
@@ -1723,6 +2019,16 @@ def _llm_prompt_text(body: bytes) -> str:
     return "\n".join(chunk for chunk in chunks if chunk)
 
 
+def _llm_request_is_streaming(body: bytes) -> bool:
+    if not body:
+        return False
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("stream") is True
+
+
 def _llm_usage_from_response(body: bytes) -> dict[str, int] | None:
     if not body:
         return None
@@ -1732,7 +2038,7 @@ def _llm_usage_from_response(body: bytes) -> dict[str, int] | None:
         return None
     if not isinstance(payload, dict):
         return None
-    return _llm_usage_counts(payload.get("usage"))
+    return _llm_usage_counts(payload.get("usage") or payload.get("usageMetadata"))
 
 
 def _llm_usage_counts(usage: Any) -> dict[str, int] | None:
@@ -1746,8 +2052,8 @@ def _llm_usage_counts(usage: Any) -> dict[str, int] | None:
                 return int(value)
         return None
 
-    prompt = _usage_int("prompt_tokens", "input_tokens")
-    completion = _usage_int("completion_tokens", "output_tokens")
+    prompt = _usage_int("prompt_tokens", "input_tokens", "promptTokenCount")
+    completion = _usage_int("completion_tokens", "output_tokens", "candidatesTokenCount")
     total = _usage_int("total_tokens")
     if total is None and prompt is None and completion is None:
         return None
@@ -1809,7 +2115,7 @@ def _llm_usage_from_sse(body: bytes) -> tuple[dict[str, int] | None, str]:
     usage: dict[str, int] | None = None
     delta_parts: list[str] = []
     for payload in _sse_json_payloads(body):
-        chunk_usage = _llm_usage_counts(payload.get("usage"))
+        chunk_usage = _llm_usage_counts(payload.get("usage") or payload.get("usageMetadata"))
         if chunk_usage is not None:
             usage = chunk_usage
         delta_parts.extend(_sse_delta_texts(payload))
@@ -2092,6 +2398,8 @@ class LlmTokenLimit(PolicyNode):
         """Queue the real token accounting for after the response is known."""
         if runtime is None:
             return
+        if self.tokens_consumed_variable_name:
+            runtime.backend_variable_initializers.append((self.tokens_consumed_variable_name, estimated_prompt_tokens))
         runtime.deferred_actions.append(
             LlmTokenLimitDeferred(
                 counter_key=counter_key,
@@ -2129,7 +2437,8 @@ class LlmTokenLimit(PolicyNode):
         if token_quota > 0 and token_quota_period not in LLM_QUOTA_PERIODS:
             raise HTTPException(status_code=500, detail="llm-token-limit token-quota-period is invalid")
 
-        estimated_prompt_tokens = _estimate_llm_tokens_from_text(_llm_prompt_text(req.body)) if estimate else 0
+        estimate_prompt = estimate or _llm_request_is_streaming(req.body)
+        estimated_prompt_tokens = _estimate_llm_tokens_from_text(_llm_prompt_text(req.body)) if estimate_prompt else 0
         now = time.time()
 
         used_quota, refusal = self._quota_block(
@@ -2161,8 +2470,6 @@ class LlmTokenLimit(PolicyNode):
 
         # The deferred accounting reads the response body, so it must be buffered.
         req.variables["_policy_response_buffering_required"] = True
-        if self.tokens_consumed_variable_name:
-            req.variables[self.tokens_consumed_variable_name] = estimated_prompt_tokens
         self._defer(
             runtime,
             counter_key=counter_key,
@@ -2203,26 +2510,36 @@ class LlmTokenLimit(PolicyNode):
             "llm-token-limit",
             {"counter_key": counter_key, "blocked": True, "status_code": status_code, "retry_after": retry_after},
         )
+        # The LLM policy pages specify the status and retry header, but not
+        # the human-readable refusal text. Reuse the APIM JSON envelope and
+        # the simulator's existing rate/quota wording.
         headers = {
-            "content-type": "text/plain",
+            "content-type": "application/json",
             header_name.lower(): str(retry_after),
         }
-        return ResponseSpec(status_code=status_code, headers=headers, body=body.encode("utf-8"))
+        return ResponseSpec(status_code=status_code, headers=headers, body=_json_throttle_body(status_code, body))
 
 
-_LLM_DEFAULT_DIMENSION_SOURCES = {
+_DEFAULT_DIMENSION_SOURCES = {
     "api id": "api_id",
     "operation id": "operation_id",
     "subscription id": "subscription_id",
     "product id": "product_id",
-    "product": "product_id",
-    "client ip address": "client_ip",
+    "user id": "user_id",
+    "location": "location",
+    "gateway id": "gateway_id",
+    "backend id": "backend_id",
 }
 
 
 def _default_llm_dimension_value(req: PolicyRequest, name: str) -> str:
-    source = _LLM_DEFAULT_DIMENSION_SOURCES.get(name.strip().lower())
+    normalized_name = name.strip().lower()
+    source = _DEFAULT_DIMENSION_SOURCES.get(normalized_name)
     if source is None:
+        raise HTTPException(status_code=500, detail=f"Dimension value is required for {name}")
+    if normalized_name == "backend id" and req.section != "outbound":
+        # The Learn reference restricts Backend ID to outbound policies. The
+        # local gateway has no backend selection before its backend stage.
         return ""
     return _stringify_policy_value(req.variables.get(source))
 
@@ -2264,7 +2581,8 @@ class LlmEmitTokenMetric(PolicyNode):
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         resolved: list[tuple[str, str]] = []
-        for name, value in self.dimensions:
+        for name_template, value in self.dimensions:
+            name = render_policy_value(name_template, req, runtime)
             if value is None:
                 resolved.append((name, _default_llm_dimension_value(req, name)))
             else:
@@ -2295,15 +2613,16 @@ class EmitMetric(PolicyNode):
     dimensions: tuple[tuple[str, str | None], ...]
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        amount = _policy_int(self.value, req, runtime, default=1) if self.value else 1
+        amount = _policy_float(self.value, req, runtime, default=1.0) if self.value else 1.0
         resolved: dict[str, str] = {}
-        for dim_name, dim_value in self.dimensions:
+        for dim_name_template, dim_value in self.dimensions:
+            dim_name = render_policy_value(dim_name_template, req, runtime)
             if dim_value is None:
                 resolved[dim_name] = _default_llm_dimension_value(req, dim_name)
             else:
                 resolved[dim_name] = render_policy_value(dim_value, req, runtime)
         emitter = runtime.custom_metric_emitter if runtime is not None else None
-        if emitter is not None and amount:
+        if emitter is not None:
             attributes = {
                 "apim.metric.name": self.name,
                 "apim.metric.namespace": self.namespace,
@@ -2334,14 +2653,25 @@ def _record_validation_error(
     *,
     policy: str,
     errors_variable_name: str | None,
-    message: str,
+    name: str,
+    error_type: str,
+    validation_rule: str,
+    details: str,
+    action: str,
 ) -> None:
+    error = {
+        "Name": name,
+        "Type": error_type,
+        "ValidationRule": validation_rule,
+        "Details": details,
+        "Action": action,
+    }
     if errors_variable_name:
         existing = req.variables.get(errors_variable_name)
         errors = existing if isinstance(existing, list) else []
-        errors.append({"source": policy, "message": message})
+        errors.append(error)
         req.variables[errors_variable_name] = errors
-    _record_step(runtime, policy, {"error": message})
+    _record_step(runtime, policy, {"error": error})
 
 
 def _operation_request_metadata(req: PolicyRequest, runtime: PolicyRuntime | None) -> Any:
@@ -2363,18 +2693,26 @@ _INTERNAL_ERROR_PUBLIC_MESSAGE = "The request could not be processed due to an i
 
 @dataclass(frozen=True)
 class ValidateContentType:
-    content_type: str
+    content_type: str | None
     validate_as: str
     action: str
 
 
 @dataclass(frozen=True)
+class ContentTypeMap:
+    any_content_type_value: str | None = None
+    missing_content_type_value: str | None = None
+    types: tuple[tuple[str | None, str, str | None], ...] = ()
+
+
+@dataclass(frozen=True)
 class ValidateContent(PolicyNode):
-    unspecified_content_type_action: str = "ignore"
-    max_size: int | None = None
-    size_exceeded_action: str = "prevent"
+    unspecified_content_type_action: str
+    max_size: int
+    size_exceeded_action: str
     errors_variable_name: str | None = None
     content_types: tuple[ValidateContentType, ...] = ()
+    content_type_map: ContentTypeMap | None = None
 
     @staticmethod
     def _message(req: PolicyRequest) -> tuple[bytes, str, str]:
@@ -2385,20 +2723,30 @@ class ValidateContent(PolicyNode):
         """
         if req.in_outbound:
             headers = req.response_headers if req.response_headers is not None else req.headers
-            content_type = headers.get("content-type") or req.response_media_type or ""
+            content_type = _header_value(headers, "content-type") or req.response_media_type or ""
             return req.response_body, content_type, "Response"
-        return req.body, req.headers.get("content-type") or "", "Request"
+        return req.body, _header_value(req.headers, "content-type"), "Request"
 
     def _size_failure(
         self, req: PolicyRequest, runtime: PolicyRuntime | None, *, body: bytes, noun: str
     ) -> ResponseSpec | None:
-        if self.max_size is None or len(body) <= self.max_size:
+        if len(body) <= self.max_size:
             return None
+        error_type = f"{noun}Body"
+        details = (
+            f"{noun}'s body is {len(body)} bytes long and it exceeds the configured limit of {self.max_size} bytes."
+        )
+        public = f"{noun}'s body is {len(body)} bytes long and it exceeds the limit of {self.max_size} bytes."
         return self._fail(
             req,
             runtime,
             action=self.size_exceeded_action,
-            message=f"{noun} body is larger than max-size ({self.max_size} bytes)",
+            name="",
+            error_type=error_type,
+            validation_rule="SizeLimit",
+            details=details,
+            public_message=public,
+            status_code=400 if not req.in_outbound else 502,
         )
 
     def _json_failure(
@@ -2406,6 +2754,9 @@ class ValidateContent(PolicyNode):
     ) -> ResponseSpec | None:
         if matched.validate_as != "json":
             return None
+        # Learn describes schema-based IncorrectMessage details, but this
+        # simulator deliberately defers schema selection/enforcement. The
+        # existing JSON well-formedness check therefore has no definition name.
         try:
             json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -2413,9 +2764,31 @@ class ValidateContent(PolicyNode):
                 req,
                 runtime,
                 action=matched.action,
-                message=f"Body is not valid JSON for content type {content_type}",
+                name=content_type,
+                error_type="ResponseBody" if req.in_outbound else "RequestBody",
+                validation_rule="IncorrectMessage",
+                details=f"Body of the {'response' if req.in_outbound else 'request'} is not valid JSON for content type "
+                f"{content_type}",
+                public_message=f"Body of the {'response' if req.in_outbound else 'request'} is not valid JSON for content type "
+                f"{content_type}",
             )
         return None
+
+    def _mapped_content_type(self, req: PolicyRequest, runtime: PolicyRuntime | None, content_type: str) -> str:
+        mapping = self.content_type_map
+        if mapping is None:
+            return content_type
+        incoming = content_type
+        for source, target, condition in mapping.types:
+            if source is not None and source.casefold() == incoming.casefold():
+                return target
+            if condition and bool(evaluate_apim_expression(condition, req, runtime)):
+                return target
+        if mapping.any_content_type_value:
+            return mapping.any_content_type_value
+        if not incoming and mapping.missing_content_type_value:
+            return mapping.missing_content_type_value
+        return incoming
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         """Validate the request (inbound) or response (outbound) body.
@@ -2432,18 +2805,30 @@ class ValidateContent(PolicyNode):
         if outcome is not None:
             return outcome
 
-        content_type = raw_content_type.split(";", 1)[0].strip().lower()
+        content_type = self._mapped_content_type(req, runtime, raw_content_type.split(";", 1)[0].strip()).lower()
         matched = next(
-            (item for item in self.content_types if item.content_type.lower() == content_type),
+            (
+                item
+                for item in self.content_types
+                if not item.content_type or item.content_type.casefold() == content_type
+            ),
             None,
         )
         if matched is None:
-            if content_type and self.unspecified_content_type_action != "ignore":
+            if self.unspecified_content_type_action != "ignore":
                 return self._fail(
                     req,
                     runtime,
                     action=self.unspecified_content_type_action,
-                    message=f"Content type {content_type} is not specified for validation",
+                    name=content_type,
+                    error_type="ResponseBody" if req.in_outbound else "RequestBody",
+                    validation_rule="Unspecified",
+                    details=f"Unspecified content type {content_type} is not allowed.",
+                    public_message=(
+                        _INTERNAL_ERROR_PUBLIC_MESSAGE
+                        if req.in_outbound
+                        else f"Unspecified content type {content_type} is not allowed."
+                    ),
                 )
             return None
         if matched.action == "ignore":
@@ -2462,12 +2847,25 @@ class ValidateContent(PolicyNode):
         runtime: PolicyRuntime | None,
         *,
         action: str,
-        message: str,
+        name: str,
+        error_type: str,
+        validation_rule: str,
+        details: str,
+        public_message: str,
+        status_code: int = 400,
     ) -> ResponseSpec | None:
         if action == "ignore":
             return None
         _record_validation_error(
-            req, runtime, policy="validate-content", errors_variable_name=self.errors_variable_name, message=message
+            req,
+            runtime,
+            policy="validate-content",
+            errors_variable_name=self.errors_variable_name,
+            name=name,
+            error_type=error_type,
+            validation_rule=validation_rule,
+            details=details,
+            action=action,
         )
         if action != "prevent":
             return None
@@ -2479,28 +2877,70 @@ class ValidateContent(PolicyNode):
                 body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             )
         return ResponseSpec(
-            status_code=400,
+            status_code=status_code,
             headers={"content-type": "text/plain"},
-            body=message.encode("utf-8"),
+            body=public_message.encode("utf-8"),
         )
 
 
-# Headers every HTTP client sends. validate-parameters must not reject these as
-# "unspecified", or it fails every request rather than catching a mistake.
-_ALWAYS_ALLOWED_HEADERS = frozenset({"host", "content-type", "content-length", "accept", "connection", "user-agent"})
+def _header_value(headers: dict[str, str], name: str) -> str:
+    wanted = name.casefold()
+    return next((value for key, value in headers.items() if key.casefold() == wanted), "")
 
 
 @dataclass(frozen=True)
 class ValidateParameters(PolicyNode):
-    specified_parameter_action: str = "prevent"
-    unspecified_parameter_action: str = "ignore"
+    specified_parameter_action: str
+    unspecified_parameter_action: str
     errors_variable_name: str | None = None
     headers_specified_action: str | None = None
     headers_unspecified_action: str | None = None
     query_specified_action: str | None = None
     query_unspecified_action: str | None = None
+    path_specified_action: str | None = None
+    overrides: tuple[tuple[str, str, str], ...] = ()
 
-    def _missing_required_failure(
+    def _action_for(
+        self,
+        *,
+        kind: str,
+        name: str,
+        specified: bool,
+        group_action: str | None,
+    ) -> str:
+        normalised = name.casefold() if kind == "header" else name
+        for override_kind, override_name, action in self.overrides:
+            if override_kind == kind and override_name == normalised:
+                return action
+        if group_action is not None:
+            return group_action
+        return self.specified_parameter_action if specified else self.unspecified_parameter_action
+
+    def _failure(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        kind: str,
+        name: str,
+        rule: str,
+        details: str,
+        action: str,
+    ) -> ResponseSpec | None:
+        if action == "ignore":
+            return None
+        error_type = {"header": "RequestHeader", "query": "QueryParameter", "path": "PathParameter"}[kind]
+        return self._fail(
+            req,
+            runtime,
+            action=action,
+            name=name,
+            error_type=error_type,
+            validation_rule=rule,
+            details=details,
+        )
+
+    def _check_kind(
         self,
         req: PolicyRequest,
         runtime: PolicyRuntime | None,
@@ -2509,97 +2949,80 @@ class ValidateParameters(PolicyNode):
         declared: list[Any],
         present: set[str],
         normalise: Any,
-        action: str,
+        specified_action: str | None,
+        unspecified_action: str | None,
     ) -> ResponseSpec | None:
-        """Refuse when a parameter the operation declares required is absent."""
-        if action == "ignore":
-            return None
+        declared_names = {normalise(param.name) for param in declared}
         for param in declared:
-            if param.required and normalise(param.name) not in present:
-                outcome = self._fail(
+            name = normalise(param.name)
+            if param.required and name not in present:
+                outcome = self._failure(
                     req,
                     runtime,
-                    action=action,
-                    message=f"Required {kind} parameter {param.name} is missing",
+                    kind=kind,
+                    name=param.name,
+                    rule="Required",
+                    details=f"Required {kind} parameter {param.name} is missing",
+                    action=self._action_for(kind=kind, name=param.name, specified=True, group_action=specified_action),
                 )
                 if outcome is not None:
                     return outcome
-        return None
-
-    def _unspecified_failure(
-        self,
-        req: PolicyRequest,
-        runtime: PolicyRuntime | None,
-        *,
-        kind: str,
-        declared_names: set[str],
-        present: set[str],
-        action: str,
-    ) -> ResponseSpec | None:
-        """Refuse parameters the operation never declared.
-
-        Headers every HTTP client sends are exempt: rejecting `host` or
-        `user-agent` would fail every request rather than catch a mistake.
-        """
-        if action == "ignore":
-            return None
-        for name in sorted(present):
-            if name in declared_names or (kind == "header" and name in _ALWAYS_ALLOWED_HEADERS):
-                continue
-            outcome = self._fail(
+        for name in sorted(present - declared_names):
+            outcome = self._failure(
                 req,
                 runtime,
-                action=action,
-                message=f"Unspecified {kind} parameter {name} is not allowed",
+                kind=kind,
+                name=name,
+                rule="Unspecified",
+                details=f"Unspecified {kind} parameter {name} is not allowed.",
+                action=self._action_for(kind=kind, name=name, specified=False, group_action=unspecified_action),
             )
             if outcome is not None:
                 return outcome
         return None
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        """Check headers and query parameters against the operation's contract."""
+        """Check headers, query, and path parameters against the operation contract."""
+        # Learn also validates parameter values against schema definitions;
+        # schema/value enforcement remains deferred in this simulator.
         operation = _operation_request_metadata(req, runtime)
         request_meta = getattr(operation, "request", None)
-
         checks = (
             (
                 "header",
                 list(getattr(request_meta, "headers", []) or []),
-                {name.lower() for name in req.headers},
-                lambda name: name.lower(),
-                self.headers_specified_action or self.specified_parameter_action,
-                self.headers_unspecified_action or self.unspecified_parameter_action,
+                {name.casefold() for name in req.headers},
+                str.casefold,
+                self.headers_specified_action,
+                self.headers_unspecified_action,
             ),
             (
                 "query",
                 list(getattr(request_meta, "query_parameters", []) or []),
                 set(req.query),
                 lambda name: name,
-                self.query_specified_action or self.specified_parameter_action,
-                self.query_unspecified_action or self.unspecified_parameter_action,
+                self.query_specified_action,
+                self.query_unspecified_action,
+            ),
+            (
+                "path",
+                list(getattr(operation, "template_parameters", []) or []),
+                set((req.variables.get("_matched_parameters") or {}).keys()),
+                lambda name: name,
+                self.path_specified_action,
+                None,
             ),
         )
-
         for kind, declared, present, normalise, specified_action, unspecified_action in checks:
-            outcome = self._missing_required_failure(
+            outcome = self._check_kind(
                 req,
                 runtime,
                 kind=kind,
                 declared=declared,
                 present=present,
                 normalise=normalise,
-                action=specified_action,
-            )
-            if outcome is not None:
-                return outcome
-
-            outcome = self._unspecified_failure(
-                req,
-                runtime,
-                kind=kind,
-                declared_names={normalise(param.name) for param in declared},
-                present=present,
-                action=unspecified_action,
+                specified_action=specified_action,
+                unspecified_action=unspecified_action,
             )
             if outcome is not None:
                 return outcome
@@ -2611,23 +3034,36 @@ class ValidateParameters(PolicyNode):
         runtime: PolicyRuntime | None,
         *,
         action: str,
-        message: str,
+        name: str,
+        error_type: str,
+        validation_rule: str,
+        details: str,
     ) -> ResponseSpec | None:
         _record_validation_error(
-            req, runtime, policy="validate-parameters", errors_variable_name=self.errors_variable_name, message=message
+            req,
+            runtime,
+            policy="validate-parameters",
+            errors_variable_name=self.errors_variable_name,
+            name=name,
+            error_type=error_type,
+            validation_rule=validation_rule,
+            details=details,
+            action=action,
         )
-        if action == "prevent":
+        if action != "prevent":
+            return None
+        if req.in_outbound:
             return ResponseSpec(
-                status_code=400,
+                status_code=502,
                 headers={"content-type": "text/plain"},
-                body=message.encode("utf-8"),
+                body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             )
-        return None
+        return ResponseSpec(status_code=400, headers={"content-type": "text/plain"}, body=details.encode("utf-8"))
 
 
 @dataclass(frozen=True)
 class ValidateStatusCode(PolicyNode):
-    unspecified_status_code_action: str = "prevent"
+    unspecified_status_code_action: str
     errors_variable_name: str | None = None
     status_codes: tuple[tuple[int, str], ...] = ()
 
@@ -2646,12 +3082,17 @@ class ValidateStatusCode(PolicyNode):
         action = dict(self.status_codes).get(status, self.unspecified_status_code_action)
         if action == "ignore":
             return None
+        details = f"Response status code {status} is not allowed."
         _record_validation_error(
             req,
             runtime,
             policy="validate-status-code",
             errors_variable_name=self.errors_variable_name,
-            message=f"Response status code {status} is not specified for this operation",
+            name=str(status),
+            error_type="StatusCode",
+            validation_rule="Unspecified",
+            details=details,
+            action=action,
         )
         if action != "prevent":
             return None
@@ -2662,6 +3103,94 @@ class ValidateStatusCode(PolicyNode):
             body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
             media_type="text/plain",
         )
+
+
+@dataclass(frozen=True)
+class ValidateHeaders(PolicyNode):
+    specified_header_action: str
+    unspecified_header_action: str
+    errors_variable_name: str | None = None
+    overrides: tuple[tuple[str, str], ...] = ()
+
+    def _action_for(self, name: str, *, specified: bool) -> str:
+        normalised = name.casefold()
+        for override_name, action in self.overrides:
+            if override_name == normalised:
+                return action
+        return self.specified_header_action if specified else self.unspecified_header_action
+
+    def _fail(
+        self,
+        req: PolicyRequest,
+        runtime: PolicyRuntime | None,
+        *,
+        name: str,
+        action: str,
+        rule: str,
+        details: str,
+    ) -> ResponseSpec | None:
+        if action == "ignore":
+            return None
+        _record_validation_error(
+            req,
+            runtime,
+            policy="validate-headers",
+            errors_variable_name=self.errors_variable_name,
+            name=name,
+            error_type="ResponseHeader",
+            validation_rule=rule,
+            details=details,
+            action=action,
+        )
+        if action != "prevent":
+            return None
+        return ResponseSpec(
+            status_code=502,
+            headers={"content-type": "text/plain"},
+            body=_INTERNAL_ERROR_PUBLIC_MESSAGE.encode("utf-8"),
+            media_type="text/plain",
+        )
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        if not req.in_outbound:
+            return None
+        # Learn validates response-header values against schema definitions;
+        # this implementation covers presence and unspecified names only.
+        operation = _operation_request_metadata(req, runtime)
+        responses = list(getattr(operation, "responses", []) or [])
+        response = next(
+            (item for item in responses if item.status_code == req.response_status_code),
+            None,
+        )
+        declared = list(getattr(response, "headers", []) or [])
+        declared_names = {header.name.casefold() for header in declared}
+        headers = req.response_headers or {}
+        for header in declared:
+            if header.required and header.name.casefold() not in {name.casefold() for name in headers}:
+                outcome = self._fail(
+                    req,
+                    runtime,
+                    name=header.name,
+                    action=self._action_for(header.name, specified=True),
+                    rule="Required",
+                    details=f"Required response header {header.name} is missing.",
+                )
+                if outcome is not None:
+                    return outcome
+        for name in sorted(headers):
+            if name.casefold() in declared_names:
+                continue
+            outcome = self._fail(
+                req,
+                runtime,
+                name=name,
+                action=self._action_for(name, specified=False),
+                rule="Unspecified",
+                details=f"Unspecified header {name} is not allowed.",
+            )
+            if outcome is not None:
+                return outcome
+        return None
 
 
 @dataclass(frozen=True)
@@ -3314,6 +3843,9 @@ class SendRequest(PolicyNode):
     body: str | None = None
     authentication_certificate_thumbprint: str | None = None
     authentication_managed_identity_resource: str | None = None
+    authentication_managed_identity_client_id: str | None = None
+    authentication_managed_identity_output_token_variable_name: str | None = None
+    authentication_managed_identity_ignore_error: bool = False
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         raise RuntimeError("send-request must be executed through apply_async")
@@ -3328,9 +3860,11 @@ class SendRequest(PolicyNode):
         are applied on top.
         """
         mode = (render_policy_value(self.mode, req, runtime) or "new").lower()
+        if mode not in {"new", "copy"}:
+            raise HTTPException(status_code=500, detail="send-request mode must be new or copy")
         copying = mode == "copy"
 
-        url = str(req.variables.get("original_request_url") or "")
+        url = str(req.variables.get("original_request_url") or "") if copying else ""
         if self.url is not None:
             url = render_policy_value(self.url, req, runtime)
         if not url:
@@ -3346,7 +3880,8 @@ class SendRequest(PolicyNode):
             query=dict(req.query),
             headers=dict(req.headers) if copying else {},
             variables=req.variables,
-            body=req.body if copying else b"",
+            body=req.body if copying and not req.in_outbound else b"",
+            section=req.section,
         )
         for header in self.headers:
             header.apply(temp_req, runtime)
@@ -3359,27 +3894,43 @@ class SendRequest(PolicyNode):
     def _apply_callout_authentication(
         self, temp_req: PolicyRequest, req: PolicyRequest, runtime: PolicyRuntime | None
     ) -> None:
-        """Signal managed identity or client certificate to the callout target.
-
-        The simulator has no real credential to present, so it says which one
-        would have been used rather than presenting one.
-        """
+        """Apply local adaptations for callout authentication policies."""
         if self.authentication_managed_identity_resource is not None:
-            temp_req.headers["x-apim-managed-identity"] = "true"
-            temp_req.headers["x-apim-managed-identity-resource"] = render_policy_value(
-                self.authentication_managed_identity_resource, req, runtime
-            )
+            resource = render_policy_value(self.authentication_managed_identity_resource, req, runtime)
+            if not resource:
+                if self.authentication_managed_identity_output_token_variable_name:
+                    req.variables[self.authentication_managed_identity_output_token_variable_name] = None
+                if self.authentication_managed_identity_ignore_error:
+                    return
+                raise HTTPException(status_code=500, detail="send-request managed identity token acquisition failed")
+            token = issue_local_managed_identity_token(resource, self.authentication_managed_identity_client_id)
+            temp_req.headers["authorization"] = f"Bearer {token}"
+            if self.authentication_managed_identity_output_token_variable_name:
+                req.variables[self.authentication_managed_identity_output_token_variable_name] = token
+                _record_variable_write(
+                    runtime,
+                    self.authentication_managed_identity_output_token_variable_name,
+                    token,
+                    "send-request",
+                )
         if self.authentication_certificate_thumbprint is not None:
             temp_req.headers["x-apim-authentication-certificate-thumbprint"] = render_policy_value(
                 self.authentication_certificate_thumbprint, req, runtime
             )
 
+    def _response_variable_name(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> str:
+        name = render_policy_value(self.response_variable_name, req, runtime).strip()
+        if not name:
+            raise HTTPException(status_code=500, detail="send-request response-variable-name evaluated to empty")
+        return name
+
     def _record_ignored_error(
         self, req: PolicyRequest, runtime: PolicyRuntime | None, *, url: str, method: str, exc: Exception
     ) -> None:
         """Record a failed callout the policy asked to tolerate."""
-        req.variables[self.response_variable_name] = None
-        _record_variable_write(runtime, self.response_variable_name, None, "send-request")
+        response_variable_name = self._response_variable_name(req, runtime)
+        req.variables[response_variable_name] = None
+        _record_variable_write(runtime, response_variable_name, None, "send-request")
         _record_send_request(
             runtime,
             {
@@ -3387,7 +3938,7 @@ class SendRequest(PolicyNode):
                 "method": method,
                 "status": "ignored-error",
                 "error": str(exc),
-                "response_variable_name": self.response_variable_name,
+                "response_variable_name": response_variable_name,
             },
         )
 
@@ -3415,15 +3966,16 @@ class SendRequest(PolicyNode):
             content=response.content,
             reason=response.reason_phrase,
         )
-        req.variables[self.response_variable_name] = callout
-        _record_variable_write(runtime, self.response_variable_name, callout, "send-request")
+        response_variable_name = self._response_variable_name(req, runtime)
+        req.variables[response_variable_name] = callout
+        _record_variable_write(runtime, response_variable_name, callout, "send-request")
         _record_send_request(
             runtime,
             {
                 "url": url,
                 "method": method,
                 "status_code": response.status_code,
-                "response_variable_name": self.response_variable_name,
+                "response_variable_name": response_variable_name,
             },
         )
         return None
@@ -3523,19 +4075,35 @@ def _policy_value_or_empty(el: ElementTree.Element) -> str:
     return _text_or_empty(el)
 
 
+def _policy_values(el: ElementTree.Element) -> tuple[str, ...]:
+    values = tuple(_text_or_empty(item) for item in el.findall("value"))
+    return values or (_policy_value_or_empty(el),)
+
+
+def _parse_exists_action(el: ElementTree.Element, policy_name: str) -> str:
+    action = el.attrib.get("exists-action", "override").strip()
+    if not is_apim_expression(action) and action.lower() not in _SET_HEADER_ACTIONS:
+        # Learn lists the allowed values but not the configuration-error
+        # status or message for an invalid value.
+        raise HTTPException(status_code=500, detail=f"{policy_name} unsupported exists-action: {action}")
+    return action
+
+
 def _parse_set_header(el: ElementTree.Element) -> SetHeader:
     name = el.attrib.get("name")
     if not name:
         raise HTTPException(status_code=500, detail="set-header missing name")
-    exists_action = el.attrib.get("exists-action", "override")
-    value = _policy_value_or_empty(el)
-    return SetHeader(name=name.lower(), value=value, exists_action=exists_action)
+    exists_action = _parse_exists_action(el, "set-header")
+    values = _policy_values(el)
+    return SetHeader(name=name.strip(), value=values[0], exists_action=exists_action, values=values)
 
 
 def _parse_set_variable(el: ElementTree.Element) -> SetVariable:
     name = (el.attrib.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=500, detail="set-variable missing name")
+    if "value" not in el.attrib:
+        raise HTTPException(status_code=500, detail="set-variable requires value")
     return SetVariable(name=name, value=_policy_value_or_empty(el))
 
 
@@ -3543,11 +4111,18 @@ def _parse_set_query_parameter(el: ElementTree.Element) -> SetQueryParameter:
     name = (el.attrib.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=500, detail="set-query-parameter missing name")
-    exists_action = el.attrib.get("exists-action", "override")
-    return SetQueryParameter(name=name, value=_policy_value_or_empty(el), exists_action=exists_action)
+    exists_action = _parse_exists_action(el, "set-query-parameter")
+    values = _policy_values(el)
+    return SetQueryParameter(name=name, value=values[0], exists_action=exists_action, values=values)
 
 
 def _parse_set_body(el: ElementTree.Element) -> SetBody:
+    template = el.attrib.get("template")
+    if template:
+        raise HTTPException(status_code=500, detail=f"set-body template {template} is unsupported")
+    for attribute in ("xsi-nil", "parse-date"):
+        if attribute in el.attrib:
+            raise HTTPException(status_code=500, detail=f"set-body {attribute} is unsupported")
     return SetBody(value=_policy_value_or_empty(el))
 
 
@@ -3558,21 +4133,66 @@ def _parse_rewrite_uri(el: ElementTree.Element) -> RewriteUri:
     return RewriteUri(template=template)
 
 
-def _parse_return_response(el: ElementTree.Element) -> ReturnResponse:
-    status_el = el.find("set-status")
-    if status_el is None:
-        raise HTTPException(status_code=500, detail="return-response missing set-status")
-    code = int(status_el.attrib.get("code") or "200")
-    reason = status_el.attrib.get("reason")
-    headers = [_parse_set_header(h) for h in el.findall("set-header")]
-    body_el = el.find("body")
-    set_body_el = el.find("set-body")
-    body = (
-        _parse_set_body(set_body_el).value
-        if set_body_el is not None
-        else (_text_or_empty(body_el) if body_el is not None else None)
+def _parse_authentication_basic(el: ElementTree.Element) -> AuthenticationBasic:
+    return AuthenticationBasic(
+        username=_required_attr(el, "username", "authentication-basic"),
+        password=_required_attr(el, "password", "authentication-basic"),
     )
-    return ReturnResponse(status_code=code, reason=reason, headers=headers, body=body)
+
+
+def _parse_authentication_managed_identity(el: ElementTree.Element) -> AuthenticationManagedIdentity:
+    resource = _required_attr(el, "resource", "authentication-managed-identity")
+    client_id = _static_policy_name(el, "client-id", "authentication-managed-identity")
+    output_name = _static_policy_name(el, "output-token-variable-name", "authentication-managed-identity")
+    ignore_error = str(el.attrib.get("ignore-error") or "false").lower()
+    if ignore_error not in {"true", "false"}:
+        raise HTTPException(
+            status_code=500, detail="authentication-managed-identity ignore-error must be true or false"
+        )
+    return AuthenticationManagedIdentity(
+        resource=resource,
+        client_id=client_id,
+        output_token_variable_name=output_name,
+        ignore_error=ignore_error == "true",
+    )
+
+
+def _parse_authentication_certificate(el: ElementTree.Element) -> AuthenticationCertificate:
+    thumbprint = el.attrib.get("thumbprint")
+    certificate_id = el.attrib.get("certificate-id")
+    body = el.attrib.get("body")
+    if not thumbprint and not certificate_id and not body:
+        raise HTTPException(
+            status_code=500,
+            detail="authentication-certificate requires thumbprint, certificate-id, or body",
+        )
+    return AuthenticationCertificate(
+        thumbprint=thumbprint,
+        certificate_id=certificate_id,
+        body=body,
+        password=el.attrib.get("password"),
+    )
+
+
+def _parse_return_response(el: ElementTree.Element) -> ReturnResponse:
+    response_variable_name = _static_policy_name(el, "response-variable-name", "return-response")
+    actions: list[SetHeader | SetBody | _ReturnResponseStatus] = []
+    for child in el:
+        if child.tag == "set-status":
+            code = child.attrib.get("code")
+            if not code:
+                raise HTTPException(status_code=500, detail="set-status requires code")
+            actions.append(_ReturnResponseStatus(code=code, reason=child.attrib.get("reason")))
+        elif child.tag == "set-header":
+            actions.append(_parse_set_header(child))
+        elif child.tag == "set-body":
+            actions.append(_parse_set_body(child))
+        elif child.tag == "body":
+            # Kept for existing simulator policies; APIM documents set-body.
+            actions.append(SetBody(value=_text_or_empty(child)))
+        else:
+            raise HTTPException(status_code=500, detail=f"return-response unsupported element: {child.tag}")
+    return ReturnResponse(response_variable_name=response_variable_name, actions=tuple(actions))
 
 
 def _parse_mock_response(el: ElementTree.Element) -> MockResponse:
@@ -3590,7 +4210,7 @@ def _required_attr(el: ElementTree.Element, name: str, policy_name: str) -> str:
 
 def _parse_check_header(el: ElementTree.Element) -> CheckHeader:
     _reject_unknown_attributes(
-        el, {"name", "failed-check-httpcode", "failed-check-error-message", "ignore-case"}, "check-header"
+        el, {"id", "name", "failed-check-httpcode", "failed-check-error-message", "ignore-case"}, "check-header"
     )
     name = _required_attr(el, "name", "check-header").strip()
     status_code = _required_attr(el, "failed-check-httpcode", "check-header").strip()
@@ -3647,7 +4267,7 @@ def _parse_cors(el: ElementTree.Element) -> Cors:
 
 
 def _parse_ip_filter(el: ElementTree.Element) -> IpFilter:
-    _reject_unknown_attributes(el, {"action"}, "ip-filter")
+    _reject_unknown_attributes(el, {"id", "action"}, "ip-filter")
     action = _required_attr(el, "action", "ip-filter").strip()
     if not is_apim_expression(action) and action.lower() not in {"allow", "forbid"}:
         raise HTTPException(status_code=500, detail="ip-filter action must be allow or forbid")
@@ -3988,9 +4608,22 @@ def _parse_llm_emit_token_metric(el: ElementTree.Element) -> LlmEmitTokenMetric:
         name = (child.attrib.get("name") or "").strip()
         if not name:
             raise HTTPException(status_code=500, detail="llm-emit-token-metric dimension missing name")
+        if (
+            child.attrib.get("value") is None
+            and not is_apim_expression(name)
+            and name.lower() not in _DEFAULT_DIMENSION_SOURCES
+        ):
+            # The reference requires a value for non-default dimensions but
+            # does not define the configuration error text.
+            raise HTTPException(status_code=500, detail=f"Dimension value is required for {name}")
         dimensions.append((name, child.attrib.get("value")))
+    if len(dimensions) > 5:
+        # Learn documents the limit but not the policy-configuration error.
+        # It does not exempt dimensions whose values come from APIM defaults,
+        # so every configured dimension child counts toward the five.
+        raise HTTPException(status_code=500, detail="llm-emit-token-metric allows at most 5 dimensions")
     return LlmEmitTokenMetric(
-        namespace=(el.attrib.get("namespace") or "llm").strip() or "llm",
+        namespace=(el.attrib.get("namespace") or "API Management").strip() or "API Management",
         dimensions=tuple(dimensions),
     )
 
@@ -4004,80 +4637,213 @@ def _parse_emit_metric(el: ElementTree.Element) -> EmitMetric:
         dim_name = (child.attrib.get("name") or "").strip()
         if not dim_name:
             raise HTTPException(status_code=500, detail="emit-metric dimension missing name")
+        if (
+            child.attrib.get("value") is None
+            and not is_apim_expression(dim_name)
+            and dim_name.lower() not in _DEFAULT_DIMENSION_SOURCES
+        ):
+            # The reference requires a value for non-default dimensions but
+            # does not define the configuration error text.
+            raise HTTPException(status_code=500, detail=f"Dimension value is required for {dim_name}")
         dimensions.append((dim_name, child.attrib.get("value")))
     if not dimensions:
         raise HTTPException(status_code=500, detail="emit-metric requires at least one dimension")
+    if len(dimensions) > 5:
+        # Learn documents the limit but not the policy-configuration error.
+        # It does not exempt dimensions whose values come from APIM defaults,
+        # so every configured dimension child counts toward the five.
+        raise HTTPException(status_code=500, detail="emit-metric allows at most 5 dimensions")
     return EmitMetric(
         name=name,
-        namespace=(el.attrib.get("namespace") or "apim").strip() or "apim",
+        namespace=(el.attrib.get("namespace") or "API Management").strip() or "API Management",
         value=el.attrib.get("value"),
         dimensions=tuple(dimensions),
     )
 
 
 def _parse_validate_content(el: ElementTree.Element) -> ValidateContent:
-    max_size_raw = (el.attrib.get("max-size") or "").strip()
+    _reject_unknown_attributes(
+        el,
+        {"unspecified-content-type-action", "max-size", "size-exceeded-action", "errors-variable-name"},
+        "validate-content",
+    )
+    max_size_raw = _required_attr(el, "max-size", "validate-content").strip()
     content_types: list[ValidateContentType] = []
     for child in el.findall("content"):
+        _reject_unknown_attributes(
+            child,
+            {
+                "type",
+                "validate-as",
+                "schema-id",
+                "schema-ref",
+                "action",
+                "allow-additional-properties",
+                "case-insensitive-property-names",
+            },
+            "validate-content content",
+        )
         content_type = (child.attrib.get("type") or "").strip()
-        if not content_type:
-            raise HTTPException(status_code=500, detail="validate-content content element missing type")
         validate_as = (child.attrib.get("validate-as") or "json").strip().lower()
         if validate_as != "json":
             raise HTTPException(status_code=500, detail=f"Unsupported validate-as: {validate_as}")
+        unsupported = (
+            "schema-id",
+            "schema-ref",
+            "allow-additional-properties",
+            "case-insensitive-property-names",
+        )
+        for attribute in unsupported:
+            if attribute in child.attrib:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"validate-content does not implement {attribute}",
+                )
         content_types.append(
             ValidateContentType(
-                content_type=content_type,
+                content_type=content_type or None,
                 validate_as=validate_as,
                 action=_validation_action(child.attrib.get("action"), default="prevent"),
             )
         )
+    map_el = el.find("content-type-map")
+    content_type_map = None
+    if map_el is not None:
+        _reject_unknown_attributes(
+            map_el,
+            {"any-content-type-value", "missing-content-type-value"},
+            "validate-content content-type-map",
+        )
+        mappings: list[tuple[str | None, str, str | None]] = []
+        for child in map_el.findall("type"):
+            _reject_unknown_attributes(child, {"from", "when", "to"}, "validate-content content-type-map type")
+            source = (child.attrib.get("from") or "").strip() or None
+            condition = (child.attrib.get("when") or "").strip() or None
+            target = (child.attrib.get("to") or "").strip()
+            if (source is None) == (condition is None) or not target:
+                raise HTTPException(
+                    status_code=500,
+                    detail="validate-content content-type-map type requires exactly one of from or when and to",
+                )
+            mappings.append((source, target, condition))
+        content_type_map = ContentTypeMap(
+            any_content_type_value=(map_el.attrib.get("any-content-type-value") or "").strip() or None,
+            missing_content_type_value=(map_el.attrib.get("missing-content-type-value") or "").strip() or None,
+            types=tuple(mappings),
+        )
     return ValidateContent(
         unspecified_content_type_action=_validation_action(
-            el.attrib.get("unspecified-content-type-action"), default="ignore"
+            _required_attr(el, "unspecified-content-type-action", "validate-content"), default="ignore"
         ),
         max_size=int(max_size_raw) if max_size_raw else None,
-        size_exceeded_action=_validation_action(el.attrib.get("size-exceeded-action"), default="prevent"),
+        size_exceeded_action=_validation_action(
+            _required_attr(el, "size-exceeded-action", "validate-content"), default="ignore"
+        ),
         errors_variable_name=el.attrib.get("errors-variable-name"),
         content_types=tuple(content_types),
+        content_type_map=content_type_map,
     )
 
 
 def _parse_validate_parameters(el: ElementTree.Element) -> ValidateParameters:
+    _reject_unknown_attributes(
+        el,
+        {"specified-parameter-action", "unspecified-parameter-action", "errors-variable-name"},
+        "validate-parameters",
+    )
     headers_el = el.find("headers")
     query_el = el.find("query")
+    path_el = el.find("path")
 
     def _child_action(child: ElementTree.Element | None, attr: str) -> str | None:
         if child is None or child.attrib.get(attr) is None:
             return None
         return _validation_action(child.attrib.get(attr), default="ignore")
 
+    def _overrides(child: ElementTree.Element | None, kind: str) -> list[tuple[str, str, str]]:
+        if child is None:
+            return []
+        allowed = {"specified-parameter-action", "unspecified-parameter-action"}
+        if kind == "path":
+            allowed = {"specified-parameter-action"}
+        _reject_unknown_attributes(child, allowed, f"validate-parameters {kind}")
+        overrides = []
+        for parameter in child.findall("parameter"):
+            _reject_unknown_attributes(parameter, {"name", "action"}, f"validate-parameters {kind} parameter")
+            name = _required_attr(parameter, "name", f"validate-parameters {kind} parameter").strip()
+            action = _validation_action(
+                _required_attr(parameter, "action", f"validate-parameters {kind} parameter"), default="ignore"
+            )
+            overrides.append((kind, name.casefold() if kind == "header" else name, action))
+        return overrides
+
     return ValidateParameters(
-        specified_parameter_action=_validation_action(el.attrib.get("specified-parameter-action"), default="prevent"),
+        specified_parameter_action=_validation_action(
+            _required_attr(el, "specified-parameter-action", "validate-parameters"), default="ignore"
+        ),
         unspecified_parameter_action=_validation_action(
-            el.attrib.get("unspecified-parameter-action"), default="ignore"
+            _required_attr(el, "unspecified-parameter-action", "validate-parameters"), default="ignore"
         ),
         errors_variable_name=el.attrib.get("errors-variable-name"),
         headers_specified_action=_child_action(headers_el, "specified-parameter-action"),
         headers_unspecified_action=_child_action(headers_el, "unspecified-parameter-action"),
         query_specified_action=_child_action(query_el, "specified-parameter-action"),
         query_unspecified_action=_child_action(query_el, "unspecified-parameter-action"),
+        path_specified_action=_child_action(path_el, "specified-parameter-action"),
+        overrides=tuple(_overrides(headers_el, "header") + _overrides(query_el, "query") + _overrides(path_el, "path")),
     )
 
 
 def _parse_validate_status_code(el: ElementTree.Element) -> ValidateStatusCode:
+    _reject_unknown_attributes(
+        el,
+        {"unspecified-status-code-action", "errors-variable-name"},
+        "validate-status-code",
+    )
     status_codes: list[tuple[int, str]] = []
     for child in el.findall("status-code"):
+        _reject_unknown_attributes(child, {"code", "action"}, "validate-status-code status-code")
         code_raw = (child.attrib.get("code") or "").strip()
         if not code_raw:
             raise HTTPException(status_code=500, detail="validate-status-code status-code element missing code")
-        status_codes.append((int(code_raw), _validation_action(child.attrib.get("action"), default="ignore")))
+        status_codes.append(
+            (
+                int(code_raw),
+                _validation_action(
+                    _required_attr(child, "action", "validate-status-code status-code"), default="ignore"
+                ),
+            )
+        )
     return ValidateStatusCode(
         unspecified_status_code_action=_validation_action(
-            el.attrib.get("unspecified-status-code-action"), default="prevent"
+            _required_attr(el, "unspecified-status-code-action", "validate-status-code"), default="ignore"
         ),
         errors_variable_name=el.attrib.get("errors-variable-name"),
         status_codes=tuple(status_codes),
+    )
+
+
+def _parse_validate_headers(el: ElementTree.Element) -> ValidateHeaders:
+    _reject_unknown_attributes(
+        el,
+        {"specified-header-action", "unspecified-header-action", "errors-variable-name"},
+        "validate-headers",
+    )
+    overrides: list[tuple[str, str]] = []
+    for child in el.findall("header"):
+        _reject_unknown_attributes(child, {"name", "action"}, "validate-headers header")
+        name = _required_attr(child, "name", "validate-headers header").strip()
+        action = _validation_action(_required_attr(child, "action", "validate-headers header"), default="ignore")
+        overrides.append((name.casefold(), action))
+    return ValidateHeaders(
+        specified_header_action=_validation_action(
+            _required_attr(el, "specified-header-action", "validate-headers"), default="ignore"
+        ),
+        unspecified_header_action=_validation_action(
+            _required_attr(el, "unspecified-header-action", "validate-headers"), default="ignore"
+        ),
+        errors_variable_name=el.attrib.get("errors-variable-name"),
+        overrides=tuple(overrides),
     )
 
 
@@ -4267,6 +5033,12 @@ def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
 
 
 def _parse_set_backend_service(el: ElementTree.Element) -> SetBackendService:
+    service_fabric = sorted(name for name in el.attrib if name.startswith("sf-"))
+    if service_fabric:
+        raise HTTPException(
+            status_code=500,
+            detail=f"set-backend-service Service Fabric attributes are unsupported: {service_fabric[0]}",
+        )
     base_url = el.attrib.get("base-url")
     backend_id = el.attrib.get("backend-id")
     if not base_url and not backend_id:
@@ -4290,14 +5062,41 @@ def _parse_forward_request(el: ElementTree.Element) -> ForwardRequest:
     )
 
 
+def _required_send_request_child(el: ElementTree.Element, tag: str) -> None:
+    child = el.find(tag)
+    if child is None or not _text_or_empty(child):
+        raise HTTPException(status_code=500, detail="send-request mode=new requires set-url and set-method")
+
+
+def _validate_send_request_shape(el: ElementTree.Element, mode: str) -> None:
+    if not is_apim_expression(mode) and mode.lower() not in {"new", "copy"}:
+        raise HTTPException(status_code=500, detail="send-request mode must be new or copy")
+    if not is_apim_expression(mode) and mode.lower() == "new":
+        _required_send_request_child(el, "set-url")
+        _required_send_request_child(el, "set-method")
+    if el.find("proxy") is not None:
+        # Learn specifies that proxy routes the callout but not how a shared
+        # client should apply per-policy proxy credentials; reject rather than
+        # silently dropping the documented child.
+        raise HTTPException(status_code=500, detail="send-request proxy is unsupported by the simulator")
+    auth_cert_el = el.find("authentication-certificate")
+    if auth_cert_el is not None and not auth_cert_el.attrib.get("thumbprint"):
+        raise HTTPException(status_code=500, detail="send-request authentication-certificate requires thumbprint")
+    auth_mi_el = el.find("authentication-managed-identity")
+    if auth_mi_el is not None and not auth_mi_el.attrib.get("resource"):
+        raise HTTPException(status_code=500, detail="send-request authentication-managed-identity requires resource")
+
+
 def _parse_send_request(el: ElementTree.Element) -> SendRequest:
     response_variable_name = (el.attrib.get("response-variable-name") or "").strip()
     if not response_variable_name:
         raise HTTPException(status_code=500, detail="send-request missing response-variable-name")
+    mode = str(el.attrib.get("mode") or "new").strip()
+    _validate_send_request_shape(el, mode)
     auth_cert_el = el.find("authentication-certificate")
     auth_mi_el = el.find("authentication-managed-identity")
     return SendRequest(
-        mode=str(el.attrib.get("mode") or "new"),
+        mode=mode,
         response_variable_name=response_variable_name,
         timeout=el.attrib.get("timeout"),
         ignore_error=str(el.attrib.get("ignore-error") or "false").lower() == "true",
@@ -4314,6 +5113,23 @@ def _parse_send_request(el: ElementTree.Element) -> SendRequest:
             str(auth_mi_el.attrib.get("resource"))
             if auth_mi_el is not None and auth_mi_el.attrib.get("resource")
             else None
+        ),
+        authentication_managed_identity_client_id=(
+            _static_policy_name(auth_mi_el, "client-id", "send-request authentication-managed-identity")
+            if auth_mi_el is not None
+            else None
+        ),
+        authentication_managed_identity_output_token_variable_name=(
+            _static_policy_name(
+                auth_mi_el,
+                "output-token-variable-name",
+                "send-request authentication-managed-identity",
+            )
+            if auth_mi_el is not None
+            else None
+        ),
+        authentication_managed_identity_ignore_error=(
+            str(auth_mi_el.attrib.get("ignore-error") or "false").lower() == "true" if auth_mi_el is not None else False
         ),
     )
 
@@ -4341,9 +5157,16 @@ def _parse_choose(
     policy_fragments: dict[str, str],
     section_name: str,
     seen_fragments: set[str],
+    path: str,
+    path_component: str,
+    in_fragment: bool,
 ) -> Choose:
+    when_elements = el.findall("when")
+    if not when_elements:
+        raise HTTPException(status_code=500, detail="choose requires at least one when")
     branches: list[tuple[Condition, list[PolicyNode]]] = []
-    for when in el.findall("when"):
+    choose_path = path or path_component
+    for index, when in enumerate(when_elements, start=1):
         cond = parse_condition(when.attrib.get("condition"))
         steps = _parse_children(
             list(when),
@@ -4351,6 +5174,8 @@ def _parse_choose(
             section_name=section_name,
             seen_fragments=set(seen_fragments),
             allow_base=False,
+            path_prefix=f"{choose_path}\\when[{index}]",
+            in_fragment=in_fragment,
         )
         branches.append((cond, steps))
     otherwise_el = el.find("otherwise")
@@ -4361,6 +5186,8 @@ def _parse_choose(
             section_name=section_name,
             seen_fragments=set(seen_fragments),
             allow_base=False,
+            path_prefix=f"{choose_path}\\otherwise[1]",
+            in_fragment=in_fragment,
         )
         if otherwise_el is not None
         else []
@@ -4377,10 +5204,11 @@ def _fragment_elements(xml: str, *, section_name: str) -> list[ElementTree.Eleme
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=500, detail="Invalid policy fragment XML") from exc
 
-    if root.tag == "policies":
-        section = root.find(section_name)
-        return list(section) if section is not None else []
+    if root.tag == "policies" or root.tag in {"inbound", "backend", "outbound", "on-error"}:
+        raise HTTPException(status_code=500, detail="policy fragment cannot contain policy sections")
     if root.tag == "fragment":
+        if any(child.tag in {"inbound", "backend", "outbound", "on-error"} for child in root):
+            raise HTTPException(status_code=500, detail="policy fragment cannot contain policy sections")
         return list(root)
     return [root]
 
@@ -4392,44 +5220,77 @@ def _parse_children(
     section_name: str,
     seen_fragments: set[str],
     allow_base: bool = True,
+    path_prefix: str = "",
+    in_fragment: bool = False,
 ) -> list[PolicyNode]:
     out: list[PolicyNode] = []
+    occurrences: dict[str, int] = {}
     for child in children:
+        occurrences[child.tag] = occurrences.get(child.tag, 0) + 1
         # APIM's base marker controls the containing section; it is not a
         # policy statement that can be deferred inside choose branches.
         if child.tag == "base" and not allow_base:
             raise HTTPException(status_code=500, detail="base element is only allowed directly inside a policy section")
+        if in_fragment and child.tag in {"base", "include-fragment"}:
+            detail = "base" if child.tag == "base" else "another fragment"
+            raise HTTPException(status_code=500, detail=f"policy fragment cannot contain {detail}")
         if child.tag == "include-fragment":
-            fragment_id = (
-                child.attrib.get("fragment-id") or child.attrib.get("name") or child.attrib.get("id") or ""
-            ).strip()
-            if not fragment_id:
-                raise HTTPException(status_code=500, detail="include-fragment missing fragment-id")
-            if fragment_id in seen_fragments:
-                raise HTTPException(status_code=500, detail=f"Circular policy fragment include: {fragment_id}")
-            fragment_xml = policy_fragments.get(fragment_id)
-            if fragment_xml is None:
-                raise HTTPException(status_code=500, detail=f"Unknown policy fragment: {fragment_id}")
-            fragment_children = _fragment_elements(fragment_xml, section_name=section_name)
             out.extend(
-                _parse_children(
-                    fragment_children,
+                _parse_included_fragment(
+                    child,
                     policy_fragments=policy_fragments,
                     section_name=section_name,
-                    seen_fragments=seen_fragments | {fragment_id},
+                    seen_fragments=seen_fragments,
                     allow_base=allow_base,
+                    path_prefix=path_prefix,
                 )
             )
             continue
+        component = f"{child.tag}[{occurrences[child.tag]}]"
+        path = f"{path_prefix}\\{component}" if path_prefix else ""
         out.append(
             _parse_node(
                 child,
                 policy_fragments=policy_fragments,
                 section_name=section_name,
                 seen_fragments=seen_fragments,
+                path=path,
+                path_component=component,
+                in_fragment=in_fragment,
             )
         )
     return out
+
+
+def _parse_included_fragment(
+    child: ElementTree.Element,
+    *,
+    policy_fragments: dict[str, str],
+    section_name: str,
+    seen_fragments: set[str],
+    allow_base: bool,
+    path_prefix: str,
+) -> list[PolicyNode]:
+    if not (child.attrib.get("fragment-id") or "").strip():
+        raise HTTPException(status_code=500, detail="include-fragment requires fragment-id")
+    _reject_unknown_attributes(child, {"fragment-id"}, "include-fragment")
+    fragment_id = (child.attrib.get("fragment-id") or "").strip()
+    if is_apim_expression(fragment_id):
+        raise HTTPException(status_code=500, detail="include-fragment fragment-id does not allow expressions")
+    if fragment_id in seen_fragments:
+        raise HTTPException(status_code=500, detail=f"Circular policy fragment include: {fragment_id}")
+    fragment_xml = policy_fragments.get(fragment_id)
+    if fragment_xml is None:
+        raise HTTPException(status_code=500, detail=f"Unknown policy fragment: {fragment_id}")
+    return _parse_children(
+        _fragment_elements(fragment_xml, section_name=section_name),
+        policy_fragments=policy_fragments,
+        section_name=section_name,
+        seen_fragments=seen_fragments | {fragment_id},
+        allow_base=allow_base,
+        path_prefix=path_prefix,
+        in_fragment=True,
+    )
 
 
 # Policy elements whose parser needs nothing but the element itself. Some Azure
@@ -4437,6 +5298,9 @@ def _parse_children(
 # `azure-openai-*`); both map to the same parser rather than to two nodes.
 _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "set-header": _parse_set_header,
+    "authentication-basic": _parse_authentication_basic,
+    "authentication-managed-identity": _parse_authentication_managed_identity,
+    "authentication-certificate": _parse_authentication_certificate,
     "set-variable": _parse_set_variable,
     "set-query-parameter": _parse_set_query_parameter,
     "set-body": _parse_set_body,
@@ -4455,6 +5319,7 @@ _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "emit-metric": _parse_emit_metric,
     "validate-content": _parse_validate_content,
     "validate-parameters": _parse_validate_parameters,
+    "validate-headers": _parse_validate_headers,
     "validate-status-code": _parse_validate_status_code,
     "cache-lookup": _parse_cache_lookup,
     "cache-store": _parse_cache_store,
@@ -4474,6 +5339,57 @@ _CONSTANT_ELEMENTS: dict[str, Callable[[], PolicyNode]] = {
     "base": NoOp,
 }
 
+# Allowed sections come from the Usage section of each policy's Learn page, e.g.
+# https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
+_POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
+    "choose": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "include-fragment": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "set-header": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "set-variable": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "set-query-parameter": frozenset({"inbound", "backend"}),
+    "set-body": frozenset({"inbound", "backend", "outbound"}),
+    "rewrite-uri": frozenset({"inbound"}),
+    "check-header": frozenset({"inbound"}),
+    "ip-filter": frozenset({"inbound"}),
+    "cors": frozenset({"inbound"}),
+    "rate-limit": frozenset({"inbound"}),
+    "rate-limit-by-key": frozenset({"inbound"}),
+    "quota": frozenset({"inbound"}),
+    "quota-by-key": frozenset({"inbound"}),
+    "llm-token-limit": frozenset({"inbound"}),
+    "azure-openai-token-limit": frozenset({"inbound"}),
+    "llm-emit-token-metric": frozenset({"inbound"}),
+    "azure-openai-emit-token-metric": frozenset({"inbound"}),
+    "emit-metric": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "validate-content": frozenset({"inbound", "outbound", "on-error"}),
+    "validate-parameters": frozenset({"inbound"}),
+    "validate-status-code": frozenset({"outbound", "on-error"}),
+    "cache-lookup": frozenset({"inbound"}),
+    "cache-store": frozenset({"outbound"}),
+    "cache-lookup-value": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "cache-store-value": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "cache-remove-value": frozenset({"inbound", "backend", "outbound"}),
+    "return-response": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "mock-response": frozenset({"inbound", "outbound", "on-error"}),
+    "validate-jwt": frozenset({"inbound"}),
+    "set-backend-service": frozenset({"inbound", "backend"}),
+    "forward-request": frozenset({"backend"}),
+    "send-request": frozenset({"inbound", "backend", "outbound", "on-error"}),
+}
+
+_SINGLETON_POLICIES = frozenset(
+    {
+        "rate-limit",
+        "quota",
+        "cors",
+        "validate-parameters",
+        "validate-status-code",
+        "cache-lookup",
+        "cache-lookup-value",
+        "cache-store-value",
+    }
+)
+
 
 def _parse_node(
     el: ElementTree.Element,
@@ -4481,6 +5397,9 @@ def _parse_node(
     policy_fragments: dict[str, str],
     section_name: str,
     seen_fragments: set[str],
+    path: str,
+    path_component: str,
+    in_fragment: bool,
 ) -> PolicyNode:
     """One policy element to one node.
 
@@ -4488,22 +5407,48 @@ def _parse_node(
     only one that needs the fragment table and the recursion guard.
     """
     tag = el.tag
-    if tag == "forward-request" and section_name != "backend":
-        raise HTTPException(status_code=500, detail="forward-request is only supported in the backend section")
+    allowed_sections = _POLICY_ALLOWED_SECTIONS.get(tag)
+    if allowed_sections is not None and section_name not in allowed_sections:
+        if tag == "forward-request":
+            raise HTTPException(status_code=500, detail="forward-request is only supported in the backend section")
+        raise HTTPException(status_code=500, detail=f"{tag} is not allowed in {section_name} section")
     constant = _CONSTANT_ELEMENTS.get(tag)
     if constant is not None:
-        return constant()
+        return _annotate_policy_node(constant(), policy_id=el.attrib.get("id"), path=path)
     if tag == "choose":
-        return _parse_choose(
+        node = _parse_choose(
             el,
             policy_fragments=policy_fragments,
             section_name=section_name,
             seen_fragments=seen_fragments,
+            path=path,
+            path_component=path_component,
+            in_fragment=in_fragment,
         )
+        return _annotate_policy_node(node, policy_id=el.attrib.get("id"), path=path)
     parser = _ELEMENT_PARSERS.get(tag)
     if parser is None:
         raise HTTPException(status_code=500, detail=f"Unsupported policy element: {tag}")
-    return parser(el)
+    return _annotate_policy_node(parser(el), policy_id=el.attrib.get("id"), path=path)
+
+
+def _iter_policy_nodes(nodes: list[PolicyNode]) -> Iterator[PolicyNode]:
+    for node in nodes:
+        yield node
+        if isinstance(node, Choose):
+            for _condition, steps in node.branches:
+                yield from _iter_policy_nodes(steps)
+            yield from _iter_policy_nodes(node.otherwise)
+
+
+def _validate_section_structure(name: str, nodes: list[PolicyNode]) -> None:
+    non_base = [node for node in nodes if not isinstance(node, NoOp)]
+    if name == "backend" and len(non_base) > 1:
+        raise HTTPException(status_code=500, detail="backend section allows only one policy element")
+    for policy_name in _SINGLETON_POLICIES:
+        count = sum(element_name(node) == policy_name for node in _iter_policy_nodes(non_base))
+        if count > 1:
+            raise HTTPException(status_code=500, detail=f"{policy_name} can be used only once per section")
 
 
 def _resolve_policy_fragment_named_values(policy_fragments: dict[str, str], config: GatewayConfig) -> dict[str, str]:
@@ -4549,7 +5494,9 @@ def parse_policies_xml(
         if sec is None:
             return []
         sections_present.add(name)
-        return _parse_children(list(sec), policy_fragments=fragments, section_name=name, seen_fragments=set())
+        nodes = _parse_children(list(sec), policy_fragments=fragments, section_name=name, seen_fragments=set())
+        _validate_section_structure(name, nodes)
+        return nodes
 
     return PolicyDocument(
         inbound=section("inbound"),
@@ -4591,11 +5538,17 @@ async def _apply_steps_async(
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
     for step in steps:
-        req.variables["_policy_step"] = element_name(step)
+        _set_policy_execution_context(req, step)
         out = await step.apply_async(req, runtime)
         if out is not None:
             return out
     return None
+
+
+def _set_policy_execution_context(req: PolicyRequest, step: PolicyNode) -> None:
+    req.variables["_policy_step"] = element_name(step)
+    req.variables["_policy_path"] = str(getattr(step, "_policy_path", "") or "")
+    req.variables["_policy_id"] = str(getattr(step, "_policy_id", "") or "")
 
 
 ScopedStep = tuple[str, PolicyNode]
@@ -4644,7 +5597,7 @@ async def _apply_section_async(
         runtime.policy_named_values_resolved = bool(docs) and all(doc.named_values_resolved for doc in docs)
     for scope, step in _effective_section_steps(docs, section_name):
         req.variables["_policy_scope"] = scope
-        req.variables["_policy_step"] = element_name(step)
+        _set_policy_execution_context(req, step)
         out = await step.apply_async(req, runtime)
         if out is not None:
             return out
@@ -4672,6 +5625,7 @@ async def apply_inbound_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
+    req.section = "inbound"
     return await _apply_section_async(docs, "inbound", req, runtime)
 
 
@@ -4680,6 +5634,12 @@ async def apply_backend_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
+    req.section = "backend"
+    if runtime is not None:
+        for name, value in runtime.backend_variable_initializers:
+            req.variables[name] = value
+            _record_variable_write(runtime, name, value, "llm-token-limit")
+        runtime.backend_variable_initializers.clear()
     return await _apply_section_async(docs, "backend", req, runtime)
 
 
@@ -4751,6 +5711,12 @@ def apply_outbound(
     )
     asyncio.run(apply_outbound_async(docs, req, runtime))
     finalize_deferred_actions(req, runtime)
+    headers.clear()
+    if isinstance(headers, MultiValueMap):
+        for name, values in req.headers.as_dict_lists().items():
+            headers.set_list(name, values)
+    else:
+        headers.update(dict(req.headers))
 
 
 def apply_on_error(

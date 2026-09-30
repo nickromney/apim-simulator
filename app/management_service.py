@@ -457,6 +457,11 @@ class ManagementService:
             path=body.path or (existing.path if existing is not None else api_id),
             upstream_base_url=upstream_base_url,
             upstream_path_prefix=body.upstream_path_prefix,
+            protocols=(
+                body.protocols
+                if body.protocols is not None
+                else (existing.protocols if existing is not None else ["http", "https"])
+            ),
             backend=body.backend if body.backend is not None else (existing.backend if existing is not None else None),
             products=body.products
             if body.products is not None
@@ -505,6 +510,7 @@ class ManagementService:
             path=body.path,
             upstream_base_url=body.upstream_base_url,
             upstream_path_prefix=body.upstream_path_prefix,
+            protocols=body.protocols,
             backend=body.backend,
             products=body.products,
             api_version_set=body.api_version_set,
@@ -706,7 +712,6 @@ class ManagementService:
             versioning_scheme=self.coerce_api_versioning_scheme(body.versioning_scheme),
             version_header_name=body.version_header_name,
             version_query_name=body.version_query_name,
-            default_version=body.default_version,
         )
         return self.persist_or_apply_config(cfg)
 

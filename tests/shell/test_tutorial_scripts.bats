@@ -206,7 +206,7 @@ case "$url" in
     response_body='[{"id":"public","revision":"2"}]'
     ;;
   "http://localhost:8000/apim/management/api-version-sets/public")
-    response_body='{"id":"public","default_version":"v1","version_header_name":"x-api-version","versioning_scheme":"Header"}'
+    response_body='{"id":"public","version_header_name":"x-api-version","versioning_scheme":"Header"}'
     ;;
   "http://localhost:8000/apim/management/apis/versioned-v1")
     response_body='{"id":"versioned-v1","path":"versioned","api_version":"v1"}'

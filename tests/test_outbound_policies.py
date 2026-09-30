@@ -205,7 +205,7 @@ def test_outbound_validate_content_checks_the_response_body() -> None:
     In outbound the policy validates the response, and prevent returns 502.
     """
     resp = _run(
-        '<validate-content unspecified-content-type-action="ignore">'
+        '<validate-content unspecified-content-type-action="ignore" max-size="100" size-exceeded-action="prevent">'
         '<content type="application/json" validate-as="json" action="prevent" /></validate-content>',
         upstream=httpx.Response(200, content=b"{not json", headers={"content-type": "application/json"}),
     )
@@ -219,7 +219,7 @@ def test_outbound_validate_content_ignores_request_body() -> None:
     A bad request body is not the outbound policy's business.
     """
     resp = _run(
-        '<validate-content unspecified-content-type-action="ignore">'
+        '<validate-content unspecified-content-type-action="ignore" max-size="100" size-exceeded-action="prevent">'
         '<content type="application/json" validate-as="json" action="prevent" /></validate-content>',
         upstream=httpx.Response(200, json={"ok": True}),
         method="POST",

@@ -69,16 +69,22 @@ Behaviour follows the documented Azure semantics:
   and subsequent requests are blocked — the same trade-off Azure documents.
 - Consumption comes from the response `usage` block (OpenAI
   `prompt_tokens`/`completion_tokens`/`total_tokens`, or Anthropic-style
-  `input_tokens`/`output_tokens`). SSE streams are parsed too: a final usage
-  chunk (`stream_options.include_usage`, Anthropic `message_delta`) is
-  authoritative, otherwise completion tokens are estimated from the content
-  deltas on top of the prompt estimate. Error responses (4xx/5xx without
-  usage) are not counted.
+  `input_tokens`/`output_tokens`), or Vertex AI `usageMetadata`
+  (`promptTokenCount`/`candidatesTokenCount`/`totalTokenCount`). SSE streams
+  are parsed too: a final usage chunk (`stream_options.include_usage`,
+  Anthropic `message_delta`, or Vertex `usageMetadata`) is authoritative,
+  otherwise completion tokens are estimated from the content deltas on top of
+  the prompt estimate. Error responses (4xx/5xx without usage) are not
+  counted.
 
 Adapted, not parity:
 
 - Token estimation is a ~4-characters-per-token heuristic, not a model
   tokenizer. Use it to exercise limit behaviour, not to predict billing.
+- `remaining-quota-tokens-header-name` and
+  `remaining-quota-tokens-variable-name` are exact local counter values. Azure
+  documents those values as estimates; the simulator has no provider-specific
+  token estimator, so this is an intentional local adaptation.
 - Counters live in gateway memory (like the other `rate-limit*` policies):
   restart resets them, and there is no cross-instance aggregation.
 - Image-input token counting is not modelled.
@@ -87,9 +93,10 @@ Adapted, not parity:
 
 Adapted implementation (alias: `azure-openai-emit-token-metric`). Declares a
 `namespace` and `<dimension>` children like Azure. Dimensions without a
-`value` resolve the common defaults (`API ID`, `Operation ID`,
-`Subscription ID`, `Client IP address`). Instead of Application Insights,
-token counts feed the OTEL counter `apim.llm.tokens` with attributes
+`value` resolve the documented defaults (`API ID`, `Operation ID`, `Product
+ID`, `User ID`, `Subscription ID`, `Location`, `Gateway ID`, `Backend ID`).
+The default namespace is `API Management`; at most five configured dimensions
+are accepted. Instead of Application Insights, token counts feed the OTEL counter `apim.llm.tokens` with attributes
 `apim.llm.token.type` (`prompt|completion|total`), the namespace, and each
 dimension — so any OTEL-enabled stack (for example `make up-otel`) can chart
 token spend immediately.

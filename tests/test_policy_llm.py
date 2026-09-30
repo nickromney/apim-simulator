@@ -11,6 +11,7 @@ from app.policy import (
     LlmTokenLimit,
     PolicyRequest,
     PolicyRuntime,
+    apply_backend,
     apply_inbound,
     finalize_deferred_actions,
     parse_policies_xml,
@@ -183,6 +184,65 @@ def test_llm_token_limit_quota_returns_403() -> None:
     assert int(blocked.headers["retry-after"]) <= 3600
 
 
+def test_llm_token_limit_refusals_use_apim_json_envelopes_and_retry_header() -> None:
+    """llm-token-limit refusals use APIM's JSON envelope and Retry-After contract.
+
+    https://learn.microsoft.com/en-us/azure/api-management/llm-token-limit-policy
+    https://learn.microsoft.com/en-us/azure/api-management/rate-limit-policy
+    https://learn.microsoft.com/en-us/azure/api-management/quota-policy
+    """
+    rate_doc = _policy_doc(
+        """\
+<policies>
+  <inbound>
+    <llm-token-limit counter-key="demo" tokens-per-minute="1" estimate-prompt-tokens="false" />
+  </inbound>
+</policies>
+"""
+    )
+    rate_store: dict[str, Any] = {}
+    runtime = PolicyRuntime()
+    req = _request(rate_store, {})
+    assert apply_inbound([rate_doc], req, runtime) is None
+    _finalize(req, runtime)
+    runtime = PolicyRuntime()
+    blocked = apply_inbound([rate_doc], _request(rate_store, {}), runtime)
+    assert blocked is not None
+    assert blocked.status_code == 429
+    assert blocked.headers["content-type"] == "application/json"
+    assert blocked.headers["retry-after"].isdigit()
+    assert json.loads(blocked.body) == {
+        "statusCode": 429,
+        "message": f"Token limit is exceeded. Try again in {blocked.headers['retry-after']} seconds.",
+    }
+
+    quota_doc = _policy_doc(
+        """\
+<policies>
+  <inbound>
+    <llm-token-limit counter-key="demo" token-quota="1" token-quota-period="Hourly"
+        estimate-prompt-tokens="false" />
+  </inbound>
+</policies>
+"""
+    )
+    quota_store: dict[str, Any] = {}
+    runtime = PolicyRuntime()
+    req = _request({}, quota_store)
+    assert apply_inbound([quota_doc], req, runtime) is None
+    _finalize(req, runtime)
+    runtime = PolicyRuntime()
+    blocked = apply_inbound([quota_doc], _request({}, quota_store), runtime)
+    assert blocked is not None
+    assert blocked.status_code == 403
+    assert blocked.headers["content-type"] == "application/json"
+    assert blocked.headers["retry-after"].isdigit()
+    assert json.loads(blocked.body) == {
+        "statusCode": 403,
+        "message": f"Token quota is exceeded. Try again in {blocked.headers['retry-after']} seconds.",
+    }
+
+
 @pytest.mark.contract("POLICY-LLM-TOKEN-LIMIT")
 def test_llm_token_limit_streaming_falls_back_to_estimate() -> None:
     doc = _policy_doc(
@@ -275,6 +335,34 @@ def test_llm_token_limit_estimates_completion_from_sse_deltas() -> None:
     assert with_deltas > prompt_only
 
 
+def test_llm_token_limit_always_estimates_prompt_for_streaming_requests() -> None:
+    """Streaming requests estimate prompt tokens even when the attribute is false.
+
+    https://learn.microsoft.com/en-us/azure/api-management/llm-token-limit-policy
+    """
+    doc = _policy_doc(
+        """\
+<policies>
+  <inbound>
+    <llm-token-limit counter-key="demo" tokens-per-minute="1000"
+        estimate-prompt-tokens="false"
+        tokens-consumed-header-name="x-tokens-consumed" />
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    runtime = PolicyRuntime()
+    req = _request({}, {}, body=json.dumps({**json.loads(PROMPT_BODY), "stream": True}).encode())
+    assert apply_inbound([doc], req, runtime) is None
+    sse_body = b'data: {"choices":[{"delta":{"content":"x"}}]}\n\ndata: [DONE]\n\n'
+
+    headers = _finalize(req, runtime, body=sse_body, media_type="text/event-stream")
+    assert int(headers["x-tokens-consumed"]) > 1
+
+
 def _finalize_consumed(req: PolicyRequest, runtime: PolicyRuntime, *, body: bytes, media_type: str) -> int:
     headers = _finalize(req, runtime, body=body, media_type=media_type)
     return int(headers["x-tokens-consumed"])
@@ -301,6 +389,77 @@ def test_llm_token_limit_does_not_count_error_responses() -> None:
     assert apply_inbound([doc], req, runtime) is None
     headers = _finalize(req, runtime, status=502, body=b"Bad Gateway", media_type="text/plain")
     assert headers["x-tokens-consumed"] == "0"
+
+
+def test_llm_token_limit_initializes_consumed_variable_in_backend_then_updates_outbound() -> None:
+    """tokens-consumed-variable-name is initialized in backend and updated in outbound.
+
+    https://learn.microsoft.com/en-us/azure/api-management/llm-token-limit-policy
+    """
+    doc = _policy_doc(
+        """\
+<policies>
+  <inbound>
+    <llm-token-limit counter-key="demo" tokens-per-minute="1000"
+        estimate-prompt-tokens="true"
+        tokens-consumed-variable-name="consumed" />
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    runtime = PolicyRuntime()
+    req = _request({}, {})
+
+    assert apply_inbound([doc], req, runtime) is None
+    assert "consumed" not in req.variables
+
+    assert apply_backend([doc], req, runtime) is None
+    estimated = req.variables["consumed"]
+    assert isinstance(estimated, int)
+    assert estimated > 0
+
+    _finalize(req, runtime)
+    assert req.variables["consumed"] == 60
+
+
+def test_llm_token_limit_reads_vertex_usage_metadata() -> None:
+    """llm-token-limit reads the documented Google Vertex AI usageMetadata shape.
+
+    https://learn.microsoft.com/en-us/azure/api-management/llm-token-limit-policy
+    """
+    doc = _policy_doc(
+        """\
+<policies>
+  <inbound>
+    <llm-token-limit counter-key="demo" tokens-per-minute="1000"
+        estimate-prompt-tokens="false"
+        tokens-consumed-header-name="x-tokens-consumed" />
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    runtime = PolicyRuntime()
+    req = _request({}, {})
+    assert apply_inbound([doc], req, runtime) is None
+    body = json.dumps(
+        {
+            "candidates": [{"content": {"parts": [{"text": "Hello"}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 9,
+                "candidatesTokenCount": 6,
+                "totalTokenCount": 15,
+            },
+        }
+    ).encode()
+
+    headers = _finalize(req, runtime, body=body)
+    assert headers["x-tokens-consumed"] == "15"
 
 
 @pytest.mark.contract("POLICY-LLM-TOKEN-LIMIT")
@@ -395,3 +554,46 @@ def test_llm_emit_token_metric_records_trace_step() -> None:
     final_step = steps[-1]
     assert final_step["total_tokens"] == 60
     assert final_step["dimensions"] == {"API ID": "llm-api"}
+
+
+def test_llm_emit_token_metric_defaults_namespace_and_evaluates_dimension_names() -> None:
+    """llm-emit-token-metric uses the documented namespace and evaluates dimension names.
+
+    https://learn.microsoft.com/en-us/azure/api-management/llm-emit-token-metric-policy
+    """
+    doc = _policy_doc(
+        """\
+<policies>
+  <inbound>
+    <llm-emit-token-metric>
+      <dimension name='@(context.Variables["dimension_name"])' value="value" />
+    </llm-emit-token-metric>
+  </inbound>
+  <backend />
+  <outbound />
+  <on-error />
+</policies>
+"""
+    )
+    emitted: list[tuple[int, dict[str, str]]] = []
+    runtime = PolicyRuntime(llm_metric_emitter=lambda amount, attributes: emitted.append((amount, attributes)))
+    req = _request({}, {})
+    req.variables["dimension_name"] = "dynamic-name"
+    assert apply_inbound([doc], req, runtime) is None
+    _finalize(req, runtime)
+
+    assert emitted
+    assert emitted[0][1]["apim.llm.metric.namespace"] == "API Management"
+    assert emitted[0][1]["apim.llm.dimension.dynamic-name"] == "value"
+
+
+def test_llm_emit_token_metric_rejects_more_than_five_dimensions() -> None:
+    """llm-emit-token-metric allows at most five configured dimensions.
+
+    https://learn.microsoft.com/en-us/azure/api-management/llm-emit-token-metric-policy
+    """
+    dimensions = "".join(f'<dimension name="d{i}" value="{i}" />' for i in range(6))
+    with pytest.raises(HTTPException):
+        _policy_doc(
+            f"<policies><inbound><llm-emit-token-metric>{dimensions}</llm-emit-token-metric></inbound></policies>"
+        )

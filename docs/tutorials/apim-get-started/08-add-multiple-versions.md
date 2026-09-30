@@ -19,7 +19,7 @@ Create a version set:
 curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
   -H "Content-Type: application/json" \
   "$APIM_BASE/apim/management/api-version-sets/public" \
-  --data '{"display_name":"Public","versioning_scheme":"Header","version_header_name":"x-api-version","default_version":"v1"}'
+  --data '{"display_name":"Public","versioning_scheme":"Header","version_header_name":"x-api-version"}'
 ```
 
 Create two APIs that share the same public path but declare different versions:
@@ -79,7 +79,6 @@ Expected key `./docs/tutorials/apim-get-started/tutorial08.sh --verify` output:
 ```text
 Creating version set 'public'
 {
-  "default_version": "v1",
   "id": "public",
   "version_header_name": "x-api-version",
   "versioning_scheme": "Header"
