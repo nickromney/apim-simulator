@@ -195,6 +195,7 @@ stays on a hardened runtime base.
 | OIDC example | `make up-oidc` | [http://localhost:8000](http://localhost:8000) | You want JWT plus subscription flows |
 | AI gateway example | `make up-ai` | [http://localhost:8000](http://localhost:8000) | You want an LLM backend behind token-limit and token-metric policies |
 | AI Foundry integration | `make up-ai-foundry` | [http://localhost:8000](http://localhost:8000) | You want the gateway fronting the sibling AI Foundry simulator (semantic cache, content safety) |
+| BFF pattern demo | `make -C examples/bff up` / `make -C examples/bff up-series` | [http://localhost:8000](http://localhost:8000) | You want web/mobile BFFs and an optional second APIM hop |
 | Shared gateway RBAC example | `make up-shared` | [http://localhost:8000](http://localhost:8000) | You want one gateway shared by several workload identities, segregated by role |
 | AWS API Gateway comparison | `make up-aws` | [http://localhost:4566](http://localhost:4566) | You want an AWS-shaped gateway beside the simulator for comparison |
 | MCP example | `make up-mcp` | [http://localhost:8000/mcp](http://localhost:8000/mcp) | You want an MCP server behind APIM |
@@ -274,12 +275,14 @@ If you prefer a raw offset, use `PORT_OFFSET` directly:
 PORT_OFFSET=200 make up-ui
 ```
 
-To start every compose stack in one pass with non-conflicting ports:
+To start the root-managed Compose stacks with non-conflicting ports:
 
 ```bash
 make up-all
 make down-all
 ```
+
+Example-specific stacks use focused Makefiles; run `make examples` to find them.
 
 `up-all` assigns a distinct slot to each stack automatically, including the
 todo, OIDC, edge, UI, hello, and private variants.
@@ -503,6 +506,18 @@ make smoke-ai-foundry
 
 See the "Fronting the sibling AI Foundry simulator" section of
 [docs/AI-GATEWAY.md](docs/AI-GATEWAY.md).
+
+### Backends for Frontends demo
+
+A small Python demo with separate web/mobile BFF containers and a shared catalog backend:
+
+```bash
+make -C examples/bff up
+make -C examples/bff smoke
+make -C examples/bff down
+```
+
+Use `make -C examples/bff up-series` to put an internal APIM simulator between the BFFs and backend. See [examples/bff/README.md](examples/bff/README.md) for scope, topology, and verification.
 
 ### Shared gateway RBAC example
 

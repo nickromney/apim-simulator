@@ -4,6 +4,7 @@ Use this file for durable, concise guidance for coding agents in this repository
 
 - Before changing code, read `README.md` and the nearest package/build manifest for the commands and constraints that apply.
 - Run Python tests and lint with `uv run --extra dev`; do not invoke `.venv/bin/python` directly.
+- Keep new example lifecycle commands in `examples/<name>/Makefile`; the root lists entrypoints and delegates repo-wide validation.
 - Add confirmed project-specific commands, conventions, and constraints here when they become durable.
 
 ## Codex workflow
@@ -16,4 +17,4 @@ Use this file for durable, concise guidance for coding agents in this repository
 - Use background or scheduled work for long-running or recurring tasks instead of continuous polling.
 - After a repeated mistake or correction, update this file with the smallest actionable rule that would prevent it.
 
-Reference: https://learn.chatgpt.com/guides/best-practices
+Reference: [Codex best practices](https://learn.chatgpt.com/guides/best-practices)

@@ -1,0 +1,23 @@
+{
+  "allow_anonymous": true,
+  "trace_enabled": true,
+  "subscription": {
+    "required": false
+  },
+  "apis": {
+    "domain": {
+      "name": "Domain API",
+      "path": "domain",
+      "upstream_base_url": "http://shared-backend:8000",
+      "upstream_path_prefix": "/api",
+      "policies_xml": "<policies><inbound><check-header name=\"X-Service-Key\" failed-check-httpcode=\"401\" failed-check-error-message=\"Invalid service key\" ignore-case=\"false\"><value>bff-internal-demo-key</value></check-header></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
+      "operations": {
+        "catalog": {
+          "name": "Catalog",
+          "method": "GET",
+          "url_template": "/catalog"
+        }
+      }
+    }
+  }
+}
