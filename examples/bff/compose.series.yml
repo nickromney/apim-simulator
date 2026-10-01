@@ -1,0 +1,43 @@
+services:
+  web-bff:
+    environment:
+      DOMAIN_BASE_URL: http://internal-apim:8000/domain
+    depends_on:
+      internal-apim:
+        condition: service_healthy
+
+  mobile-bff:
+    environment:
+      DOMAIN_BASE_URL: http://internal-apim:8000/domain
+    depends_on:
+      internal-apim:
+        condition: service_healthy
+
+  internal-apim:
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    image: apim-simulator:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev}
+        PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13}
+        APP_UID: ${APP_UID:-65532}
+        APP_GID: ${APP_GID:-65532}
+    expose:
+      - "8000"
+    environment:
+      APIM_CONFIG_PATH: /tmp/bff-internal-apim-config.json
+      APIM_CONFIG_SOURCE_PATH: /app/examples/bff/apim.internal.json
+    depends_on:
+      shared-backend:
+        condition: service_healthy
+    networks:
+      - domain

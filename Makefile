@@ -121,6 +121,8 @@ CHECK_VERSION_SCRIPT ?= scripts/check-version.sh
 RELEASE_SCRIPT ?= scripts/release.sh
 RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 
+.PHONY: examples
+
 .PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run build-backstage up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-backstage up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-ai-foundry check-aifoundry-network up-shared up-aws up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-ai logs-ai-foundry logs-shared logs-aws logs-todo logs-todo-otel logs-backstage test test-python test-shell compat compat-report import-tofu verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-ai smoke-ai-foundry smoke-shared smoke-aws smoke-todo smoke-backstage smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-backstage compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-ai compose-config-ai-foundry compose-config-shared compose-config-aws compose-config-todo compose-config-todo-otel
 
 help:
@@ -141,6 +143,7 @@ help:
 	@printf $(HELP_FMT) "up-oidc" "Start the simulator with the Keycloak overlay"
 	@printf $(HELP_FMT) "up-otel" "Start the direct public simulator stack with LGTM at $(GRAFANA_BASE_URL)"
 	@printf $(HELP_FMT) "up-private" "Start the private MCP stack without publishing the gateway host port"
+	@printf $(HELP_FMT) "examples" "Show focused example Makefiles (including the BFF demo)"
 	@printf $(HELP_FMT) "up-shared" "Start the shared gateway RBAC example with Keycloak workload identities"
 	@printf $(HELP_FMT) "up-tls" "Start the edge TLS MCP stack on $(APIM_EDGE_HOST):9443"
 	@printf $(HELP_FMT) "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
@@ -377,6 +380,7 @@ down:
 	$(COMPOSE_HELLO_OIDC) down --remove-orphans
 	$(COMPOSE_AI) down --remove-orphans
 	$(COMPOSE_AI_FOUNDRY) down --remove-orphans
+	$(MAKE) --no-print-directory -C examples/bff down
 	$(COMPOSE_SHARED) down --remove-orphans
 	$(COMPOSE_AWS) down --remove-orphans
 	$(COMPOSE_TODO) down --remove-orphans
@@ -461,6 +465,7 @@ compose-config-ci:
 	@$(MAKE) --no-print-directory compose-config-tls
 	@$(MAKE) --no-print-directory compose-config-private
 	@$(MAKE) --no-print-directory compose-config-ui
+	@$(MAKE) --no-print-directory -C examples/bff compose-config compose-config-series
 
 fmt:
 	uv run --extra dev ruff format .
@@ -719,3 +724,7 @@ compose-config-todo:
 
 compose-config-todo-otel:
 	$(COMPOSE_TODO_OTEL) config
+
+examples:
+	@echo "Example workflows: use make -C <directory> help"
+	@rg --files examples -g Makefile | sort

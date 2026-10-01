@@ -1,0 +1,89 @@
+name: apim-simulator-bff
+
+x-build-args: &build-args
+  PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev}
+  PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13}
+  APP_UID: ${APP_UID:-65532}
+  APP_GID: ${APP_GID:-65532}
+
+x-hardening: &hardening
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-service: &service
+  <<: *hardening
+  build:
+    context: .
+    dockerfile: examples/bff/Dockerfile
+    args: *build-args
+  image: apim-simulator-bff-services:local
+  expose:
+    - "8000"
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+    interval: 5s
+    timeout: 3s
+    retries: 15
+    start_period: 5s
+
+services:
+  shared-backend:
+    <<: *service
+    environment:
+      BFF_SERVICE_ROLE: backend
+    networks:
+      - domain
+
+  web-bff:
+    <<: *service
+    environment:
+      BFF_SERVICE_ROLE: web
+      DOMAIN_BASE_URL: http://shared-backend:8000/api
+    depends_on:
+      shared-backend:
+        condition: service_healthy
+    networks:
+      - edge
+      - domain
+
+  mobile-bff:
+    <<: *service
+    environment:
+      BFF_SERVICE_ROLE: mobile
+      DOMAIN_BASE_URL: http://shared-backend:8000/api
+    depends_on:
+      shared-backend:
+        condition: service_healthy
+    networks:
+      - edge
+      - domain
+
+  apim-simulator:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args: *build-args
+    image: apim-simulator:latest
+    ports:
+      - "127.0.0.1:${APIM_GATEWAY_PORT:-8000}:8000"
+    environment:
+      APIM_CONFIG_PATH: /tmp/bff-apim-config.json
+      APIM_CONFIG_SOURCE_PATH: /app/examples/bff/apim.json
+    depends_on:
+      web-bff:
+        condition: service_healthy
+      mobile-bff:
+        condition: service_healthy
+    networks:
+      - edge
+
+networks:
+  edge:
+  domain:
