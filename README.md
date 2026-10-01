@@ -282,7 +282,7 @@ make up-all
 make down-all
 ```
 
-Example-specific stacks use focused Makefiles; run `make examples` to find them.
+BFF uses a focused Makefile; run `make examples` for the demo entrypoints.
 
 `up-all` assigns a distinct slot to each stack automatically, including the
 todo, OIDC, edge, UI, hello, and private variants.
@@ -574,6 +574,11 @@ make compat
 Key Vault-backed named values are local-first. Provide local overrides with env vars in the form `APIM_NAMED_VALUE_<NAME>`.
 
 ## Development
+
+Run `make` for a short navigation menu. Use `make help-stacks`,
+`make help-dev`, `make help-verify`, `make help-release`, or `make help-config`
+for a focused command list; `make help-all` shows the complete reference.
+Run `make examples` to choose a demo and see its command.
 
 Common commands:
 

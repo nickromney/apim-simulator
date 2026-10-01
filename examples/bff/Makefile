@@ -21,10 +21,10 @@ UV_RUN := uv run --project "$(REPO_ROOT)" --extra dev
 
 help:
 	@echo "BFF demo: make -C examples/bff <target> [STACK_SLOT=1]"
-	@echo "  up / up-series                 Start direct or two-gateway topology"
+	@echo "  compose-config / compose-config-series  Render Compose configuration"
 	@echo "  down / logs                    Stop either topology or show logs"
 	@echo "  smoke / test                   Check running containers or focused tests"
-	@echo "  compose-config / compose-config-series  Render Compose configuration"
+	@echo "  up / up-series                 Start direct or two-gateway topology"
 
 up:
 	$(COMPOSE_BASE) up --build --wait --remove-orphans
