@@ -1,0 +1,112 @@
+{
+  "mode": "azure-runtime",
+  "status": "passed",
+  "target": "configured-apim-service",
+  "cases": [
+    {
+      "name": "routing:catalog",
+      "passed": true,
+      "expected_status": 200,
+      "actual_status": 200,
+      "headers": {}
+    },
+    {
+      "name": "routing:orders",
+      "passed": true,
+      "expected_status": 200,
+      "actual_status": 200,
+      "headers": {}
+    },
+    {
+      "name": "offloading-first",
+      "passed": true,
+      "expected_status": 200,
+      "actual_status": 200,
+      "headers": {}
+    },
+    {
+      "name": "offloading-cache",
+      "passed": true,
+      "expected_status": 200,
+      "actual_status": 200,
+      "headers": {
+        "x-pattern": "offloading"
+      },
+      "fixture_request_id_reused": true
+    },
+    {
+      "name": "gatekeeper-missing-jwt",
+      "passed": true,
+      "expected_status": 401,
+      "actual_status": 401,
+      "headers": {}
+    },
+    {
+      "name": "gatekeeper-valid-jwt",
+      "passed": true,
+      "expected_status": 200,
+      "actual_status": 200,
+      "headers": {}
+    },
+    {
+      "name": "gatekeeper-second-valid-jwt",
+      "passed": true,
+      "expected_status": 200,
+      "actual_status": 200,
+      "headers": {}
+    },
+    {
+      "name": "gatekeeper-rate-limit",
+      "passed": true,
+      "expected_status": 429,
+      "actual_status": 429,
+      "headers": {}
+    },
+    {
+      "name": "aggregation",
+      "passed": true,
+      "expected_status": 200,
+      "actual_status": 200,
+      "headers": {
+        "x-aggregation": "orders,profile"
+      }
+    },
+    {
+      "name": "aggregation-backend-error",
+      "passed": true,
+      "expected_status": 502,
+      "actual_status": 502,
+      "headers": {}
+    },
+    {
+      "name": "aggregation-transport-error",
+      "passed": true,
+      "expected_status": 502,
+      "actual_status": 502,
+      "headers": {}
+    }
+  ],
+  "cleanup": [
+    {
+      "api": "aps-aggregation-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-gatekeeper-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-offloading-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-routing-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-fixture-<run-id>",
+      "deleted": true
+    }
+  ],
+  "execution_path": "private-container-apps-probe"
+}
