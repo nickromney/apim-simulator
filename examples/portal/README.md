@@ -16,7 +16,7 @@ Start it with:
 docker compose -f compose.yml -f compose.public.yml -f compose.ui.yml -f compose.portal-journey.yml up --build -d
 ```
 
-Open http://localhost:3007, load the local demo preset and connect. These are local
+Open <http://localhost:3007>, load the local demo preset and connect. These are local
 development fixtures and use the repository's intentional demo credentials.
 The normal stack's temporary runtime config resets when the container restarts;
 this overlay reloads the recorded comparison fixture at startup.
