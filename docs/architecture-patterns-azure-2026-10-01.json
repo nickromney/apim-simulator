@@ -1,0 +1,54 @@
+{
+  "cleanup": [
+    {
+      "api": "aps-extra-3-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-extra-2-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-extra-1-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-extra-0-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-aggregation-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-gatekeeper-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-offloading-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-routing-<run-id>",
+      "deleted": true
+    },
+    {
+      "api": "aps-fixture-<run-id>",
+      "deleted": true
+    }
+  ],
+  "mode": "azure-policy-acceptance",
+  "policies_accepted": [
+    "routing:orders-backend",
+    "routing",
+    "offloading",
+    "gatekeeper",
+    "aggregation",
+    "architecture-patterns-extra/apim.json:compat-orders",
+    "bff/apim.json:web-bff",
+    "bff/apim.json:mobile-bff",
+    "bff/apim.internal.json:domain"
+  ],
+  "status": "passed",
+  "target": "configured-apim-service"
+}

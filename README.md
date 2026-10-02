@@ -519,6 +519,23 @@ make -C examples/bff down
 
 Use `make -C examples/bff up-series` to put an internal APIM simulator between the BFFs and backend. See [examples/bff/README.md](examples/bff/README.md) for scope, topology, and verification.
 
+### Architecture pattern labs
+
+Run gateway routing, offloading, aggregation, and gatekeeper scenarios with
+private local Docker backends:
+
+```bash
+make -C examples/architecture-patterns up
+make -C examples/architecture-patterns smoke
+make -C examples/architecture-patterns down
+```
+
+Domain translation, tenant deployment stamps, and backend bulkheads have a
+separate lab at `examples/architecture-patterns-extra` with the same targets.
+Use `STACK_SLOT` to run labs alongside other examples. These labs provision no
+Azure infrastructure. See the [pattern inventory](docs/ARCHITECTURE-PATTERNS.md)
+for Microsoft's APIM responsibilities, local coverage, and Azure-only limits.
+
 ### Shared gateway RBAC example
 
 One gateway shared by several simulated AKS workload identities (Keycloak

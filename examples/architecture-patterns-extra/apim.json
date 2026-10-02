@@ -1,0 +1,53 @@
+{
+  "allow_anonymous": true,
+  "trace_enabled": true,
+  "proxy_max_attempts": 1,
+  "backends": {
+    "order-adapter": {"url": "http://order-adapter:8000"},
+    "stamp-a": {
+      "type": "pool",
+      "pool": [{"backend_id": "stamp-a-app"}],
+      "circuit_breaker": {"failure_count": 1, "interval_seconds": 60, "trip_duration_seconds": 1}
+    },
+    "stamp-a-app": {"url": "http://stamp-a:8000"},
+    "stamp-b": {
+      "type": "pool",
+      "pool": [{"backend_id": "stamp-b-app"}],
+      "circuit_breaker": {"failure_count": 1, "interval_seconds": 60, "trip_duration_seconds": 1}
+    },
+    "stamp-b-app": {"url": "http://stamp-b:8000"}
+  },
+  "apis": {
+    "compat-orders": {
+      "name": "Normalized orders (anti-corruption facade)",
+      "path": "orders",
+      "backend": "order-adapter",
+      "upstream_base_url": "http://order-adapter:8000",
+      "upstream_path_prefix": "/api/orders",
+      "policies_xml": "<policies><inbound><base /></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
+      "operations": {
+        "get-order": {"name": "Get normalized order", "method": "GET", "url_template": "/{order_id}"}
+      }
+    },
+    "tenant-a": {
+      "name": "Tenant A stamp",
+      "path": "tenants/a",
+      "backend": "stamp-a",
+      "upstream_base_url": "http://stamp-a:8000",
+      "upstream_path_prefix": "/api",
+      "operations": {
+        "catalog": {"name": "Tenant A catalog", "method": "GET", "url_template": "/catalog"}
+      }
+    },
+    "tenant-b": {
+      "name": "Tenant B stamp",
+      "path": "tenants/b",
+      "backend": "stamp-b",
+      "upstream_base_url": "http://stamp-b:8000",
+      "upstream_path_prefix": "/api",
+      "operations": {
+        "catalog": {"name": "Tenant B catalog", "method": "GET", "url_template": "/catalog"}
+      }
+    }
+  }
+}

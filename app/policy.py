@@ -4764,7 +4764,7 @@ def _trace_safe_value(runtime: PolicyRuntime | None, value: Any) -> Any:
             "status_code": value.StatusCode,
             "reason": value.ReasonPhrase,
             "headers": dict(value.Headers),
-            "body_text": value.Body.AsString()[:512],
+            "body_text": value.Body.AsString(preserve_content=True)[:512],
         }
     if runtime and runtime.gateway_config:
         return mask_secret_data(value, runtime.gateway_config)

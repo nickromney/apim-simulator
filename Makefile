@@ -493,6 +493,8 @@ compose-config-ci:
 	@$(MAKE) --no-print-directory compose-config-private
 	@$(MAKE) --no-print-directory compose-config-ui
 	@$(MAKE) --no-print-directory -C examples/bff compose-config compose-config-series
+	@$(MAKE) --no-print-directory -C examples/architecture-patterns compose-config
+	@$(MAKE) --no-print-directory -C examples/architecture-patterns-extra compose-config
 
 fmt:
 	uv run --extra dev ruff format .
@@ -758,11 +760,13 @@ examples:
 	@printf "  %-18s %-34s %s\n" "AI gateway" "make up-ai" "Token limits and metrics with a mock LLM"
 	@printf "  %-18s %-34s %s\n" "AWS comparison" "make up-aws" "LocalStack API Gateway beside APIM"
 	@printf "  %-18s %-34s %s\n" "BFF" "make -C examples/bff help" "Web/mobile backends and gateways in series"
+	@printf "  %-18s %-34s %s\n" "Gateway patterns" "make -C examples/architecture-patterns help" "Routing, offloading, aggregation, gatekeeper"
+	@printf "  %-18s %-34s %s\n" "Workload patterns" "make -C examples/architecture-patterns-extra help" "Domain adapter, deployment stamps, bulkheads"
 	@printf "  %-18s %-34s %s\n" "Hello API" "make up-hello" "Smallest backend behind APIM"
 	@printf "  %-18s %-34s %s\n" "MCP" "make up-mcp" "MCP server behind APIM"
 	@printf "  %-18s %-34s %s\n" "OIDC" "make up-oidc" "JWT and subscription flows with Keycloak"
 	@printf "  %-18s %-34s %s\n" "Shared gateway" "make up-shared" "Workload identities separated by role"
 	@printf "  %-18s %-34s %s\n" "Todo app" "make up-todo" "Browser frontend calling an API through APIM"
 	@echo ""
-	@echo "BFF has its own Makefile; the other demos currently use root targets."
+	@echo "BFF and architecture patterns have their own Makefiles; other demos use root targets."
 	@echo "For stack variants, logs, and smoke checks: make help-stacks or make help-verify"

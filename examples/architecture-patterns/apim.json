@@ -1,0 +1,96 @@
+{
+  "allow_anonymous": true,
+  "trace_enabled": true,
+  "backends": {
+    "private-services": {
+      "url": "http://pattern-backends:8000"
+    },
+    "order-service": {
+      "url": "http://order-backend:8000"
+    }
+  },
+  "apis": {
+    "routing": {
+      "name": "Routing",
+      "path": "route",
+      "backend": "private-services",
+      "upstream_base_url": "http://pattern-backends:8000",
+      "upstream_path_prefix": "/api",
+      "policies_xml": "<policies><inbound><base /></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
+      "operations": {
+        "catalog": {
+          "name": "Catalog route",
+          "method": "GET",
+          "url_template": "/catalog"
+        },
+        "orders": {
+          "name": "Orders route",
+          "method": "GET",
+          "url_template": "/orders",
+          "backend": "order-service",
+          "upstream_base_url": "http://order-backend:8000"
+        }
+      }
+    },
+    "diagnostics": {
+      "name": "Demo backend call counters",
+      "path": "diagnostics",
+      "backend": "private-services",
+      "upstream_base_url": "http://pattern-backends:8000",
+      "upstream_path_prefix": "/api",
+      "policies_xml": "<policies><inbound><base /></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
+      "operations": {
+        "stats": {
+          "name": "Read backend counters",
+          "method": "GET",
+          "url_template": "/stats"
+        }
+      }
+    },
+    "offloading": {
+      "name": "Policy offloading",
+      "path": "offload",
+      "backend": "private-services",
+      "upstream_base_url": "http://pattern-backends:8000",
+      "upstream_path_prefix": "/api",
+      "policies_xml": "<policies><inbound><rate-limit-by-key calls=\"20\" renewal-period=\"60\" counter-key=\"@(context.Request.Headers.GetValueOrDefault(&quot;x-client-id&quot;, &quot;anonymous&quot;))\" /><cache-lookup vary-by-developer=\"false\" vary-by-developer-groups=\"false\" caching-type=\"internal\"><vary-by-header>Accept</vary-by-header><vary-by-query-parameter>run</vary-by-query-parameter></cache-lookup><set-header name=\"x-gateway-transform\" exists-action=\"override\"><value>applied</value></set-header></inbound><backend><forward-request /></backend><outbound><set-header name=\"x-pattern\" exists-action=\"override\"><value>offloading</value></set-header><cache-store duration=\"30\" /></outbound><on-error /></policies>",
+      "operations": {
+        "catalog": {
+          "name": "Catalog",
+          "method": "GET",
+          "url_template": "/catalog"
+        }
+      }
+    },
+    "gatekeeper": {
+      "name": "Gatekeeper",
+      "path": "guard",
+      "backend": "private-services",
+      "upstream_base_url": "http://pattern-backends:8000",
+      "upstream_path_prefix": "/api",
+      "policies_xml": "<policies><inbound><validate-jwt header-name=\"Authorization\" require-scheme=\"Bearer\" output-token-variable-name=\"jwt\"><issuer-signing-keys><key>bG9jYWwtcGF0dGVybnMtc2lnbmluZy1rZXktMzJieXRlcyE=</key></issuer-signing-keys><audiences><audience>patterns-client</audience></audiences><issuers><issuer>http://patterns.local</issuer></issuers></validate-jwt><rate-limit-by-key calls=\"2\" renewal-period=\"60\" counter-key=\"@(((Jwt)context.Variables[&quot;jwt&quot;]).Subject)\" /></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
+      "operations": {
+        "catalog": {
+          "name": "Protected catalog",
+          "method": "GET",
+          "url_template": "/catalog"
+        }
+      }
+    },
+    "aggregation": {
+      "name": "Aggregation send-request fan-out",
+      "path": "aggregate",
+      "backend": "private-services",
+      "upstream_base_url": "http://pattern-backends:8000",
+      "upstream_path_prefix": "/api",
+      "policies_xml": "<policies><inbound>\n<choose>\n<when condition=\"@(context.Request.Url.Query.GetValueOrDefault(&quot;fail&quot;, &quot;&quot;) == &quot;transport&quot;)\"><send-request mode=\"new\" response-variable-name=\"orders\" timeout=\"5\" ignore-error=\"false\"><set-url>http://pattern-backends:1/api/orders</set-url><set-method>GET</set-method></send-request></when>\n<when condition=\"@(context.Request.Url.Query.GetValueOrDefault(&quot;fail&quot;, &quot;&quot;) == &quot;true&quot;)\"><send-request mode=\"new\" response-variable-name=\"orders\" timeout=\"5\" ignore-error=\"false\"><set-url>http://pattern-backends:8000/api/orders-fail</set-url><set-method>GET</set-method></send-request></when>\n<otherwise><send-request mode=\"new\" response-variable-name=\"orders\" timeout=\"5\" ignore-error=\"false\"><set-url>http://pattern-backends:8000/api/orders</set-url><set-method>GET</set-method></send-request></otherwise>\n</choose>\n<send-request mode=\"new\" response-variable-name=\"profile\" timeout=\"5\" ignore-error=\"false\"><set-url>http://pattern-backends:8000/api/profile</set-url><set-method>GET</set-method></send-request>\n<choose><when condition=\"@(((IResponse)context.Variables[&quot;orders&quot;]).StatusCode != 200 || ((IResponse)context.Variables[&quot;profile&quot;]).StatusCode != 200)\"><return-response><set-status code=\"502\" reason=\"Bad Gateway\" /><set-body>aggregation source returned an error</set-body></return-response></when></choose>\n<return-response><set-status code=\"200\" reason=\"OK\" /><set-header name=\"content-type\" exists-action=\"override\"><value>application/json</value></set-header><set-header name=\"x-aggregation\" exists-action=\"override\"><value>orders,profile</value></set-header><set-body>@(\"{\\\"orders\\\":\" + ((IResponse)context.Variables[\"orders\"]).Body.As&lt;string&gt;(true) + \",\\\"profile\\\":\" + ((IResponse)context.Variables[\"profile\"]).Body.As&lt;string&gt;(true) + \"}\")</set-body></return-response>\n</inbound><backend><forward-request /></backend><outbound /><on-error><return-response><set-status code=\"502\" reason=\"Bad Gateway\" /><set-body>aggregation callout failed</set-body></return-response></on-error></policies>",
+      "operations": {
+        "overview": {
+          "name": "Account overview",
+          "method": "GET",
+          "url_template": "/overview"
+        }
+      }
+    }
+  }
+}

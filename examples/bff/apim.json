@@ -10,7 +10,7 @@
       "path": "web",
       "upstream_base_url": "http://web-bff:8000",
       "upstream_path_prefix": "/api",
-      "policies_xml": "<policies><inbound><validate-jwt header-name=\"Authorization\" require-scheme=\"Bearer\"><issuers><issuer>http://bff-demo.local</issuer></issuers><audiences><audience>bff-web</audience></audiences><issuer-signing-keys><key>bG9jYWwtYmZmLWRlbW8tc2lnbmluZy1rZXktMzJieXRlcyEh</key></issuer-signing-keys></validate-jwt></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
+      "policies_xml": "<policies><inbound><validate-jwt header-name=\"Authorization\" require-scheme=\"Bearer\"><issuer-signing-keys><key>bG9jYWwtYmZmLWRlbW8tc2lnbmluZy1rZXktMzJieXRlcyEh</key></issuer-signing-keys><audiences><audience>bff-web</audience></audiences><issuers><issuer>http://bff-demo.local</issuer></issuers></validate-jwt></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
       "operations": {
         "catalog": {
           "name": "Catalog",
@@ -24,7 +24,7 @@
       "path": "mobile",
       "upstream_base_url": "http://mobile-bff:8000",
       "upstream_path_prefix": "/api",
-      "policies_xml": "<policies><inbound><validate-jwt header-name=\"Authorization\" require-scheme=\"Bearer\"><issuers><issuer>http://bff-demo.local</issuer></issuers><audiences><audience>bff-mobile</audience></audiences><issuer-signing-keys><key>bG9jYWwtYmZmLWRlbW8tc2lnbmluZy1rZXktMzJieXRlcyEh</key></issuer-signing-keys></validate-jwt></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
+      "policies_xml": "<policies><inbound><validate-jwt header-name=\"Authorization\" require-scheme=\"Bearer\"><issuer-signing-keys><key>bG9jYWwtYmZmLWRlbW8tc2lnbmluZy1rZXktMzJieXRlcyEh</key></issuer-signing-keys><audiences><audience>bff-mobile</audience></audiences><issuers><issuer>http://bff-demo.local</issuer></issuers></validate-jwt></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
       "operations": {
         "catalog": {
           "name": "Catalog",

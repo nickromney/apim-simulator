@@ -1,0 +1,90 @@
+name: apim-simulator-architecture-patterns-extra
+
+x-hardening: &hardening
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-build: &build
+  context: .
+  dockerfile: examples/architecture-patterns-extra/Dockerfile
+  args:
+    PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev}
+    PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13}
+    APP_UID: ${APP_UID:-65532}
+    APP_GID: ${APP_GID:-65532}
+
+x-backend: &backend
+  <<: *hardening
+  cpus: 0.5
+  mem_limit: 256m
+  build: *build
+  image: apim-simulator-architecture-patterns-extra-backend:local
+  expose: ["8000"]
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+    interval: 5s
+    timeout: 3s
+    retries: 15
+    start_period: 5s
+  networks: [private]
+
+services:
+  legacy-orders:
+    <<: *backend
+    environment:
+      PATTERN_SERVICE_ROLE: legacy
+
+  order-adapter:
+    <<: *backend
+    environment:
+      PATTERN_SERVICE_ROLE: adapter
+      LEGACY_ORDERS_URL: http://legacy-orders:8000
+    depends_on:
+      legacy-orders:
+        condition: service_healthy
+
+  stamp-a:
+    <<: *backend
+    environment:
+      PATTERN_STAMP_NAME: tenant-a-stamp
+
+  stamp-b:
+    <<: *backend
+    environment:
+      PATTERN_STAMP_NAME: tenant-b-stamp
+
+  apim-simulator:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev}
+        PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13}
+        APP_UID: ${APP_UID:-65532}
+        APP_GID: ${APP_GID:-65532}
+    image: apim-simulator:latest
+    ports:
+      - "127.0.0.1:${APIM_GATEWAY_PORT:-8000}:8000"
+    environment:
+      APIM_CONFIG_PATH: /tmp/architecture-patterns-extra-apim.json
+      APIM_CONFIG_SOURCE_PATH: /app/examples/architecture-patterns-extra/apim.json
+    depends_on:
+      order-adapter:
+        condition: service_healthy
+      stamp-a:
+        condition: service_healthy
+      stamp-b:
+        condition: service_healthy
+    networks: [edge, private]
+
+networks:
+  edge:
+  private:
+    internal: true

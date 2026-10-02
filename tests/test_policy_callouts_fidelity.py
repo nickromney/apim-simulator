@@ -13,6 +13,7 @@ from app.config import BackendConfig, GatewayConfig
 from app.policy import (
     PolicyRequest,
     PolicyRuntime,
+    PolicyTraceCollector,
     apply_inbound,
     apply_inbound_async,
     apply_outbound_async,
@@ -114,6 +115,37 @@ def test_send_request_evaluates_response_variable_name() -> None:
     asyncio.run(apply_inbound_async([doc], req, _runtime(handler)))
     assert isinstance(req.variables["result"], CalloutResponse)
     assert '@(context.Variables.GetValueOrDefault("target",""))' not in req.variables
+
+
+@pytest.mark.parametrize("traced", [False, True])
+def test_send_request_body_remains_available_to_outbound_when_traced(traced: bool) -> None:
+    async def scenario() -> None:
+        def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"orders": 3})
+
+        doc = parse_policies_xml(
+            '<policies><inbound><send-request mode="new" response-variable-name="orders">'
+            "<set-url>https://example.test/orders</set-url><set-method>GET</set-method>"
+            "</send-request></inbound><outbound>"
+            '<set-body>@(((IResponse)context.Variables["orders"]).Body.As&lt;string&gt;())</set-body>'
+            "</outbound></policies>"
+        )
+        runtime = _runtime(handler)
+        runtime.trace = PolicyTraceCollector() if traced else None
+        req = _request()
+        try:
+            await apply_inbound_async([doc], req, runtime)
+            req.section = "outbound"
+            await apply_outbound_async([doc], req, runtime)
+            assert req.response_body == b'{"orders":3}'
+            # The policy still consumes the body normally; tracing alone must not.
+            assert req.variables["orders"].Body.AsString() == ""
+            if traced:
+                assert runtime.trace.variable_writes[0]["value"]["body_text"] == '{"orders":3}'
+        finally:
+            await runtime.http_client.aclose()
+
+    asyncio.run(scenario())
 
 
 def test_send_request_proxy_is_rejected_instead_of_dropped() -> None:
