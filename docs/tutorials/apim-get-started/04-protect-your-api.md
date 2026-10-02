@@ -32,6 +32,8 @@ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/he
 curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/health"
 curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/health"
 curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/health"
+sleep 16
+curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/health"
 ```
 
 ## What Mapped Cleanly
@@ -39,6 +41,12 @@ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/he
 - API-level policies
 - outbound header transforms
 - request throttling with `rate-limit-by-key`
+- Recovery after the 15-second rate-limit window renews
+
+The first three calls return `200` with `Custom: My custom value`. The fourth
+returns `429` with a `Retry-After` header. After 16 seconds, the same key succeeds
+again with the custom header. The scripted verification checks that complete
+sequence, including renewal; allow at least 16 seconds for `--verify`.
 
 ## Shortcut
 
@@ -73,9 +81,18 @@ $ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/tu
 
 $ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/tutorial-api/health"
 {
-  "body_text": "Rate limit exceeded",
+  "body_status_code": 429,
+  "rate_limit_message": true,
   "retry_after_present": true,
   "status_code": 429
+}
+
+Waiting 16 seconds to verify the 15-second rate-limit renewal
+{
+  "custom_header": "My custom value",
+  "path": "/api/health",
+  "status": "ok",
+  "status_code": 200
 }
 ```
 

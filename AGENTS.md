@@ -2,6 +2,7 @@
 
 Use this file for durable, concise guidance for coding agents in this repository.
 
+- Treat tutorial outcomes as local simulation requirements; use local UI/API clients such as Bruno without emulating Azure CLI or writing editor extensions.
 - Before changing code, read `README.md` and the nearest package/build manifest for the commands and constraints that apply.
 - Run Python tests and lint with `uv run --extra dev`; do not invoke `.venv/bin/python` directly.
 - Keep new example lifecycle commands in `examples/<name>/Makefile`; the root lists entrypoints and delegates repo-wide validation.

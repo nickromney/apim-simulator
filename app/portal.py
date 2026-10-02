@@ -4,19 +4,22 @@ This is the adapted local equivalent of the Azure developer portal's consumer
 surface: browse published products, inspect API operations, request a
 subscription, and try calls with a key. Identity is simulator-grade — the
 acting user is a config-defined user passed in a header, not a signed-in
-account. The portal CMS, theming, email, and notification surface stay out of
-scope.
+account. Draft content, styles, and publication are persisted separately from
+the public portal through the operator editor.
 """
 
 from __future__ import annotations
 
+from html import escape
 from typing import Any
+from urllib.parse import quote, urlencode
 
 from fastapi import HTTPException
 
 from app.config import (
     ApiConfig,
     GatewayConfig,
+    OperationConfig,
     ProductConfig,
     ProductState,
     Subscription,
@@ -24,6 +27,7 @@ from app.config import (
     SubscriptionState,
     UserConfig,
 )
+from app.portal_customization import PortalSite
 
 
 def require_portal_user(cfg: GatewayConfig, user_id: str | None) -> UserConfig:
@@ -42,8 +46,9 @@ def user_group_ids(cfg: GatewayConfig, user_id: str) -> set[str]:
 
 
 def product_visible(product: ProductConfig, groups: set[str]) -> bool:
-    if product.state != ProductState.Published:
-        return False
+    administrator = "administrators" in {group.casefold() for group in groups}
+    if product.state != ProductState.Published or not product.require_subscription:
+        return administrator
     # Products with no group links are visible to every portal user. Azure
     # scopes visibility through built-in groups instead; documented as adapted.
     if not product.groups:
@@ -51,12 +56,37 @@ def product_visible(product: ProductConfig, groups: set[str]) -> bool:
     return bool(set(product.groups) & groups)
 
 
-def _project_portal_api(api_id: str, api: ApiConfig) -> dict[str, Any]:
+def _portal_operation_request(cfg: GatewayConfig, api: ApiConfig, operation: OperationConfig) -> dict[str, Any]:
+    version = operation.api_version or api.api_version
+    version_set = cfg.api_version_sets.get(operation.api_version_set or api.api_version_set or "")
+    prefix = "/" + api.path.strip("/")
+    if version and version_set and version_set.versioning_scheme == "Segment":
+        prefix = prefix.rstrip("/") + "/" + quote(version, safe="")
+    path = prefix.rstrip("/") + "/" + operation.url_template.lstrip("/")
+    headers = {}
+    if version and version_set and version_set.versioning_scheme == "Header":
+        headers[version_set.version_header_name] = version
+    if version and version_set and version_set.versioning_scheme == "Query":
+        path += ("&" if "?" in path else "?") + urlencode({version_set.version_query_name: version})
+    return {"request_url": path, "request_headers": headers}
+
+
+def _project_portal_api(cfg: GatewayConfig, api_id: str, api: ApiConfig) -> dict[str, Any]:
+    version_set = cfg.api_version_sets.get(api.api_version_set or "")
     return {
         "id": api_id,
         "name": api.name,
         "path": api.path,
         "api_version": api.api_version,
+        "api_version_set": api.api_version_set,
+        "version_set_name": version_set.display_name if version_set else None,
+        "versioning": {
+            "scheme": version_set.versioning_scheme.value,
+            "header_name": version_set.version_header_name,
+            "query_name": version_set.version_query_name,
+        }
+        if version_set
+        else None,
         "revision": api.revision,
         "revision_description": api.revision_description,
         "change_log": [
@@ -71,6 +101,7 @@ def _project_portal_api(api_id: str, api: ApiConfig) -> dict[str, Any]:
                 "method": operation.method,
                 "url_template": operation.url_template,
                 "description": operation.description,
+                **_portal_operation_request(cfg, api, operation),
             }
             for operation_id, operation in api.operations.items()
         ],
@@ -93,7 +124,7 @@ def portal_catalog(cfg: GatewayConfig, user_id: str) -> dict[str, Any]:
     for product_id, product in cfg.products.items():
         if not product_visible(product, groups):
             continue
-        apis = [_project_portal_api(api_id, api) for api_id, api in cfg.apis.items() if product_id in api.products]
+        apis = [_project_portal_api(cfg, api_id, api) for api_id, api in cfg.apis.items() if product_id in api.products]
         products.append(
             {
                 "id": product_id,
@@ -101,6 +132,8 @@ def portal_catalog(cfg: GatewayConfig, user_id: str) -> dict[str, Any]:
                 "description": product.description,
                 "require_subscription": product.require_subscription,
                 "approval_required": product.approval_required,
+                "terms": product.terms,
+                "subscriptions_limit": product.subscriptions_limit,
                 "apis": apis,
             }
         )
@@ -131,7 +164,7 @@ def portal_subscriptions(cfg: GatewayConfig, user_id: str) -> dict[str, Any]:
 
 
 def create_portal_subscription(
-    cfg: GatewayConfig, user_id: str, product_id: str, display_name: str | None = None
+    cfg: GatewayConfig, user_id: str, product_id: str, display_name: str | None = None, accept_terms: bool = False
 ) -> Subscription:
     groups = user_group_ids(cfg, user_id)
     product = cfg.products.get(product_id)
@@ -139,6 +172,8 @@ def create_portal_subscription(
         raise HTTPException(status_code=404, detail="Product not found")
     if not product.require_subscription:
         raise HTTPException(status_code=400, detail="Product does not use subscriptions")
+    if product.terms and not accept_terms:
+        raise HTTPException(status_code=400, detail="Accept the product terms before requesting a subscription")
     if product.subscriptions_limit is not None:
         existing = sum(
             1
@@ -151,8 +186,11 @@ def create_portal_subscription(
             raise HTTPException(status_code=409, detail="Subscription limit reached for this product")
 
     sub_id = f"{user_id}-{product_id}"
-    if any(subscription.id == sub_id for subscription in cfg.subscription.subscriptions.values()):
-        raise HTTPException(status_code=409, detail="Subscription already exists for this product")
+    existing_ids = {subscription.id for subscription in cfg.subscription.subscriptions.values()}
+    sequence = 1
+    while sub_id in existing_ids:
+        sequence += 1
+        sub_id = f"{user_id}-{product_id}-{sequence}"
 
     state = SubscriptionState.Submitted if product.approval_required else SubscriptionState.Active
     subscription = Subscription(
@@ -167,7 +205,7 @@ def create_portal_subscription(
     return subscription
 
 
-PORTAL_HTML = """<!doctype html>
+PORTAL_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -268,6 +306,8 @@ PORTAL_HTML = """<!doctype html>
   <section>
     <h2>Try it</h2>
     <div class="tryit-grid">
+      <label>API<select id="api-select"></select></label>
+      <label>Version<select id="version-select"></select></label>
       <label>Operation
         <select id="op-select"></select>
       </label>
@@ -285,7 +325,7 @@ PORTAL_HTML = """<!doctype html>
 </main>
 
 <script>
-  const state = { user: "", catalog: null, subscriptions: [] };
+  const state = { user: "", catalog: null, subscriptions: [], apiGroups: new Map(), selectedApi: null };
 
   function headers() {
     return { "X-Apim-Portal-User": state.user, "Content-Type": "application/json" };
@@ -305,6 +345,7 @@ PORTAL_HTML = """<!doctype html>
   function el(tag, attrs, children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs ?? {})) {
+      if (value == null || value === false) continue;
       if (key === "text") node.textContent = value;
       else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
       else node.setAttribute(key, value);
@@ -321,7 +362,6 @@ PORTAL_HTML = """<!doctype html>
       root.append(el("p", { class: "status", text: "No published products are visible to this user." }));
       return;
     }
-    const subscribedProducts = new Set(state.subscriptions.flatMap((sub) => sub.products));
     for (const product of products) {
       const badges = el("span", { class: "badges" }, [
         el("span", { class: "badge", text: product.require_subscription ? "subscription required" : "open access" }),
@@ -350,13 +390,14 @@ PORTAL_HTML = """<!doctype html>
       );
       const actions = el("div", {});
       if (product.require_subscription) {
-        const subscribed = subscribedProducts.has(product.id);
+        const count = state.subscriptions.filter(sub => sub.products.includes(product.id) && ['active', 'submitted'].includes(sub.state)).length;
+        const atLimit = product.subscriptions_limit != null && count >= product.subscriptions_limit;
         actions.append(el("button", {
           type: "button",
           class: "secondary",
-          disabled: subscribed ? "disabled" : undefined,
-          text: subscribed ? "Subscription requested" : "Request subscription",
-          onclick: () => requestSubscription(product.id),
+          disabled: atLimit ? "disabled" : undefined,
+          text: atLimit ? "Subscription limit reached" : count ? "Request another subscription" : "Request subscription",
+          onclick: () => requestSubscription(product.id, product.terms),
         }));
       }
       root.append(el("div", { class: "product" }, [
@@ -392,18 +433,36 @@ PORTAL_HTML = """<!doctype html>
   function renderOperations() {
     const select = document.getElementById("op-select");
     select.replaceChildren();
+    for (const operation of state.selectedApi?.operations ?? []) {
+      const option = el("option", {value: operation.id, text: operation.method + " " + operation.request_url});
+      option.request = operation;
+      select.append(option);
+    }
+    const updatePath = () => { document.getElementById("try-path").value = select.selectedOptions[0]?.request.request_url ?? ''; };
+    document.getElementById('try-send').disabled = select.options.length === 0;
+    updatePath(); select.onchange = updatePath;
+  }
+
+  function renderApiVersions() {
+    const apiSelect = document.getElementById('api-select');
+    const versionSelect = document.getElementById('version-select');
+    state.apiGroups = new Map();
     for (const product of state.catalog?.products ?? []) {
       for (const api of product.apis) {
-        for (const operation of api.operations) {
-          const path = "/" + api.path + operation.url_template;
-          select.append(el("option", { value: path, text: operation.method + " " + path }));
-        }
+        const groupId = api.api_version_set ? 'version-set:' + api.api_version_set : 'api:' + api.id;
+        if (!state.apiGroups.has(groupId)) state.apiGroups.set(groupId, []);
+        const group = state.apiGroups.get(groupId);
+        if (!group.some(item => item.id === api.id)) group.push(api);
       }
     }
-    if (select.options.length) {
-      document.getElementById("try-path").value = select.value;
-    }
-    select.onchange = () => { document.getElementById("try-path").value = select.value; };
+    apiSelect.replaceChildren(...Array.from(state.apiGroups, ([id, group]) => el('option', {value:id, text:group[0].version_set_name ?? group[0].name})));
+    const chooseVersion = () => { state.selectedApi = (state.apiGroups.get(apiSelect.value) ?? []).find(api => api.id === versionSelect.value); renderOperations(); };
+    const chooseApi = () => {
+      const group = state.apiGroups.get(apiSelect.value) ?? [];
+      versionSelect.replaceChildren(...group.map(api => el('option', {value:api.id, text:api.api_version ?? 'Original'})));
+      chooseVersion();
+    };
+    apiSelect.onchange = chooseApi; versionSelect.onchange = chooseVersion; chooseApi();
   }
 
   async function refresh() {
@@ -418,18 +477,19 @@ PORTAL_HTML = """<!doctype html>
       status.textContent = "";
       renderCatalog();
       renderSubscriptions();
-      renderOperations();
+      renderApiVersions();
     } catch (error) {
       status.textContent = String(error.message ?? error);
     }
   }
 
-  async function requestSubscription(productId) {
+  async function requestSubscription(productId, terms) {
     const status = document.getElementById("user-status");
     try {
+      if (terms && !window.confirm(terms + "\n\nAccept these terms and request a subscription?")) return;
       await fetchJson("/apim/portal/subscriptions", {
         method: "POST",
-        body: JSON.stringify({ product_id: productId }),
+        body: JSON.stringify({ product_id: productId, accept_terms: Boolean(terms) }),
       });
       await refresh();
     } catch (error) {
@@ -440,12 +500,13 @@ PORTAL_HTML = """<!doctype html>
   async function tryIt() {
     const path = document.getElementById("try-path").value;
     const key = document.getElementById("key-select").value;
-    const method = document.getElementById("op-select").selectedOptions[0]?.text.split(" ")[0] ?? "GET";
+    const operation = document.getElementById("op-select").selectedOptions[0]?.request;
+    const method = operation?.method ?? "GET";
     const status = document.getElementById("try-status");
     const output = document.getElementById("try-output");
     status.textContent = "Calling " + method + " " + path + " ...";
     try {
-      const requestHeaders = {};
+      const requestHeaders = {...(operation?.request_headers ?? {})};
       if (key) requestHeaders["Ocp-Apim-Subscription-Key"] = key;
       const response = await fetch(path, { method, headers: requestHeaders });
       const text = await response.text();
@@ -479,3 +540,56 @@ PORTAL_HTML = """<!doctype html>
 </body>
 </html>
 """
+
+
+def _portal_image_url(site: PortalSite, url: str) -> str:
+    """Inline this snapshot's uploads so private draft previews need no public asset."""
+    media = next((item for item in site.media if url == "/apim/portal/media/" + item.id), None)
+    return f"data:{media.content_type};base64,{media.content_base64}" if media else url
+
+
+def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
+    """Render only a selected immutable snapshot; all editable text is escaped."""
+    page = next((page for page in site.pages if page.slug == slug), None)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Portal page not found")
+    links = " ".join(
+        f'<a href="/apim/portal{("/pages/" + item.slug) if item.slug != "home" else ""}">{escape(item.title)}</a>'
+        for item in site.pages
+    )
+    logo = (
+        f'<img src="{escape(_portal_image_url(site, site.logo_url), quote=True)}" alt="" width="120">'
+        if site.logo_url
+        else ""
+    )
+    navigation = f'<nav aria-label="Portal pages">{logo}{links}</nav>'
+    content = f'<h1>{escape(page.title)}</h1><p class="lede" style="white-space:pre-wrap">{escape(page.content)}</p>'
+    html = PORTAL_HTML.replace(
+        "<title>APIM Simulator Developer Portal</title>", f"<title>{escape(site.site_title)}</title>"
+    )
+    start = html.index("  <h1>Developer Portal</h1>")
+    end = html.index("  <section>", start)
+    html = html[:start] + navigation + content + html[end:]
+    # Additional pages share branding and navigation, while the home page retains
+    # the discovery, subscription, and try-it widgets.
+    if slug != "home":
+        html = html[: html.index("  <section>")] + "</main></body></html>"
+    dark = "--panel:#242424;--ink:#f4efe4;--muted:#d4cfc4;--line:#777;" if site.theme == "dark" else ""
+    background = "#181818" if site.theme == "dark" and site.background_color == "#f2ede1" else site.background_color
+    image = ""
+    if site.background_image_url:
+        # HTML escaping alone cannot quote a CSS URL: escape CSS delimiters first.
+        css_url = (
+            _portal_image_url(site, site.background_image_url)
+            .replace("'", "%27")
+            .replace('"', "%22")
+            .replace("<", "%3C")
+            .replace(">", "%3E")
+        )
+        image = f"body{{background-image:url('{css_url}');background-size:cover}}"
+    style = (
+        f"<style>:root{{color-scheme:{site.theme};--accent:{site.accent_color};--bg:{background};{dark}}}"
+        f"nav{{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}}"
+        f"nav a{{color:var(--accent)}}{image}</style>"
+    )
+    return html.replace("</head>", style + "</head>")

@@ -23,6 +23,7 @@ from app.config import (
     NamedValueConfig,
     OperationConfig,
     ProductConfig,
+    ProductState,
     Subscription,
     SubscriptionKeyPair,
     SubscriptionScope,
@@ -95,6 +96,30 @@ def _apply_revision_definition(api: ApiConfig, definition: dict[str, Any]) -> No
             setattr(api, field_name, getattr(validated, field_name))
 
 
+def _check_open_products(cfg: GatewayConfig, product_ids: set[str], scope: str) -> None:
+    open_products = sorted(
+        product_id
+        for product_id in product_ids
+        if product_id in cfg.products and not cfg.products[product_id].require_subscription
+    )
+    if len(open_products) > 1:
+        raise ValueError(f"{scope} can belong to at most one open product; found {', '.join(open_products)}")
+
+
+def _validate_open_product_associations(cfg: GatewayConfig) -> None:
+    for api_id, api in cfg.apis.items():
+        product_ids = set(api.products)
+        for operation in api.operations.values():
+            product_ids.update(operation.products or [])
+        _check_open_products(cfg, product_ids, f"API {api_id}")
+    for route in cfg.routes:
+        if route.api_id in cfg.apis:
+            continue
+        _check_open_products(
+            cfg, set(route.products) | ({route.product} if route.product else set()), f"Route {route.name}"
+        )
+
+
 logger = logging.getLogger("apim-simulator")
 
 
@@ -113,6 +138,9 @@ class ManagementService:
         self._saved_config_digest: str | None = None
 
     def _prepare_config(self, cfg: GatewayConfig) -> tuple[GatewayConfig, dict[str, OIDCVerifier]]:
+        from app.local_api_center import synchronize_api_center
+
+        synchronize_api_center(cfg)
         cfg.routes = cfg.materialize_routes()
         validate_policy_config(cfg)
         return cfg, self._build_oidc_verifiers(cfg)
@@ -202,6 +230,7 @@ class ManagementService:
         staged = cfg.model_copy(deep=True)
         _sync_current_revision_definitions(staged)
         try:
+            _validate_open_product_associations(staged)
             staged, oidc_verifiers = self._prepare_config(staged)
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=400, detail=f"Invalid config update: {exc}") from exc
@@ -228,15 +257,13 @@ class ManagementService:
 
     def upsert_product(self, cfg: GatewayConfig, product_id: str, body: Any) -> GatewayConfig:
         existing = cfg.products.get(product_id)
-        cfg.products[product_id] = ProductConfig(
-            name=body.name,
-            description=body.description,
-            state=body.state,
-            require_subscription=body.require_subscription,
-            approval_required=body.approval_required,
-            groups=existing.groups if existing is not None else [],
-            tags=existing.tags if existing is not None else [],
-        )
+        payload = existing.model_dump(mode="python") if existing is not None else {"state": ProductState.NotPublished}
+        updates = body.model_dump(exclude_unset=True) if hasattr(body, "model_dump") else vars(body)
+        try:
+            product = ProductConfig.model_validate({**payload, **updates})
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid product configuration: {exc}") from exc
+        cfg.products[product_id] = product
         return self.persist_or_apply_config(cfg)
 
     def delete_product(self, cfg: GatewayConfig, product_id: str) -> GatewayConfig:
@@ -700,6 +727,9 @@ class ManagementService:
         self.require_api_authoring_mode(cfg)
         self._get_api_or_404(cfg, api_id)
         del cfg.apis[api_id]
+        # Materialized routes belong to the deleted catalog, not legacy input.
+        if not cfg.apis:
+            cfg.routes = []
         return self.persist_or_apply_config(cfg)
 
     def upsert_api_revision(self, cfg: GatewayConfig, api_id: str, revision_id: str, body: Any) -> GatewayConfig:

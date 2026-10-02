@@ -121,11 +121,11 @@ def test_catalog_filters_unpublished_and_group_restricted_products() -> None:
         everyone = client.get("/apim/portal/catalog", headers={"X-Apim-Portal-User": "dev-1"})
         assert everyone.status_code == 200
         visible = {product["id"] for product in everyone.json()["products"]}
-        assert visible == {"starter", "gated", "open"}
+        assert visible == {"starter", "gated"}
 
         partner = client.get("/apim/portal/catalog", headers={"X-Apim-Portal-User": "dev-2"})
         partner_visible = {product["id"] for product in partner.json()["products"]}
-        assert partner_visible == {"starter", "partner", "gated", "open"}
+        assert partner_visible == {"starter", "partner", "gated"}
 
         starter = next(p for p in everyone.json()["products"] if p["id"] == "starter")
         assert [api["id"] for api in starter["apis"]] == ["hello"]
@@ -201,7 +201,8 @@ def test_subscription_signup_error_paths() -> None:
         duplicate_target = client.post("/apim/portal/subscriptions", json={"product_id": "starter"}, headers=headers)
         assert duplicate_target.status_code == 201
         duplicate = client.post("/apim/portal/subscriptions", json={"product_id": "starter"}, headers=headers)
-        assert duplicate.status_code == 409
+        assert duplicate.status_code == 201
+        assert duplicate.json()["id"] == duplicate_target.json()["id"] + "-2"
 
         invisible = client.post("/apim/portal/subscriptions", json={"product_id": "partner"}, headers=headers)
         assert invisible.status_code == 404
@@ -210,14 +211,20 @@ def test_subscription_signup_error_paths() -> None:
         assert unpublished.status_code == 404
 
         open_product = client.post("/apim/portal/subscriptions", json={"product_id": "open"}, headers=headers)
-        assert open_product.status_code == 400
+        assert open_product.status_code == 404
 
 
 def test_subscription_signup_respects_product_subscriptions_limit() -> None:
     config = _portal_config()
-    config.products["capped"] = ProductConfig(name="Capped", subscriptions_limit=0)
+    config.products["capped"] = ProductConfig(name="Capped", subscriptions_limit=1)
     config.apis["hello"].products.append("capped")
     with _client(config) as client:
+        first = client.post(
+            "/apim/portal/subscriptions",
+            json={"product_id": "capped"},
+            headers={"X-Apim-Portal-User": "dev-1"},
+        )
+        assert first.status_code == 201
         blocked = client.post(
             "/apim/portal/subscriptions",
             json={"product_id": "capped"},

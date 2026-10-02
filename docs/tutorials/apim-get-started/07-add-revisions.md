@@ -2,7 +2,7 @@
 
 Source: [Tutorial: Use revisions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-revise-api)
 
-Simulator status: Partial
+Simulator status: Supported for local revision isolation, routing, and release promotion.
 
 ## Run It Locally
 
@@ -11,103 +11,56 @@ From the repo root:
 ```bash
 export APIM_BASE=http://localhost:8000
 export APIM_TENANT_KEY=local-dev-tenant-key
+./docs/tutorials/apim-get-started/tutorial07.sh --setup
+./docs/tutorials/apim-get-started/tutorial07.sh --verify
 ```
 
-These commands assume `tutorial-api` already exists. If it does not, run step
-1 first or use `./docs/tutorials/apim-get-started/tutorial01.sh --setup`.
+Setup recreates the tutorial gateway and imports the local mock API. It then
+rehearses the tutorial's sequence:
 
-Add revision metadata:
+1. Keep revision 1 current and online.
+2. Copy its definition into revision 2 and add a `POST /test` operation that
+   returns `{"sampleField":"revision-two"}`. Existing operations stay in both revisions.
+3. Verify the default URL and revision 1 return `404` for the new operation,
+   while `tutorial-api;rev=2/test` returns `200`. Revision 1's existing health
+   operation still returns `200`.
+4. Create the `public` release for revision 2. Verify the default URL now exposes
+   the new operation.
+5. Take revision 1 offline. Verify its existing health route returns `404`,
+   and an unknown revision also returns `404`.
+
+The revision management endpoint accepts a `definition` snapshot containing the
+API configuration and its operations. The companion script copies revision 1's
+snapshot before editing revision 2, which keeps changes isolated until release.
+
+Create a release to make an existing revision current:
 
 ```bash
-curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
-  -H "Content-Type: application/json" \
-  "$APIM_BASE/apim/management/apis/tutorial-api/revisions/1" \
-  --data '{"description":"Initial revision","is_current":false,"is_online":false}'
-
-curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
-  -H "Content-Type: application/json" \
-  "$APIM_BASE/apim/management/apis/tutorial-api/revisions/2" \
-  --data '{"description":"Current revision","is_current":true,"is_online":true,"source_api_id":"service/apim-simulator/apis/tutorial-api;rev=1"}'
-```
-
-Create a release for the current revision:
-
-```bash
-curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
+curl -fsS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
   -H "Content-Type: application/json" \
   "$APIM_BASE/apim/management/apis/tutorial-api/releases/public" \
   --data '{"notes":"Published revision","revision":"2"}'
 ```
 
-Inspect the results:
+After setup, inspect the current and explicit revision routes:
 
 ```bash
-curl -sS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
-  "$APIM_BASE/apim/management/apis/tutorial-api/revisions"
-
-curl -sS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
-  "$APIM_BASE/apim/management/apis/tutorial-api/releases"
+curl -i -X POST "$APIM_BASE/tutorial-api/test"
+curl -i -X POST "$APIM_BASE/tutorial-api;rev=2/test"
+curl -i "$APIM_BASE/tutorial-api;rev=1/health"
+curl -i -X POST "$APIM_BASE/tutorial-api;rev=999/test"
 ```
 
-## What Mapped Cleanly
-
-- Revision metadata
-- current-revision bookkeeping
-- release metadata
-
-## Shortcut
-
-If you want the scripted shortcut instead of running the commands manually:
-
-```bash
-./docs/tutorials/apim-get-started/tutorial07.sh --setup
-./docs/tutorials/apim-get-started/tutorial07.sh --verify
-```
-
-Use `--setup` to have [`tutorial07.sh`](tutorial07.sh) perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
-
-Expected key `./docs/tutorials/apim-get-started/tutorial07.sh --verify` output:
-
-```text
-Adding revision metadata
-{
-  "description": "Initial revision",
-  "id": "1",
-  "is_current": false,
-  "is_online": false
-}
-
-{
-  "description": "Current revision",
-  "id": "2",
-  "is_current": true,
-  "source_api_id": "service/apim-simulator/apis/tutorial-api;rev=1"
-}
-
-Creating release 'public'
-{
-  "api_id": "service/apim-simulator/apis/tutorial-api;rev=2",
-  "id": "public",
-  "revision": "2"
-}
-
-Verifying revision metadata
-$ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/apis/tutorial-api"
-{
-  "id": "tutorial-api",
-  "release_ids": [
-    "public"
-  ],
-  "revision": "2",
-  "revision_ids": [
-    "1",
-    "2"
-  ]
-}
-```
+Expected statuses are `200`, `200`, `404`, and `404`, respectively. The two
+successful responses contain `{"sampleField":"revision-two"}`. `--verify` checks
+these routes and the current-revision and release metadata without changing state.
 
 ## Differences From Azure APIM
 
-- Revisions are descriptive in the simulator.
-- Multiple Azure revisions still collapse into one active local runtime API.
-- Revision-specific `;rev=` routing is not modeled as a separate runtime surface.
+- Revision authoring uses the simulator management API and saved definitions
+  instead of the Azure portal revision selector.
+- The added operation uses an operation policy to return a deterministic sample;
+  no change to the mock backend is needed.
+- Release notes are exposed in the local developer portal catalog for APIs
+  associated with a visible published product. This standalone script checks
+  release metadata; it does not publish a product or exercise the portal UI.

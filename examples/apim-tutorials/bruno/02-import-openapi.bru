@@ -1,0 +1,33 @@
+meta {
+  name: Import OpenAPI
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{apimBaseUrl}}/apim/management/apis/bruno-api/import
+  body: json
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  X-Apim-Tenant-Key: {{tenantKey}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "path": "bruno-api",
+    "name": "Bruno Tutorial API",
+    "upstream_base_url": "{{upstreamBaseUrl}}",
+    "content_format": "openapi+json",
+    "content_value": "{\"openapi\": \"3.0.3\", \"info\": {\"title\": \"Bruno Tutorial API\", \"version\": \"1\"}, \"paths\": {\"/health\": {\"get\": {\"operationId\": \"health\", \"responses\": {\"200\": {\"description\": \"Healthy\"}}}}}}"
+  }
+}
+
+tests {
+  test("Import OpenAPI", function () {
+    expect(res.getStatus()).to.equal(200); expect(res.getBody().api.operations[0].id).to.equal("health");
+  });
+}

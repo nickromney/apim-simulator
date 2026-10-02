@@ -23,6 +23,22 @@ printf 'docker %s\n' "$*" >>"$CALL_LOG"
 EOF
   chmod +x "$TEST_BIN/docker"
 
+  cat >"$TEST_BIN/make" <<'EOF'
+#!/usr/bin/env bash
+printf 'make %s\n' "$*" >>"$CALL_LOG"
+echo "Bruno collection: 11 requests passed"
+EOF
+  chmod +x "$TEST_BIN/make"
+
+  cat >"$TEST_BIN/sleep" <<'EOF'
+#!/usr/bin/env bash
+printf 'sleep %s\n' "$*" >>"$CALL_LOG"
+if [[ "${1:-}" == "16" ]]; then
+  printf '0\n' >"$STATE_DIR/rate-limit-count"
+fi
+EOF
+  chmod +x "$TEST_BIN/sleep"
+
   cat >"$TEST_BIN/uv" <<'EOF'
 #!/usr/bin/env bash
 printf 'uv %s\n' "$*" >>"$CALL_LOG"
@@ -34,6 +50,10 @@ if [[ "${1:-}" == "run" ]]; then
   if [[ "${1:-}" == "python" && "${2:-}" == "-" ]]; then
     shift
     exec python3 "$@"
+  fi
+  if [[ "${1:-}" == "python" && "${2:-}" == *"/examples/apim-tutorials/workflows.py" ]]; then
+    echo "Local tutorial workflow passed"
+    exit 0
   fi
   if [[ "${1:-}" == "python" && "${2:-}" == *"/scripts/import_openapi.py" ]]; then
     printf '{"api_id":"tutorial-api","path":"tutorial-api","operations":["echo","health"],"import":{"diagnostics":[],"format":"openapi+json","operation_count":2,"upstream_base_url":"http://mock-backend:8080/api"}}\n'
@@ -141,11 +161,20 @@ case "$url" in
     response_headers+=("content-type: text/html; charset=utf-8")
     ;;
   "http://localhost:8000/apim/management/products/tutorial-product")
-    if [[ "$method" == "GET" ]]; then
-      response_body='{"id":"tutorial-product","name":"Tutorial Product","require_subscription":true,"subscription_count":1}'
-    else
-      response_body='{"id":"tutorial-product","name":"Tutorial Product","require_subscription":true,"subscription_count":0}'
+    if [[ "$method" == "PUT" ]]; then
+      if [[ "$data" == *'"state":"not_published"'* ]]; then echo not_published >"$STATE_DIR/product-state"; else echo published >"$STATE_DIR/product-state"; fi
     fi
+    product_state="$(cat "$STATE_DIR/product-state" 2>/dev/null || echo published)"
+    subscription_count=0
+    if [[ "$method" == "GET" ]]; then subscription_count=1; fi
+    response_body="{\"id\":\"tutorial-product\",\"name\":\"Tutorial Product\",\"require_subscription\":true,\"state\":\"$product_state\",\"subscription_count\":$subscription_count}"
+    ;;
+  "http://localhost:8000/apim/management/products/tutorial-product-signup")
+    response_body='{"state":"published","subscriptions_limit":1,"terms":"Accept terms"}'
+    ;;
+  "http://localhost:8000/apim/management/subscriptions/demo-dev-tutorial-product-signup")
+    rm -f "$STATE_DIR/signup-created"
+    response_body='{"deleted":true}'
     ;;
   "http://localhost:8000/apim/management/subscriptions/tutorial-sub")
     if [[ "$method" == "DELETE" ]]; then
@@ -190,23 +219,85 @@ case "$url" in
   "http://localhost:8000/apim/management/apis/tutorial-api")
     response_body='{"id":"tutorial-api","path":"tutorial-api","upstream_base_url":"http://mock-backend:8080/api","products":["tutorial-product"],"operations":[{"id":"echo"},{"id":"health"}],"revision":"2","revisions":[{"id":"1","is_current":false},{"id":"2","is_current":true}],"releases":[{"id":"public","revision":"2"}]}'
     ;;
+  "http://localhost:8000/apim/management/apis/petstore")
+    response_body="$(python3 - <<'PY'
+import json
+print(json.dumps({"id": "petstore", "path": "petstore", "upstream_base_url": "http://mock-backend:8080/api/v3",
+                  "operations": [{"id": "findpetsbystatus", "url_template": "/pet/findByStatus?status={status}"}]
+                  + [{"id": f"operation{i}"} for i in range(18)]}))
+PY
+)"
+    ;;
+  "http://localhost:8000/petstore/pet/findByStatus?status=pending")
+    response_body='[{"id":1,"name":"local-cat","status":"pending"}]'
+    ;;
+  "http://localhost:8000/petstore/pet/findByTags?tags=cat&tags=dog")
+    response_body='[{"id":1},{"id":2},{"id":3}]'
+    ;;
   "http://localhost:8000/apim/management/apis/tutorial-api/revisions/1")
-    response_body='{"id":"1","description":"Initial revision","is_current":false,"is_online":false}'
+    if [[ "$data" == *'"is_current":true'* ]]; then
+      rm -f "$STATE_DIR/revision-promoted" "$STATE_DIR/revision-one-offline"
+      response_body='{"id":"1","description":"Initial revision","is_current":true,"is_online":true,"definition":{"operations":{"health":{"name":"health","method":"GET","url_template":"/health"},"echo":{"name":"echo","method":"GET","url_template":"/echo"}}}}'
+    else
+      touch "$STATE_DIR/revision-one-offline"
+      response_body='{"id":"1","description":"Initial revision","is_current":false,"is_online":false}'
+    fi
     ;;
   "http://localhost:8000/apim/management/apis/tutorial-api/revisions/2")
-    response_body='{"id":"2","description":"Current revision","is_current":true,"is_online":true,"source_api_id":"service/apim-simulator/apis/tutorial-api;rev=1"}'
+    response_body='{"id":"2","description":"Added test operation","is_current":false,"is_online":true,"source_api_id":"service/apim-simulator/apis/tutorial-api;rev=1"}'
     ;;
   "http://localhost:8000/apim/management/apis/tutorial-api/revisions")
     response_body='[{"id":"1","is_current":false},{"id":"2","is_current":true}]'
     ;;
   "http://localhost:8000/apim/management/apis/tutorial-api/releases/public")
+    if [[ "$method" == "PUT" ]]; then
+      touch "$STATE_DIR/revision-promoted"
+    fi
     response_body='{"id":"public","api_id":"service/apim-simulator/apis/tutorial-api;rev=2","revision":"2","notes":"Published revision"}'
     ;;
   "http://localhost:8000/apim/management/apis/tutorial-api/releases")
     response_body='[{"id":"public","revision":"2"}]'
     ;;
+  "http://localhost:8000/tutorial-api/test")
+    if [[ -f "$STATE_DIR/revision-promoted" ]]; then
+      response_body='{"sampleField":"revision-two"}'
+    else
+      response_status=404
+      response_body='{"statusCode":404,"message":"Resource not found"}'
+    fi
+    ;;
+  "http://localhost:8000/tutorial-api;rev=2/test")
+    response_body='{"sampleField":"revision-two"}'
+    ;;
+  "http://localhost:8000/tutorial-api;rev=1/health")
+    if [[ -f "$STATE_DIR/revision-one-offline" ]]; then
+      response_status=404
+      response_body='{"statusCode":404,"message":"Resource not found"}'
+    else
+      response_body='{"status":"ok","path":"/api/health"}'
+    fi
+    ;;
+  "http://localhost:8000/tutorial-api;rev=1/test"|\
+  "http://localhost:8000/tutorial-api;rev=999/test")
+    response_status=404
+    response_body='{"statusCode":404,"message":"Resource not found"}'
+    ;;
   "http://localhost:8000/apim/management/api-version-sets/public")
     response_body='{"id":"public","version_header_name":"x-api-version","versioning_scheme":"Header"}'
+    ;;
+  "http://localhost:8000/apim/management/apis/path-versioned-original")
+    response_body='{"id":"path-versioned-original","api_version":null,"version_description":"Original","api_version_set":"tutorial-path-versions"}'
+    ;;
+  "http://localhost:8000/apim/management/apis/path-versioned-original/versions")
+    response_body='{"id":"path-versioned-v2","api_version":"v2","products":["version-tutorial-product"],"operations":[{"id":"echo"}]}'
+    printf '%s' "$data" >"$STATE_DIR/tutorial08-version-request.json"
+    ;;
+  "http://localhost:8000/path-versioned/echo"|\
+  "http://localhost:8000/path-versioned/v2/echo")
+    response_body='{"ok":true,"method":"GET","path":"/api/echo","body":""}'
+    if [[ "$url" == */v2/echo ]]; then
+      response_headers+=("x-version: v2")
+    fi
     ;;
   "http://localhost:8000/apim/management/apis/versioned-v1")
     response_body='{"id":"versioned-v1","path":"versioned","api_version":"v1"}'
@@ -267,7 +358,7 @@ case "$url" in
         printf '%s\n' "$count" >"$rate_limit_file"
         if ((count > 3)); then
           response_status=429
-          response_body='Rate limit exceeded'
+          response_body='{"statusCode":429,"message":"Rate limit is exceeded. Try again in 15 seconds."}'
           response_headers+=("retry-after: 15")
         else
           response_body='{"status":"ok","path":"/api/health"}'
@@ -299,6 +390,36 @@ case "$url" in
   "http://localhost:8000/apim/management/apis/portal-hello/operations/health")
     response_body='{"id":"health","method":"GET","url_template":"/health"}'
     ;;
+  "http://localhost:8000/apim/portal/editor/draft")
+    if [[ "$method" == "PUT" ]]; then
+      printf '%s' "$data" >"$STATE_DIR/portal-draft.json"
+    fi
+    response_body="{\"site\":$(cat "$STATE_DIR/portal-draft.json"),\"publication\":1}"
+    ;;
+  "http://localhost:8000/apim/portal/editor/media")
+    response_body='{"id":"tutorial-image","name":"tutorial-logo.png","url":"/apim/portal/media/tutorial-image"}'
+    ;;
+  "http://localhost:8000/apim/portal/editor/publish")
+    cp "$STATE_DIR/portal-draft.json" "$STATE_DIR/portal-published.json"
+    response_body="{\"site\":$(cat "$STATE_DIR/portal-published.json"),\"publication\":1}"
+    ;;
+  "http://localhost:8000/apim/portal/editor/preview")
+    response_body='<!doctype html><h1>Welcome developers</h1><style>:root{--accent:#663399}</style>'
+    ;;
+  "http://localhost:8000/apim/portal/content")
+    response_body="{\"site\":$(cat "$STATE_DIR/portal-published.json"),\"publication\":1}"
+    ;;
+  "http://localhost:8000/apim/portal/pages/getting-started")
+    response_body='<!doctype html><h1>Getting started</h1><p>Request access to a product, then try an API call.</p>'
+    ;;
+  "http://localhost:8000/apim/portal/media/tutorial-image")
+    if grep -q 'logo_url' "$STATE_DIR/portal-published.json"; then
+      response_body='PNG'
+    else
+      response_status=404
+      response_body='{"detail":"Portal media not found"}'
+    fi
+    ;;
   "http://localhost:8000/apim/management/subscriptions/demo-dev-portal-premium")
     if [[ "$method" == "DELETE" ]]; then
       rm -f "$STATE_DIR/portal-approved"
@@ -314,13 +435,24 @@ case "$url" in
     response_body='<!doctype html><title>APIM portal</title>'
     ;;
   "http://localhost:8000/apim/portal/catalog")
-    response_body='{"products":[{"id":"portal-premium","approval_required":true,"apis":[{"id":"portal-hello"}]}]}'
+    response_body='{"products":[{"id":"portal-premium","approval_required":true,"apis":[{"id":"portal-hello"}]},{"id":"version-tutorial-product","apis":[{"id":"path-versioned-original"},{"id":"path-versioned-v2"}]}]}'
+    if [[ "$(cat "$STATE_DIR/product-state" 2>/dev/null || echo absent)" == "published" ]]; then
+      response_body='{"products":[{"id":"tutorial-product"},{"id":"tutorial-product-signup"}]}'
+    fi
     ;;
   "http://localhost:8000/apim/portal/subscriptions")
-    if [[ "$method" == "POST" ]]; then
+    if [[ "$method" == "POST" && "$data" == *tutorial-product-signup* ]]; then
+      if [[ "$data" != *accept_terms* ]]; then
+        response_status=400; response_body='{"detail":"Accept terms"}'
+      elif [[ -f "$STATE_DIR/signup-created" ]]; then
+        response_status=409; response_body='{"detail":"Subscription limit reached"}'
+      else
+        touch "$STATE_DIR/signup-created"; response_body='{"id":"demo-dev-tutorial-product-signup","state":"active"}'
+      fi
+    elif [[ "$method" == "POST" ]]; then
       response_body='{"id":"demo-dev-portal-premium","state":"submitted","keys":{"primary":"sub-demo-dev-portal-premium-primary","secondary":"sub-demo-dev-portal-premium-secondary"}}'
     else
-      response_body='{"subscriptions":[{"id":"demo-dev-portal-premium","state":"active"}]}'
+      response_body='{"subscriptions":[{"id":"demo-dev-portal-premium","state":"active"},{"id":"demo-dev-tutorial-product-signup","state":"active"}]}'
     fi
     ;;
   "http://localhost:8000/portal-hello/health")
@@ -472,6 +604,8 @@ EOF
   [[ "$output" == *'"custom_header": "My custom value"'* ]]
   [[ "$output" == *'"status_code": 429'* ]]
   [[ "$output" == *'"retry_after_present": true'* ]]
+  [[ "$output" == *"Waiting 16 seconds to verify the 15-second rate-limit renewal"* ]]
+  [[ "$(cat "$CALL_LOG")" == *"sleep 16"* ]]
 }
 
 @test "tutorial05.sh --verify checks grafana and traces" {
@@ -500,9 +634,11 @@ EOF
   [[ "$output" == *'"matching_traces": 1'* ]]
 }
 
-@test "tutorial07.sh --verify records revisions and releases" {
+@test "tutorial07.sh tests isolated revisions, promotion, and offline routing" {
   run "$TUTORIAL_DIR/tutorial07.sh" --setup
   [ "$status" -eq 0 ]
+  [[ "$output" == *"Verifying isolation before release"* ]]
+  [[ "$output" == *"Verifying release promotion"* ]]
 
   run "$TUTORIAL_DIR/tutorial07.sh" --verify
 
@@ -511,24 +647,34 @@ EOF
   [[ "$output" == *'"id": "public"'* ]]
   [[ "$output" == *'"revision_ids": ['* ]]
   [[ "$output" == *'"releases": ['* ]]
+  [[ "$output" == *'"sampleField": "revision-two"'* ]]
+  [[ "$output" == *'"status_code": 404'* ]]
+  [[ "$(cat "$CALL_LOG")" == *'curl POST http://localhost:8000/tutorial-api;rev=999/test'* ]]
 }
 
-@test "tutorial08.sh --verify routes by version header" {
+@test "tutorial08.sh clones Path version, retains Original and product catalog, and routes by header" {
   run "$TUTORIAL_DIR/tutorial08.sh" --setup
   [ "$status" -eq 0 ]
+  [[ "$(cat "$STATE_DIR/tutorial08-version-request.json")" == *'"versioning_scheme":"Path"'* ]]
+  [[ "$(cat "$CALL_LOG")" == *'curl POST http://localhost:8000/apim/management/apis/path-versioned-original/versions'* ]]
 
   run "$TUTORIAL_DIR/tutorial08.sh" --verify
 
   [ "$status" -eq 0 ]
   [[ "$output" != *"Starting tutorial 08 stack with docker compose"* ]]
   [[ "$output" == *'"version_header_name": "x-api-version"'* ]]
+  [[ "$output" == *'"version_description": "Original"'* ]]
+  [[ "$output" == *'"product_id": "version-tutorial-product"'* ]]
   [[ "$output" == *'"x_version": null'* ]]
   [[ "$output" == *'"x_version": "v2"'* ]]
 }
 
-@test "tutorial09.sh --verify checks the consumer portal loop" {
+@test "tutorial09.sh verifies draft privacy, publication, and consumer subscription loop" {
   run "$TUTORIAL_DIR/tutorial09.sh" --setup
   [ "$status" -eq 0 ]
+  [[ "$output" == *"Anonymous draft image: HTTP 404"* ]]
+  [[ "$output" == *'"draft_private": true'* ]]
+  [[ "$output" == *"Anonymous published image: HTTP 200"* ]]
 
   run "$TUTORIAL_DIR/tutorial09.sh" --verify
 
@@ -539,9 +685,12 @@ EOF
   [[ "$output" == *'"approval_required": true'* ]]
   [[ "$output" == *'"state": "active"'* ]]
   [[ "$output" == *'"status": "ok"'* ]]
+  [[ "$output" == *'"site_title": "Tutorial Developer Portal"'* ]]
+  [[ "$output" == *'"theme": "dark"'* ]]
+  [[ "$output" == *'"page": "getting-started"'* ]]
 }
 
-@test "tutorial10.sh --verify applies the VS Code policy example" {
+@test "tutorial10.sh --verify runs the Bruno authoring collection" {
   run "$TUTORIAL_DIR/tutorial10.sh" --setup
   [ "$status" -eq 0 ]
 
@@ -549,9 +698,9 @@ EOF
 
   [ "$status" -eq 0 ]
   [[ "$output" != *"Starting tutorial 10 stack with docker compose"* ]]
-  [[ "$output" == *"Verifying the authored policy and gateway response"* ]]
-  [[ "$output" == *'"contains_vscode_header": true'* ]]
-  [[ "$output" == *'"x_from_vscode": "true"'* ]]
+  [[ "$output" == *"Running Bruno CLI: import, edit settings/policies"* ]]
+  [[ "$output" == *"Bruno collection: 11 requests passed"* ]]
+  [[ "$(cat "$CALL_LOG")" == *"examples/apim-tutorials bruno APIM_BASE=http://localhost:8000"* ]]
 }
 
 @test "tutorial11.sh --verify exports simulator inventory" {

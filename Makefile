@@ -139,6 +139,7 @@ help:
 	@printf $(HELP_FMT) "make help-verify" "Smoke tests and live verification"
 	@echo ""
 	@echo "BFF demo: make -C examples/bff help"
+	@echo "APIM tutorials: make -C examples/apim-tutorials help"
 
 .PHONY: help-stacks help-dev help-verify help-release help-config help-all
 
@@ -759,6 +760,7 @@ examples:
 	@echo ""
 	@printf "  %-18s %-34s %s\n" "AI gateway" "make up-ai" "Token limits and metrics with a mock LLM"
 	@printf "  %-18s %-34s %s\n" "AWS comparison" "make up-aws" "LocalStack API Gateway beside APIM"
+	@printf "  %-18s %-34s %s\n" "APIM tutorials" "make -C examples/apim-tutorials help" "Eleven workflows and Bruno CLI"
 	@printf "  %-18s %-34s %s\n" "BFF" "make -C examples/bff help" "Web/mobile backends and gateways in series"
 	@printf "  %-18s %-34s %s\n" "Gateway patterns" "make -C examples/architecture-patterns help" "Routing, offloading, aggregation, gatekeeper"
 	@printf "  %-18s %-34s %s\n" "Workload patterns" "make -C examples/architecture-patterns-extra help" "Domain adapter, deployment stamps, bulkheads"

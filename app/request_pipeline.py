@@ -1447,12 +1447,15 @@ class _TraceContext:
     collector: PolicyTraceCollector | None
 
     @classmethod
-    def read(cls, request: Request, cfg: GatewayConfig) -> _TraceContext:
-        requested = cfg.trace_enabled and request.headers.get("x-apim-trace", "").lower() == "true"
+    def read(cls, request: Request, cfg: GatewayConfig, api_id: str | None = None) -> _TraceContext:
+        from app.debug_credentials import authorize_debug
+
+        authorized = authorize_debug(request, api_id)
+        requested = authorized or (cfg.trace_enabled and request.headers.get("x-apim-trace", "").lower() == "true")
         request.state.apim_trace_requested = requested
         return cls(
             requested=requested,
-            trace_id=f"trace-{int(time.time() * 1000)}" if requested else None,
+            trace_id=f"trace-{uuid.uuid4().hex}" if requested else None,
             collector=PolicyTraceCollector() if requested else None,
         )
 
@@ -2173,10 +2176,13 @@ async def execute_gateway_request(request: Request) -> Response:
     )
 
     policy_docs = _policy_document_stack(cfg, route, effective_product_id, request.app.state.policy_cache)
+    request.state.apim_api_id = route.api_id
 
     body = await _read_body_within_limit(request, cfg)
     correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
     headers = _initial_upstream_headers(request, auth, cfg, correlation_id)
+    # Debug credentials authorize gateway tracing, not the backend.
+    headers.pop("apim-debug-authorization", None)
 
     forwarding = _ForwardingContext.read(request)
     request.state.apim_client_ip = forwarding.client_ip
@@ -2197,7 +2203,7 @@ async def execute_gateway_request(request: Request) -> Response:
         subscription_groups=subscription_groups,
     )
 
-    trace = _TraceContext.read(request, cfg)
+    trace = _TraceContext.read(request, cfg, route.api_id)
     trace_requested, trace_id, trace_collector = trace.requested, trace.trace_id, trace.collector
     client: httpx.AsyncClient = request.app.state.http_client
     policy_runtime = PolicyRuntime(

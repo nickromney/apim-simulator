@@ -4,6 +4,13 @@ import base64
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
+
+PETS = [
+    {"id": 1, "name": "local-cat", "photoUrls": [], "status": "pending", "tags": [{"id": 1, "name": "cat"}]},
+    {"id": 2, "name": "local-dog", "photoUrls": [], "status": "available", "tags": [{"id": 2, "name": "dog"}]},
+    {"id": 3, "name": "local-adopted-cat", "photoUrls": [], "status": "sold", "tags": [{"id": 1, "name": "cat"}]},
+]
 
 
 def _decode_body(data: bytes) -> str:
@@ -27,7 +34,7 @@ class Handler(BaseHTTPRequestHandler):
             return b""
         return self.rfile.read(length)
 
-    def _write_json(self, status_code: int, payload: dict) -> None:
+    def _write_json(self, status_code: int, payload: dict | list[dict]) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status_code)
         self.send_header("content-type", "application/json")
@@ -46,10 +53,28 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self) -> None:
         body = self._read_body()
+        if self.command == "GET" and self._petstore_get():
+            return
         if self.path.endswith("/health") or self.path.endswith("/startup"):
             self._write_json(200, {"status": "ok", "path": self.path})
             return
         self._write_json(200, self._payload(body))
+
+    def _petstore_get(self) -> bool:
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == "/api/v3/pet/findByStatus":
+            statuses = query.get("status", [])
+            self._write_json(200, [pet for pet in PETS if pet["status"] in statuses])
+        elif url.path == "/api/v3/pet/findByTags":
+            tags = set(query.get("tags", []))
+            self._write_json(200, [pet for pet in PETS if tags & {tag["name"] for tag in pet["tags"]}])
+        elif url.path.startswith("/api/v3/pet/"):
+            pet = next((pet for pet in PETS if str(pet["id"]) == url.path.rsplit("/", 1)[-1]), None)
+            self._write_json(200 if pet else 404, pet or {"message": "Pet not found"})
+        else:
+            return False
+        return True
 
     def do_GET(self) -> None:
         self._handle()

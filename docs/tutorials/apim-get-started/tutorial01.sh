@@ -12,10 +12,12 @@ DOCKER_BIN="${DOCKER_BIN:-docker}"
 APIM_BASE="${APIM_BASE:-$APIM_BASE_URL}"
 APIM_TENANT_KEY="${APIM_TENANT_KEY:-local-dev-tenant-key}"
 OPENAPI_SOURCE="${OPENAPI_SOURCE:-$ROOT_DIR/examples/mock-backend/openapi.json}"
+APIM_UPSTREAM_BASE_URL="${APIM_UPSTREAM_BASE_URL-http://mock-backend:8080/api}"
 OPENAPI_SOURCE_DISPLAY="${OPENAPI_SOURCE_DISPLAY:-$(stack_env_display_path "$OPENAPI_SOURCE")}"
 APIM_API_ID="${APIM_API_ID:-tutorial-api}"
 APIM_API_NAME="${APIM_API_NAME:-Tutorial API}"
 APIM_API_PATH="${APIM_API_PATH:-tutorial-api}"
+PETSTORE_SOURCE="$ROOT_DIR/tests/fixtures/openapi/petstore3-2026-10-02.json"
 APIM_HEALTH_ATTEMPTS="${APIM_HEALTH_ATTEMPTS:-30}"
 APIM_HEALTH_DELAY_SECONDS="${APIM_HEALTH_DELAY_SECONDS:-1}"
 UV_BIN="${UV_BIN:-uv}"
@@ -45,6 +47,7 @@ Environment overrides:
   APIM_BASE                    Gateway base URL. Default: $APIM_BASE
   APIM_TENANT_KEY              Management tenant key. Default: $APIM_TENANT_KEY
   OPENAPI_SOURCE               OpenAPI file path or URL. Default: $OPENAPI_SOURCE_DISPLAY
+  APIM_UPSTREAM_BASE_URL       Explicit local backend. Default: $APIM_UPSTREAM_BASE_URL
   APIM_API_ID                  API identifier to create. Default: $APIM_API_ID
   APIM_API_NAME                API display name. Default: $APIM_API_NAME
   APIM_API_PATH                Public API path. Default: $APIM_API_PATH
@@ -192,6 +195,43 @@ print(json.dumps(summary, indent=2, sort_keys=True))
 PY
 }
 
+verify_petstore() {
+  local metadata pending tags
+  echo "Verifying unchanged Microsoft tutorial Petstore import"
+  metadata="$(curl -fsS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" "$APIM_BASE/apim/management/apis/petstore")"
+  METADATA_JSON="$metadata" repo_python - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["METADATA_JSON"])
+summary = {"id": data["id"], "operation_count": len(data["operations"]), "path": data["path"],
+           "upstream_base_url": data["upstream_base_url"],
+           "find_by_status_template": next(op["url_template"] for op in data["operations"]
+                                          if op["id"] == "findpetsbystatus")}
+expected = {"id": "petstore", "operation_count": 19, "path": "petstore",
+            "upstream_base_url": "http://mock-backend:8080/api/v3",
+            "find_by_status_template": "/pet/findByStatus?status={status}"}
+assert summary == expected, (summary, expected)
+print(json.dumps(summary, indent=2, sort_keys=True))
+PY
+  echo "GET $APIM_BASE/petstore/pet/findByStatus?status=pending"
+  pending="$(curl -fsS "$APIM_BASE/petstore/pet/findByStatus?status=pending")"
+  echo "GET $APIM_BASE/petstore/pet/findByTags?tags=cat&tags=dog"
+  tags="$(curl -fsS "$APIM_BASE/petstore/pet/findByTags?tags=cat&tags=dog")"
+  PENDING_JSON="$pending" TAGS_JSON="$tags" repo_python - <<'PY'
+import json
+import os
+
+pending = json.loads(os.environ["PENDING_JSON"])
+tags = json.loads(os.environ["TAGS_JSON"])
+summary = {"pending_ids": [pet["id"] for pet in pending],
+           "pending_statuses": [pet["status"] for pet in pending],
+           "tag_ids": [pet["id"] for pet in tags]}
+assert summary == {"pending_ids": [1], "pending_statuses": ["pending"], "tag_ids": [1, 2, 3]}, summary
+print(json.dumps(summary, indent=2, sort_keys=True))
+PY
+}
+
 verify_tutorial() {
   echo "Verifying imported API metadata"
   verify_api_metadata
@@ -201,6 +241,8 @@ verify_tutorial() {
   verify_health_route
   echo
   verify_echo_route
+  echo
+  verify_petstore
   echo
 }
 
@@ -282,6 +324,17 @@ OPENAPI_SOURCE="$OPENAPI_SOURCE" \
 APIM_API_ID="$APIM_API_ID" \
 APIM_API_NAME="$APIM_API_NAME" \
 APIM_API_PATH="$APIM_API_PATH" \
+APIM_UPSTREAM_BASE_URL="$APIM_UPSTREAM_BASE_URL" \
+repo_python "$ROOT_DIR/scripts/import_openapi.py"
+echo
+echo "Importing unchanged Microsoft tutorial Petstore fixture (OpenAPI 3.0.4)"
+APIM_BASE_URL="$APIM_BASE" \
+APIM_TENANT_KEY="$APIM_TENANT_KEY" \
+OPENAPI_SOURCE="$PETSTORE_SOURCE" \
+APIM_API_ID=petstore \
+APIM_API_NAME="Swagger Petstore - OpenAPI 3.0" \
+APIM_API_PATH=petstore \
+APIM_UPSTREAM_BASE_URL=http://mock-backend:8080/api/v3 \
 repo_python "$ROOT_DIR/scripts/import_openapi.py"
 echo
 echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial01.sh --verify to validate the imported API."

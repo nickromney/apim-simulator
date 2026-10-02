@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "APIM tutorial authoring",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Export reusable OpenAPI
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{apimBaseUrl}}/apim/management/apis/bruno-api/export
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  X-Apim-Tenant-Key: {{tenantKey}}
+}
+
+tests {
+  test("Export reusable OpenAPI", function () {
+    expect(res.getStatus()).to.equal(200); expect(res.getBody().openapi).to.equal("3.0.3"); expect(res.getBody().paths["/health"].get.operationId).to.equal("health");
+  });
+}

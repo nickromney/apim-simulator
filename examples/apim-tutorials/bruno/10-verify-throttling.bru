@@ -1,0 +1,22 @@
+meta {
+  name: Verify throttling
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{apimBaseUrl}}/bruno-api/health
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  Ocp-Apim-Subscription-Key: {{subscriptionKey}}
+}
+
+tests {
+  test("Verify throttling", function () {
+    expect(res.getStatus()).to.equal(429); expect(res.getHeader("Retry-After")).to.not.equal(undefined);
+  });
+}

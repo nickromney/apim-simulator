@@ -690,18 +690,26 @@ def _mock_operation(req: PolicyRequest, runtime: PolicyRuntime | None) -> Any | 
     return api.operations.get(operation_id)
 
 
+def _declared_response(operation: Any, status_code: int | None) -> Any | None:
+    responses = list(getattr(operation, "responses", []) or [])
+    return next(
+        (item for item in responses if item.status_code == status_code),
+        next((item for item in responses if item.status_code == "default"), None),
+    )
+
+
 def _mock_representation(operation: Any, *, status_code: int, content_type: str | None) -> Any | None:
     """The response representation to mock.
 
-    APIM selects a representation only from the response matching the
-    requested status code. A requested content type must also match exactly,
+    Select the exact status response first, then the OpenAPI default response.
+    A requested content type must also match exactly,
     case-insensitively; otherwise the response has no content.
     """
-    candidates = [item for item in operation.responses if item.status_code == status_code]
-    if not candidates:
+    response = _declared_response(operation, status_code)
+    if response is None:
         return None
 
-    representations = list(candidates[0].representations)
+    representations = list(response.representations)
     if not representations:
         return None
     if content_type:
@@ -790,7 +798,7 @@ def _mock_schema_sample(api_id: str, operation: Any, representation: Any, runtim
             root = json.loads(schema.value) if schema.value else None
         except (TypeError, json.JSONDecodeError):
             root = None
-    definitions = getattr(schema, "definitions", {})
+    definitions = getattr(schema, "definitions", {}) or getattr(schema, "components", {}).get("schemas", {})
     return _schema_sample(root, definitions if isinstance(definitions, dict) else {}, set())
 
 
@@ -2870,10 +2878,7 @@ def _operation_representation(req: PolicyRequest, runtime: PolicyRuntime | None,
     if operation is None:
         return None
     if req.in_outbound:
-        response = next(
-            (item for item in operation.responses if item.status_code == req.response_status_code),
-            None,
-        )
+        response = _declared_response(operation, req.response_status_code)
         representations = getattr(response, "representations", []) if response is not None else []
     else:
         request = getattr(operation, "request", None)
@@ -3112,10 +3117,14 @@ def _parameter_schema(
     return {"type": getattr(parameter, "type", "string")}, None
 
 
-def _coerce_parameter_value(value: str, schema: dict[str, Any]) -> Any:
+def _coerce_parameter_value(value: str | list[str], schema: dict[str, Any]) -> Any:
     value_type = schema.get("type")
     if isinstance(value_type, list):
         value_type = next((item for item in value_type if item != "null"), value_type[0] if value_type else None)
+    if value_type == "array":
+        if not isinstance(value, list):
+            raise ValueError("Array parameters require repeated query values")
+        return [_coerce_parameter_value(item, schema.get("items", {})) for item in value]
     if value_type == "integer":
         return int(value)
     if value_type == "number":
@@ -3566,16 +3575,6 @@ class ValidateParameters(PolicyNode):
             specified=True,
             group_action=specified_action,
         )
-        if len(values) > 1:
-            return self._failure(
-                req,
-                runtime,
-                kind=kind,
-                name=parameter.name,
-                rule="IncorrectMessage",
-                details=f"Request cannot contain multiple values for the {kind} parameter {parameter.name}.",
-                action=action,
-            )
         if not values:
             return None
         schema, resolution = _parameter_schema(req, runtime, parameter)
@@ -3593,9 +3592,20 @@ class ValidateParameters(PolicyNode):
             )
         if schema is None:
             return None
+        if len(values) > 1 and schema.get("type") != "array":
+            return self._failure(
+                req,
+                runtime,
+                kind=kind,
+                name=parameter.name,
+                rule="IncorrectMessage",
+                details=f"Request cannot contain multiple values for the {kind} parameter {parameter.name}.",
+                action=action,
+            )
         if getattr(parameter, "values", None):
             schema = {**schema, "enum": _typed_parameter_enum(parameter.values, schema)}
-        return self._validate_parameter_value(req, runtime, kind, parameter.name, values[0], schema, action)
+        value = values if schema.get("type") == "array" else values[0]
+        return self._validate_parameter_value(req, runtime, kind, parameter.name, value, schema, action)
 
     def _validate_parameter_value(
         self,
@@ -3603,7 +3613,7 @@ class ValidateParameters(PolicyNode):
         runtime: PolicyRuntime | None,
         kind: str,
         name: str,
-        value: str,
+        value: str | list[str],
         schema: dict[str, Any],
         action: str,
     ) -> ResponseSpec | None:
@@ -3737,7 +3747,7 @@ class ValidateStatusCode(PolicyNode):
         # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
         operation = _operation_request_metadata(req, runtime)
         declared = {resp.status_code for resp in getattr(operation, "responses", []) or []}
-        if status in declared:
+        if status in declared or "default" in declared:
             _record_step(runtime, "validate-status-code", {"status_code": status, "declared": True})
             return None
         action = dict(self.status_codes).get(status, self.unspecified_status_code_action)
@@ -3926,11 +3936,7 @@ class ValidateHeaders(PolicyNode):
         if not req.in_outbound:
             return None
         operation = _operation_request_metadata(req, runtime)
-        responses = list(getattr(operation, "responses", []) or [])
-        response = next(
-            (item for item in responses if item.status_code == req.response_status_code),
-            None,
-        )
+        response = _declared_response(operation, req.response_status_code)
         declared = list(getattr(response, "headers", []) or [])
         declared_names = {header.name.casefold() for header in declared}
         headers = req.response_headers or {}

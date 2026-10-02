@@ -72,7 +72,18 @@ $ curl -sS "http://localhost:8000/apim/trace/<trace-id>"
 }
 ```
 
-## Differences From Azure APIM
+## API-scoped debug credentials
 
-- The simulator uses `x-apim-trace: true` directly.
-- It does not implement Azure's time-limited debug-token flow for trace authorization.
+The local gateway also implements the tutorial's credential workflow:
+
+1. POST to `/apim/management/gateways/managed/listDebugCredentials` with the tenant
+   header and `{"apiId":"tutorial-api","purposes":["tracing"],"credentialsExpireAfter":"PT1H"}`.
+2. Call the gateway with the returned token in `Apim-Debug-Authorization`.
+3. Read `Apim-Trace-Id`, then POST `{"traceId":"<returned-id>"}` to
+   `/apim/management/gateways/managed/listTrace` with the tenant header.
+
+The script tests API scope, expiry, lookup, and identical response bodies with and
+without tracing. Wrong-API and expired credentials produce the documented debug
+response headers without changing the gateway result. Debug tokens are temporary,
+in memory, bounded to one hour, and removed from forwarded backend headers.
+The existing `x-apim-trace` flow remains available for local compatibility.

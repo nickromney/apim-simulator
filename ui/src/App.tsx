@@ -20,7 +20,7 @@ type OperationRequest = {
   representations: Representation[];
 };
 type OperationResponse = {
-  status_code: number;
+  status_code: number | "default";
   description?: string | null;
   headers: Parameter[];
   representations: Representation[];

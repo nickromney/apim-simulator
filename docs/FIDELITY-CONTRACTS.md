@@ -78,7 +78,9 @@ and the portal visibility regression in `tests/test_portal.py`. Confidence:
 ## OpenAPI import — verified subset
 
 **Contract.** The importer implements a bounded, documentation-backed projection for
-OpenAPI 2 JSON and OpenAPI 3.0.x (through 3.0.3). OpenAPI 3.1 is outside this
+OpenAPI 2 JSON and OpenAPI 3.0.x (through 3.0.4). Accepting 3.0.4 is a local
+extension: the current Microsoft getting-started tutorial points to a 3.0.4
+Petstore document, while its import restrictions still list 3.0.3. OpenAPI 3.1 is outside this
 contract and must be rejected or reported as unsupported until a separate
 compatibility decision is made. The same projection is used by the
 management import endpoint and Terraform/OpenTofu import.
@@ -93,6 +95,15 @@ to 300 characters, falling back to the operation ID. By default, translate
 required query parameters into operation template parameters. GET, HEAD, and
 OPTIONS request bodies are discarded.
 
+Scalar parameter formats and numeric minimum/maximum constraints are retained
+in API-scoped schemas. Query arrays support OpenAPI 3 `style: form`,
+`explode: true` and Swagger 2 `collectionFormat: multi`; repeated query values
+are forwarded unchanged and parameter validation coerces and checks every item.
+Path/header arrays and other array encodings remain unsupported. Swagger form
+and file parameters are projected into request representations' `form_parameters`;
+file metadata uses a binary string schema. HTTP bodies are forwarded as received;
+form decoding or form-field validation requires authored policy.
+
 **Order and result.** Validate the document and URL templates, project API
 metadata, operations, parameters, representations/examples, and API-scoped
 schemas, then replace unmatched operations on update. On reimport, match the raw `operationId` against existing resource names.
@@ -103,11 +114,21 @@ normalized resource name does not match in place on reimport; this follows the
 Microsoft documentation and remains a priority for live Azure comparison. Management
 projection and runtime routing must see the same imported metadata.
 
+Inline request/response and parameter schemas are preserved under deterministic
+generated API-scope schema IDs, with their internal references intact. This is
+a local adaptation to Azure's documented restriction on inline operation
+schemas. Default responses retain `status_code: default`, description, headers,
+representations, examples, and schemas. Exact status metadata takes precedence;
+mocking and response validation fall back to default metadata when no exact
+status is declared. This fallback follows OpenAPI response semantics; its
+Azure import projection remains unverified. Swagger form metadata projection
+is also a local adaptation beyond Azure's documented unsupported form parameters.
+
 **Errors and exclusions.** Reject unsupported versions, external
-`$ref` files, recursive definitions, operation-level `servers`, array/object or
-referenced parameter schemas, unsupported serialization, inline complex operation
-schemas, unprojected scalar parameter constraints, component request bodies/responses/
-headers/examples, nonnumeric response status keys, OpenAPI 3 TRACE operations,
+`$ref` files, recursive definitions, operation-level `servers`, object or
+referenced parameter schemas, nested/non-query parameter arrays, unsupported
+serialization, unprojected scalar parameter constraints, component request bodies/responses/
+headers/examples, response status keys other than numeric or `default`, OpenAPI 3 TRACE operations,
 callbacks, templated server URLs, `x-ms-paths`, OpenAPI 3.1 documents, and
 documents over the documented inline size limit. Do not infer OpenAPI security
 definitions as gateway authentication. Exact Azure error text is not promised
@@ -117,7 +138,11 @@ unless documented.
 Confidence: `verified-subset`. Local evidence includes `tests/test_openapi_import.py`,
 `tests/test_openapi_workflows.py`, and `tests/test_import_mock_contract.py`.
 Live Azure differential comparison remains unverified. Explicit local HTTP
-backend overrides are a simulator adaptation.
+backend overrides are a simulator adaptation. Unmodified snapshots of both
+Microsoft tutorial Petstore specifications are covered by `tests/test_petstore_import.py`,
+including management import, routing, repeated query arrays, constraint validation,
+and default-response fallback. The fallback semantics reference the
+[OpenAPI Responses Object](https://spec.openapis.org/oas/v3.0.4.html#responses-object).
 
 ## Policy expressions and policy scopes — verified subset
 
@@ -280,6 +305,30 @@ headers are opt-in adaptations.
 [APIM tracing](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-api-inspect),
 `docs/APIM-SDK-SURFACE-GUIDE.md`, and the management/trace owner tests in
 `contract_matrix.yml`. Confidence: `adapted`.
+
+## Local tutorial services
+
+API-scoped debug credentials authorize tracing for at most one hour using
+`Apim-Debug-Authorization`; trace lookup uses `Apim-Trace-Id`. Local monitoring
+provides metrics, management activity logs, sampled gateway resource logs, and
+Fired/Resolved alert events with local action groups. Observations and credentials
+are in-memory; settings and rules persist. These additions do not consume request
+bodies or change policy results.
+
+The developer portal maintains independent draft/published branding, theme, pages
+and uploaded images. Protected preview sees drafts; anonymous consumers see only
+published content. The portal groups API versions and generates Segment, Header,
+or Query selectors. Product publication controls discovery; terms and limits apply
+to consumer signup. Management-created products default to unpublished.
+
+API Center maintains a persisted one-way local catalog of all source APIs,
+including optional exported OpenAPI. Create/edit/delete operations synchronize
+immediately; unlink removes synchronized assets. One link is allowed per simulator.
+
+Evidence: [local tutorial guides](tutorials/apim-get-started/README.md),
+`tests/test_debug_credentials.py`, `tests/test_local_monitoring.py`,
+`tests/test_portal_customization.py`, `tests/test_local_api_center.py`,
+`tests/test_product_authoring.py`, and `tests/test_version_workflow.py`.
 
 ## Evidence maintenance rule
 

@@ -44,6 +44,7 @@ def main() -> int:
     base_url = os.environ.get("APIM_BASE_URL", "http://localhost:8000").rstrip("/")
     tenant_key = os.environ.get("APIM_TENANT_KEY", "local-dev-tenant-key")
     products = [item.strip() for item in os.environ.get("APIM_API_PRODUCTS", "").split(",") if item.strip()]
+    upstream_base_url = os.environ.get("APIM_UPSTREAM_BASE_URL")
 
     response = httpx.post(
         f"{base_url}/apim/management/apis/{api_id}/import",
@@ -54,6 +55,7 @@ def main() -> int:
             "content_format": content_format,
             "content_value": content_value,
             "products": products or None,
+            "upstream_base_url": upstream_base_url,
         },
         timeout=60.0,
     )

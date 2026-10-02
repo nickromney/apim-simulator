@@ -120,6 +120,15 @@ $ curl -sS -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/t
 }
 ```
 
-## Differences From Azure APIM
+## Publication, terms and limits
 
-- There is no developer portal publication state. Product access is enforced at the gateway.
+Management-created products default to `not_published`. The gateway still accepts
+valid subscription keys; publication controls developer catalog discovery. Publish
+with a product PUT containing `state: "published"`. The script verifies that the
+unpublished product is hidden and the published product appears in the consumer
+catalog.
+
+It also creates a separate signup product with legal terms and a subscription
+limit of one. A request without acceptance returns `400`; accepting the terms
+creates an active subscription; a second request returns `409`. Open products are
+visible only to administrators, and an API may belong to at most one open product.

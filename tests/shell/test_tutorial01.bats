@@ -30,6 +30,14 @@ case "$*" in
   *"/apim/health"*)
     printf '{"status":"healthy"}\n'
     ;;
+  *"/apim/management/apis/petstore"*)
+    python3 - <<'PY'
+import json
+print(json.dumps({"id": "petstore", "path": "petstore", "upstream_base_url": "http://mock-backend:8080/api/v3",
+                  "operations": [{"id": "findpetsbystatus", "url_template": "/pet/findByStatus?status={status}"}]
+                  + [{"id": f"operation{i}"} for i in range(18)]}))
+PY
+    ;;
   *"/apim/management/apis/"*)
     printf '{"id":"tutorial-api","path":"tutorial-api","upstream_base_url":"http://mock-backend:8080/api","operations":[{"id":"health"},{"id":"echo"}]}\n'
     ;;
@@ -38,6 +46,12 @@ case "$*" in
     ;;
   *"/tutorial-api/echo"*)
     printf '{"ok":true,"method":"GET","path":"/api/echo","body":"","headers":{"host":"mock-backend:8080"}}\n'
+    ;;
+  *"/petstore/pet/findByStatus?status=pending"*)
+    printf '[{"id":1,"name":"local-cat","status":"pending"}]\n'
+    ;;
+  *"/petstore/pet/findByTags?tags=cat&tags=dog"*)
+    printf '[{"id":1},{"id":2},{"id":3}]\n'
     ;;
 esac
 EOF
@@ -58,6 +72,8 @@ if [[ "${1:-}" == "run" ]]; then
   if [[ "${1:-}" == "python" && "${2:-}" == *"/scripts/import_openapi.py" ]]; then
     printf 'APIM_BASE_URL=%s\n' "${APIM_BASE_URL:-}" >>"$CALL_LOG"
     printf 'OPENAPI_SOURCE=%s\n' "${OPENAPI_SOURCE:-}" >>"$CALL_LOG"
+    printf 'APIM_UPSTREAM_BASE_URL=%s\n' "${APIM_UPSTREAM_BASE_URL:-}" >>"$CALL_LOG"
+    printf 'APIM_API_ID=%s\n' "${APIM_API_ID:-}" >>"$CALL_LOG"
     printf '{"api_id":"tutorial-api"}\n'
     exit 0
   fi
@@ -90,6 +106,10 @@ EOF
   [[ "$output" == *"uv run --project ${REPO_ROOT} python ${REPO_ROOT}/scripts/import_openapi.py"* ]]
   [[ "$output" == *"APIM_BASE_URL=http://localhost:18000"* ]]
   [[ "$output" == *"OPENAPI_SOURCE=$OPENAPI_SOURCE"* ]]
+  [[ "$output" == *"APIM_UPSTREAM_BASE_URL=http://mock-backend:8080/api"* ]]
+  [[ "$output" == *"APIM_API_ID=petstore"* ]]
+  [[ "$output" == *"OPENAPI_SOURCE=${REPO_ROOT}/tests/fixtures/openapi/petstore3-2026-10-02.json"* ]]
+  [[ "$output" == *"APIM_UPSTREAM_BASE_URL=http://mock-backend:8080/api/v3"* ]]
 }
 
 @test "tutorial01.sh without arguments prints help" {
@@ -117,6 +137,8 @@ EOF
   [[ "$output" == *'"operations": ['* ]]
   [[ "$output" == *'"path": "/api/health"'* ]]
   [[ "$output" == *'"path": "/api/echo"'* ]]
+  [[ "$output" == *'"operation_count": 19'* ]]
+  [[ "$output" == *'"pending_statuses": ['* ]]
 
   run cat "$CALL_LOG"
   [ "$status" -eq 0 ]
@@ -125,6 +147,8 @@ EOF
   [[ "$output" == *"curl -fsS -H X-Apim-Tenant-Key: test-tenant-key http://localhost:18000/apim/management/apis/tutorial-api"* ]]
   [[ "$output" == *"curl -fsS http://localhost:18000/tutorial-api/health"* ]]
   [[ "$output" == *"curl -fsS http://localhost:18000/tutorial-api/echo"* ]]
+  [[ "$output" == *"curl -fsS http://localhost:18000/petstore/pet/findByStatus?status=pending"* ]]
+  [[ "$output" == *"curl -fsS http://localhost:18000/petstore/pet/findByTags?tags=cat&tags=dog"* ]]
 }
 
 @test "tutorial01.sh --verify suggests setup when state is missing" {

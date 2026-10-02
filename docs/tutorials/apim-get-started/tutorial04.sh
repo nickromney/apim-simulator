@@ -40,8 +40,15 @@ verify_tutorial() {
   echo '$ curl -i -H "Ocp-Apim-Subscription-Key: '"$APIM_SUBSCRIPTION_KEY"'" "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
   capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
   captured_expect_summary \
-    '{"body_text":"Rate limit exceeded","retry_after_present":true,"status_code":429}' \
-    'summary = {"body_text": body_text, "retry_after_present": "retry-after" in headers, "status_code": status}'
+    '{"body_status_code":429,"rate_limit_message":true,"retry_after_present":true,"status_code":429}' \
+    'summary = {"body_status_code": (body_json or {}).get("statusCode"), "rate_limit_message": (body_json or {}).get("message", "").startswith("Rate limit is exceeded."), "retry_after_present": "retry-after" in headers, "status_code": status}'
+  echo
+  echo "Waiting 16 seconds to verify the 15-second rate-limit renewal"
+  sleep 16
+  capture_http_request -H "Ocp-Apim-Subscription-Key: $APIM_SUBSCRIPTION_KEY" "$APIM_BASE/$APIM_API_PATH/health"
+  captured_expect_summary \
+    '{"custom_header":"My custom value","path":"/api/health","status":"ok","status_code":200}' \
+    'summary = {"custom_header": headers.get("custom"), "path": (body_json or {}).get("path"), "status": (body_json or {}).get("status"), "status_code": status}'
   echo
 }
 
@@ -103,7 +110,7 @@ echo
 
 echo "Creating product '$APIM_PRODUCT_ID'"
 management_put "/apim/management/products/$APIM_PRODUCT_ID" "$(cat <<JSON
-{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","require_subscription":true}
+{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","state":"published","require_subscription":true}
 JSON
 )" >/dev/null
 

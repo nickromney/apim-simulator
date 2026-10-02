@@ -2,7 +2,7 @@
 
 This directory mirrors the 11-item [Azure API Management "Get started" tutorial sequence from Microsoft Learn](https://learn.microsoft.com/en-us/azure/api-management/), but mapped onto `apim-simulator`.
 
-Source sequence, verified on 2026-04-08 from the API Management TOC:
+Source sequence, verified on 2026-10-02 from the API Management TOC:
 
 1. Import your first API
 2. Create and publish a product
@@ -66,15 +66,27 @@ and remove orphaned containers.
 | 4 | [Protect your API](https://learn.microsoft.com/en-us/azure/api-management/transform-api) | Supported | [04](./04-protect-your-api.md) |
 | 5 | [Monitor published APIs](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-use-azure-monitor) | Adapted | [05](./05-monitor-published-apis.md) |
 | 6 | [Debug your APIs](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-api-inspector) | Adapted | [06](./06-debug-your-apis.md) |
-| 7 | [Add revisions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-revise-api) | Partial | [07](./07-add-revisions.md) |
+| 7 | [Add revisions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-revise-api) | Supported | [07](./07-add-revisions.md) |
 | 8 | [Add multiple versions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-publish-versions) | Supported | [08](./08-add-multiple-versions.md) |
 | 9 | [Customise developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize) | Adapted | [09](./09-customise-developer-portal.md) |
 | 10 | [Manage APIs in Visual Studio Code](https://learn.microsoft.com/en-us/azure/api-management/visual-studio-code-tutorial) | Adapted | [10](./10-manage-apis-in-visual-studio-code.md) |
-| 11 | [Link to an API Center](https://learn.microsoft.com/en-us/azure/api-management/tutorials/link-api-center) | Not appropriate | [11](./11-link-to-an-api-center.md) |
+| 11 | [Link to an API Center](https://learn.microsoft.com/en-us/azure/api-management/tutorials/link-api-center) | Supported | [11](./11-link-to-an-api-center.md) |
 
-## Interpretation Rules
+## Local equivalents
 
-- `Supported` means the simulator can demonstrate the main tutorial behaviour locally.
-- `Adapted` means the Azure-specific surface is different, but the learning goal maps cleanly.
-- `Partial` means the simulator supports the control-plane shape but not the full Azure runtime semantics.
-- `Not appropriate` means the Azure feature is intentionally outside the simulator's local-gateway scope.
+All eleven tutorial outcomes have local workflows. Monitoring uses local metrics,
+logs and alert action-group events plus OTEL/Grafana; debug uses API-scoped
+credentials and trace lookup; portal customization uses draft, preview and publish;
+API Center uses a continuously synchronized local catalog. Tutorial 10 uses Bruno
+CLI for import, editing, policy authoring, testing and export.
+
+`Supported` denotes local API behavior; `Adapted` denotes a different local client
+or service implementing the tutorial outcome. Run every journey with:
+
+```bash
+make -C examples/apim-tutorials smoke
+```
+
+Tutorial 10's `--verify` repeats authoring requests through Bruno. Other verification
+commands inspect state, and tutorial 6 issues temporary credentials to test expiry.
+See [validation report](validation-2026-10-02.md).

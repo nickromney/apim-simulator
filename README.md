@@ -18,7 +18,8 @@ The simulator gives you a local APIM-shaped gateway with:
 - APIM-style auth flows, including anonymous, subscription-key, JWT/OIDC, scope, role, claim, and client-certificate checks
 - a practical XML policy subset, including routing, transforms, throttling, caching, JWT validation, backend selection, and `send-request`
 - tenant-key-protected management APIs, per-request traces, replay, and a local operator console
-- product publish states and approval-required subscriptions, plus an adapted consumer developer portal at `/apim/portal` for catalog browsing, subscription sign-up, and try-it calls
+- product publication, legal terms, subscription limits and approval workflows, plus a consumer portal with version selection and draft/preview/publish customization
+- API-scoped debug credentials, local monitoring logs/alerts, OpenAPI export, and a continuously synchronized local API Center catalog
 - Terraform/OpenTofu import and static compatibility reporting
 - direct public, edge HTTP, edge TLS, private/internal, OIDC, MCP, hello starter, todo demo, and OTEL/[LGTM](https://github.com/grafana/docker-otel-lgtm) runtime shapes
 

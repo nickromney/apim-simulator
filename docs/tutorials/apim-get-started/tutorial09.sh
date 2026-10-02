@@ -15,14 +15,14 @@ APIM_PORTAL_PRODUCT_ID="${APIM_PORTAL_PRODUCT_ID:-portal-premium}"
 APIM_PORTAL_API_ID="${APIM_PORTAL_API_ID:-portal-hello}"
 APIM_PORTAL_SUBSCRIPTION_ID="$APIM_PORTAL_USER-$APIM_PORTAL_PRODUCT_ID"
 APIM_PORTAL_SUBSCRIPTION_KEY="sub-$APIM_PORTAL_SUBSCRIPTION_ID-primary"
+PORTAL_IMAGE_BASE64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNIM575HwAEZwIymUV1gwAAAABJRU5ErkJggg=="
 
 usage() {
   cat <<EOF
 Usage: ./docs/tutorials/apim-get-started/tutorial09.sh [--setup|--execute|--verify|--dry-run]
 
-Runs tutorial step 9 for the APIM simulator: the adapted consumer
-developer-portal loop (publish an approval-gated product, request a
-subscription from the portal, approve it, and call the API).
+Runs tutorial step 9: customize portal branding and pages, upload an image,
+preview and publish the draft, then request and approve an API subscription.
 
 Flags:
   --setup, --execute  Start the stack and run the portal sign-up and approval loop.
@@ -33,7 +33,24 @@ EOF
 }
 
 verify_tutorial() {
-  echo "Verifying the consumer developer portal"
+  echo "Verifying the customized and published developer portal"
+
+  published_response="$(curl -fsS "$APIM_BASE/apim/portal/content")"
+  json_expect_summary "$published_response" \
+    '{"site_title":"Tutorial Developer Portal","theme":"dark","accent_color":"#663399","page":"getting-started"}' \
+    'site = data["site"]
+summary = {"site_title":site["site_title"], "theme":site["theme"], "accent_color":site["accent_color"], "page":next(p["slug"] for p in site["pages"] if p["slug"] == "getting-started")}'
+  image_url="$(PUBLISHED_RESPONSE="$published_response" tutorial_python - <<'PY'
+import json, os
+print(json.loads(os.environ["PUBLISHED_RESPONSE"])["site"]["logo_url"])
+PY
+)"
+  image_status="$(curl -sS -o /dev/null -w '%{http_code}' "$APIM_BASE$image_url")"
+  [[ "$image_status" == "200" ]] || { echo "Published media returned $image_status, expected 200" >&2; return 1; }
+  echo "Anonymous published image: HTTP $image_status"
+  capture_http_request "$APIM_BASE/apim/portal/pages/getting-started"
+  captured_expect_summary '{"status_code":200,"page_visible":true}' \
+    'summary = {"status_code": status, "page_visible": "Request access to a product" in body_text}'
 
   echo '$ curl -i "'"$APIM_BASE"'/apim/portal"'
   capture_http_request "$APIM_BASE/apim/portal"
@@ -127,7 +144,7 @@ wait_for_operator_console
 
 echo "Creating approval-gated product '$APIM_PORTAL_PRODUCT_ID'"
 product_response="$(management_put "/apim/management/products/$APIM_PORTAL_PRODUCT_ID" "$(cat <<JSON
-{"name":"Portal Premium","description":"Approval-gated portal demo product","require_subscription":true,"approval_required":true}
+{"name":"Portal Premium","description":"Approval-gated portal demo product","state":"published","require_subscription":true,"approval_required":true}
 JSON
 )")"
 json_expect_summary \
@@ -152,6 +169,46 @@ management_put "/apim/management/apis/$APIM_PORTAL_API_ID/operations/health" "$(
 {"name":"Health","method":"GET","url_template":"/health"}
 JSON
 )" >/dev/null
+echo
+
+echo "Creating a clean draft and publishing the baseline"
+management_put "/apim/portal/editor/draft" '{"site_title":"APIM Simulator Developer Portal","pages":[{"slug":"home","title":"Developer Portal","content":"Browse the APIs."}]}' >/dev/null
+management_post "/apim/portal/editor/publish" '{}' >/dev/null
+
+echo "Uploading a PNG to the draft media library"
+media_response="$(management_post "/apim/portal/editor/media" "{\"name\":\"tutorial-logo.png\",\"content_type\":\"image/png\",\"content_base64\":\"$PORTAL_IMAGE_BASE64\"}")"
+image_url="$(MEDIA_RESPONSE="$media_response" tutorial_python - <<'PY'
+import json, os
+print(json.loads(os.environ["MEDIA_RESPONSE"])["url"])
+PY
+)"
+image_status="$(curl -sS -o /dev/null -w '%{http_code}' "$APIM_BASE$image_url")"
+[[ "$image_status" == "404" ]] || { echo "Draft media returned $image_status, expected 404" >&2; exit 1; }
+echo "Anonymous draft image: HTTP $image_status"
+
+echo "Saving draft title, styles, logo, and a new page"
+draft_response="$(management_get "/apim/portal/editor/draft")"
+draft_payload="$(DRAFT_RESPONSE="$draft_response" IMAGE_URL="$image_url" tutorial_python - <<'PY'
+import json, os
+site = json.loads(os.environ["DRAFT_RESPONSE"])["site"]
+site.update(site_title="Tutorial Developer Portal", theme="dark", accent_color="#663399", logo_url=os.environ["IMAGE_URL"])
+site["pages"] = [{"slug":"home","title":"Welcome developers","content":"Discover our APIs and request access."},
+                 {"slug":"getting-started","title":"Getting started","content":"Request access to a product, then try an API call."}]
+print(json.dumps(site))
+PY
+)"
+management_put "/apim/portal/editor/draft" "$draft_payload" >/dev/null
+capture_http_request -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" "$APIM_BASE/apim/portal/editor/preview"
+captured_expect_summary '{"status_code":200,"draft_visible":true}' \
+  'summary = {"status_code":status,"draft_visible":"Welcome developers" in body_text and "--accent:#663399" in body_text}'
+published_before="$(curl -fsS "$APIM_BASE/apim/portal/content")"
+json_expect_summary "$published_before" '{"draft_private":true}' \
+  'summary = {"draft_private":data["site"]["site_title"] != "Tutorial Developer Portal"}'
+echo "Publishing the saved draft"
+management_post "/apim/portal/editor/publish" '{}' >/dev/null
+image_status="$(curl -sS -o /dev/null -w '%{http_code}' "$APIM_BASE$image_url")"
+[[ "$image_status" == "200" ]] || { echo "Published media returned $image_status, expected 200" >&2; exit 1; }
+echo "Anonymous published image: HTTP $image_status"
 echo
 
 ensure_subscription_absent "$APIM_PORTAL_SUBSCRIPTION_ID"
@@ -190,6 +247,7 @@ json_expect_summary \
 echo
 
 echo "Portal page is available at $APIM_BASE/apim/portal"
+echo "Portal editor is available at $APIM_BASE/apim/portal/editor"
 echo "Operator console is available at $OPERATOR_CONSOLE_BASE"
 echo
 echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial09.sh --verify to validate the portal loop."

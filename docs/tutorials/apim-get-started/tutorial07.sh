@@ -18,11 +18,25 @@ Usage: ./docs/tutorials/apim-get-started/tutorial07.sh [--setup|--execute|--veri
 Runs tutorial step 7 for the APIM simulator.
 
 Flags:
-  --setup, --execute  Start the local stack and apply the tutorial revision metadata.
+  --setup, --execute  Test an isolated revision, publish it, and take the old revision offline.
   --verify            Verify the existing tutorial state without restarting it.
   --dry-run           Show this help and preview the setup action without side effects.
   --help, -h          Show this help text.
 EOF
+}
+
+verify_test_operation() {
+  local path="$1"
+  local expected_status="$2"
+  local expected_sample="null"
+  if [[ "$expected_status" -eq 200 ]]; then
+    expected_sample='"revision-two"'
+  fi
+  echo "POST $APIM_BASE$path"
+  capture_http_request -X POST "$APIM_BASE$path"
+  captured_expect_summary \
+    "{\"status_code\":$expected_status,\"sampleField\":$expected_sample}" \
+    'summary = {"status_code": status, "sampleField": (body_json or {}).get("sampleField")}'
 }
 
 verify_tutorial() {
@@ -50,6 +64,16 @@ verify_tutorial() {
     "$releases_response" \
     '{"releases":[{"id":"public","revision":"2"}]}' \
     'summary = {"releases": [{"id": item.get("id"), "revision": item.get("revision")} for item in data]}'
+
+  echo
+  echo "Verifying current, explicit, offline, and unknown revision routes"
+  verify_test_operation "/$APIM_API_PATH/test" 200
+  verify_test_operation "/$APIM_API_PATH;rev=2/test" 200
+  verify_test_operation "/$APIM_API_PATH;rev=1/test" 404
+  verify_test_operation "/$APIM_API_PATH;rev=999/test" 404
+  echo "GET $APIM_BASE/$APIM_API_PATH;rev=1/health (offline revision)"
+  capture_http_request "$APIM_BASE/$APIM_API_PATH;rev=1/health"
+  captured_expect_summary '{"status_code":404}' 'summary = {"status_code": status}'
   echo
 }
 
@@ -101,7 +125,7 @@ if [[ "$VERIFY" -eq 1 ]]; then
 fi
 
 echo "Starting tutorial 07 stack with docker compose"
-start_public_stack
+recreate_public_gateway_stack
 
 echo "Waiting for gateway health at $APIM_BASE/apim/health"
 wait_for_gateway
@@ -109,25 +133,49 @@ wait_for_gateway
 import_tutorial_api
 echo
 
-echo "Adding revision metadata"
+echo "Keeping revision 1 current while preparing revision 2"
 revision_one="$(management_put "/apim/management/apis/$APIM_API_ID/revisions/1" "$(cat <<JSON
-{"description":"Initial revision","is_current":false,"is_online":false}
+{"description":"Initial revision","is_current":true,"is_online":true}
 JSON
 )")"
 json_expect_summary \
   "$revision_one" \
-  '{"description":"Initial revision","id":"1","is_current":false,"is_online":false}' \
+  '{"description":"Initial revision","id":"1","is_current":true,"is_online":true}' \
   'summary = {"description": data.get("description"), "id": data.get("id"), "is_current": data.get("is_current"), "is_online": data.get("is_online")}'
 echo
 
-revision_two="$(management_put "/apim/management/apis/$APIM_API_ID/revisions/2" "$(cat <<JSON
-{"description":"Current revision","is_current":true,"is_online":true,"source_api_id":"$CURRENT_REVISION_SOURCE"}
-JSON
-)")"
+revision_payload="$(REVISION_JSON="$revision_one" CURRENT_REVISION_SOURCE="$CURRENT_REVISION_SOURCE" tutorial_python - <<'PY'
+import json
+import os
+
+definition = json.loads(os.environ["REVISION_JSON"])["definition"]
+definition["operations"]["test"] = {
+    "name": "Test revision",
+    "method": "POST",
+    "url_template": "/test",
+    "policies_xml": '<policies><inbound><return-response><set-status code="200" reason="OK" />'
+    '<set-header name="Content-Type" exists-action="override"><value>application/json</value></set-header>'
+    '<set-body>{"sampleField":"revision-two"}</set-body></return-response></inbound>'
+    '<backend /><outbound /><on-error /></policies>',
+}
+print(json.dumps({"description": "Added test operation", "is_current": False, "is_online": True,
+                 "source_api_id": os.environ["CURRENT_REVISION_SOURCE"], "definition": definition}))
+PY
+)"
+revision_two="$(management_put "/apim/management/apis/$APIM_API_ID/revisions/2" "$revision_payload")"
 json_expect_summary \
   "$revision_two" \
-  "{\"description\":\"Current revision\",\"id\":\"2\",\"is_current\":true,\"source_api_id\":\"$CURRENT_REVISION_SOURCE\"}" \
+  "{\"description\":\"Added test operation\",\"id\":\"2\",\"is_current\":false,\"source_api_id\":\"$CURRENT_REVISION_SOURCE\"}" \
   'summary = {"description": data.get("description"), "id": data.get("id"), "is_current": data.get("is_current"), "source_api_id": data.get("source_api_id")}'
+echo
+
+echo "Verifying isolation before release: only revision 2 has POST /test"
+verify_test_operation "/$APIM_API_PATH/test" 404
+verify_test_operation "/$APIM_API_PATH;rev=1/test" 404
+verify_test_operation "/$APIM_API_PATH;rev=2/test" 200
+echo "GET $APIM_BASE/$APIM_API_PATH;rev=1/health (original revision remains online)"
+capture_http_request "$APIM_BASE/$APIM_API_PATH;rev=1/health"
+captured_expect_summary '{"status_code":200}' 'summary = {"status_code": status}'
 echo
 
 echo "Creating release 'public'"
@@ -140,4 +188,10 @@ json_expect_summary \
   '{"api_id":"service/apim-simulator/apis/tutorial-api;rev=2","id":"public","revision":"2"}' \
   'summary = {"api_id": data.get("api_id"), "id": data.get("id"), "revision": data.get("revision")}'
 echo
-echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial07.sh --verify to validate the revision metadata."
+echo "Verifying release promotion on the default URL"
+verify_test_operation "/$APIM_API_PATH/test" 200
+echo
+echo "Taking revision 1 offline"
+management_put "/apim/management/apis/$APIM_API_ID/revisions/1" \
+  '{"description":"Initial revision","is_current":false,"is_online":false}' >/dev/null
+echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial07.sh --verify to validate revision routing."

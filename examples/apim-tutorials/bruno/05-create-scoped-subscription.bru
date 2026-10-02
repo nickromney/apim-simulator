@@ -1,0 +1,34 @@
+meta {
+  name: Create scoped subscription
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{apimBaseUrl}}/apim/management/subscriptions
+  body: json
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  X-Apim-Tenant-Key: {{tenantKey}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "id": "tutorial10-bruno",
+    "name": "Bruno tutorial subscription",
+    "products": [
+      "bruno-product"
+    ],
+    "primary_key": "{{subscriptionKey}}"
+  }
+}
+
+tests {
+  test("Create scoped subscription", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

@@ -99,7 +99,18 @@ $ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/a
 }
 ```
 
-## Differences From Azure APIM
+## Local metrics, logs and alert rules
 
-- This uses OTEL plus Grafana instead of Azure Monitor metrics, activity logs, and alert rules.
-- There is no Azure resource-log pipeline or alert-group workflow in the simulator.
+The script enables gateway resource logs through
+`PUT /apim/management/monitoring/diagnostic-settings` and creates a failed-request
+rule through `PUT /apim/management/monitoring/alert-rules/tutorial-failures`.
+A deliberately missing route produces a failure and fires the local action group.
+Inspect tenant-protected `metrics`, `activity-logs`, `resource-logs` and `alerts`
+under `/apim/management/monitoring/`. Activity logs record management writes;
+resource logs record sampled gateway calls without consuming bodies. Alert events
+include Fired/Resolved states and the local action-group name. Local observations
+live in memory and reset on restart; diagnostic settings and rules persist in the
+configuration. Alert counts use one-second buckets for windows up to 24 hours.
+
+The same script checks that gateway telemetry reaches Grafana's Prometheus, Loki,
+and Tempo backends. No cloud service is needed for these monitoring outcomes.

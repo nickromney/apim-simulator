@@ -27,6 +27,8 @@ EOF
 }
 
 verify_tutorial() {
+  APIM_BASE="$APIM_BASE" APIM_TENANT_KEY="$APIM_TENANT_KEY" APIM_API_ID="$APIM_API_ID" APIM_API_PATH="$APIM_API_PATH" APIM_SUBSCRIPTION_KEY="$APIM_SUBSCRIPTION_KEY" \
+    tutorial_python "$ROOT_DIR/examples/apim-tutorials/workflows.py" monitoring verify
   echo "Verifying observability surfaces"
 
   echo '$ curl -sS "'"$GRAFANA_BASE"'/api/health"'
@@ -44,6 +46,10 @@ verify_tutorial() {
     "{\"matching_traces\":[{\"correlation_id\":\"$TRACE_ONE\",\"status\":200,\"upstream_url\":\"http://mock-backend:8080/api/health\"},{\"correlation_id\":\"$TRACE_TWO\",\"status\":200,\"upstream_url\":\"http://mock-backend:8080/api/echo\"}]}" \
     'summary = {"matching_traces": sorted([{"correlation_id": item.get("correlation_id"), "status": item.get("status"), "upstream_url": item.get("upstream_url")} for item in data.get("items", []) if item.get("correlation_id") in {"'"$TRACE_ONE"'","'"$TRACE_TWO"'" }], key=lambda item: 0 if item["correlation_id"] == "'"$TRACE_ONE"'" else 1)}'
   echo
+
+  echo "Verifying exported gateway metrics, logs, and traces"
+  APIM_BASE_URL="$APIM_BASE" GRAFANA_BASE_URL="$GRAFANA_BASE" \
+    tutorial_python "$ROOT_DIR/scripts/verify_otel.py"
 }
 
 while (($# > 0)); do
@@ -107,7 +113,7 @@ echo
 
 echo "Creating product '$APIM_PRODUCT_ID'"
 management_put "/apim/management/products/$APIM_PRODUCT_ID" "$(cat <<JSON
-{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","require_subscription":true}
+{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","state":"published","require_subscription":true}
 JSON
 )" >/dev/null
 
@@ -131,8 +137,8 @@ capture_http_request \
   -H "x-correlation-id: $TRACE_ONE" \
   "$APIM_BASE/$APIM_API_PATH/health"
 captured_expect_summary \
-  "{\"correlation_id\":\"$TRACE_ONE\",\"status_code\":200,\"trace_id_present\":true}" \
-  'summary = {"correlation_id": headers.get("x-correlation-id"), "status_code": status, "trace_id_present": bool(headers.get("x-apim-trace-id"))}'
+  '{"status_code":200,"trace_id_present":true}' \
+  'summary = {"status_code": status, "trace_id_present": bool(headers.get("x-apim-trace-id"))}'
 echo
 
 capture_http_request \
@@ -141,7 +147,10 @@ capture_http_request \
   -H "x-correlation-id: $TRACE_TWO" \
   "$APIM_BASE/$APIM_API_PATH/echo"
 captured_expect_summary \
-  "{\"correlation_id\":\"$TRACE_TWO\",\"status_code\":200,\"trace_id_present\":true}" \
-  'summary = {"correlation_id": headers.get("x-correlation-id"), "status_code": status, "trace_id_present": bool(headers.get("x-apim-trace-id"))}'
+  '{"status_code":200,"trace_id_present":true}' \
+  'summary = {"status_code": status, "trace_id_present": bool(headers.get("x-apim-trace-id"))}'
 echo
+APIM_BASE="$APIM_BASE" APIM_TENANT_KEY="$APIM_TENANT_KEY" APIM_API_ID="$APIM_API_ID" APIM_API_PATH="$APIM_API_PATH" APIM_SUBSCRIPTION_KEY="$APIM_SUBSCRIPTION_KEY" \
+  tutorial_python "$ROOT_DIR/examples/apim-tutorials/workflows.py" monitoring setup
+
 echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial05.sh --verify to validate the observability surfaces."

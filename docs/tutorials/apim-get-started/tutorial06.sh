@@ -27,6 +27,8 @@ EOF
 }
 
 verify_tutorial() {
+  APIM_BASE="$APIM_BASE" APIM_TENANT_KEY="$APIM_TENANT_KEY" APIM_API_ID="$APIM_API_ID" APIM_API_PATH="$APIM_API_PATH" APIM_SUBSCRIPTION_KEY="$APIM_SUBSCRIPTION_KEY" \
+    tutorial_python "$ROOT_DIR/examples/apim-tutorials/workflows.py" debug verify
   echo "Verifying stored trace details"
 
   echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/traces"'
@@ -123,7 +125,7 @@ echo
 
 echo "Creating product '$APIM_PRODUCT_ID'"
 management_put "/apim/management/products/$APIM_PRODUCT_ID" "$(cat <<JSON
-{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","require_subscription":true}
+{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","state":"published","require_subscription":true}
 JSON
 )" >/dev/null
 
@@ -147,8 +149,8 @@ capture_http_request \
   -H "x-correlation-id: $TRACE_CORRELATION_ID" \
   "$APIM_BASE/$APIM_API_PATH/health"
 captured_expect_summary \
-  "{\"correlation_id\":\"$TRACE_CORRELATION_ID\",\"status_code\":200,\"trace_id_present\":true}" \
-  'summary = {"correlation_id": headers.get("x-correlation-id"), "status_code": status, "trace_id_present": bool(headers.get("x-apim-trace-id"))}'
+  '{"status_code":200,"trace_id_present":true}' \
+  'summary = {"status_code": status, "trace_id_present": bool(headers.get("x-apim-trace-id"))}'
 
 TRACE_ID="$(CAPTURE_HEADERS="$CAPTURE_HEADERS" tutorial_python - <<'PY'
 import os
@@ -168,4 +170,7 @@ if [[ -z "$TRACE_ID" ]]; then
   exit 1
 fi
 echo
+APIM_BASE="$APIM_BASE" APIM_TENANT_KEY="$APIM_TENANT_KEY" APIM_API_ID="$APIM_API_ID" APIM_API_PATH="$APIM_API_PATH" APIM_SUBSCRIPTION_KEY="$APIM_SUBSCRIPTION_KEY" \
+  tutorial_python "$ROOT_DIR/examples/apim-tutorials/workflows.py" debug setup
+
 echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial06.sh --verify to validate the stored trace."
