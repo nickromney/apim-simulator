@@ -1,0 +1,29 @@
+meta {
+  name: Apply custom header and rate limit
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{apimBaseUrl}}/apim/management/policies/api/bruno-api
+  body: json
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  X-Apim-Tenant-Key: {{tenantKey}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "xml": "<policies><inbound><rate-limit-by-key counter-key=\"bruno-{{runId}}\" calls=\"3\" renewal-period=\"15\" /><base /></inbound><backend><base /></backend><outbound><set-header name=\"Custom\" exists-action=\"override\"><value>My custom value</value></set-header><base /></outbound><on-error><base /></on-error></policies>"
+  }
+}
+
+tests {
+  test("Apply custom header and rate limit", function () {
+    expect(res.getStatus()).to.equal(200); expect(res.getBody().xml).to.include("rate-limit");
+  });
+}

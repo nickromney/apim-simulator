@@ -1,0 +1,34 @@
+meta {
+  name: Edit API settings and attach product
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{apimBaseUrl}}/apim/management/apis/bruno-api
+  body: json
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  X-Apim-Tenant-Key: {{tenantKey}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "name": "Bruno API edited",
+    "path": "bruno-api",
+    "upstream_base_url": "{{upstreamBaseUrl}}",
+    "products": [
+      "bruno-product"
+    ]
+  }
+}
+
+tests {
+  test("Edit API settings and attach product", function () {
+    expect(res.getStatus()).to.equal(200); expect(res.getBody().name).to.equal("Bruno API edited");
+  });
+}

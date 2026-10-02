@@ -17,30 +17,18 @@ Usage: ./docs/tutorials/apim-get-started/tutorial10.sh [--setup|--execute|--veri
 Runs tutorial step 10 for the APIM simulator.
 
 Flags:
-  --setup, --execute  Start the local stack and apply the tutorial REST Client policy.
-  --verify            Verify the existing tutorial state without restarting it.
+  --setup, --execute  Start the local stack and run the Bruno authoring collection.
+  --verify            Run the Bruno collection again against the existing stack.
   --dry-run           Show this help and preview the setup action without side effects.
   --help, -h          Show this help text.
 EOF
 }
 
 verify_tutorial() {
-  echo "Verifying the authored policy and gateway response"
-
-  echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/policies/api/'"$APIM_API_ID"'"'
-  fetched_policy="$(management_get "/apim/management/policies/api/$APIM_API_ID")"
-  json_expect_summary \
-    "$fetched_policy" \
-    "{\"contains_vscode_header\":true,\"scope_name\":\"$APIM_API_ID\",\"scope_type\":\"api\"}" \
-    'summary = {"contains_vscode_header": "x-from-vscode" in (data.get("xml") or ""), "scope_name": data.get("scope_name"), "scope_type": data.get("scope_type")}'
-
-  echo
-  echo '$ curl -i "'"$APIM_BASE"'/'"$APIM_API_PATH"'/health"'
-  capture_http_request "$APIM_BASE/$APIM_API_PATH/health"
-  captured_expect_summary \
-    '{"path":"/api/health","status":"ok","status_code":200,"x_from_vscode":"true"}' \
-    'summary = {"path": (body_json or {}).get("path"), "status": (body_json or {}).get("status"), "status_code": status, "x_from_vscode": headers.get("x-from-vscode")}'
-  echo
+  echo "Running Bruno CLI: import, edit settings/policies, three calls, throttling, export"
+  make -C "$ROOT_DIR/examples/apim-tutorials" bruno \
+    APIM_BASE="$APIM_BASE" APIM_TENANT_KEY="$APIM_TENANT_KEY" \
+    APIM_UPSTREAM_BASE_URL="$APIM_UPSTREAM_BASE_URL"
 }
 
 while (($# > 0)); do
@@ -75,13 +63,13 @@ fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   usage
-  echo "INFO dry-run: would run $(basename "$0") setup; use --verify for read-only validation"
+  echo "INFO dry-run: would run $(basename "$0") setup; use --verify to run the collection against the existing stack"
   exit 0
 fi
 
 if [[ "$EXECUTE" -eq 0 && "$VERIFY" -eq 0 ]]; then
   usage
-  echo "INFO dry-run: would run $(basename "$0") setup; use --verify for read-only validation"
+  echo "INFO dry-run: would run $(basename "$0") setup; use --verify to run the collection against the existing stack"
   exit 0
 fi
 
@@ -96,18 +84,6 @@ start_public_stack
 echo "Waiting for gateway health at $APIM_BASE/apim/health"
 wait_for_gateway
 
-import_tutorial_api
-echo
+verify_tutorial
 
-echo "REST Client example: $(stack_env_display_path "$TUTORIAL10_REST_FILE")"
-echo "Applying the REST Client policy update to '$APIM_API_ID'"
-policy_response="$(management_put "/apim/management/policies/api/$APIM_API_ID" "$(cat <<JSON
-{"xml":"<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-from-vscode\" exists-action=\"override\"><value>true</value></set-header></outbound><on-error /></policies>"}
-JSON
-)")"
-json_expect_summary \
-  "$policy_response" \
-  "{\"contains_vscode_header\":true,\"scope_name\":\"$APIM_API_ID\",\"scope_type\":\"api\"}" \
-  'summary = {"contains_vscode_header": "x-from-vscode" in (data.get("xml") or ""), "scope_name": data.get("scope_name"), "scope_type": data.get("scope_type")}'
-echo
-echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial10.sh --verify to validate the authored policy."
+echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial10.sh --verify to repeat the Bruno workflow."

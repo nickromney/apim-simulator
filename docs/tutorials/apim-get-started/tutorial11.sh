@@ -26,6 +26,8 @@ EOF
 }
 
 verify_tutorial() {
+  APIM_BASE="$APIM_BASE" APIM_TENANT_KEY="$APIM_TENANT_KEY" APIM_API_ID="$APIM_API_ID" APIM_API_PATH="$APIM_API_PATH" APIM_SUBSCRIPTION_KEY="$APIM_SUBSCRIPTION_KEY" \
+    tutorial_python "$ROOT_DIR/examples/apim-tutorials/workflows.py" catalog verify
   echo "Verifying exported inventory inputs"
 
   echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/summary"'
@@ -103,7 +105,7 @@ echo
 
 echo "Creating inventory that is worth exporting"
 management_put "/apim/management/products/$APIM_PRODUCT_ID" "$(cat <<JSON
-{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","require_subscription":true}
+{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","state":"published","require_subscription":true}
 JSON
 )" >/dev/null
 management_put "/apim/management/apis/$APIM_API_ID" "$(cat <<JSON
@@ -139,4 +141,7 @@ management_get "/apim/management/apis" >"$APIM_EXPORT_DIR/apis.json"
 echo "Wrote $APIM_EXPORT_DIR/summary.json"
 echo "Wrote $APIM_EXPORT_DIR/apis.json"
 echo
+APIM_BASE="$APIM_BASE" APIM_TENANT_KEY="$APIM_TENANT_KEY" APIM_API_ID="$APIM_API_ID" APIM_API_PATH="$APIM_API_PATH" APIM_SUBSCRIPTION_KEY="$APIM_SUBSCRIPTION_KEY" \
+  tutorial_python "$ROOT_DIR/examples/apim-tutorials/workflows.py" catalog setup
+
 echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial11.sh --verify to validate the exported inventory inputs."

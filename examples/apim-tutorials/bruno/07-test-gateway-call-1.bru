@@ -1,0 +1,22 @@
+meta {
+  name: Test gateway call 1
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{apimBaseUrl}}/bruno-api/health
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  Ocp-Apim-Subscription-Key: {{subscriptionKey}}
+}
+
+tests {
+  test("Test gateway call 1", function () {
+    expect(res.getStatus()).to.equal(200); expect(res.getHeader("Custom")).to.equal("My custom value"); expect(res.getBody().status).to.equal("ok");
+  });
+}

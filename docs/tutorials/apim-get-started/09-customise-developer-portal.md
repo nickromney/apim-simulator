@@ -2,132 +2,100 @@
 
 Source: [Tutorial: Access and customise the developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize)
 
-Simulator status: Adapted
+The local portal supports the tutorial's administrator, customization, preview,
+publication, and visitor workflows. Draft content and uploaded images remain
+private until publication. The editor uses forms for site settings, shared
+branding and navigation, editable pages, and a media library.
 
-## What Maps And What Does Not
+## Start the local tutorial
 
-The Microsoft developer portal is two things wearing one name: a managed CMS
-(page editing, theming, sign-up emails) and a set of consumer workflows
-(browse published products, request a subscription, try an API call).
-
-The simulator ships the consumer workflows at `/apim/portal` and leaves the
-CMS out of scope. Identity is simulator-grade: the acting user is a
-config-defined user passed in the `X-Apim-Portal-User` header, not a
-signed-in account.
-
-## Local Equivalent
-
-From the repo root:
+From the repository root:
 
 ```bash
 export APIM_BASE=http://localhost:8000
 export APIM_TENANT_KEY=local-dev-tenant-key
-```
-
-Start the operator console stack:
-
-```bash
-make up-ui
-```
-
-Open the two portals side by side:
-
-- consumer developer portal: `http://localhost:8000/apim/portal`
-- operator console: `http://localhost:3007`
-
-Then walk the publish-and-approve loop:
-
-1. Create an approval-gated product as the operator:
-
-   ```bash
-   curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
-     -H "Content-Type: application/json" \
-     "$APIM_BASE/apim/management/products/portal-premium" \
-     --data '{"name":"Portal Premium","require_subscription":true,"approval_required":true}'
-   ```
-
-2. Attach an API to the product:
-
-   ```bash
-   curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
-     -H "Content-Type: application/json" \
-     "$APIM_BASE/apim/management/apis/portal-hello" \
-     --data '{"name":"Portal Hello","path":"portal-hello","upstream_base_url":"http://mock-backend:8080","upstream_path_prefix":"/api","products":["portal-premium"]}'
-   ```
-
-3. Request a subscription as the portal user (or click "Request subscription"
-   on the portal page):
-
-   ```bash
-   curl -sS -X POST -H "X-Apim-Portal-User: demo-dev" \
-     -H "Content-Type: application/json" \
-     "$APIM_BASE/apim/portal/subscriptions" \
-     --data '{"product_id":"portal-premium"}'
-   ```
-
-   The subscription lands in `submitted` state, and its key returns `403`
-   until it is approved.
-
-4. Approve it as the operator (or click "Approve" in the console's
-   Subscriptions panel):
-
-   ```bash
-   curl -sS -X PATCH -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
-     -H "Content-Type: application/json" \
-     "$APIM_BASE/apim/management/subscriptions/demo-dev-portal-premium" \
-     --data '{"state":"active"}'
-   ```
-
-5. Call the API with the approved key:
-
-   ```bash
-   curl -sS -H "Ocp-Apim-Subscription-Key: sub-demo-dev-portal-premium-primary" \
-     "$APIM_BASE/portal-hello/health"
-   ```
-
-## Shortcut
-
-If you want the scripted shortcut instead of running the commands manually:
-
-```bash
 ./docs/tutorials/apim-get-started/tutorial09.sh --setup
 ./docs/tutorials/apim-get-started/tutorial09.sh --verify
 ```
 
-Use `--setup` to have [`tutorial09.sh`](tutorial09.sh) perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
+Setup starts the local stack, publishes an approval-gated product, and creates
+its API. It then uploads a PNG, edits branding and pages, previews the draft,
+proves visitors cannot see the draft, and publishes it. Finally, it requests a
+subscription, checks that its pending key receives HTTP 401, approves it, and
+calls the API with the active key. `--verify` checks the published state and
+approved subscription without restarting the stack.
 
-Expected key `./docs/tutorials/apim-get-started/tutorial09.sh --verify` output:
+The script publishes a baseline portal before editing so repeated runs still
+prove that draft changes and newly uploaded images remain unpublished.
 
-```text
-Verifying the consumer developer portal
-$ curl -i "http://localhost:8000/apim/portal"
-{
-  "status_code": 200
-}
+## Customize and publish in the browser
 
-$ curl -sS -H "X-Apim-Portal-User: demo-dev" "http://localhost:8000/apim/portal/catalog"
-{
-  "api_ids": [
-    "portal-hello"
-  ],
-  "approval_required": true,
-  "product_id": "portal-premium"
-}
+1. Open [the portal editor](http://localhost:8000/apim/portal/editor), enter the
+   tenant key, and select **Open saved draft**. This corresponds to opening the
+   managed developer portal as its administrator.
+2. In **Media library**, upload a PNG, JPEG, or WebP image. Each image can be up
+   to 2 MiB; the library holds ten images. Choose it under **Saved images** and
+   select **Use as logo** or **Use as background**. You can also enter an
+   HTTP(S) image URL in the corresponding field.
+3. Change **Site title**, **Primary color**, **Background color**, and **Theme**.
+   Branding and navigation apply to the home page and other pages.
+4. Under **Pages and navigation**, edit a page's heading and text. Enter a new
+   address such as `getting-started` and select **Add page**. Pages become links
+   in the shared navigation. Page text is escaped as plain text.
+5. Select **Save draft**, then **Preview saved draft**. Preview runs in the
+   editor and includes privately uploaded images. Preview and publish use the
+   saved draft; save any further form changes first.
+6. Open [the visitor portal](http://localhost:8000/apim/portal) in a separate
+   browser session. It still displays the preceding publication.
+7. Select **Publish saved draft**, then refresh the visitor portal. Its title,
+   colors, pages, and images now match the saved draft.
 
-$ curl -sS -H "X-Apim-Portal-User: demo-dev" "http://localhost:8000/apim/portal/subscriptions"
-{
-  "id": "demo-dev-portal-premium",
-  "state": "active"
-}
+The editor's data and publication endpoints require `X-Apim-Tenant-Key`.
+Visitors can read the published portal, its pages, and its media without that
+header. Draft and published snapshots persist in the simulator configuration
+and survive a restart.
 
-$ curl -sS -H "Ocp-Apim-Subscription-Key: sub-demo-dev-portal-premium-primary" "http://localhost:8000/portal-hello/health"
-{
-  "path": "/api/health",
-  "status": "ok"
-}
+## Discover, subscribe, and try an API
+
+Open [the consumer portal](http://localhost:8000/apim/portal). Choose `demo-dev`
+as the acting user. The local identity selector corresponds to a configured
+developer; requests identify that user with the `X-Apim-Portal-User` header.
+
+Find **Portal Premium** in the catalog and request a subscription. Its approval
+setting creates a `submitted` subscription. In [the operator
+console](http://localhost:3007), approve the subscription; refresh the consumer
+portal and use its key in **Try it** to call `GET /portal-hello/health`.
+
+For versioned APIs, choose the logical **API**, then **Version** and
+**Operation**. Original versions use the unversioned request. The console
+places named versions in the path segment, version header, or query parameter
+configured by their version set.
+
+To create the product manually, explicitly publish it:
+
+```bash
+curl -fsS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
+  -H "Content-Type: application/json" \
+  "$APIM_BASE/apim/management/products/portal-premium" \
+  --data '{"name":"Portal Premium","state":"published","require_subscription":true,"approval_required":true}'
 ```
 
-## Guidance
+New products begin unpublished. Open products and unpublished products are
+visible only to the administrators group. Product terms must be accepted
+before subscribing, and each developer can request additional subscriptions
+up to the product's configured limit.
 
-If you need to rehearse portal CMS customisation, theming, or sign-up emails, use real Azure APIM.
-If you need to rehearse the consumer loop — publish, discover, request, approve, call — the simulator covers it locally.
+## API equivalents
+
+| Action | Local endpoint |
+| --- | --- |
+| Read or save the draft | `GET` / `PUT /apim/portal/editor/draft` |
+| Upload an image | `POST /apim/portal/editor/media` with `name`, `content_type`, and `content_base64` |
+| Preview a saved page | `GET /apim/portal/editor/preview?slug=home` |
+| Publish the saved draft | `POST /apim/portal/editor/publish` |
+| Read the published snapshot | `GET /apim/portal/content` |
+| View a published page | `GET /apim/portal/pages/getting-started` |
+| Fetch a published image | `GET /apim/portal/media/{id}` |
+
+The first four actions require the tenant key. An uploaded image's public URL
+returns HTTP 404 until a snapshot containing it is published.

@@ -15,6 +15,7 @@ init_tutorial_env() {
   GRAFANA_BASE="${GRAFANA_BASE:-$GRAFANA_BASE_URL}"
   OPERATOR_CONSOLE_BASE="${OPERATOR_CONSOLE_BASE:-$OPERATOR_CONSOLE_URL}"
   OPENAPI_SOURCE="${OPENAPI_SOURCE:-$ROOT_DIR/examples/mock-backend/openapi.json}"
+  APIM_UPSTREAM_BASE_URL="${APIM_UPSTREAM_BASE_URL-http://mock-backend:8080/api}"
   APIM_API_ID="${APIM_API_ID:-tutorial-api}"
   APIM_API_NAME="${APIM_API_NAME:-Tutorial API}"
   APIM_API_PATH="${APIM_API_PATH:-tutorial-api}"
@@ -332,6 +333,7 @@ import_tutorial_api() {
   APIM_API_ID="$APIM_API_ID" \
   APIM_API_NAME="$APIM_API_NAME" \
   APIM_API_PATH="$APIM_API_PATH" \
+  APIM_UPSTREAM_BASE_URL="$APIM_UPSTREAM_BASE_URL" \
   tutorial_python "$ROOT_DIR/scripts/import_openapi.py"
 }
 

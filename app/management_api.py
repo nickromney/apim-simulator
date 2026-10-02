@@ -49,12 +49,12 @@ from app.management_service import ManagementService
 from app.named_values import mask_secret_data
 from app.policy_inspection import inspect_effective_policy
 from app.portal import (
-    PORTAL_HTML,
     create_portal_subscription,
     portal_catalog,
     portal_subscriptions,
     portal_users,
     project_portal_subscription,
+    render_portal_page,
     require_portal_user,
 )
 from app.resource_projection import (
@@ -204,16 +204,19 @@ class ApiReleaseUpsert(BaseModel):
 
 
 class ProductUpsert(BaseModel):
-    name: str
+    name: str | None = None
     description: str | None = None
-    state: ProductState = ProductState.Published
+    state: ProductState = ProductState.NotPublished
     require_subscription: bool = True
     approval_required: bool = False
+    subscriptions_limit: int | None = Field(default=None, ge=1)
+    terms: str | None = None
 
 
 class PortalSubscriptionRequest(BaseModel):
     product_id: str
     name: str | None = None
+    accept_terms: bool = False
 
 
 class GroupUpsert(BaseModel):
@@ -1024,7 +1027,7 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
     async def portal_page(request: Request) -> HTMLResponse:
         cfg: GatewayConfig = request.app.state.gateway_config
         _require_portal_enabled(cfg)
-        return HTMLResponse(PORTAL_HTML)
+        return HTMLResponse(render_portal_page(cfg.portal_content.published))
 
     @router.get("/apim/portal/users")
     async def portal_list_users(request: Request) -> dict[str, Any]:
@@ -1049,7 +1052,7 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
         cfg = _config_for_management_write(request)
         _require_portal_enabled(cfg)
         user_id = _portal_user_id(request, cfg)
-        subscription = create_portal_subscription(cfg, user_id, body.product_id, body.name)
+        subscription = create_portal_subscription(cfg, user_id, body.product_id, body.name, body.accept_terms)
         updated = require_management_plane().persist_or_apply_config(cfg)
         persisted = updated.subscription.subscriptions.get(subscription.id)
         if persisted is None:

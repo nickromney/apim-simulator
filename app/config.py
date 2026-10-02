@@ -11,6 +11,9 @@ from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.local_api_center import ApiCenterState
+from app.local_monitoring import MonitoringConfig
+from app.portal_customization import PortalContentConfig
 from app.urls import http_url
 
 # APIM creates this global backend policy when no global policy document exists.
@@ -303,7 +306,7 @@ class OperationRequestMetadataConfig(BaseModel):
 
 
 class OperationResponseMetadataConfig(BaseModel):
-    status_code: int
+    status_code: int | Literal["default"]
     description: str | None = None
     headers: list[OperationParameterConfig] = Field(default_factory=list)
     representations: list[OperationRepresentationConfig] = Field(default_factory=list)
@@ -435,7 +438,8 @@ class ProductConfig(BaseModel):
     state: ProductState = ProductState.Published
     require_subscription: bool = True
     approval_required: bool = False
-    subscriptions_limit: int | None = None
+    subscriptions_limit: int | None = Field(default=None, ge=1)
+    terms: str | None = None
     groups: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     policies_xml: str | None = None
@@ -880,6 +884,9 @@ class GatewayConfig(BaseModel):
     admin_token: str | None = None
     tenant_access: TenantAccessConfig = Field(default_factory=TenantAccessConfig)
     portal: PortalConfig = Field(default_factory=PortalConfig)
+    portal_content: PortalContentConfig = Field(default_factory=PortalContentConfig)
+    api_center: ApiCenterState = Field(default_factory=ApiCenterState)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     proxy_timeout_seconds: float = 30.0
     proxy_max_attempts: int = 1
     proxy_retry_statuses: list[int] = Field(default_factory=lambda: [502, 503, 504])

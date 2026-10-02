@@ -9,6 +9,9 @@ init_tutorial_env
 EXECUTE=0
 VERIFY=0
 DRY_RUN=0
+APIM_PORTAL_USER="${APIM_PORTAL_USER:-demo-dev}"
+SIGNUP_PRODUCT_ID="$APIM_PRODUCT_ID-signup"
+SIGNUP_SUBSCRIPTION_ID="$APIM_PORTAL_USER-$SIGNUP_PRODUCT_ID"
 
 usage() {
   cat <<EOF
@@ -31,8 +34,18 @@ verify_tutorial() {
   product_verify="$(management_get "/apim/management/products/$APIM_PRODUCT_ID")"
   json_expect_summary \
     "$product_verify" \
-    "{\"id\":\"$APIM_PRODUCT_ID\",\"require_subscription\":true,\"subscription_count\":1}" \
-    'summary = {"id": data.get("id"), "require_subscription": data.get("require_subscription"), "subscription_count": data.get("subscription_count")}'
+    "{\"id\":\"$APIM_PRODUCT_ID\",\"state\":\"published\",\"require_subscription\":true,\"subscription_count\":1}" \
+    'summary = {"id": data.get("id"), "state": data.get("state"), "require_subscription": data.get("require_subscription"), "subscription_count": data.get("subscription_count")}'
+
+  catalog_verify="$(portal_get "/apim/portal/catalog" "$APIM_PORTAL_USER")"
+  json_expect_summary "$catalog_verify" '{"published_product_visible":true}' \
+    'summary = {"published_product_visible":any(p["id"] == "'"$APIM_PRODUCT_ID"'" for p in data["products"])}'
+  signup_verify="$(management_get "/apim/management/products/$SIGNUP_PRODUCT_ID")"
+  json_expect_summary "$signup_verify" '{"state":"published","subscriptions_limit":1,"has_terms":true}' \
+    'summary = {"state":data["state"],"subscriptions_limit":data["subscriptions_limit"],"has_terms":bool(data["terms"])}'
+  portal_subscriptions="$(portal_get "/apim/portal/subscriptions" "$APIM_PORTAL_USER")"
+  json_expect_summary "$portal_subscriptions" '{"signup_state":"active"}' \
+    'summary = {"signup_state":next(s["state"] for s in data["subscriptions"] if s["id"] == "'"$SIGNUP_SUBSCRIPTION_ID"'")}'
 
   echo
   echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/subscriptions/'"$APIM_SUBSCRIPTION_ID"'"'
@@ -116,17 +129,21 @@ wait_for_gateway
 
 import_tutorial_api
 echo
+ensure_subscription_absent "$APIM_SUBSCRIPTION_ID"
 
 echo "Creating product '$APIM_PRODUCT_ID'"
 product_response="$(management_put "/apim/management/products/$APIM_PRODUCT_ID" "$(cat <<JSON
-{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","require_subscription":true}
+{"name":"$APIM_PRODUCT_NAME","description":"$APIM_PRODUCT_DESCRIPTION","state":"not_published","require_subscription":true}
 JSON
 )")"
 json_expect_summary \
   "$product_response" \
-  "{\"id\":\"$APIM_PRODUCT_ID\",\"name\":\"$APIM_PRODUCT_NAME\",\"require_subscription\":true,\"subscription_count\":0}" \
-  'summary = {"id": data.get("id"), "name": data.get("name"), "require_subscription": data.get("require_subscription"), "subscription_count": data.get("subscription_count")}'
+  "{\"id\":\"$APIM_PRODUCT_ID\",\"name\":\"$APIM_PRODUCT_NAME\",\"state\":\"not_published\",\"require_subscription\":true,\"subscription_count\":0}" \
+  'summary = {"id": data.get("id"), "name": data.get("name"), "state":data.get("state"), "require_subscription": data.get("require_subscription"), "subscription_count": data.get("subscription_count")}'
 echo
+catalog_before="$(portal_get "/apim/portal/catalog" "$APIM_PORTAL_USER")"
+json_expect_summary "$catalog_before" '{"unpublished_product_hidden":true}' \
+  'summary = {"unpublished_product_hidden":all(p["id"] != "'"$APIM_PRODUCT_ID"'" for p in data["products"])}'
 
 echo "Attaching API '$APIM_API_ID' to product '$APIM_PRODUCT_ID'"
 api_response="$(management_put "/apim/management/apis/$APIM_API_ID" "$(cat <<JSON
@@ -139,7 +156,11 @@ json_expect_summary \
   'summary = {"id": data.get("id"), "path": data.get("path"), "products": data.get("products")}'
 echo
 
-ensure_subscription_absent "$APIM_SUBSCRIPTION_ID"
+echo "Publishing product '$APIM_PRODUCT_ID' for developer discovery"
+management_put "/apim/management/products/$APIM_PRODUCT_ID" "{\"name\":\"$APIM_PRODUCT_NAME\",\"state\":\"published\"}" >/dev/null
+catalog_after="$(portal_get "/apim/portal/catalog" "$APIM_PORTAL_USER")"
+json_expect_summary "$catalog_after" '{"published_product_visible":true}' \
+  'summary = {"published_product_visible":any(p["id"] == "'"$APIM_PRODUCT_ID"'" for p in data["products"])}'
 
 echo "Creating subscription '$APIM_SUBSCRIPTION_ID'"
 subscription_response="$(management_post "/apim/management/subscriptions" "$(cat <<JSON
@@ -150,5 +171,25 @@ json_expect_summary \
   "$subscription_response" \
   "{\"id\":\"$APIM_SUBSCRIPTION_ID\",\"name\":\"$APIM_SUBSCRIPTION_NAME\",\"products\":[\"$APIM_PRODUCT_ID\"],\"primary_key\":\"$APIM_SUBSCRIPTION_KEY\"}" \
   'summary = {"id": data.get("id"), "name": data.get("name"), "products": data.get("products"), "primary_key": (data.get("keys") or {}).get("primary")}'
+echo
+echo "Rehearsing legal terms and subscription limits on a separate product"
+ensure_subscription_absent "$SIGNUP_SUBSCRIPTION_ID"
+management_put "/apim/management/products/$SIGNUP_PRODUCT_ID" \
+  '{"name":"Portal signup tutorial","state":"published","require_subscription":true,"subscriptions_limit":1,"terms":"Accept the tutorial API terms."}' >/dev/null
+management_put "/apim/management/apis/$APIM_API_ID" "$(cat <<JSON
+{"name":"$APIM_API_NAME","path":"$APIM_API_PATH","upstream_base_url":"http://mock-backend:8080/api","products":["$APIM_PRODUCT_ID","$SIGNUP_PRODUCT_ID"]}
+JSON
+)" >/dev/null
+capture_http_request -X POST -H "X-Apim-Portal-User: $APIM_PORTAL_USER" -H 'Content-Type: application/json' \
+  "$APIM_BASE/apim/portal/subscriptions" --data "{\"product_id\":\"$SIGNUP_PRODUCT_ID\"}"
+captured_expect_summary '{"status_code":400,"terms_required":true}' \
+  'summary = {"status_code":status,"terms_required":"terms" in (body_json or {}).get("detail", "")}'
+signup_response="$(portal_post "/apim/portal/subscriptions" "$APIM_PORTAL_USER" "{\"product_id\":\"$SIGNUP_PRODUCT_ID\",\"accept_terms\":true}")"
+json_expect_summary "$signup_response" "{\"id\":\"$SIGNUP_SUBSCRIPTION_ID\",\"state\":\"active\"}" \
+  'summary = {"id":data["id"],"state":data["state"]}'
+capture_http_request -X POST -H "X-Apim-Portal-User: $APIM_PORTAL_USER" -H 'Content-Type: application/json' \
+  "$APIM_BASE/apim/portal/subscriptions" --data "{\"product_id\":\"$SIGNUP_PRODUCT_ID\",\"accept_terms\":true}"
+captured_expect_summary '{"status_code":409,"limit_enforced":true}' \
+  'summary = {"status_code":status,"limit_enforced":"limit" in (body_json or {}).get("detail", "").lower()}'
 echo
 echo "Setup complete. Run ./docs/tutorials/apim-get-started/tutorial02.sh --verify to validate product access."

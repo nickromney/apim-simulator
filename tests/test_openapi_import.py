@@ -113,7 +113,7 @@ def test_swagger_json_projects_base_url_and_discards_get_body() -> None:
     assert result.operations[0].responses[0].representations[0].examples[0].value == "ok"
 
 
-def test_rejects_unsupported_versions_refs_recursion_serialization_and_inline_schemas() -> None:
+def test_rejects_unsupported_versions_refs_recursion_and_serialization() -> None:
     with pytest.raises(ValueError, match="3.1"):
         _import({"openapi": "3.1.0", "paths": {}})
 
@@ -140,8 +140,12 @@ def test_rejects_unsupported_versions_refs_recursion_serialization_and_inline_sc
     serialized["paths"]["/x"]["post"]["requestBody"] = {
         "content": {"application/json": {"schema": {"type": "object", "properties": {"x": {"type": "string"}}}}}
     }
-    with pytest.raises(ValueError, match="Inline complex"):
-        _import(serialized)
+    imported = _import(serialized)
+    schema_id = imported.operations[0].request.representations[0].schema_id
+    assert imported.schemas[schema_id].components["schemas"][schema_id] == {
+        "type": "object",
+        "properties": {"x": {"type": "string"}},
+    }
 
 
 @pytest.mark.parametrize(
@@ -248,8 +252,13 @@ def test_rejects_unprojected_parameter_schema_fields_and_json_format_yaml() -> N
         "type": "array",
         "items": {"type": "string"},
     }
-    with pytest.raises(ValueError, match="Array parameter serialization"):
-        parse_api_import(content_format="openapi+json", content_value=json.dumps(doc))
+    array_import = _import(doc)
+    parameter = array_import.operations[0].request.query_parameters[0]
+    assert parameter.type == "array"
+    assert array_import.schemas[parameter.schema_id].components["schemas"][parameter.schema_id] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
     for schema in ({"type": "object"}, {"$ref": "#/components/schemas/Q"}):
         doc["components"] = {"schemas": {"Q": {"type": "object"}}}
         doc["paths"]["/x"]["get"]["parameters"][0]["schema"] = schema

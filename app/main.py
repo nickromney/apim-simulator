@@ -18,9 +18,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import GatewayConfig, load_config, validate_policy_config
 from app.cors_preflight import answer_preflight
+from app.debug_credentials import build_debug_router
 from app.gateway_errors import GatewayError, gateway_error_handler
+from app.local_api_center import build_api_center_router
+from app.local_monitoring import MonitoringStore, build_monitoring_router
 from app.management_api import build_management_router
 from app.management_service import ManagementService
+from app.openapi_export import build_openapi_export_router
+from app.portal_customization import build_portal_customization_router
 from app.proxy import build_user_payload
 from app.request_pipeline import (
     APIM_BACKEND_ID_ATTR,
@@ -42,6 +47,7 @@ from app.telemetry import (
     reset_correlation_id,
     set_correlation_id,
 )
+from app.version_workflow import build_version_workflow_router
 
 logger = logging.getLogger("apim-simulator")
 
@@ -318,6 +324,8 @@ def _reset_runtime_stores(app: FastAPI) -> None:
     app.state.rate_limit_store = {}
     app.state.quota_store = {}
     app.state.trace_store = {}
+    app.state.debug_credentials = {}
+    app.state.monitoring_store = MonitoringStore()
     app.state.backend_health = {}
 
 
@@ -448,16 +456,25 @@ def _add_observability_middleware(app: FastAPI, telemetry: ObservabilityRuntime)
         except Exception:
             duration_seconds = time.perf_counter() - start
             _record_request_observation(request, status_code=500, duration_seconds=duration_seconds)
+            request.app.state.monitoring_store.record(request, status_code=500, duration_seconds=duration_seconds)
             telemetry.logger.exception(
                 "request failed",
                 extra=_access_log_fields(request, status_code=500, duration_seconds=duration_seconds),
             )
             raise
         else:
+            debug_header = getattr(request.state, "debug_response_header", None)
+            if debug_header is not None:
+                response.headers[debug_header[0]] = debug_header[1]
+            if getattr(request.state, "debug_authorized", False) and "x-apim-trace-id" in response.headers:
+                response.headers["Apim-Trace-Id"] = response.headers["x-apim-trace-id"]
             if request.app.state.gateway_config.emit_simulator_response_headers:
                 response.headers.setdefault("x-correlation-id", correlation_id)
             duration_seconds = time.perf_counter() - start
             _record_request_observation(request, status_code=response.status_code, duration_seconds=duration_seconds)
+            request.app.state.monitoring_store.record(
+                request, status_code=response.status_code, duration_seconds=duration_seconds
+            )
             telemetry.logger.info(
                 "request completed",
                 extra=_access_log_fields(request, status_code=response.status_code, duration_seconds=duration_seconds),
@@ -539,7 +556,16 @@ def _add_cors_middleware(app: FastAPI, gateway_config: GatewayConfig) -> None:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["x-apim-simulator", "x-apim-trace-id", "x-correlation-id", "x-todo-demo-policy"],
+        expose_headers=[
+            "x-apim-simulator",
+            "x-apim-trace-id",
+            "x-correlation-id",
+            "x-todo-demo-policy",
+            "Apim-Trace-Id",
+            "Apim-Debug-Authorization-Expired",
+            "Apim-Debug-Authorization-WrongAPI",
+            "Apim-Debug-Authorization-Invalid",
+        ],
     )
 
 
@@ -598,6 +624,12 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 
     app.include_router(_build_gateway_router(require_management_plane=_require_management_plane))
     app.include_router(build_management_router(require_management_plane=_require_management_plane))
+    app.include_router(build_debug_router(require_management_plane=_require_management_plane))
+    app.include_router(build_api_center_router(require_management_plane=_require_management_plane))
+    app.include_router(build_monitoring_router(require_management_plane=_require_management_plane))
+    app.include_router(build_openapi_export_router())
+    app.include_router(build_version_workflow_router(require_management_plane=_require_management_plane))
+    app.include_router(build_portal_customization_router(require_management_plane=_require_management_plane))
     app.include_router(_build_catch_all_router())
 
     instrument_fastapi_app(app, telemetry)

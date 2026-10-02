@@ -1,0 +1,26 @@
+meta {
+  name: Remove previous demo subscription
+  type: http
+  seq: 1
+}
+
+delete {
+  url: {{apimBaseUrl}}/apim/management/subscriptions/tutorial10-bruno
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  X-Apim-Tenant-Key: {{tenantKey}}
+}
+
+script:pre-request {
+  bru.setVar("runId", Date.now().toString());
+}
+
+tests {
+  test("Remove previous demo subscription", function () {
+    expect([200,404]).to.include(res.getStatus());
+  });
+}

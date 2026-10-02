@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -86,7 +87,7 @@ def _swagger_schemas(document: dict[str, Any]) -> dict[str, Any]:
 def _openapi_schemas(document: dict[str, Any], version: str) -> dict[str, Any]:
     if version.startswith("3.1"):
         raise ValueError("OpenAPI 3.1 is unsupported by the simulator import contract")
-    if not re.fullmatch(r"3\.0\.[0-3]", version):
+    if not re.fullmatch(r"3\.0\.[0-4]", version):
         raise ValueError(f"Unsupported OpenAPI version: {version}")
     components = document.get("components", {})
     if not isinstance(components, dict):
@@ -168,6 +169,24 @@ def _schema_id(schema: Any, version: str, schemas: dict[str, Any]) -> str | None
     return _internal_ref(ref, schemas)
 
 
+def _project_schema(schema: Any, version: str, schemas: dict[str, Any]) -> str | None:
+    """Preserve inline metadata in an API-scoped schema, rather than discard it."""
+    if schema is None or schema == {}:
+        return None
+    if not isinstance(schema, dict):
+        raise ValueError("Operation schema must be an object")
+    referenced = _schema_id(schema, version, schemas)
+    if referenced is not None:
+        return referenced
+    _schema_refs(schema, schemas, "inline schema")
+    digest = hashlib.sha256(json.dumps(schema, sort_keys=True).encode()).hexdigest()[:16]
+    name = f"imported-{digest}"
+    while name in schemas and schemas[name] != schema:
+        name += "-inline"
+    schemas[name] = schema
+    return name
+
+
 def _schema_type(schema: Any) -> str:
     if not isinstance(schema, dict):
         return "string"
@@ -199,7 +218,7 @@ def _parameter(item: dict[str, Any], version: str, schemas: dict[str, Any]) -> O
         raise ValueError("OpenAPI parameter is missing its name")
     if location == "cookie":
         raise ValueError(f"Cookie parameter {name!r} is unsupported")
-    if location not in {"path", "query", "header"}:
+    if location not in {"path", "query", "header"} and not (version == "2.0" and location == "formData"):
         raise ValueError(f"Unsupported parameter location {location!r}")
     schema, values, default = _parameter_schema(item, version, location, name)
     return OperationParameterConfig(
@@ -210,17 +229,39 @@ def _parameter(item: dict[str, Any], version: str, schemas: dict[str, Any]) -> O
         default_value=str(default) if default is not None else None,
         values=[str(value) for value in values] if isinstance(values, list) else [],
         examples=_example("default", item.get("example", schema.get("example") if isinstance(schema, dict) else None)),
-        schema_id=_schema_id(schema, version, schemas),
+        schema_id=_project_schema(schema, version, schemas),
     )
 
 
 def _parameter_schema(item: dict[str, Any], version: str, location: str, name: str) -> tuple[dict[str, Any], Any, Any]:
     if version == "2.0":
-        supported = {"name", "in", "required", "description", "type", "enum", "default", "example"}
+        supported = {
+            "name",
+            "in",
+            "required",
+            "description",
+            "type",
+            "enum",
+            "default",
+            "example",
+            "format",
+            "minimum",
+            "maximum",
+            "items",
+            "collectionFormat",
+        }
         _reject_fields(item, supported, f"parameter {name!r}")
-        schema = {key: item[key] for key in ("type", "enum", "default", "example") if key in item}
+        schema = {
+            key: item[key]
+            for key in ("type", "enum", "default", "example", "format", "minimum", "maximum", "items")
+            if key in item
+        }
         schema.setdefault("type", "string")
-        _validate_parameter_schema(schema, name)
+        if schema["type"] == "file" and location == "formData":
+            schema = {"type": "string", "format": "binary"}
+        if schema["type"] == "array" and (location != "query" or item.get("collectionFormat") != "multi"):
+            raise ValueError(f"Unsupported {location} array parameter serialization for {name!r}; use multi")
+        _validate_parameter_schema(schema, name, location)
         return schema, item.get("enum", []), item.get("default")
     supported = {"name", "in", "required", "description", "schema", "example", "style", "explode"}
     _reject_fields(item, supported, f"parameter {name!r}")
@@ -231,18 +272,23 @@ def _parameter_schema(item: dict[str, Any], version: str, location: str, name: s
     default_explode = default_style == "form"
     if item.get("style", default_style) != default_style or item.get("explode", default_explode) is not default_explode:
         raise ValueError(f"Unsupported {location} parameter serialization for {name!r}")
-    _validate_parameter_schema(schema, name)
+    _validate_parameter_schema(schema, name, location)
     return schema, schema.get("enum", []), schema.get("default")
 
 
-def _validate_parameter_schema(schema: dict[str, Any], name: str) -> None:
+def _validate_parameter_schema(schema: dict[str, Any], name: str, location: str) -> None:
     if schema.get("type") == "array":
-        raise ValueError(f"Array parameter serialization is unsupported for {name!r}")
+        if location != "query":
+            raise ValueError(f"Array parameter serialization is unsupported for {location} parameter {name!r}")
+        item_schema = schema.get("items")
+        if not isinstance(item_schema, dict) or item_schema.get("type") == "array":
+            raise ValueError(f"Array parameter {name!r} must have scalar items")
+        _validate_parameter_schema(item_schema, name, location)
     if "$ref" in schema:
         raise ValueError(f"Referenced parameter schemas are unsupported for {name!r}")
-    if schema.get("type", "string") not in {"string", "integer", "number", "boolean"}:
+    if schema.get("type", "string") not in {"string", "integer", "number", "boolean", "array"}:
         raise ValueError(f"Non-scalar parameter serialization is unsupported for {name!r}")
-    unsupported = set(schema) - {"type", "enum", "default", "example"}
+    unsupported = set(schema) - {"type", "enum", "default", "example", "format", "minimum", "maximum", "items"}
     if unsupported:
         fields = ", ".join(sorted(unsupported))
         raise ValueError(f"Unsupported parameter schema fields for {name!r}: {fields}")
@@ -327,15 +373,7 @@ def _openapi_representations(content: Any, schemas: dict[str, Any]) -> list[Oper
         if not isinstance(media, dict):
             continue
         schema = media.get("schema")
-        schema_ref = _schema_id(schema, "3.0", schemas)
-        if schema is not None and not isinstance(schema, dict):
-            raise ValueError("Operation media schema must be an object")
-        if (
-            schema is not None
-            and schema_ref is None
-            and ("properties" in schema or schema.get("type") in {"object", "array"})
-        ):
-            raise ValueError("Inline complex operation schemas are unsupported; define and reference an API schema")
+        schema_ref = _project_schema(schema, "3.0", schemas)
         result.append(
             OperationRepresentationConfig(
                 content_type=str(media_type),
@@ -356,8 +394,10 @@ def _parameter_groups(
     list[OperationParameterConfig], list[OperationParameterConfig], list[OperationParameterConfig], list[dict[str, Any]]
 ]:
     raw_parameters = _merged_parameter_items(path_items, operation.get("parameters"))
-    body_parameters = [item for item in raw_parameters if item.get("in") == "body"]
-    url_raw = [item for item in raw_parameters if item.get("in") != "body"]
+    body_parameters = [item for item in raw_parameters if item.get("in") in {"body", "formData"}]
+    if body_parameters and version != "2.0":
+        raise ValueError("OpenAPI 3 body parameters must use requestBody")
+    url_raw = [item for item in raw_parameters if item.get("in") not in {"body", "formData"}]
     params = [_parameter(item, version, schemas) for item in url_raw]
     path_name_list = [name.casefold() for name in re.findall(r"\{([^{}]+)\}", str(operation.get("_path", "")))]
     if len(path_name_list) != len(set(path_name_list)):
@@ -387,18 +427,17 @@ def _swagger_request_body(
 ) -> OperationRequestMetadataConfig | None:
     if not body_parameters:
         return None
+    form_parameters = [item for item in body_parameters if item.get("in") == "formData"]
+    if form_parameters:
+        if len(form_parameters) != len(body_parameters):
+            raise ValueError("Swagger operations cannot mix body and formData parameters")
+        return _swagger_form_body(operation, schemas, form_parameters)
     if len(body_parameters) > 1:
         raise ValueError("Swagger operations with multiple body parameters are unsupported")
     body_schema = body_parameters[0].get("schema", {})
     if not isinstance(body_schema, dict):
         raise ValueError("Swagger request body schema must be an object")
-    schema_id = _schema_id(body_schema, "2.0", schemas)
-    if (
-        body_schema
-        and schema_id is None
-        and ("properties" in body_schema or body_schema.get("type") in {"object", "array"})
-    ):
-        raise ValueError("Inline complex operation schemas are unsupported; define and reference an API schema")
+    schema_id = _project_schema(body_schema, "2.0", schemas)
     consumes = operation.get("consumes") or operation.get("_consumes") or []
     return OperationRequestMetadataConfig(
         description=body_parameters[0].get("description"),
@@ -408,6 +447,22 @@ def _swagger_request_body(
             )
             for kind in consumes
         ],
+    )
+
+
+def _swagger_form_body(
+    operation: dict[str, Any], schemas: dict[str, Any], parameters: list[dict[str, Any]]
+) -> OperationRequestMetadataConfig:
+    consumes = operation.get("consumes") or operation.get("_consumes") or []
+    if not consumes or any(
+        kind not in {"multipart/form-data", "application/x-www-form-urlencoded"} for kind in consumes
+    ):
+        raise ValueError("Swagger formData requires multipart/form-data or application/x-www-form-urlencoded")
+    projected = [_parameter(item, "2.0", schemas) for item in parameters]
+    return OperationRequestMetadataConfig(
+        representations=[
+            OperationRepresentationConfig(content_type=kind, form_parameters=projected) for kind in consumes
+        ]
     )
 
 
@@ -453,9 +508,7 @@ def _response_representations(
     content = response.get("schema")
     if content is not None and not isinstance(content, dict):
         raise ValueError("Operation response schema must be an object")
-    schema_ref = _schema_id(content, version, schemas)
-    if content and schema_ref is None and ("properties" in content or content.get("type") in {"object", "array"}):
-        raise ValueError("Inline complex operation schemas are unsupported; define and reference an API schema")
+    schema_ref = _project_schema(content, version, schemas)
     produces = response.get("produces") or operation.get("_produces") or []
     examples = response.get("examples", {})
     return [
@@ -490,7 +543,7 @@ def _responses(
         raise ValueError("Operation responses must be an object")
     output = []
     for status, response in responses.items():
-        if not str(status).isdigit():
+        if status != "default" and not str(status).isdigit():
             raise ValueError(f"Unsupported response status key: {status}")
         if not isinstance(response, dict):
             raise ValueError(f"Response {status} must be an object")
@@ -498,7 +551,7 @@ def _responses(
             raise ValueError("Referenced responses are unsupported")
         output.append(
             OperationResponseMetadataConfig(
-                status_code=int(status),
+                status_code="default" if status == "default" else int(status),
                 description=response.get("description"),
                 headers=_response_headers(response, version, schemas),
                 representations=_response_representations(response, operation, version, schemas),
@@ -694,6 +747,10 @@ def parse_api_import(
             name: ApiSchemaConfig(content_type=content_type, components={"schemas": schemas}) for name in schemas
         }
     diagnostics = [] if operations else ["API import document did not produce any operations."]
+    if version == "3.0.4":
+        diagnostics.append(
+            "OpenAPI 3.0.4 is accepted as a local extension to the documented Azure 3.0.3 import subset."
+        )
     return ApiImportResult(
         format=normalized,
         operations=operations,
