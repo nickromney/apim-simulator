@@ -2253,19 +2253,42 @@ html[data-theme="dark"] .connection-control summary {
 }
 
 .masthead {
-  padding: 0.75rem 1.125rem;
+  padding: 12px 18px;
   min-height: 56px;
-  gap: 1.5rem;
+  gap: 24px;
   flex-wrap: wrap;
   background: #087e78;
 }
+.masthead .brand-lockup h1 {
+  font-size: 16px;
+  line-height: 20px;
+  letter-spacing: 0;
+}
 .application-nav {
-  font-size: 0.9rem;
+  font-size: 14px;
+  line-height: 20px;
+  gap: 16px;
 }
 .application-nav label {
   color: white;
+  font-size: 14px;
+  line-height: 20px;
+  margin: 0;
+  gap: 8px;
 }
 .application-nav select {
+  height: 32px;
   min-height: 32px;
-  padding: 0.3rem 0.5rem;
+  padding: 4px 8px;
+  font: inherit;
+}
+.console-shell > .service-nav {
+  background: #087e78;
+  min-height: 36px;
+  margin-bottom: 8px;
+}
+@media (max-width: 760px) {
+  .masthead .brand-lockup {
+    flex-basis: 100%;
+  }
 }

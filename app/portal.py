@@ -295,12 +295,13 @@ html[data-theme="dark"] { color-scheme:dark; --bg:#111827; --panel:#1f2937; --in
 html[data-theme="light"] { color-scheme:light; }
 html[data-theme="dark"] input,html[data-theme="dark"] select { background:var(--panel);color:var(--ink); }
 html[data-theme="dark"] button { color:#111827; }
-.masthead { display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;background:#087e78;color:white;padding:.75rem 1.125rem;min-height:56px; }
-.masthead strong { font-size:1.05rem;font-weight:600;line-height:1; }
-.masthead nav { display:flex;align-items:center;gap:1rem;margin:0;flex-wrap:wrap; }
-.masthead nav a,.masthead label { color:white; font-size:.9rem; }
-.masthead label { flex-direction:row;align-items:center;gap:.5rem; }
-.masthead select { width:auto;min-height:32px;padding:.3rem .5rem; }
+.masthead { display:flex;align-items:center;gap:24px;flex-wrap:wrap;background:#087e78;color:white;padding:12px 18px;min-height:56px; }
+.masthead strong { font-size:16px;font-weight:600;line-height:20px;letter-spacing:0; }
+.masthead nav { display:flex;align-items:center;gap:16px;margin:0;flex-wrap:wrap; }
+.masthead nav a,.masthead label { color:white;font-size:14px;line-height:20px; }
+.masthead label { flex-direction:row;align-items:center;gap:8px;margin:0; }
+.masthead select { width:auto;height:32px;min-height:32px;padding:4px 8px;font:inherit; }
+@media(max-width:760px) { .masthead strong { flex-basis:100%; } }
 </style>
 </head>
 <body>
@@ -561,6 +562,7 @@ html[data-theme="dark"] button { color:#111827; }
   }
 
   async function requestSubscription(productId, terms) {
+    const generation = state.identityGeneration;
     const status = document.getElementById("user-status");
     try {
       if (terms && !window.confirm(terms + "\n\nAccept these terms and request a subscription?")) return;
@@ -568,13 +570,14 @@ html[data-theme="dark"] button { color:#111827; }
         method: "POST",
         body: JSON.stringify({ product_id: productId, accept_terms: Boolean(terms) }),
       });
-      await refresh();
+      if (generation === state.identityGeneration) await refresh();
     } catch (error) {
-      status.textContent = String(error.message ?? error);
+      if (generation === state.identityGeneration) status.textContent = String(error.message ?? error);
     }
   }
 
   async function tryIt() {
+    const generation = state.identityGeneration;
     const path = document.getElementById("try-path").value;
     const key = document.getElementById("key-select").value;
     const operation = document.getElementById("op-select").selectedOptions[0]?.request;
@@ -587,11 +590,12 @@ html[data-theme="dark"] button { color:#111827; }
       if (key) requestHeaders["Ocp-Apim-Subscription-Key"] = key;
       const response = await fetch(path, { method, headers: requestHeaders });
       const text = await response.text();
+      if (generation !== state.identityGeneration) return;
       status.textContent = response.status + " " + response.statusText;
       try { output.textContent = JSON.stringify(JSON.parse(text), null, 2); }
       catch { output.textContent = text || "(empty body)"; }
     } catch (error) {
-      status.textContent = String(error.message ?? error);
+      if (generation === state.identityGeneration) status.textContent = String(error.message ?? error);
     }
   }
 
@@ -599,7 +603,9 @@ html[data-theme="dark"] button { color:#111827; }
     const generation = ++state.identityGeneration;
     clearPortalData();
     const select = document.getElementById("user-select");
-    const payload = await fetchJson("/apim/portal/users");
+    let payload;
+    try { payload = await fetchJson("/apim/portal/users"); }
+    catch (error) { if (generation === state.identityGeneration) throw error; return; }
     if (generation !== state.identityGeneration) return;
     const signed = payload.authentication === 'signed-jwt';
     document.getElementById('portal-sign-out').hidden = !signed;
