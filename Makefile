@@ -296,7 +296,7 @@ up:
 up-gateway:
 	$(COMPOSE_GATEWAY) up --build -d
 
-up-otel:
+up-otel: ensure-certs
 	$(COMPOSE_CORE_OTEL) up --build -d
 
 up-oidc:
@@ -322,7 +322,7 @@ up-hello:
 up-hello-subscription:
 	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.subscription.json $(COMPOSE_HELLO) up --build -d
 
-up-hello-otel:
+up-hello-otel: ensure-certs
 	$(COMPOSE_HELLO_OTEL) up --build -d
 
 up-hello-oidc:
@@ -354,7 +354,7 @@ up-aws:
 up-todo:
 	$(COMPOSE_TODO) up --build -d
 
-up-todo-otel:
+up-todo-otel: ensure-certs
 	$(COMPOSE_TODO_OTEL) up --build -d
 
 up-all:

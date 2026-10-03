@@ -1,5 +1,9 @@
 # Scope
 
+This is an unofficial, independent community project. It is not affiliated with,
+endorsed by, or supported by Microsoft. The default local examples need no Azure
+account or cloud resources. Azure comparison runs are separately opt-in.
+
 This repository is not trying to clone all of Azure API Management. It is a local learning and iteration tool with a deliberate bias toward gateway behaviour, policy experimentation, auth flows, networking scenarios, and management-surface workflows that are useful in development.
 
 The project promises fidelity only for a named feature subset. Read

@@ -3,6 +3,11 @@
 This guide is for engineers who are new to Azure API Management (APIM) or
 OpenTelemetry (OTEL) and need the local working model quickly.
 
+Start with [APIs before APIM](API-BASICS.md) for a ten-minute request/response
+lesson and [the local address map](LOCAL-ADDRESSES.md) for the gateway, operator
+console and consumer portal. This simulator is an unofficial community project,
+independent of Microsoft.
+
 It gives you a practical path to:
 
 - run a local API behind APIM
@@ -34,7 +39,8 @@ is the shortest path from user action to observable API traffic.
 
 ## APIM In Plain Terms
 
-An API is just a program that accepts requests and returns responses.
+An API is an agreement between programs about operations, inputs and results.
+For an HTTP API, a server implements that agreement using requests and responses.
 
 Examples:
 

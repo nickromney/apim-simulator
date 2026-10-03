@@ -1556,6 +1556,10 @@ function App() {
           </label>
         </nav>
       </header>
+      <p className="project-notice">
+        Unofficial community project. Not affiliated with, endorsed by, or supported by Microsoft; behavior may differ
+        from Azure API Management.
+      </p>
       <nav className="service-nav" aria-label="Management areas">
         {(["apis", "subscriptions", "traces"] as const).map((area) => (
           <button
@@ -1639,8 +1643,11 @@ function App() {
             </button>
           </div>
           <p className="connection-hint">
-            The demo preset targets the management-enabled stack on <code>localhost:8000</code>. Credentials stay in
-            memory; only the gateway URL is saved.
+            This console runs at <code>{window.location.host}</code> and sends management requests to the gateway at{" "}
+            <code>{baseUrl.replace(/\/$/, "")}</code>. The consumer portal is served by that gateway at{" "}
+            <code>{baseUrl.replace(/\/$/, "")}/apim/portal</code>. With default ports, these are{" "}
+            <code>localhost:3007</code> and <code>localhost:8000</code>. The local demo preset targets the
+            management-enabled gateway. Credentials stay in memory; only the gateway URL is saved.
           </p>
         </form>
       </details>
@@ -3084,6 +3091,7 @@ function App() {
             management-enabled local gateway to get started.
           </p>
           <div className="welcome-actions">
+            <a href={`${baseUrl.replace(/\/$/, "")}/apim/portal#getting-started`}>Start with your first API call</a>
             <button
               type="button"
               onClick={() => {
@@ -3097,7 +3105,8 @@ function App() {
             </button>
           </div>
           <small>
-            For the default demo, start the UI stack with <code>make up-ui</code>.
+            For the default demo, start the stack with <code>make up</code>. Try the consumer journey in the developer
+            portal, then return here to inspect the request trace.
           </small>
         </section>
       ) : null}

@@ -36,9 +36,30 @@
       "name": "Default",
       "description": "Anonymous local development product",
       "require_subscription": false
+    },
+    "portal-demo": {
+      "name": "API learning demo",
+      "description": "Request a local subscription, then compare /demo/echo with the anonymous /api/echo route.",
+      "state": "published",
+      "require_subscription": true
     }
   },
   "apis": {
+    "portal-demo": {
+      "name": "Subscription demo",
+      "path": "demo",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "products": ["portal-demo"],
+      "operations": {
+        "echo": {
+          "name": "Echo",
+          "method": "GET",
+          "url_template": "/echo",
+          "description": "Echo a request after checking its local product subscription key."
+        }
+      }
+    },
     "default": {
       "name": "Default",
       "path": "api",
