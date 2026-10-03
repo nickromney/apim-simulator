@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-03",
+  "transport": "real localhost TCP; native uvicorn and HTTP backend",
+  "checks": [
+    "set-method forwards POST/body with recalculated length and outbound context over localhost sockets",
+    "unauthorized collection export denied",
+    "authorized portable Postman collection validates against official schema without upstream/key leakage"
+  ],
+  "passed": 3
+}

@@ -446,3 +446,28 @@ contracts:
       - tests/test_gateway.py::test_explicit_revision_selects_versioned_api_and_does_not_fall_through_snapshots
     fixture_or_golden: null
     assertion_kind: http-json
+
+  - id: POLICY-SET-METHOD
+    status: supported
+    surface: policy
+    module: app/policy_transforms.py
+    doc_refs:
+      - docs/SET-METHOD.md
+      - https://learn.microsoft.com/en-us/azure/api-management/set-method-policy
+    owner_tests:
+      - tests/test_set_method_policy.py::test_method_transform_reaches_backend_and_updates_context_and_trace
+    fixture_or_golden: inline-xml
+    assertion_kind: http-json
+
+  - id: EXPORT-POSTMAN
+    status: supported
+    surface: management
+    module: app/postman_export.py
+    doc_refs:
+      - docs/POSTMAN-EXPORT.md
+      - https://learn.microsoft.com/en-us/azure/api-management/export-api-postman
+    owner_tests:
+      - tests/test_postman_export.py::test_postman_preserves_contract_and_is_deterministic
+      - tests/test_postman_export.py::test_export_scoped_readers_cannot_export_other_apis*
+    fixture_or_golden: inline-json
+    assertion_kind: http-json

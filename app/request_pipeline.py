@@ -600,7 +600,7 @@ async def _handle_backend_error_status(
         return None
 
     failure_req = PolicyRequest(
-        method=request.method,
+        method=policy_req.method,
         path=policy_req.path,
         query=policy_req.query.copy(),
         headers=policy_req.headers.copy(),
@@ -701,7 +701,7 @@ async def _apply_outbound_policies(
     upstream Content-Length.
     """
     outbound_req = PolicyRequest(
-        method=request.method,
+        method=policy_req.method,
         path=policy_req.path,
         query=policy_req.query.copy(),
         headers=response_headers,
@@ -994,7 +994,7 @@ async def _fail_upstream_unavailable(
     if policy_docs:
         last_error = _upstream_last_error(last_exc)
         failure_req = PolicyRequest(
-            method=request.method,
+            method=policy_req.method,
             path=policy_req.path,
             query=policy_req.query.copy(),
             headers=policy_req.headers.copy(),
@@ -1101,7 +1101,7 @@ def _gateway_cache_key(
     Only GETs are cached, never a streaming proxy, and never when a policy has
     already taken responsibility for caching the response itself.
     """
-    if not cfg.cache_enabled or request.method != "GET" or cfg.proxy_streaming or policy_response_cache_active:
+    if not cfg.cache_enabled or policy_req.method != "GET" or cfg.proxy_streaming or policy_response_cache_active:
         return None
     return request_cache_key(
         method=policy_req.method,
@@ -2418,7 +2418,7 @@ async def execute_gateway_request(request: Request) -> Response:
         tls_client_pool=request.app.state.tls_client_pool,
         client=client,
         cfg=cfg,
-        method=request.method,
+        method=policy_req.method,
         upstream_url=upstream_url,
         policy_req=policy_req,
         upstream_auth=upstream_auth,

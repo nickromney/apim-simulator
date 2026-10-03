@@ -205,13 +205,25 @@ def build_openapi_export_router() -> APIRouter:
 
     @router.get("/apim/management/apis/{api_id}/export")
     async def export_api(api_id: str, request: Request) -> dict[str, Any]:
-        require_tenant_access(request)
+        require_tenant_access(request, permission="read", api_id=api_id)
         cfg = request.app.state.gateway_config
         api = cfg.apis.get(api_id)
         if api is None:
             raise HTTPException(status_code=404, detail="API not found")
         try:
             version_set = cfg.api_version_sets.get(api.api_version_set)
+            if request.query_params.get("format") == "postman":
+                from app.postman_export import build_postman, redact_collection
+
+                header_names = api.subscription_header_names or cfg.subscription.header_names
+                collection = build_postman(
+                    api,
+                    version_set=version_set,
+                    subscription_header=header_names[0] if header_names else "Ocp-Apim-Subscription-Key",
+                )
+                return redact_collection(collection, cfg)
+            if request.query_params.get("format", "openapi") != "openapi":
+                raise HTTPException(status_code=400, detail="Unsupported export format; use openapi or postman")
             return mask_secret_data(build_openapi(api, str(request.base_url), version_set=version_set), cfg)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Cannot export API: {exc}") from exc
