@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-02",
+  "python": {
+    "scope": "runtime dependencies",
+    "command": "uv export --no-dev --no-emit-project --format requirements-txt --no-hashes > /tmp/apim-security-runtime-reqs.txt; pip-audit -r /tmp/apim-security-runtime-reqs.txt --no-deps --disable-pip --format json",
+    "audited_dependency_count": 48,
+    "advisory_count": 0,
+    "status": "clean"
+  },
+  "npm": {
+    "ui": {
+      "command": "npm audit --json",
+      "counts": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "status": "clean"
+    },
+    "examples/todo-app/frontend-astro": {
+      "command": "npm audit --json",
+      "counts": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "status": "clean"
+    }
+  },
+  "backstage": {
+    "command": "node .yarn/releases/yarn-4.4.1.cjs npm audit --all --recursive --json",
+    "exit_code": 1,
+    "advisory_count": 8,
+    "advisories_by_severity": {
+      "moderate": 6,
+      "low": 1,
+      "high": 1,
+      "critical": 0
+    },
+    "deprecation_count": 17,
+    "untriaged_high_or_critical": 0,
+    "status": "triaged_remaining_advisories",
+    "evidence": "backstage-advisories-2026-10-02.json",
+    "baseline": {
+      "scanner_record_count": 276,
+      "advisory_count": 255,
+      "advisories_by_severity": {
+        "critical": 23,
+        "high": 109,
+        "moderate": 101,
+        "low": 22
+      },
+      "deprecation_count": 21
+    },
+    "local_mitigation": {
+      "advisory": "GHSA-wrjc-x8rr-h8h6",
+      "upstream_source": "https://github.com/remix-run/react-router/pull/15176",
+      "test": "backstage/app/scripts/security-router.test.cjs",
+      "status": "documented navigation condition regression-tested and mitigated; version scan remains affected"
+    }
+  },
+  "build_validation": {
+    "backstage_backend": "passed under Node24 after local backport",
+    "backstage_app": "passed under Node24 after local backport",
+    "node_runtime": "24.19.0",
+    "react_router_regressions": {
+      "before_patch": {
+        "passed": 1,
+        "failed": 4
+      },
+      "after_patch": {
+        "passed": 5,
+        "failed": 0
+      }
+    }
+  },
+  "limitations": [
+    "Dependency scans are dated advisory snapshots, not proof of exploit resistance.",
+    "Backstage retains eight reviewed advisories; node-forge high has no published fixed version.",
+    "Backstage audit includes development dependencies and deprecated-package notices are counted separately."
+  ]
+}

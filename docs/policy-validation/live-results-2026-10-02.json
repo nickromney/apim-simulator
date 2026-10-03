@@ -1,0 +1,248 @@
+{
+  "date": "2026-10-02",
+  "gateway": "http://localhost:8900",
+  "companion": "http://localhost:8901",
+  "kind": "published_host_ports",
+  "runs": [
+    {
+      "run": "final",
+      "command": "make -C examples/apim-policies verify",
+      "passed": true,
+      "outcomes": [
+        "PASS Service Bus: topic fanout, independent consumers, queue, payload/properties/TTL, immediate 201 and sender-only access",
+        "PASS advanced logging: buffered request/response consumption, correlation, partitions, credential filtering and preserved bodies",
+        "PASS external services: reference-token introspection grants/denials, body preservation and one-way backend-error alert",
+        {
+          "four_request_composition": true,
+          "last_query_value": true,
+          "source_from_date_typo_observed_and_refined": true,
+          "trace_preserves_callout_bodies": true,
+          "null_introspection_denied": 401
+        },
+        {
+          "guide": "advanced-request-throttling",
+          "results": {
+            "six_call_bucket": {
+              "allowed": 6,
+              "blocked": 429,
+              "retry_after": 60
+            },
+            "ip": {
+              "allowed": 10,
+              "blocked": 429,
+              "retry_after": 60,
+              "independent_address": 200
+            },
+            "jwt_subject": {
+              "allowed": 10,
+              "blocked": 429,
+              "retry_after": 60,
+              "independent_subject": 200
+            },
+            "client_header": {
+              "allowed": 100,
+              "blocked": 429,
+              "retry_after": 60,
+              "independent_customer": 200
+            },
+            "bandwidth": {
+              "first": 200,
+              "after_body_accounting": 403,
+              "independent_address": 200
+            },
+            "combined": {
+              "alice": 2,
+              "bob": 1,
+              "shared_subscription_block": 429
+            }
+          }
+        },
+        {
+          "overview": {
+            "source_transform_order": "passed",
+            "base_suppression": "passed",
+            "adobe_policy_file": "passed",
+            "trace_body_equivalence": "passed"
+          },
+          "set_edit": {
+            "source_ip_allow_deny": "passed",
+            "save_read_edit": "passed",
+            "effective_policy_runtime_order": "passed",
+            "invalid_save_preserves_policy": "passed"
+          },
+          "copilot": {
+            "authored_five_per_second": "passed",
+            "remove_response_header": "passed"
+          },
+          "vscode": {
+            "backend_and_header_prompt": "passed",
+            "debug_variables_and_steps": "passed",
+            "body_preserving_replay": "passed",
+            "hundred_per_minute_prompt": "passed"
+          }
+        },
+        {
+          "expressions": {
+            "arithmetic": "2",
+            "multi_statement": "local-example",
+            "missing_header": "missing",
+            "role_filter_authoring": {
+              "validated_member_fields": [
+                "public"
+              ],
+              "validated_admin_fields": [
+                "public",
+                "private"
+              ],
+              "invalid_token": 401
+            }
+          },
+          "fragments": {
+            "subscribed_user": "management",
+            "shared_update": 2,
+            "referenced_delete": 400
+          },
+          "named_values": {
+            "secret_masked": true,
+            "value_rotated": true,
+            "display_name_references_updated": true,
+            "url_encoding": "The URL encoded value is This+is+a+header+value.",
+            "local_vault_rotated_without_policy_reload": true
+          },
+          "errors": {
+            "status": 403,
+            "reason": "HeaderNotFound",
+            "policy_id": "guide-required"
+          },
+          "graphql": {
+            "arguments": true,
+            "variables": true,
+            "parent": true,
+            "schema_projection": true,
+            "invalid_query": 400
+          }
+        }
+      ]
+    },
+    {
+      "run": "repeat",
+      "command": "make -C examples/apim-policies verify",
+      "passed": true,
+      "outcomes": [
+        "PASS Service Bus: topic fanout, independent consumers, queue, payload/properties/TTL, immediate 201 and sender-only access",
+        "PASS advanced logging: buffered request/response consumption, correlation, partitions, credential filtering and preserved bodies",
+        "PASS external services: reference-token introspection grants/denials, body preservation and one-way backend-error alert",
+        {
+          "four_request_composition": true,
+          "last_query_value": true,
+          "source_from_date_typo_observed_and_refined": true,
+          "trace_preserves_callout_bodies": true,
+          "null_introspection_denied": 401
+        },
+        {
+          "guide": "advanced-request-throttling",
+          "results": {
+            "six_call_bucket": {
+              "allowed": 6,
+              "blocked": 429,
+              "retry_after": 60
+            },
+            "ip": {
+              "allowed": 10,
+              "blocked": 429,
+              "retry_after": 60,
+              "independent_address": 200
+            },
+            "jwt_subject": {
+              "allowed": 10,
+              "blocked": 429,
+              "retry_after": 60,
+              "independent_subject": 200
+            },
+            "client_header": {
+              "allowed": 100,
+              "blocked": 429,
+              "retry_after": 60,
+              "independent_customer": 200
+            },
+            "bandwidth": {
+              "first": 200,
+              "after_body_accounting": 403,
+              "independent_address": 200
+            },
+            "combined": {
+              "alice": 2,
+              "bob": 1,
+              "shared_subscription_block": 429
+            }
+          }
+        },
+        {
+          "overview": {
+            "source_transform_order": "passed",
+            "base_suppression": "passed",
+            "adobe_policy_file": "passed",
+            "trace_body_equivalence": "passed"
+          },
+          "set_edit": {
+            "source_ip_allow_deny": "passed",
+            "save_read_edit": "passed",
+            "effective_policy_runtime_order": "passed",
+            "invalid_save_preserves_policy": "passed"
+          },
+          "copilot": {
+            "authored_five_per_second": "passed",
+            "remove_response_header": "passed"
+          },
+          "vscode": {
+            "backend_and_header_prompt": "passed",
+            "debug_variables_and_steps": "passed",
+            "body_preserving_replay": "passed",
+            "hundred_per_minute_prompt": "passed"
+          }
+        },
+        {
+          "expressions": {
+            "arithmetic": "2",
+            "multi_statement": "local-example",
+            "missing_header": "missing",
+            "role_filter_authoring": {
+              "validated_member_fields": [
+                "public"
+              ],
+              "validated_admin_fields": [
+                "public",
+                "private"
+              ],
+              "invalid_token": 401
+            }
+          },
+          "fragments": {
+            "subscribed_user": "management",
+            "shared_update": 2,
+            "referenced_delete": 400
+          },
+          "named_values": {
+            "secret_masked": true,
+            "value_rotated": true,
+            "display_name_references_updated": true,
+            "url_encoding": "The URL encoded value is This+is+a+header+value.",
+            "local_vault_rotated_without_policy_reload": true
+          },
+          "errors": {
+            "status": 403,
+            "reason": "HeaderNotFound",
+            "policy_id": "guide-required"
+          },
+          "graphql": {
+            "arguments": true,
+            "variables": true,
+            "parent": true,
+            "schema_projection": true,
+            "invalid_query": 400
+          }
+        }
+      ]
+    }
+  ]
+}

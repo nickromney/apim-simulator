@@ -1,0 +1,30 @@
+services:
+  policy-broker:
+    build:
+      context: .
+      dockerfile: examples/apim-policies/broker.Dockerfile
+      args:
+        PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13}
+    image: apim-simulator-policy-broker:local
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      BROKER_SECRET_READER_KEY: ${POLICY_VAULT_READER_KEY:-local-vault-reader}
+      BROKER_ADMIN_KEY: ${POLICY_BROKER_ADMIN_KEY:-local-broker-admin}
+      BROKER_SENDER_KEY: ${POLICY_BROKER_SENDER_KEY:-local-broker-sender}
+    ports:
+      - "127.0.0.1:${POLICY_BROKER_PORT:-8081}:8081"
+    networks: [apim]
+  apim-simulator:
+    environment:
+      APIM_LOCAL_VAULT_BASE_URL: http://policy-broker:8081
+      APIM_LOCAL_VAULT_KEY: ${POLICY_VAULT_READER_KEY:-local-vault-reader}
+      APIM_CONFIG_SOURCE_PATH: /app/examples/apim-policies/apim.json
+      BROKER_SENDER_KEY: ${POLICY_BROKER_SENDER_KEY:-local-broker-sender}
+    depends_on:
+      policy-broker:
+        condition: service_started

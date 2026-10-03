@@ -61,7 +61,6 @@ subset, `adapted` when local behavior intentionally differs from APIM, and
 ## Currently Deferred
 
 - External cache backends for the `cache-*` policies
-- `quota-by-key` bandwidth enforcement
 - `llm-semantic-cache-lookup`/`-store` and `llm-content-safety` (see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
 - Full APIM policy expression compatibility
 - Reconstruction of complete revision snapshots from Terraform-imported metadata, arbitrary source-API revision cloning, and broader Azure release infrastructure

@@ -1,0 +1,3 @@
+<send-service-bus-message queue-name="my-queue">
+    <payload>@(context.Request.Body.As<string>())</payload>
+</send-service-bus-message>

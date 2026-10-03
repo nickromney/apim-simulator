@@ -1,0 +1,3739 @@
+{
+  "date": "2026-10-02",
+  "mode": "read-only lockfile advisory scans; exploitability not established by package match",
+  "python": {
+    "command": "pip-audit -r exported-runtime-requirements --no-deps --disable-pip --format json",
+    "affected_packages": 7,
+    "unique_package_advisories": 34,
+    "severity": "not supplied by scanner; not yet triaged",
+    "packages": [
+      {
+        "name": "anyio",
+        "version": "4.12.1",
+        "advisories": [
+          {
+            "id": "PYSEC-2026-4025",
+            "aliases": [
+              "GHSA-82r6-8w77-94w6",
+              "CVE-2026-63374"
+            ],
+            "fix_versions": [
+              "4.14.2"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4024",
+            "aliases": [
+              "GHSA-5p39-cfhj-2xmp",
+              "CVE-2026-64847"
+            ],
+            "fix_versions": [
+              "4.14.2"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "click",
+        "version": "8.3.1",
+        "advisories": [
+          {
+            "id": "PYSEC-2026-2132",
+            "aliases": [
+              "GHSA-47fr-3ffg-hgmw",
+              "CVE-2026-7246"
+            ],
+            "fix_versions": [
+              "8.3.3"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "cryptography",
+        "version": "46.0.5",
+        "advisories": [
+          {
+            "id": "PYSEC-2026-35",
+            "aliases": [
+              "GHSA-m959-cc7f-wv43",
+              "CVE-2026-34073"
+            ],
+            "fix_versions": [
+              "46.0.6"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-36",
+            "aliases": [
+              "GHSA-p423-j2cm-9vmq",
+              "CVE-2026-39892"
+            ],
+            "fix_versions": [
+              "46.0.7"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-3554",
+            "aliases": [
+              "CVE-2026-69248",
+              "GHSA-m2h6-j472-rp4c"
+            ],
+            "fix_versions": [
+              "49.0.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-3552",
+            "aliases": [
+              "CVE-2026-69247",
+              "GHSA-g6cj-pr64-35w5"
+            ],
+            "fix_versions": [
+              "50.0.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-3553",
+            "aliases": [
+              "GHSA-jwv3-5hgf-82ww",
+              "CVE-2026-69249"
+            ],
+            "fix_versions": [
+              "49.0.0"
+            ]
+          },
+          {
+            "id": "GHSA-537c-gmf6-5ccf",
+            "aliases": [],
+            "fix_versions": [
+              "48.0.1"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "idna",
+        "version": "3.11",
+        "advisories": [
+          {
+            "id": "PYSEC-2026-215",
+            "aliases": [
+              "CVE-2026-45409",
+              "GHSA-65pc-fj4g-8rjx"
+            ],
+            "fix_versions": [
+              "3.15"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "pyjwt",
+        "version": "2.12.1",
+        "advisories": [
+          {
+            "id": "PYSEC-2026-179",
+            "aliases": [
+              "CVE-2026-48526",
+              "GHSA-xgmm-8j9v-c9wx"
+            ],
+            "fix_versions": [
+              "2.13.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-175",
+            "aliases": [
+              "CVE-2026-48522",
+              "GHSA-993g-76c3-p5m4"
+            ],
+            "fix_versions": [
+              "2.13.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-177",
+            "aliases": [
+              "GHSA-fhv5-28vv-h8m8",
+              "CVE-2026-48524"
+            ],
+            "fix_versions": [
+              "2.13.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-178",
+            "aliases": [
+              "GHSA-w7vc-732c-9m39",
+              "CVE-2026-48525"
+            ],
+            "fix_versions": [
+              "2.13.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-176",
+            "aliases": [
+              "CVE-2026-48523",
+              "GHSA-jq35-7prp-9v3f"
+            ],
+            "fix_versions": [
+              "2.13.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4145",
+            "aliases": [
+              "CVE-2026-102268",
+              "GHSA-ffc3-869f-jxw9"
+            ],
+            "fix_versions": [
+              "2.14.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4146",
+            "aliases": [
+              "GHSA-gvp8-978c-rx2q",
+              "CVE-2026-103001"
+            ],
+            "fix_versions": []
+          },
+          {
+            "id": "PYSEC-2026-4149",
+            "aliases": [
+              "GHSA-p4g4-x82p-q773",
+              "CVE-2026-102271"
+            ],
+            "fix_versions": [
+              "2.14.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4152",
+            "aliases": [
+              "CVE-2026-102274",
+              "GHSA-w6j9-cwv2-h6wq"
+            ],
+            "fix_versions": [
+              "2.14.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4144",
+            "aliases": [
+              "CVE-2026-102267",
+              "GHSA-9v7f-9g4p-ffgj"
+            ],
+            "fix_versions": [
+              "2.14.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4148",
+            "aliases": [
+              "CVE-2026-102270",
+              "GHSA-jwrc-g2q2-pq5p"
+            ],
+            "fix_versions": [
+              "2.14.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4140",
+            "aliases": [
+              "CVE-2026-101917",
+              "GHSA-2gx3-rcp4-g85q"
+            ],
+            "fix_versions": [
+              "2.14.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4141",
+            "aliases": [
+              "CVE-2026-101918",
+              "GHSA-42vr-xj54-vc7v"
+            ],
+            "fix_versions": [
+              "2.15.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4147",
+            "aliases": [
+              "CVE-2026-102269",
+              "GHSA-hxm8-2xgr-2p9m"
+            ],
+            "fix_versions": [
+              "2.14.0"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "starlette",
+        "version": "0.52.1",
+        "advisories": [
+          {
+            "id": "PYSEC-2026-161",
+            "aliases": [
+              "GHSA-86qp-5c8j-p5mr",
+              "X41-2026-002",
+              "CVE-2026-48710"
+            ],
+            "fix_versions": [
+              "1.0.1"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-2281",
+            "aliases": [
+              "CVE-2026-48818",
+              "GHSA-wqp7-x3pw-xc5r"
+            ],
+            "fix_versions": [
+              "1.1.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-2280",
+            "aliases": [
+              "GHSA-x746-7m8f-x49c",
+              "CVE-2026-48817"
+            ],
+            "fix_versions": [
+              "1.1.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-249",
+            "aliases": [
+              "CVE-2026-54283",
+              "GHSA-82w8-qh3p-5jfq"
+            ],
+            "fix_versions": [
+              "1.3.1"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-248",
+            "aliases": [
+              "GHSA-jp82-jpqv-5vv3",
+              "CVE-2026-54282"
+            ],
+            "fix_versions": [
+              "1.3.0"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "urllib3",
+        "version": "2.6.3",
+        "advisories": [
+          {
+            "id": "PYSEC-2026-141",
+            "aliases": [
+              "GHSA-qccp-gfcp-xxvc",
+              "CVE-2026-44431"
+            ],
+            "fix_versions": [
+              "2.7.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-142",
+            "aliases": [
+              "CVE-2026-44432",
+              "GHSA-mf9v-mfxr-j63j"
+            ],
+            "fix_versions": [
+              "2.7.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4177",
+            "aliases": [
+              "GHSA-vxq7-64xx-v4gw",
+              "CVE-2026-97689"
+            ],
+            "fix_versions": [
+              "2.8.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4176",
+            "aliases": [
+              "CVE-2026-97688",
+              "GHSA-gh4c-6fx4-qh6g"
+            ],
+            "fix_versions": [
+              "2.8.0"
+            ]
+          },
+          {
+            "id": "PYSEC-2026-4175",
+            "aliases": [
+              "CVE-2026-97687",
+              "GHSA-8988-9cw3-xx77"
+            ],
+            "fix_versions": [
+              "2.8.0"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "npm": {
+    "ui": {
+      "command": "npm audit --package-lock-only --json",
+      "counts": {
+        "info": 0,
+        "low": 2,
+        "moderate": 1,
+        "high": 4,
+        "critical": 0,
+        "total": 7
+      },
+      "packages": [
+        {
+          "package": "@babel/core",
+          "severity": "low",
+          "direct": false,
+          "version": "7.29.0",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "@babel/core: Arbitrary File Read via sourceMappingURL Comment",
+              "url": "https://github.com/advisories/GHSA-4x5r-pxfx-6jf8",
+              "severity": "low",
+              "range": "<=7.29.0"
+            }
+          ]
+        },
+        {
+          "package": "baseline-browser-mapping",
+          "severity": "moderate",
+          "direct": false,
+          "version": "2.10.13",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "baseline-browser-mapping process termination on invalid input causes denial of service",
+              "url": "https://github.com/advisories/GHSA-w5vr-8v7q-w6rv",
+              "severity": "moderate",
+              "range": ">=2.0.0 <2.11.0"
+            }
+          ]
+        },
+        {
+          "package": "browserslist",
+          "severity": "high",
+          "direct": false,
+          "version": "4.28.2",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "Browserslist: Unbounded memory growth (no cache eviction) via distinct query results, leading to eventual OOM",
+              "url": "https://github.com/advisories/GHSA-c83g-rgw3-j3cx",
+              "severity": "high",
+              "range": "<=4.28.6"
+            },
+            {
+              "title": "Browserslist: Uncaught crash / prototype write via untrusted browserslist-stats.json custom stats (normalizeStats)",
+              "url": "https://github.com/advisories/GHSA-73wf-gq98-2v4g",
+              "severity": "high",
+              "range": "<=4.28.6"
+            }
+          ]
+        },
+        {
+          "package": "esbuild",
+          "severity": "low",
+          "direct": false,
+          "version": "0.27.5",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "esbuild allows arbitrary file read when running the development server on Windows",
+              "url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
+              "severity": "low",
+              "range": ">=0.27.3 <0.28.1"
+            }
+          ]
+        },
+        {
+          "package": "nanoid",
+          "severity": "high",
+          "direct": false,
+          "version": "3.3.11",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "nanoid: non-secure generators can loop indefinitely with negative size",
+              "url": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+              "severity": "high",
+              "range": "<3.3.16"
+            },
+            {
+              "title": "nanoid: custom generators can loop indefinitely when size is zero",
+              "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+              "severity": "high",
+              "range": "<3.3.18"
+            },
+            {
+              "title": "nanoid: Integer Overflow or Wraparound",
+              "url": "https://github.com/advisories/GHSA-xwg4-73v4-xw9w",
+              "severity": "high",
+              "range": "<3.3.12"
+            }
+          ]
+        },
+        {
+          "package": "postcss",
+          "severity": "high",
+          "direct": false,
+          "version": "8.5.8",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+              "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+              "severity": "moderate",
+              "range": "<8.5.10"
+            },
+            {
+              "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+              "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+              "severity": "high",
+              "range": "<=8.5.11"
+            },
+            {
+              "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q \u2014 attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+              "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+              "severity": "moderate",
+              "range": "<=8.5.22"
+            },
+            {
+              "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+              "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+              "severity": "high",
+              "range": "<=8.5.17"
+            }
+          ]
+        },
+        {
+          "package": "vite",
+          "severity": "high",
+          "direct": true,
+          "version": "7.3.2",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+              "url": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+              "severity": "moderate",
+              "range": ">=7.0.0 <=7.3.4"
+            },
+            {
+              "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+              "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+              "severity": "high",
+              "range": ">=7.0.0 <=7.3.4"
+            }
+          ]
+        }
+      ]
+    },
+    "todo": {
+      "command": "npm audit --package-lock-only --json",
+      "counts": {
+        "info": 0,
+        "low": 1,
+        "moderate": 1,
+        "high": 9,
+        "critical": 1,
+        "total": 12
+      },
+      "packages": [
+        {
+          "package": "astro",
+          "severity": "critical",
+          "direct": true,
+          "version": "6.1.6",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "Astro: Server island encrypted parameters vulnerable to cross-component replay",
+              "url": "https://github.com/advisories/GHSA-xr5h-phrj-8vxv",
+              "severity": "low",
+              "range": "<6.1.10"
+            },
+            {
+              "title": "Astro: XSS via Unescaped Attribute Names in Spread Props",
+              "url": "https://github.com/advisories/GHSA-jrpj-wcv7-9fh9",
+              "severity": "moderate",
+              "range": "<6.4.6"
+            },
+            {
+              "title": "Astro: XSS via unescaped spread attribute names in renderHTMLElement (incomplete fix for CVE-2026-54298)",
+              "url": "https://github.com/advisories/GHSA-f48w-9m4c-m7f5",
+              "severity": "moderate",
+              "range": "<7.0.6"
+            },
+            {
+              "title": "Astro: Cross-site scripting via unescaped transition:* directive values on hydrated islands",
+              "url": "https://github.com/advisories/GHSA-7pw4-f3q4-r2p2",
+              "severity": "low",
+              "range": ">=3.10.0 <7.0.4"
+            },
+            {
+              "title": "Astro: Reflected XSS via unescaped View Transition animation properties",
+              "url": "https://github.com/advisories/GHSA-4g3v-8h47-v7g6",
+              "severity": "moderate",
+              "range": ">=2.9.0 <=7.0.9"
+            },
+            {
+              "title": "Astro: Host header SSRF in prerendered error page fetch",
+              "url": "https://github.com/advisories/GHSA-2pvr-wf23-7pc7",
+              "severity": "high",
+              "range": "<6.4.6"
+            },
+            {
+              "title": "Astro: Reflected XSS via unescaped slot name",
+              "url": "https://github.com/advisories/GHSA-8hv8-536x-4wqp",
+              "severity": "high",
+              "range": "<6.3.3"
+            },
+            {
+              "title": "Astro: Remote code execution through AVIF image optimization",
+              "url": "https://github.com/advisories/GHSA-26w7-cxv4-gfx2",
+              "severity": "critical",
+              "range": "<7.2.8"
+            },
+            {
+              "title": "Astro: Authorization bypass from missing path-segment boundary check when stripping the configured base",
+              "url": "https://github.com/advisories/GHSA-376h-93r7-7g6f",
+              "severity": "moderate",
+              "range": "<=7.2.3"
+            }
+          ]
+        },
+        {
+          "package": "devalue",
+          "severity": "high",
+          "direct": false,
+          "version": "5.6.4",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "Svelte devalue: DoS via sparse array deserialization",
+              "url": "https://github.com/advisories/GHSA-77vg-94rm-hx3p",
+              "severity": "high",
+              "range": ">=5.6.3 <=5.8.0"
+            },
+            {
+              "title": "Svelte devalue: DoS via malformed input",
+              "url": "https://github.com/advisories/GHSA-9rgm-9g3h-6x36",
+              "severity": "moderate",
+              "range": "<5.9.1"
+            },
+            {
+              "title": "devalue: `stringify`/`uneval` serialize shared memory",
+              "url": "https://github.com/advisories/GHSA-j22f-vq7h-c4qm",
+              "severity": "high",
+              "range": ">=5.1.0 <=5.9.2"
+            },
+            {
+              "title": "devalue: Residual sparse-array CPU amplification in uneval",
+              "url": "https://github.com/advisories/GHSA-hx4r-w6wj-j8fg",
+              "severity": "moderate",
+              "range": "<=5.9.2"
+            },
+            {
+              "title": "devalue: Repeated primitive strings cause quadratic expansion in uneval",
+              "url": "https://github.com/advisories/GHSA-mcm9-63f2-9j32",
+              "severity": "high",
+              "range": "<=5.9.2"
+            },
+            {
+              "title": "devalue: Sparse arrays emitted by uneval cause eager allocation when evaluated",
+              "url": "https://github.com/advisories/GHSA-wf3x-273g-mvxv",
+              "severity": "low",
+              "range": ">=1.0.0 <=5.9.2"
+            },
+            {
+              "title": "devalue: Malformed null-prototype object keys bypass __proto__ rejection via property-key coercion",
+              "url": "https://github.com/advisories/GHSA-4q55-j62x-fr9h",
+              "severity": "moderate",
+              "range": "<=5.9.2"
+            }
+          ]
+        },
+        {
+          "package": "esbuild",
+          "severity": "low",
+          "direct": false,
+          "version": "0.27.7",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "esbuild allows arbitrary file read when running the development server on Windows",
+              "url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
+              "severity": "low",
+              "range": ">=0.27.3 <0.28.1"
+            }
+          ]
+        },
+        {
+          "package": "fast-uri",
+          "severity": "high",
+          "direct": false,
+          "version": "3.1.0",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "fast-uri vulnerable to host confusion via literal backslash authority delimiter",
+              "url": "https://github.com/advisories/GHSA-v2hh-gcrm-f6hx",
+              "severity": "high",
+              "range": ">=3.0.0 <=3.1.3"
+            },
+            {
+              "title": "fast-uri vulnerable to host confusion via backslash authority introducer",
+              "url": "https://github.com/advisories/GHSA-7p8r-x3mc-p8w7",
+              "severity": "high",
+              "range": ">=3.0.0 <3.1.5"
+            },
+            {
+              "title": "fast-uri vulnerable to path traversal via percent-encoded dot segments",
+              "url": "https://github.com/advisories/GHSA-q3j6-qgpj-74h6",
+              "severity": "high",
+              "range": ">=3.0.0 <=3.1.0"
+            },
+            {
+              "title": "fast-uri vulnerable to host confusion via percent-encoded authority delimiters",
+              "url": "https://github.com/advisories/GHSA-v39h-62p7-jpjc",
+              "severity": "high",
+              "range": ">=3.0.0 <=3.1.1"
+            },
+            {
+              "title": "fast-uri vulnerable to server-side request forgery via malformed IPv6 normalization",
+              "url": "https://github.com/advisories/GHSA-f65p-4m7j-42xc",
+              "severity": "high",
+              "range": ">=3.0.0 <3.1.6"
+            },
+            {
+              "title": "fast-uri vulnerable to host confusion via percent-encoded scheme normalization",
+              "url": "https://github.com/advisories/GHSA-jqff-g426-hqxp",
+              "severity": "high",
+              "range": ">=3.0.0 <3.1.6"
+            },
+            {
+              "title": "fast-uri vulnerable to host confusion via failed IDN canonicalization",
+              "url": "https://github.com/advisories/GHSA-4c8g-83qw-93j6",
+              "severity": "high",
+              "range": ">=3.0.0 <3.1.3"
+            },
+            {
+              "title": "fast-uri vulnerable to authority injection via an unvalidated port in serialize",
+              "url": "https://github.com/advisories/GHSA-qw65-cvwx-89v3",
+              "severity": "high",
+              "range": ">=3.0.0 <3.1.7"
+            },
+            {
+              "title": "fast-uri vulnerable to inconsistent host case normalization via percent-encoded octets",
+              "url": "https://github.com/advisories/GHSA-hrr3-gc8f-f4qj",
+              "severity": "moderate",
+              "range": ">=3.0.0 <3.1.8"
+            }
+          ]
+        },
+        {
+          "package": "js-yaml",
+          "severity": "high",
+          "direct": false,
+          "version": "4.1.1",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "JS-YAML: Quadratic-complexity DoS in merge key handling via repeated aliases",
+              "url": "https://github.com/advisories/GHSA-h67p-54hq-rp68",
+              "severity": "moderate",
+              "range": ">=4.0.0 <=4.1.1"
+            },
+            {
+              "title": "js-yaml: YAML merge-key chains can force quadratic CPU consumption",
+              "url": "https://github.com/advisories/GHSA-52cp-r559-cp3m",
+              "severity": "high",
+              "range": ">=4.0.0 <4.3.0"
+            },
+            {
+              "title": "JS-YAML: Quadratic CPU consumption in !!omap resolution (3.x and 4.x) \u2014 CVE-2026-59870 fix not backported",
+              "url": "https://github.com/advisories/GHSA-5p4m-2wfm-xmqj",
+              "severity": "high",
+              "range": ">=4.0.0 <4.3.1"
+            },
+            {
+              "title": "js-yaml: maxTotalMergeKeys does not limit CPU use for empty merge sources",
+              "url": "https://github.com/advisories/GHSA-2883-xcg3-v3hh",
+              "severity": "high",
+              "range": ">=4.0.0 <4.3.2"
+            }
+          ]
+        },
+        {
+          "package": "nanoid",
+          "severity": "high",
+          "direct": false,
+          "version": "3.3.11",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "nanoid: non-secure generators can loop indefinitely with negative size",
+              "url": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+              "severity": "high",
+              "range": "<3.3.16"
+            },
+            {
+              "title": "nanoid: custom generators can loop indefinitely when size is zero",
+              "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+              "severity": "high",
+              "range": "<3.3.18"
+            },
+            {
+              "title": "nanoid: Integer Overflow or Wraparound",
+              "url": "https://github.com/advisories/GHSA-xwg4-73v4-xw9w",
+              "severity": "high",
+              "range": "<3.3.12"
+            }
+          ]
+        },
+        {
+          "package": "postcss",
+          "severity": "high",
+          "direct": false,
+          "version": "8.5.8",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+              "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+              "severity": "moderate",
+              "range": "<8.5.10"
+            },
+            {
+              "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+              "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+              "severity": "high",
+              "range": "<=8.5.11"
+            },
+            {
+              "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q \u2014 attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+              "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+              "severity": "moderate",
+              "range": "<=8.5.22"
+            },
+            {
+              "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+              "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+              "severity": "high",
+              "range": "<=8.5.17"
+            }
+          ]
+        },
+        {
+          "package": "sharp",
+          "severity": "high",
+          "direct": false,
+          "version": "0.34.5",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591",
+              "url": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
+              "severity": "high",
+              "range": "<0.35.0"
+            },
+            {
+              "title": "sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545",
+              "url": "https://github.com/advisories/GHSA-rgj7-g3m4-5g8c",
+              "severity": "high",
+              "range": "<0.35.4"
+            }
+          ]
+        },
+        {
+          "package": "smol-toml",
+          "severity": "high",
+          "direct": false,
+          "version": "1.6.1",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "smol-toml: Denial of Service via malformed TOML documents",
+              "url": "https://github.com/advisories/GHSA-7w5x-hrqm-74c2",
+              "severity": "high",
+              "range": "<=1.7.0"
+            }
+          ]
+        },
+        {
+          "package": "svgo",
+          "severity": "high",
+          "direct": false,
+          "version": "4.0.1",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "SVGO removeScripts plugin leaves some executable scripts intact",
+              "url": "https://github.com/advisories/GHSA-2p49-hgcm-8545",
+              "severity": "high",
+              "range": ">=4.0.0 <4.0.2"
+            },
+            {
+              "title": "SVGO: removeScripts allows executable links through namespace and control-character bypasses",
+              "url": "https://github.com/advisories/GHSA-w27v-7q3p-w38r",
+              "severity": "high",
+              "range": ">=4.0.0 <4.1.0"
+            },
+            {
+              "title": "SVGO: removeScripts incompletely sanitizes executable HTML in SVG foreignObject elements",
+              "url": "https://github.com/advisories/GHSA-4vpr-x523-8j87",
+              "severity": "moderate",
+              "range": ">=4.0.0 <4.1.0"
+            }
+          ]
+        },
+        {
+          "package": "vite",
+          "severity": "high",
+          "direct": false,
+          "version": "7.3.2",
+          "fix_available": true,
+          "advisories": [
+            {
+              "title": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+              "url": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+              "severity": "moderate",
+              "range": ">=7.0.0 <=7.3.4"
+            },
+            {
+              "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+              "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+              "severity": "high",
+              "range": ">=7.0.0 <=7.3.4"
+            }
+          ]
+        },
+        {
+          "package": "vitefu",
+          "severity": "moderate",
+          "direct": false,
+          "version": "1.1.3",
+          "fix_available": true,
+          "advisories": []
+        }
+      ]
+    }
+  },
+  "backstage": {
+    "command": "node .yarn/releases/yarn-4.4.1.cjs npm audit --all --recursive --json",
+    "counts_by_advisory": {
+      "moderate": 122,
+      "high": 109,
+      "low": 22,
+      "critical": 23
+    },
+    "advisories": [
+      {
+        "package": "@backstage/plugin-auth-backend",
+        "Issue": "@backstage/plugin-auth-backend: Unauthenticated OAuth account takeover via `redirect_uri` allowlist bypass",
+        "URL": "https://github.com/advisories/GHSA-38hq-7x33-php4",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=0.29.1",
+        "Tree Versions": [
+          "0.28.0"
+        ]
+      },
+      {
+        "package": "@grpc/grpc-js",
+        "Issue": "@grpc/grpc-js: A malformed request can cause a server crash",
+        "URL": "https://github.com/advisories/GHSA-5375-pq7m-f5r2",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.14.0 <1.14.4",
+        "Tree Versions": [
+          "1.14.3"
+        ]
+      },
+      {
+        "package": "@grpc/grpc-js",
+        "Issue": "@grpc/grpc-js: An incoming malformed compressed message can cause a client or server crash",
+        "URL": "https://github.com/advisories/GHSA-99f4-grh7-6pcq",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.14.0 <1.14.4",
+        "Tree Versions": [
+          "1.14.3"
+        ]
+      },
+      {
+        "package": "@grpc/grpc-js",
+        "Issue": "@grpc/grpc-js: In certain configurations, getAuthContext can return unauthorized certificates as though they were authorized",
+        "URL": "https://github.com/advisories/GHSA-m9gg-hp2v-232j",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.14.0 <1.14.5",
+        "Tree Versions": [
+          "1.14.3"
+        ]
+      },
+      {
+        "package": "@grpc/grpc-js",
+        "Issue": "@grpc/grpc-js: The server transmits some error messages thrown by method handlers to the client in status messages",
+        "URL": "https://github.com/advisories/GHSA-f596-whhp-79r4",
+        "Severity": "low",
+        "Vulnerable Versions": ">=1.14.0 <1.14.5",
+        "Tree Versions": [
+          "1.14.3"
+        ]
+      },
+      {
+        "package": "@humanwhocodes/config-array",
+        "Issue": "Use @eslint/config-array instead",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "0.13.0",
+        "Tree Versions": [
+          "0.13.0"
+        ]
+      },
+      {
+        "package": "@humanwhocodes/object-schema",
+        "Issue": "Use @eslint/object-schema instead",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "2.0.3",
+        "Tree Versions": [
+          "2.0.3"
+        ]
+      },
+      {
+        "package": "@material-ui/core",
+        "Issue": "Material UI v4 doesn't receive active development since September 2021. See the guide https://mui.com/material-ui/migration/migration-v4/ to upgrade to v5.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "4.12.4",
+        "Tree Versions": [
+          "4.12.4"
+        ]
+      },
+      {
+        "package": "@material-ui/lab",
+        "Issue": "Material UI v4 doesn't receive active development since September 2021. See the guide https://mui.com/material-ui/migration/migration-v4/ to upgrade to v5.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "4.0.0-alpha.61",
+        "Tree Versions": [
+          "4.0.0-alpha.61"
+        ]
+      },
+      {
+        "package": "@material-ui/pickers",
+        "Issue": "This package no longer supported. It has been relaced by @mui/x-date-pickers",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "3.3.11",
+        "Tree Versions": [
+          "3.3.11"
+        ]
+      },
+      {
+        "package": "@material-ui/styles",
+        "Issue": "Material UI v4 doesn't receive active development since September 2021. See the guide https://mui.com/material-ui/migration/migration-v4/ to upgrade to v5.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "4.11.5",
+        "Tree Versions": [
+          "4.11.5"
+        ]
+      },
+      {
+        "package": "@octokit/plugin-paginate-rest",
+        "Issue": "@octokit/plugin-paginate-rest has a Regular Expression in iterator Leads to ReDoS Vulnerability Due to Catastrophic Backtracking",
+        "URL": "https://github.com/advisories/GHSA-h5c3-5r3r-rr8q",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <9.2.2",
+        "Tree Versions": [
+          "6.1.2"
+        ]
+      },
+      {
+        "package": "@octokit/request",
+        "Issue": "@octokit/request has a Regular Expression in fetchWrapper that Leads to ReDoS Vulnerability Due to Catastrophic Backtracking",
+        "URL": "https://github.com/advisories/GHSA-rmvr-2pp2-xj38",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <8.4.1",
+        "Tree Versions": [
+          "6.2.8"
+        ]
+      },
+      {
+        "package": "@octokit/request-error",
+        "Issue": "@octokit/request-error has a Regular Expression in index that Leads to ReDoS Vulnerability Due to Catastrophic Backtracking",
+        "URL": "https://github.com/advisories/GHSA-xx4v-prfh-6cgc",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <5.1.1",
+        "Tree Versions": [
+          "3.0.3"
+        ]
+      },
+      {
+        "package": "@protobufjs/utf8",
+        "Issue": "protobufjs has overlong UTF-8 decoding",
+        "URL": "https://github.com/advisories/GHSA-q6x5-8v7m-xcrf",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=1.1.0",
+        "Tree Versions": [
+          "1.1.0"
+        ]
+      },
+      {
+        "package": "@react-hookz/deep-equal",
+        "Issue": "PACKAGE IS DEPRECATED AND WILL BE DETED SOON, USE @ver0/deep-equal INSTEAD",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "1.0.4",
+        "Tree Versions": [
+          "1.0.4"
+        ]
+      },
+      {
+        "package": "@remix-run/router",
+        "Issue": "React Router's same-origin redirect with path starting // causes open redirect via protocol-relative URL reinterpretation",
+        "URL": "https://github.com/advisories/GHSA-2j2x-hqr9-3h42",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.3.0 <1.23.3",
+        "Tree Versions": [
+          "1.23.2"
+        ]
+      },
+      {
+        "package": "@tootallnate/once",
+        "Issue": "@tootallnate/once vulnerable to Incorrect Control Flow Scoping",
+        "URL": "https://github.com/advisories/GHSA-vpq2-c234-7xj6",
+        "Severity": "low",
+        "Vulnerable Versions": "<2.0.1",
+        "Tree Versions": [
+          "2.0.0"
+        ]
+      },
+      {
+        "package": "@ungap/structured-clone",
+        "Issue": "Potential CWE-502 - Update to 1.3.1 or higher",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "1.3.0",
+        "Tree Versions": [
+          "1.3.0"
+        ]
+      },
+      {
+        "package": "adm-zip",
+        "Issue": "adm-zip: Crafted ZIP file triggers 4GB memory allocation",
+        "URL": "https://github.com/advisories/GHSA-xcpc-8h2w-3j85",
+        "Severity": "high",
+        "Vulnerable Versions": "<0.6.0",
+        "Tree Versions": [
+          "0.5.17"
+        ]
+      },
+      {
+        "package": "adm-zip",
+        "Issue": "adm-zip extraction follows destination symlinks, allowing arbitrary file overwrite",
+        "URL": "https://github.com/advisories/GHSA-vwc7-r8mq-g2x9",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=0.5.9 <=0.6.0",
+        "Tree Versions": [
+          "0.5.17"
+        ]
+      },
+      {
+        "package": "adm-zip",
+        "Issue": "adm-zip: Uncontrolled memory allocation via the declared uncompressed size (DoS)",
+        "URL": "https://github.com/advisories/GHSA-7q85-xj36-vmfc",
+        "Severity": "high",
+        "Vulnerable Versions": "<0.6.1",
+        "Tree Versions": [
+          "0.5.17"
+        ]
+      },
+      {
+        "package": "adm-zip",
+        "Issue": "adm-zip: Decompression-bomb protection (fix for CVE-2026-39244) can be bypassed by declaring uncompressed size as 0",
+        "URL": "https://github.com/advisories/GHSA-rcw4-f5rp-g42v",
+        "Severity": "high",
+        "Vulnerable Versions": "<=0.6.0",
+        "Tree Versions": [
+          "0.5.17"
+        ]
+      },
+      {
+        "package": "adm-zip",
+        "Issue": "adm-zip extraction preserves SUID/SGID bits from untrusted ZIPs -> local privilege escalation",
+        "URL": "https://github.com/advisories/GHSA-j5f4-cc29-5x44",
+        "Severity": "high",
+        "Vulnerable Versions": "<=0.6.0",
+        "Tree Versions": [
+          "0.5.17"
+        ]
+      },
+      {
+        "package": "adm-zip",
+        "Issue": "adm-zip: Duplicate ZIP entry names: getEntry() and extractAllTo() resolve to different content",
+        "URL": "https://github.com/advisories/GHSA-p634-w6r4-rjp2",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=0.6.0",
+        "Tree Versions": [
+          "0.5.17"
+        ]
+      },
+      {
+        "package": "adm-zip",
+        "Issue": "adm-zip: getDataAsync() bypasses the maxOutputLength size guard enforced by the synchronous getData() path",
+        "URL": "https://github.com/advisories/GHSA-c6fg-446q-cg94",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=0.6.0",
+        "Tree Versions": [
+          "0.5.17"
+        ]
+      },
+      {
+        "package": "adm-zip",
+        "Issue": "adm-zip: Unhandled error event in async DEFLATE decompression crashes Node.js process (DoS)",
+        "URL": "https://github.com/advisories/GHSA-8238-w5pm-2374",
+        "Severity": "high",
+        "Vulnerable Versions": "<=0.6.0",
+        "Tree Versions": [
+          "0.5.17"
+        ]
+      },
+      {
+        "package": "atlassian-openapi",
+        "Issue": "DEPRECATED: atlassian-openapi has moved to @atlassian/atlassian-openapi. The latest version is 1.0.6. Please update your dependency.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "1.0.21",
+        "Tree Versions": [
+          "1.0.21"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Regular Expression Denial of Service (ReDoS) via Cookie Name Injection",
+        "URL": "https://github.com/advisories/GHSA-hfxv-24rg-xrqf",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.0.0 <1.16.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Allocation of Resources Without Limits or Throttling in Axios",
+        "URL": "https://github.com/advisories/GHSA-777c-7fjr-54vf",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.7.0 <1.16.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Proxy-Authorization Credential Leak to Origin Server Across HTTP-to-HTTPS Redirect in Axios Node.js HTTP Adapter",
+        "URL": "https://github.com/advisories/GHSA-p92q-9vqr-4j8v",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.0.0 <1.16.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Proxy-Authorization header leaks to redirect target when proxy is re-evaluated to direct connection",
+        "URL": "https://github.com/advisories/GHSA-j5f8-grm9-p9fc",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.0.0 <1.16.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "axios Vulnerable to Full Man-in-the-Middle via Prototype Pollution Gadget in `config.proxy`",
+        "URL": "https://github.com/advisories/GHSA-35jp-ww65-95wh",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.0.0 <1.16.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "axios has DoS & Header Injection via Prototype Pollution Read-Side Gadgets in axios merge functions",
+        "URL": "https://github.com/advisories/GHSA-898c-q2cr-xwhg",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <1.16.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios has a Patch Bypass: Proxy-Authorization Header Injection via Prototype Pollution \u2014 Incomplete Null-Prototype Fix",
+        "URL": "https://github.com/advisories/GHSA-654m-c8p4-x5fp",
+        "Severity": "low",
+        "Vulnerable Versions": "=1.15.2",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "axios's shouldBypassProxy does not recognize IPv4-mapped IPv6 addresses, allowing NO_PROXY bypass (incomplete fix for CVE-2025-62718)",
+        "URL": "https://github.com/advisories/GHSA-pjwm-pj3p-43mv",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.15.0 <1.16.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Prototype pollution auth subfields can inject Basic auth",
+        "URL": "https://github.com/advisories/GHSA-xj6q-8x83-jv6g",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.15.2 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Prototype pollution gadgets can alter axios request construction",
+        "URL": "https://github.com/advisories/GHSA-mmx7-hfxf-jppx",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Deep formToJSON Key Recursion Can Cause Denial of Service",
+        "URL": "https://github.com/advisories/GHSA-pmv8-rq9r-6j72",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: HTTP/2 streamed uploads bypass `maxBodyLength`",
+        "URL": "https://github.com/advisories/GHSA-mwf2-3pr3-8698",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.13.0 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios Node HTTP adapter can use an inherited proxy after interceptor config cloning",
+        "URL": "https://github.com/advisories/GHSA-gcfj-64vw-6mp9",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.15.2 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Nested axios option objects can consume polluted prototype values",
+        "URL": "https://github.com/advisories/GHSA-7q8q-rj6j-mhjq",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Fetch adapter `ReadableStream` uploads bypass `maxBodyLength`",
+        "URL": "https://github.com/advisories/GHSA-jqh4-m9w3-8hp9",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.7.0 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: NO_PROXY bypass for 0.0.0.0 local addresses in axios",
+        "URL": "https://github.com/advisories/GHSA-f4gw-2p7v-4548",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.15.0 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Excessive recursion in formDataToJSON can cause denial of service",
+        "URL": "https://github.com/advisories/GHSA-42h9-826w-cgv3",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios form serializer maxDepth bypass via {} metatoken",
+        "URL": "https://github.com/advisories/GHSA-hcpx-6fm6-wx23",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.15.1 <1.18.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Prototype pollution gadget in fetch adapter can alter outbound requests",
+        "URL": "https://github.com/advisories/GHSA-vh66-26gq-q6x8",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.7.0 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Prototype-Pollution Gadget in the Default Instance Allows Inherited Object.prototype.method to Override HTTP Method",
+        "URL": "https://github.com/advisories/GHSA-9fr6-4gfg-395g",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: ReDoS (O(N\u00b2)) in shouldBypassProxy host normalization, reachable via untrusted redirect Location",
+        "URL": "https://github.com/advisories/GHSA-mghh-pgcx-3jjj",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.15.0 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Prototype Pollution Gadget in axios toFormData Options",
+        "URL": "https://github.com/advisories/GHSA-x97p-jq2g-jp4f",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.15.1 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: HTTP/2 adapter bypasses configured DNS lookup and proxy controls",
+        "URL": "https://github.com/advisories/GHSA-3pq3-5fj3-cg6v",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.13.0 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Denial of Service via Unhandled 'error' Event in HTTP/2 ClientHttp2Session Initialization",
+        "URL": "https://github.com/advisories/GHSA-542g-h47m-68v8",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.13.0 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Header Injection via Inherited headers After Minimal Interceptor",
+        "URL": "https://github.com/advisories/GHSA-j8rh-479h-cp32",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Fetch Adapter Header Injection via Inherited FormData getHeaders",
+        "URL": "https://github.com/advisories/GHSA-4hqw-qxg8-jxx2",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.12.0 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: Node HTTP adapter prototype-pollution gadget allows request socket hijack via inherited createConnection",
+        "URL": "https://github.com/advisories/GHSA-m8m8-qj5v-23w3",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.15.2 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "axios",
+        "Issue": "Axios: CIDR-form NO_PROXY entries are ignored, causing proxy exclusion bypass for internal IP ranges",
+        "URL": "https://github.com/advisories/GHSA-44g4-m2mj-wpvx",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.15.0 <1.20.0",
+        "Tree Versions": [
+          "1.15.2"
+        ]
+      },
+      {
+        "package": "baseline-browser-mapping",
+        "Issue": "baseline-browser-mapping process termination on invalid input causes denial of service",
+        "URL": "https://github.com/advisories/GHSA-w5vr-8v7q-w6rv",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=2.0.0 <2.11.0",
+        "Tree Versions": [
+          "2.10.23"
+        ]
+      },
+      {
+        "package": "basic-ftp",
+        "Issue": "basic-ftp allows a malicious FTP server to cause client-side denial of service via unbounded multiline control response buffering",
+        "URL": "https://github.com/advisories/GHSA-rpmf-866q-6p89",
+        "Severity": "high",
+        "Vulnerable Versions": "<=5.3.0",
+        "Tree Versions": [
+          "5.3.0"
+        ]
+      },
+      {
+        "package": "basic-ftp",
+        "Issue": "basic-ftp: Quadratic-time CPU denial of service in Client.list() Unix directory-listing parser (RE_LINE backtracking)",
+        "URL": "https://github.com/advisories/GHSA-c475-qrg2-pj4r",
+        "Severity": "high",
+        "Vulnerable Versions": "<=6.2.0",
+        "Tree Versions": [
+          "5.3.0"
+        ]
+      },
+      {
+        "package": "body-parser",
+        "Issue": "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement",
+        "URL": "https://github.com/advisories/GHSA-v422-hmwv-36x6",
+        "Severity": "low",
+        "Vulnerable Versions": "<1.20.6",
+        "Tree Versions": [
+          "1.20.5"
+        ]
+      },
+      {
+        "package": "boolean",
+        "Issue": "Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "3.2.0",
+        "Tree Versions": [
+          "3.2.0"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: Large numeric range defeats documented `max` DoS protection",
+        "URL": "https://github.com/advisories/GHSA-jxxr-4gwj-5jf2",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=5.0.0 <5.0.6",
+        "Tree Versions": [
+          "5.0.5"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups",
+        "URL": "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
+        "Severity": "high",
+        "Vulnerable Versions": ">=2.0.0 <2.1.2",
+        "Tree Versions": [
+          "2.1.0"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups",
+        "URL": "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
+        "Severity": "high",
+        "Vulnerable Versions": "<1.1.16",
+        "Tree Versions": [
+          "1.1.14"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups",
+        "URL": "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <5.0.7",
+        "Tree Versions": [
+          "5.0.5"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via unbounded expansion length causing an out-of-memory process crash",
+        "URL": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+        "Severity": "high",
+        "Vulnerable Versions": "<1.1.17",
+        "Tree Versions": [
+          "1.1.14"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via unbounded expansion length causing an out-of-memory process crash",
+        "URL": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+        "Severity": "high",
+        "Vulnerable Versions": ">=2.0.0 <2.1.3",
+        "Tree Versions": [
+          "2.1.0"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via unbounded expansion length causing an out-of-memory process crash",
+        "URL": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+        "Severity": "high",
+        "Vulnerable Versions": ">=4.0.0 <5.0.8",
+        "Tree Versions": [
+          "5.0.5"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation",
+        "URL": "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
+        "Severity": "high",
+        "Vulnerable Versions": ">=4.0.0 <5.0.9",
+        "Tree Versions": [
+          "5.0.5"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation",
+        "URL": "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
+        "Severity": "high",
+        "Vulnerable Versions": ">=2.0.0 <2.1.4",
+        "Tree Versions": [
+          "2.1.0"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation",
+        "URL": "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
+        "Severity": "high",
+        "Vulnerable Versions": "<1.1.18",
+        "Tree Versions": [
+          "1.1.14"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+        "URL": "https://github.com/advisories/GHSA-q2hr-2g5m-vwhr",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<1.1.21",
+        "Tree Versions": [
+          "1.1.14"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+        "URL": "https://github.com/advisories/GHSA-q2hr-2g5m-vwhr",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=2.0.0 <2.1.7",
+        "Tree Versions": [
+          "2.1.0"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+        "URL": "https://github.com/advisories/GHSA-q2hr-2g5m-vwhr",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=4.0.0 <5.0.12",
+        "Tree Versions": [
+          "5.0.5"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+        "URL": "https://github.com/advisories/GHSA-qhr7-859c-m2p7",
+        "Severity": "high",
+        "Vulnerable Versions": "<1.1.20",
+        "Tree Versions": [
+          "1.1.14"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+        "URL": "https://github.com/advisories/GHSA-qhr7-859c-m2p7",
+        "Severity": "high",
+        "Vulnerable Versions": ">=2.0.0 <2.1.6",
+        "Tree Versions": [
+          "2.1.0"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+        "URL": "https://github.com/advisories/GHSA-qhr7-859c-m2p7",
+        "Severity": "high",
+        "Vulnerable Versions": ">=4.0.0 <5.0.11",
+        "Tree Versions": [
+          "5.0.5"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+        "URL": "https://github.com/advisories/GHSA-6j4f-fj2g-mc7p",
+        "Severity": "high",
+        "Vulnerable Versions": "<1.1.19",
+        "Tree Versions": [
+          "1.1.14"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+        "URL": "https://github.com/advisories/GHSA-6j4f-fj2g-mc7p",
+        "Severity": "high",
+        "Vulnerable Versions": ">=2.0.0 <2.1.5",
+        "Tree Versions": [
+          "2.1.0"
+        ]
+      },
+      {
+        "package": "brace-expansion",
+        "Issue": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+        "URL": "https://github.com/advisories/GHSA-6j4f-fj2g-mc7p",
+        "Severity": "high",
+        "Vulnerable Versions": ">=4.0.0 <5.0.10",
+        "Tree Versions": [
+          "5.0.5"
+        ]
+      },
+      {
+        "package": "browserslist",
+        "Issue": "Browserslist: Unbounded memory growth (no cache eviction) via distinct query results, leading to eventual OOM",
+        "URL": "https://github.com/advisories/GHSA-c83g-rgw3-j3cx",
+        "Severity": "high",
+        "Vulnerable Versions": "<=4.28.6",
+        "Tree Versions": [
+          "4.28.2"
+        ]
+      },
+      {
+        "package": "browserslist",
+        "Issue": "Browserslist: Uncaught crash / prototype write via untrusted browserslist-stats.json custom stats (normalizeStats)",
+        "URL": "https://github.com/advisories/GHSA-73wf-gq98-2v4g",
+        "Severity": "high",
+        "Vulnerable Versions": "<=4.28.6",
+        "Tree Versions": [
+          "4.28.2"
+        ]
+      },
+      {
+        "package": "colord",
+        "Issue": "Colord: Slow rejection of oversized malformed color strings",
+        "URL": "https://github.com/advisories/GHSA-2wm5-q62r-hmrv",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<2.9.4",
+        "Tree Versions": [
+          "2.9.3"
+        ]
+      },
+      {
+        "package": "cron-parser",
+        "Issue": "v4 is no longer maintained, upgrade to v5",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "4.9.0",
+        "Tree Versions": [
+          "4.9.0"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: Cross-realm IN_PLACE sanitization leaves executable markup intact via realm-bound `instanceof` checks",
+        "URL": "https://github.com/advisories/GHSA-hpcv-96wg-7vj8",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.4.5",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: IN_PLACE mode preserves attributes of a clobbered root element, allowing XSS via attacker-controlled root DOM",
+        "URL": "https://github.com/advisories/GHSA-r47g-fvhr-h676",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.4.5",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify IN_PLACE Sanitization Bypass via Attached Shadow Root Inside <template>.content",
+        "URL": "https://github.com/advisories/GHSA-rp9w-3fw7-7cwq",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.4.6",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: `CUSTOM_ELEMENT_HANDLING` bypasses `afterSanitizeElements` for allowed custom elements.",
+        "URL": "https://github.com/advisories/GHSA-c2j3-45gr-mqc4",
+        "Severity": "low",
+        "Vulnerable Versions": "<=3.4.11",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: Permanent `ALLOWED_ATTR` pollution via `setConfig()` bypassing the hook clone-guard (incomplete fix of the 3.4.7 hook-pollution patch)",
+        "URL": "https://github.com/advisories/GHSA-cmwh-pvxp-8882",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.4.10",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: Trusted Types policy survives `clearConfig()` and can poison later `RETURN_TRUSTED_TYPE` output",
+        "URL": "https://github.com/advisories/GHSA-vxr8-fq34-vvx9",
+        "Severity": "low",
+        "Vulnerable Versions": "<3.4.9",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: SAFE_FOR_TEMPLATES bypass - template expressions survive sanitization inside <template> content when using DOM output modes",
+        "URL": "https://github.com/advisories/GHSA-gvmj-g25r-r7wr",
+        "Severity": "low",
+        "Vulnerable Versions": ">=3.0.0 <=3.4.7",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: `IN_PLACE` mode trusts attacker-controlled `nodeName` on live non-form nodes, allowing script retention and XSS via attacker-supplied DOM objects",
+        "URL": "https://github.com/advisories/GHSA-x4vx-rjvf-j5p4",
+        "Severity": "low",
+        "Vulnerable Versions": "<=3.4.6",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: Hook mutation of `data.allowedTags` / `data.allowedAttributes` permanently pollutes `DEFAULT_ALLOWED_TAGS` / `DEFAULT_ALLOWED_ATTR`",
+        "URL": "https://github.com/advisories/GHSA-76mc-f452-cxcm",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<3.4.7",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "dompurify",
+        "Issue": "DOMPurify: IN_PLACE hook removal leaves a detached subtree executable, causing XSS",
+        "URL": "https://github.com/advisories/GHSA-55q2-fjhq-7xh7",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.4.12",
+        "Tree Versions": [
+          "3.4.1"
+        ]
+      },
+      {
+        "package": "elliptic",
+        "Issue": "Elliptic Uses a Cryptographic Primitive with a Risky Implementation",
+        "URL": "https://github.com/advisories/GHSA-848j-6mx2-7j84",
+        "Severity": "low",
+        "Vulnerable Versions": "<=6.6.1",
+        "Tree Versions": [
+          "6.6.1"
+        ]
+      },
+      {
+        "package": "esbuild",
+        "Issue": "esbuild allows arbitrary file read when running the development server on Windows",
+        "URL": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
+        "Severity": "low",
+        "Vulnerable Versions": ">=0.27.3 <0.28.1",
+        "Tree Versions": [
+          "0.27.7"
+        ]
+      },
+      {
+        "package": "eslint",
+        "Issue": "This version is no longer supported. Please see https://eslint.org/version-support for other options.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "8.57.1",
+        "Tree Versions": [
+          "8.57.1"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to host confusion via literal backslash authority delimiter",
+        "URL": "https://github.com/advisories/GHSA-v2hh-gcrm-f6hx",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <=3.1.3",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to host confusion via backslash authority introducer",
+        "URL": "https://github.com/advisories/GHSA-7p8r-x3mc-p8w7",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.1.5",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to path traversal via percent-encoded dot segments",
+        "URL": "https://github.com/advisories/GHSA-q3j6-qgpj-74h6",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <=3.1.0",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to host confusion via percent-encoded authority delimiters",
+        "URL": "https://github.com/advisories/GHSA-v39h-62p7-jpjc",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <=3.1.1",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to server-side request forgery via malformed IPv6 normalization",
+        "URL": "https://github.com/advisories/GHSA-f65p-4m7j-42xc",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.1.6",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to host confusion via percent-encoded scheme normalization",
+        "URL": "https://github.com/advisories/GHSA-jqff-g426-hqxp",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.1.6",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to host confusion via failed IDN canonicalization",
+        "URL": "https://github.com/advisories/GHSA-4c8g-83qw-93j6",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.1.3",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to authority injection via an unvalidated port in serialize",
+        "URL": "https://github.com/advisories/GHSA-qw65-cvwx-89v3",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.1.7",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-uri",
+        "Issue": "fast-uri vulnerable to inconsistent host case normalization via percent-encoded octets",
+        "URL": "https://github.com/advisories/GHSA-hrr3-gc8f-f4qj",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=3.0.0 <3.1.8",
+        "Tree Versions": [
+          "3.1.0"
+        ]
+      },
+      {
+        "package": "fast-xml-builder",
+        "Issue": "fast-xml-builder allows attribute values with unwanted quotes to bypass malicious or unwanted attributes",
+        "URL": "https://github.com/advisories/GHSA-5wm8-gmm8-39j9",
+        "Severity": "high",
+        "Vulnerable Versions": "<=1.1.6",
+        "Tree Versions": [
+          "1.1.5"
+        ]
+      },
+      {
+        "package": "fast-xml-builder",
+        "Issue": "fast-xml-builder Comment Value regex can be bypassed",
+        "URL": "https://github.com/advisories/GHSA-45c6-75p6-83cc",
+        "Severity": "moderate",
+        "Vulnerable Versions": "=1.1.5",
+        "Tree Versions": [
+          "1.1.5"
+        ]
+      },
+      {
+        "package": "form-data",
+        "Issue": "form-data: CRLF injection in form-data via unescaped multipart field names and filenames",
+        "URL": "https://github.com/advisories/GHSA-hmw2-7cc7-3qxx",
+        "Severity": "high",
+        "Vulnerable Versions": ">=4.0.0 <4.0.6",
+        "Tree Versions": [
+          "4.0.5"
+        ]
+      },
+      {
+        "package": "form-data",
+        "Issue": "form-data: CRLF injection in form-data via unescaped multipart field names and filenames",
+        "URL": "https://github.com/advisories/GHSA-hmw2-7cc7-3qxx",
+        "Severity": "high",
+        "Vulnerable Versions": "<2.5.6",
+        "Tree Versions": [
+          "2.5.5"
+        ]
+      },
+      {
+        "package": "glob",
+        "Issue": "Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "7.2.3",
+        "Tree Versions": [
+          "7.2.3"
+        ]
+      },
+      {
+        "package": "http-proxy-middleware",
+        "Issue": "http-proxy-middleware `router` host+path substring matching allows Host-header-driven backend routing bypass",
+        "URL": "https://github.com/advisories/GHSA-64mm-vxmg-q3vj",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=0.16.0 <2.0.10",
+        "Tree Versions": [
+          "2.0.9"
+        ]
+      },
+      {
+        "package": "immutable",
+        "Issue": "Immutable: Hash-collision algorithmic complexity denial of service in Immutable.Map/Set",
+        "URL": "https://github.com/advisories/GHSA-xvcm-6775-5m9r",
+        "Severity": "high",
+        "Vulnerable Versions": "<3.8.4",
+        "Tree Versions": [
+          "3.8.3"
+        ]
+      },
+      {
+        "package": "immutable",
+        "Issue": "Immutable.js `List` 32-bit trie overflow \u2192 unrecoverable DoS",
+        "URL": "https://github.com/advisories/GHSA-v56q-mh7h-f735",
+        "Severity": "high",
+        "Vulnerable Versions": "<3.8.4",
+        "Tree Versions": [
+          "3.8.3"
+        ]
+      },
+      {
+        "package": "inflight",
+        "Issue": "This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "1.0.6",
+        "Tree Versions": [
+          "1.0.6"
+        ]
+      },
+      {
+        "package": "ip-address",
+        "Issue": "ip-address has XSS in Address6 HTML-emitting methods",
+        "URL": "https://github.com/advisories/GHSA-v2v4-37r5-5v8g",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=10.1.0",
+        "Tree Versions": [
+          "10.1.0"
+        ]
+      },
+      {
+        "package": "ip-address",
+        "Issue": "ip-address: Address4 decodes leading-zero octets as decimal while resolvers decode them as octal, allowing SSRF and trust-boundary bypass",
+        "URL": "https://github.com/advisories/GHSA-mwp4-54f8-5fhr",
+        "Severity": "high",
+        "Vulnerable Versions": "<=10.3.0",
+        "Tree Versions": [
+          "10.1.0"
+        ]
+      },
+      {
+        "package": "ip-address",
+        "Issue": "ip-address: Address6.isLinkLocal() recognizes fe80::/64 rather than fe80::/10, allowing SSRF and trust-boundary bypass to on-link hosts",
+        "URL": "https://github.com/advisories/GHSA-rpw4-54j3-4h4q",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=10.5.0",
+        "Tree Versions": [
+          "10.1.0"
+        ]
+      },
+      {
+        "package": "ip-address",
+        "Issue": "ip-address: isInSubnet() and isHostInSubnet() compare addresses of different families as if they shared an address space, allowing an allowlist check to admit an address outside its range",
+        "URL": "https://github.com/advisories/GHSA-j6r3-76f7-8jcv",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=10.7.0",
+        "Tree Versions": [
+          "10.1.0"
+        ]
+      },
+      {
+        "package": "ip-address",
+        "Issue": "ip-address: Address6 builds a parse diagnostic proportional to the input with no length bound, allowing a single long string to stall or crash the process",
+        "URL": "https://github.com/advisories/GHSA-h3mg-xc3c-68pw",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=10.7.0",
+        "Tree Versions": [
+          "10.1.0"
+        ]
+      },
+      {
+        "package": "js-cookie",
+        "Issue": "JavaScript Cookie: Per-instance prototype hijack in assign() enables cookie-attribute injection",
+        "URL": "https://github.com/advisories/GHSA-qjx8-664m-686j",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.0.5",
+        "Tree Versions": [
+          "2.2.1"
+        ]
+      },
+      {
+        "package": "js-yaml",
+        "Issue": "JS-YAML: Quadratic-complexity DoS in merge key handling via repeated aliases",
+        "URL": "https://github.com/advisories/GHSA-h67p-54hq-rp68",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<3.15.0",
+        "Tree Versions": [
+          "3.14.2"
+        ]
+      },
+      {
+        "package": "js-yaml",
+        "Issue": "JS-YAML: Quadratic-complexity DoS in merge key handling via repeated aliases",
+        "URL": "https://github.com/advisories/GHSA-h67p-54hq-rp68",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=4.0.0 <=4.1.1",
+        "Tree Versions": [
+          "4.1.1"
+        ]
+      },
+      {
+        "package": "js-yaml",
+        "Issue": "js-yaml: YAML merge-key chains can force quadratic CPU consumption",
+        "URL": "https://github.com/advisories/GHSA-52cp-r559-cp3m",
+        "Severity": "high",
+        "Vulnerable Versions": ">=4.0.0 <4.3.0",
+        "Tree Versions": [
+          "4.1.1"
+        ]
+      },
+      {
+        "package": "js-yaml",
+        "Issue": "js-yaml: YAML merge-key chains can force quadratic CPU consumption",
+        "URL": "https://github.com/advisories/GHSA-52cp-r559-cp3m",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.15.0",
+        "Tree Versions": [
+          "3.14.2"
+        ]
+      },
+      {
+        "package": "js-yaml",
+        "Issue": "JS-YAML: Quadratic CPU consumption in !!omap resolution (3.x and 4.x) \u2014 CVE-2026-59870 fix not backported",
+        "URL": "https://github.com/advisories/GHSA-5p4m-2wfm-xmqj",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.15.1",
+        "Tree Versions": [
+          "3.14.2"
+        ]
+      },
+      {
+        "package": "js-yaml",
+        "Issue": "JS-YAML: Quadratic CPU consumption in !!omap resolution (3.x and 4.x) \u2014 CVE-2026-59870 fix not backported",
+        "URL": "https://github.com/advisories/GHSA-5p4m-2wfm-xmqj",
+        "Severity": "high",
+        "Vulnerable Versions": ">=4.0.0 <4.3.1",
+        "Tree Versions": [
+          "4.1.1"
+        ]
+      },
+      {
+        "package": "js-yaml",
+        "Issue": "js-yaml: maxTotalMergeKeys does not limit CPU use for empty merge sources",
+        "URL": "https://github.com/advisories/GHSA-2883-xcg3-v3hh",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.15.2",
+        "Tree Versions": [
+          "3.14.2"
+        ]
+      },
+      {
+        "package": "js-yaml",
+        "Issue": "js-yaml: maxTotalMergeKeys does not limit CPU use for empty merge sources",
+        "URL": "https://github.com/advisories/GHSA-2883-xcg3-v3hh",
+        "Severity": "high",
+        "Vulnerable Versions": ">=4.0.0 <4.3.2",
+        "Tree Versions": [
+          "4.1.1"
+        ]
+      },
+      {
+        "package": "koa",
+        "Issue": "Koa has Host Header Injection via ctx.hostname",
+        "URL": "https://github.com/advisories/GHSA-7gcc-r8m5-44qm",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <3.1.2",
+        "Tree Versions": [
+          "3.0.3"
+        ]
+      },
+      {
+        "package": "launch-editor",
+        "Issue": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+        "URL": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=2.14.0",
+        "Tree Versions": [
+          "2.13.2"
+        ]
+      },
+      {
+        "package": "linkify-it",
+        "Issue": "LinkifyIt#match scan loop has quadratic algorithmic complexity",
+        "URL": "https://github.com/advisories/GHSA-22p9-wv53-3rq4",
+        "Severity": "high",
+        "Vulnerable Versions": "<=5.0.0",
+        "Tree Versions": [
+          "5.0.0"
+        ]
+      },
+      {
+        "package": "linkify-it",
+        "Issue": "linkify-it: Quadratic-complexity DoS via the `mailto:` validator scan-loop on attacker text",
+        "URL": "https://github.com/advisories/GHSA-v245-v573-v5vm",
+        "Severity": "high",
+        "Vulnerable Versions": "<=5.0.1",
+        "Tree Versions": [
+          "5.0.0"
+        ]
+      },
+      {
+        "package": "lodash.get",
+        "Issue": "This package is deprecated. Use the optional chaining (?.) operator instead.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "4.4.2",
+        "Tree Versions": [
+          "4.4.2"
+        ]
+      },
+      {
+        "package": "markdown-it",
+        "Issue": "markdown-it: Quadratic complexity DoS in smartquotes rule via replaceAt string operations",
+        "URL": "https://github.com/advisories/GHSA-6v5v-wf23-fmfq",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=14.1.1",
+        "Tree Versions": [
+          "14.1.1"
+        ]
+      },
+      {
+        "package": "markdown-it",
+        "Issue": "markdown-it linkify: true has two quadratic paths, so a few hundred KB of markdown blocks the event loop for tens of seconds",
+        "URL": "https://github.com/advisories/GHSA-253c-mchw-3w2r",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<14.3.1",
+        "Tree Versions": [
+          "14.1.1"
+        ]
+      },
+      {
+        "package": "multer",
+        "Issue": "Multer vulnerable to Denial of Service via deeply nested field names",
+        "URL": "https://github.com/advisories/GHSA-72gw-mp4g-v24j",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.0.0 <2.2.0",
+        "Tree Versions": [
+          "2.1.1"
+        ]
+      },
+      {
+        "package": "multer",
+        "Issue": "Multer vulnerable to Denial of Service via incomplete cleanup of aborted uploads",
+        "URL": "https://github.com/advisories/GHSA-3p4h-7m6x-2hcm",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=2.0.0-alpha.1 <2.2.0",
+        "Tree Versions": [
+          "2.1.1"
+        ]
+      },
+      {
+        "package": "multer",
+        "Issue": "multer vulnerable to Denial of Service via crafted multipart field names",
+        "URL": "https://github.com/advisories/GHSA-wc9g-mqfw-jrwm",
+        "Severity": "high",
+        "Vulnerable Versions": "<2.3.0",
+        "Tree Versions": [
+          "2.1.1"
+        ]
+      },
+      {
+        "package": "multer",
+        "Issue": "multer vulnerable to file size limit bypass via async fileFilter race condition",
+        "URL": "https://github.com/advisories/GHSA-qvfw-j98x-7q72",
+        "Severity": "low",
+        "Vulnerable Versions": "<2.3.0",
+        "Tree Versions": [
+          "2.1.1"
+        ]
+      },
+      {
+        "package": "multer",
+        "Issue": "multer vulnerable to Denial of Service via oversized array index in field names",
+        "URL": "https://github.com/advisories/GHSA-535w-7cp7-47q4",
+        "Severity": "high",
+        "Vulnerable Versions": "<2.3.0",
+        "Tree Versions": [
+          "2.1.1"
+        ]
+      },
+      {
+        "package": "mysql2",
+        "Issue": "MySQL2: Unbounded zlib inflate in compressed MySQL protocol handler allows decompression-bomb DoS",
+        "URL": "https://github.com/advisories/GHSA-rgwj-5xj2-c3m3",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.23.0",
+        "Tree Versions": [
+          "3.22.3"
+        ]
+      },
+      {
+        "package": "nanoid",
+        "Issue": "nanoid: non-secure generators can loop indefinitely with negative size",
+        "URL": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+        "Severity": "high",
+        "Vulnerable Versions": "<3.3.16",
+        "Tree Versions": [
+          "3.3.11"
+        ]
+      },
+      {
+        "package": "nanoid",
+        "Issue": "nanoid: custom generators can loop indefinitely when size is zero",
+        "URL": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+        "Severity": "high",
+        "Vulnerable Versions": "<3.3.18",
+        "Tree Versions": [
+          "3.3.11"
+        ]
+      },
+      {
+        "package": "nanoid",
+        "Issue": "nanoid: Integer Overflow or Wraparound",
+        "URL": "https://github.com/advisories/GHSA-xwg4-73v4-xw9w",
+        "Severity": "high",
+        "Vulnerable Versions": "<3.3.12",
+        "Tree Versions": [
+          "3.3.11"
+        ]
+      },
+      {
+        "package": "node-domexception",
+        "Issue": "Use your platform's native DOMException instead",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "1.0.0",
+        "Tree Versions": [
+          "1.0.0"
+        ]
+      },
+      {
+        "package": "node-forge",
+        "Issue": "node-forge RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements",
+        "URL": "https://github.com/advisories/GHSA-86w9-cpqp-85rv",
+        "Severity": "high",
+        "Vulnerable Versions": "<=1.4.0",
+        "Tree Versions": [
+          "1.4.0"
+        ]
+      },
+      {
+        "package": "postcss",
+        "Issue": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q \u2014 attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+        "URL": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=8.5.22",
+        "Tree Versions": [
+          "8.5.12"
+        ]
+      },
+      {
+        "package": "postcss",
+        "Issue": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+        "URL": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+        "Severity": "high",
+        "Vulnerable Versions": "<=8.5.17",
+        "Tree Versions": [
+          "8.5.12"
+        ]
+      },
+      {
+        "package": "postcss-selector-parser",
+        "Issue": "postcss-selector-parser allows denial of service through uncontrolled AST recursion",
+        "URL": "https://github.com/advisories/GHSA-w9m9-85wc-3x92",
+        "Severity": "low",
+        "Vulnerable Versions": ">=7.1.0 <7.1.3",
+        "Tree Versions": [
+          "7.1.1"
+        ]
+      },
+      {
+        "package": "postcss-selector-parser",
+        "Issue": "postcss-selector-parser allows denial of service through uncontrolled AST recursion",
+        "URL": "https://github.com/advisories/GHSA-w9m9-85wc-3x92",
+        "Severity": "low",
+        "Vulnerable Versions": ">=6.1.0 <6.1.3",
+        "Tree Versions": [
+          "6.1.2"
+        ]
+      },
+      {
+        "package": "prebuild-install",
+        "Issue": "No longer maintained. Please contact the author of the relevant native addon; alternatives are available.",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "7.1.3",
+        "Tree Versions": [
+          "7.1.3"
+        ]
+      },
+      {
+        "package": "prismjs",
+        "Issue": "PrismJS DOM Clobbering vulnerability",
+        "URL": "https://github.com/advisories/GHSA-x7hr-w5r2-h6wg",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<1.30.0",
+        "Tree Versions": [
+          "1.27.0"
+        ]
+      },
+      {
+        "package": "prom-client",
+        "Issue": "prom-client has been replaced by @prometheus-io/client",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "15.1.3",
+        "Tree Versions": [
+          "15.1.3"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobuf.js: Code injection through bytes field defaults in generated toObject code",
+        "URL": "https://github.com/advisories/GHSA-66ff-xgx4-vchm",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.5",
+        "Tree Versions": [
+          "7.5.5"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobuf.js: Denial of service from crafted field names in generated code",
+        "URL": "https://github.com/advisories/GHSA-2pr8-phx7-x9h3",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=7.5.5",
+        "Tree Versions": [
+          "7.5.5"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobuf.js: Prototype injection in generated message constructors",
+        "URL": "https://github.com/advisories/GHSA-fx83-v9x8-x52w",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=7.5.5",
+        "Tree Versions": [
+          "7.5.5"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobuf.js: Code generation gadget after prototype pollution",
+        "URL": "https://github.com/advisories/GHSA-75px-5xx7-5xc7",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.5",
+        "Tree Versions": [
+          "7.5.5"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobuf.js: Process-wide denial of service through unsafe option paths",
+        "URL": "https://github.com/advisories/GHSA-jvwf-75h9-cwgg",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.5",
+        "Tree Versions": [
+          "7.5.5"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobuf.js: Denial of service through unbounded protobuf recursion",
+        "URL": "https://github.com/advisories/GHSA-685m-2w69-288q",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.5",
+        "Tree Versions": [
+          "7.5.5"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobufjs has overlong UTF-8 decoding",
+        "URL": "https://github.com/advisories/GHSA-q6x5-8v7m-xcrf",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=7.5.5",
+        "Tree Versions": [
+          "7.5.5"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobufjs: Denial of Service via unbounded recursive JSON descriptor expansion",
+        "URL": "https://github.com/advisories/GHSA-jggg-4jg4-v7c6",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=7.5.7",
+        "Tree Versions": [
+          "7.5.5",
+          "7.5.6"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobufjs: Denial of service through unbounded Any expansion during JSON conversion",
+        "URL": "https://github.com/advisories/GHSA-wcpc-wj8m-hjx6",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.6.0",
+        "Tree Versions": [
+          "7.5.5",
+          "7.5.6"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobufjs : Schema-derived names can shadow runtime-significant properties",
+        "URL": "https://github.com/advisories/GHSA-f38q-mgvj-vph7",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=7.6.2",
+        "Tree Versions": [
+          "7.5.5",
+          "7.5.6"
+        ]
+      },
+      {
+        "package": "protobufjs",
+        "Issue": "protobufjs: Denial of Service via infinite loop in .proto option parsing",
+        "URL": "https://github.com/advisories/GHSA-j3f2-48v5-ccww",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.5.0 <=7.6.4",
+        "Tree Versions": [
+          "7.5.5",
+          "7.5.6"
+        ]
+      },
+      {
+        "package": "qs",
+        "Issue": "qs has a remotely triggerable DoS: qs.stringify crashes with TypeError on null/undefined entries in comma-format arrays when encodeValuesOnly is set",
+        "URL": "https://github.com/advisories/GHSA-q8mj-m7cp-5q26",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=6.11.1 <=6.15.1",
+        "Tree Versions": [
+          "6.14.2",
+          "6.15.1"
+        ]
+      },
+      {
+        "package": "qs",
+        "Issue": "qs array-limit bypass via bracket-key comma parsing",
+        "URL": "https://github.com/advisories/GHSA-x5fp-wj9c-mxmx",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=6.14.2 <=6.15.3",
+        "Tree Versions": [
+          "6.14.2",
+          "6.15.1"
+        ]
+      },
+      {
+        "package": "qs",
+        "Issue": "qs: Denial of Service via Attacker Controlled isBuffer",
+        "URL": "https://github.com/advisories/GHSA-4mjr-xmp4-gh2g",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=2.2.5 <6.16.0",
+        "Tree Versions": [
+          "6.14.2",
+          "6.15.1"
+        ]
+      },
+      {
+        "package": "react-beautiful-dnd",
+        "Issue": "react-beautiful-dnd is now deprecated. Context and options: https://github.com/atlassian/react-beautiful-dnd/issues/2672",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "13.1.1",
+        "Tree Versions": [
+          "13.1.1"
+        ]
+      },
+      {
+        "package": "react-router",
+        "Issue": "React Router: Open redirect via backslash in <Link> and useNavigate (CVE-2025-68470 bypass)",
+        "URL": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=6.0.0 <7.18.0",
+        "Tree Versions": [
+          "6.30.3"
+        ]
+      },
+      {
+        "package": "react-router",
+        "Issue": "React Router: Arbitrary Constructor Injection via deserializeErrors() in React Router SSR Hydration",
+        "URL": "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=6.4.0 <7.18.0",
+        "Tree Versions": [
+          "6.30.3"
+        ]
+      },
+      {
+        "package": "react-router",
+        "Issue": "React Router's same-origin redirect with path starting // causes open redirect via protocol-relative URL reinterpretation",
+        "URL": "https://github.com/advisories/GHSA-2j2x-hqr9-3h42",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=6.7.0 <6.30.4",
+        "Tree Versions": [
+          "6.30.3"
+        ]
+      },
+      {
+        "package": "react-router-dom",
+        "Issue": "React Router: Open redirect leading to XSS",
+        "URL": "https://github.com/advisories/GHSA-jjmj-jmhj-qwj2",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=6.30.2 <=6.30.5",
+        "Tree Versions": [
+          "6.30.3"
+        ]
+      },
+      {
+        "package": "rimraf",
+        "Issue": "Rimraf versions prior to v4 are no longer supported",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "3.0.2",
+        "Tree Versions": [
+          "3.0.2"
+        ]
+      },
+      {
+        "package": "shell-quote",
+        "Issue": "shell-quote quote() does not escape newlines in object .op values",
+        "URL": "https://github.com/advisories/GHSA-w7jw-789q-3m8p",
+        "Severity": "critical",
+        "Vulnerable Versions": ">=1.1.0 <=1.8.3",
+        "Tree Versions": [
+          "1.8.3"
+        ]
+      },
+      {
+        "package": "shell-quote",
+        "Issue": "shell-quote: Quadratic-complexity Denial of Service in `parse()` (CWE-407)",
+        "URL": "https://github.com/advisories/GHSA-395f-4hp3-45gv",
+        "Severity": "high",
+        "Vulnerable Versions": "<=1.8.4",
+        "Tree Versions": [
+          "1.8.3"
+        ]
+      },
+      {
+        "package": "stable",
+        "Issue": "Modern JS already guarantees Array#sort() is a stable sort, so this library is deprecated. See the compatibility table on MDN: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort#browser_compatibility",
+        "URL": null,
+        "Severity": "moderate",
+        "Vulnerable Versions": "0.1.8",
+        "Tree Versions": [
+          "0.1.8"
+        ]
+      },
+      {
+        "package": "svgo",
+        "Issue": "SVGO removeScripts plugin leaves some executable scripts intact",
+        "URL": "https://github.com/advisories/GHSA-2p49-hgcm-8545",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.0.0 <2.8.3",
+        "Tree Versions": [
+          "2.8.2"
+        ]
+      },
+      {
+        "package": "svgo",
+        "Issue": "SVGO: removeScripts allows executable links through namespace and control-character bypasses",
+        "URL": "https://github.com/advisories/GHSA-w27v-7q3p-w38r",
+        "Severity": "high",
+        "Vulnerable Versions": ">=1.0.0 <2.8.4",
+        "Tree Versions": [
+          "2.8.2"
+        ]
+      },
+      {
+        "package": "svgo",
+        "Issue": "SVGO: removeScripts incompletely sanitizes executable HTML in SVG foreignObject elements",
+        "URL": "https://github.com/advisories/GHSA-4vpr-x523-8j87",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=1.0.0 <2.8.4",
+        "Tree Versions": [
+          "2.8.2"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar Vulnerable to Arbitrary File Creation/Overwrite via Hardlink Path Traversal",
+        "URL": "https://github.com/advisories/GHSA-34x7-hfp2-rc4v",
+        "Severity": "high",
+        "Vulnerable Versions": "<7.5.7",
+        "Tree Versions": [
+          "6.2.1"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar is Vulnerable to Arbitrary File Overwrite and Symlink Poisoning via Insufficient Path Sanitization",
+        "URL": "https://github.com/advisories/GHSA-8qq5-rm4j-mr97",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.2",
+        "Tree Versions": [
+          "6.2.1"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "Arbitrary File Read/Write via Hardlink Target Escape Through Symlink Chain in node-tar Extraction",
+        "URL": "https://github.com/advisories/GHSA-83g3-92jg-28cx",
+        "Severity": "high",
+        "Vulnerable Versions": "<7.5.8",
+        "Tree Versions": [
+          "6.2.1"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "tar has Hardlink Path Traversal via Drive-Relative Linkpath",
+        "URL": "https://github.com/advisories/GHSA-qffp-2rhf-9h96",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.9",
+        "Tree Versions": [
+          "6.2.1"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar Symlink Path Traversal via Drive-Relative Linkpath",
+        "URL": "https://github.com/advisories/GHSA-9ppj-qmqm-q256",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.10",
+        "Tree Versions": [
+          "6.2.1"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "Race Condition in node-tar Path Reservations via Unicode Ligature Collisions on macOS APFS",
+        "URL": "https://github.com/advisories/GHSA-r6q2-hw4h-h46w",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.3",
+        "Tree Versions": [
+          "6.2.1"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar applies PAX size override to intermediary GNU long-name/long-link headers, causing tar parser interpretation differential (file smuggling)",
+        "URL": "https://github.com/advisories/GHSA-vmf3-w455-68vh",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=7.5.15",
+        "Tree Versions": [
+          "6.2.1",
+          "7.5.13"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar: Process crash via PAX numeric path type confusion",
+        "URL": "https://github.com/advisories/GHSA-w8wr-v893-vjvp",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=7.5.17",
+        "Tree Versions": [
+          "6.2.1",
+          "7.5.13"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar: Decompression/parse DoS via unlimited input",
+        "URL": "https://github.com/advisories/GHSA-23hp-3jrh-7fpw",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=7.5.18",
+        "Tree Versions": [
+          "6.2.1",
+          "7.5.13"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar: Negative tar entry size causes infinite loop in archive replace",
+        "URL": "https://github.com/advisories/GHSA-8x88-c5mf-7j5w",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.17",
+        "Tree Versions": [
+          "6.2.1",
+          "7.5.13"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar: Uncaught Exception DoS via NUL byte in PAX path/linkpath records",
+        "URL": "https://github.com/advisories/GHSA-gvwx-54wh-qm9j",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=7.5.16",
+        "Tree Versions": [
+          "6.2.1",
+          "7.5.13"
+        ]
+      },
+      {
+        "package": "tar",
+        "Issue": "node-tar: Uncontrolled recursion in mapHas/filesFilter allows uncatchable stack-overflow DoS via crafted long-path tar with member selection",
+        "URL": "https://github.com/advisories/GHSA-r292-9mhp-454m",
+        "Severity": "high",
+        "Vulnerable Versions": "<=7.5.20",
+        "Tree Versions": [
+          "6.2.1",
+          "7.5.13"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "Undici has an unbounded decompression chain in HTTP responses on Node.js Fetch API via Content-Encoding leads to resource exhaustion",
+        "URL": "https://github.com/advisories/GHSA-g9mf-h72j-4rw9",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<6.23.0",
+        "Tree Versions": [
+          "5.29.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "Undici has an HTTP Request/Response Smuggling issue",
+        "URL": "https://github.com/advisories/GHSA-2mjp-6q6p-2qxm",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<6.24.0",
+        "Tree Versions": [
+          "5.29.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "Undici has Unbounded Memory Consumption in WebSocket permessage-deflate Decompression",
+        "URL": "https://github.com/advisories/GHSA-vrm6-8vpv-qv8q",
+        "Severity": "high",
+        "Vulnerable Versions": "<6.24.0",
+        "Tree Versions": [
+          "5.29.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "Undici has Unhandled Exception in WebSocket Client Due to Invalid server_max_window_bits Validation",
+        "URL": "https://github.com/advisories/GHSA-v9p9-hfj2-hcw8",
+        "Severity": "high",
+        "Vulnerable Versions": "<6.24.0",
+        "Tree Versions": [
+          "5.29.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "Undici has CRLF Injection in undici via `upgrade` option",
+        "URL": "https://github.com/advisories/GHSA-4992-7rv2-5pvq",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<6.24.0",
+        "Tree Versions": [
+          "5.29.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to TLS certificate validation bypass via dropped requestTls in SOCKS5 ProxyAgent",
+        "URL": "https://github.com/advisories/GHSA-vmh5-mc38-953g",
+        "Severity": "high",
+        "Vulnerable Versions": ">=7.23.0 <7.28.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to HTTP header injection via Set-Cookie percent-decoding",
+        "URL": "https://github.com/advisories/GHSA-p88m-4jfj-68fv",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.0.0 <7.28.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to HTTP header injection via Set-Cookie percent-decoding",
+        "URL": "https://github.com/advisories/GHSA-p88m-4jfj-68fv",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<6.27.0",
+        "Tree Versions": [
+          "5.29.0",
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici WebSocket client vulnerable to denial of service via fragment count bypass",
+        "URL": "https://github.com/advisories/GHSA-vxpw-j846-p89q",
+        "Severity": "high",
+        "Vulnerable Versions": ">=7.0.0 <7.28.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici WebSocket client vulnerable to denial of service via fragment count bypass",
+        "URL": "https://github.com/advisories/GHSA-vxpw-j846-p89q",
+        "Severity": "high",
+        "Vulnerable Versions": "<6.27.0",
+        "Tree Versions": [
+          "5.29.0",
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to cross-origin request routing via SOCKS5 proxy pool reuse",
+        "URL": "https://github.com/advisories/GHSA-hm92-r4w5-c3mj",
+        "Severity": "high",
+        "Vulnerable Versions": ">=7.23.0 <7.28.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to Set-Cookie SameSite attribute downgrade via permissive substring matching",
+        "URL": "https://github.com/advisories/GHSA-g8m3-5g58-fq7m",
+        "Severity": "low",
+        "Vulnerable Versions": ">=7.0.0 <7.28.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to Set-Cookie SameSite attribute downgrade via permissive substring matching",
+        "URL": "https://github.com/advisories/GHSA-g8m3-5g58-fq7m",
+        "Severity": "low",
+        "Vulnerable Versions": "<6.27.0",
+        "Tree Versions": [
+          "5.29.0",
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to cross-user information disclosure via shared cache whitespace bypass",
+        "URL": "https://github.com/advisories/GHSA-pr7r-676h-xcf6",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.0.0 <7.28.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to downstream response desynchronization via retry interceptor",
+        "URL": "https://github.com/advisories/GHSA-8xcm-r25x-g524",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.0.0 <7.29.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to downstream response desynchronization via retry interceptor",
+        "URL": "https://github.com/advisories/GHSA-8xcm-r25x-g524",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<6.28.0",
+        "Tree Versions": [
+          "5.29.0",
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to cross-user information disclosure and parse-time crash via degenerate private cache directives",
+        "URL": "https://github.com/advisories/GHSA-4cwx-7wf7-3272",
+        "Severity": "high",
+        "Vulnerable Versions": ">=7.0.0 <7.29.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to CRLF Injection via blob-like body 'type' property",
+        "URL": "https://github.com/advisories/GHSA-m8rv-5g2x-5cg5",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.0.0 <7.29.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to CRLF Injection via blob-like body 'type' property",
+        "URL": "https://github.com/advisories/GHSA-m8rv-5g2x-5cg5",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<6.28.0",
+        "Tree Versions": [
+          "5.29.0",
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to cross-user information disclosure via whitespace around equals in Cache-Control directives",
+        "URL": "https://github.com/advisories/GHSA-jr45-8vmc-qm54",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.0.0 <7.29.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to cookie attribute injection via unsanitized domain and unparsed setCookie fields",
+        "URL": "https://github.com/advisories/GHSA-v3r7-h72x-cjcm",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.0.0 <7.29.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to cookie attribute injection via unsanitized domain and unparsed setCookie fields",
+        "URL": "https://github.com/advisories/GHSA-v3r7-h72x-cjcm",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<6.28.0",
+        "Tree Versions": [
+          "5.29.0",
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to HTTP response queue poisoning via keep-alive socket reuse",
+        "URL": "https://github.com/advisories/GHSA-35p6-xmwp-9g52",
+        "Severity": "low",
+        "Vulnerable Versions": ">=7.0.0 <7.28.0",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to HTTP response queue poisoning via keep-alive socket reuse",
+        "URL": "https://github.com/advisories/GHSA-35p6-xmwp-9g52",
+        "Severity": "low",
+        "Vulnerable Versions": "<6.27.0",
+        "Tree Versions": [
+          "5.29.0",
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to Denial of Service via unhandled error in WebSocket permessage-deflate decompression",
+        "URL": "https://github.com/advisories/GHSA-3wwx-pv8p-q78v",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=6.25.0 <6.28.1",
+        "Tree Versions": [
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to Denial of Service via orphaned RetryHandler response body",
+        "URL": "https://github.com/advisories/GHSA-pmjh-fq2x-6v4x",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.11.0 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to downstream response splitting via retry interceptor",
+        "URL": "https://github.com/advisories/GHSA-r53p-7pc4-xj5r",
+        "Severity": "low",
+        "Vulnerable Versions": ">=7.0.0 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to downstream response splitting via retry interceptor",
+        "URL": "https://github.com/advisories/GHSA-r53p-7pc4-xj5r",
+        "Severity": "low",
+        "Vulnerable Versions": "<6.28.1",
+        "Tree Versions": [
+          "5.29.0",
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to Denial of Service via unrequested WebSocket subprotocol",
+        "URL": "https://github.com/advisories/GHSA-rfgv-xxqx-mfg5",
+        "Severity": "high",
+        "Vulnerable Versions": ">=7.0.0 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to Denial of Service via unrequested WebSocket subprotocol",
+        "URL": "https://github.com/advisories/GHSA-rfgv-xxqx-mfg5",
+        "Severity": "high",
+        "Vulnerable Versions": ">=6.7.0 <6.28.1",
+        "Tree Versions": [
+          "6.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to Denial of Service via unbounded decompression of compressed responses",
+        "URL": "https://github.com/advisories/GHSA-3xpg-4rpp-hhhm",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.15.0 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to cross-user cookie disclosure via Set-Cookie caching in shared caches",
+        "URL": "https://github.com/advisories/GHSA-2jfj-6hjv-fm6j",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.0.0 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to response truncation via oversized chunked responses in the dump interceptor",
+        "URL": "https://github.com/advisories/GHSA-2gqq-gqf2-x968",
+        "Severity": "low",
+        "Vulnerable Versions": ">=7.1.0 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to TLS certificate validation bypass via dropped connect options in BalancedPool",
+        "URL": "https://github.com/advisories/GHSA-w293-vg96-wgc3",
+        "Severity": "high",
+        "Vulnerable Versions": ">=7.24.1 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to caching and replay of unsafe HTTP method responses",
+        "URL": "https://github.com/advisories/GHSA-8436-99hf-9mmv",
+        "Severity": "low",
+        "Vulnerable Versions": ">=7.0.0 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "undici",
+        "Issue": "undici vulnerable to Denial of Service via WebSocketStream unclean close",
+        "URL": "https://github.com/advisories/GHSA-rx4f-c7p8-82vq",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=7.0.0 <7.29.1",
+        "Tree Versions": [
+          "7.25.0"
+        ]
+      },
+      {
+        "package": "urllib",
+        "Issue": "urllib's cross-origin redirects preserve credential-bearing request headers, leading to potential credential leakage",
+        "URL": "https://github.com/advisories/GHSA-hq3h-g68c-hp78",
+        "Severity": "high",
+        "Vulnerable Versions": ">=3.0.0 <=4.9.0",
+        "Tree Versions": [
+          "3.27.3"
+        ]
+      },
+      {
+        "package": "uuid",
+        "Issue": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+        "URL": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<11.1.1",
+        "Tree Versions": [
+          "3.4.0",
+          "8.3.2",
+          "9.0.1",
+          "11.1.0"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has access to `VM2_INTERNAL_STATE_DO_NOT_USE_OR_PROGRAM_WILL_FAIL`",
+        "URL": "https://github.com/advisories/GHSA-2cm2-m3w5-gp2f",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<3.11.2",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has Sandbox Breakout Through Null Proto Exception",
+        "URL": "https://github.com/advisories/GHSA-9vg3-4rfj-wgcm",
+        "Severity": "critical",
+        "Vulnerable Versions": "<3.11.2",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has sandbox breakout via `neutralizeArraySpeciesBatch`",
+        "URL": "https://github.com/advisories/GHSA-9qj6-qjgg-37qq",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.1",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 NodeVM `nesting: true` bypasses `require: false` allowing sandbox escape and arbitrary OS command execution",
+        "URL": "https://github.com/advisories/GHSA-8hg8-63c5-gwmx",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.0",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has a NodeVM require.root bypass via symlink traversal that allows sandbox escape",
+        "URL": "https://github.com/advisories/GHSA-cp6g-6699-wx9c",
+        "Severity": "high",
+        "Vulnerable Versions": "=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2's Transformer Fast-Path Bypass Exposes Internal State Variable",
+        "URL": "https://github.com/advisories/GHSA-wp5r-2gw5-m7q7",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 is Vulnerable to Host File Path Disclosure via Stack Trace Information Leak",
+        "URL": "https://github.com/advisories/GHSA-v27g-jcqj-v8rw",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 Host Promise Resolution Preserves Object Identity Across Sandbox Boundary",
+        "URL": "https://github.com/advisories/GHSA-mpf8-4hx2-7cjg",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 Sandbox Access to Host Buffer.alloc Allows timeout Bypass Resulting in Memory Exhaustion",
+        "URL": "https://github.com/advisories/GHSA-6785-pvv7-mvg7",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has a Sandbox Escape via Promise Constructor Unhandled Rejection (Process Crash DoS)",
+        "URL": "https://github.com/advisories/GHSA-hw58-p9xv-2mjh",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has a NodeVM builtin allowlist bypass via `module` builtin's `Module._load` that allows sandbox escape",
+        "URL": "https://github.com/advisories/GHSA-947f-4v7f-x2v8",
+        "Severity": "critical",
+        "Vulnerable Versions": "=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2: Mutable Proxies for Host Intrinsic Prototypes Allows Sandbox Escape",
+        "URL": "https://github.com/advisories/GHSA-vwrp-x96c-mhwq",
+        "Severity": "critical",
+        "Vulnerable Versions": ">=3.9.6 <=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 Access to Host Object Enables Sandbox Escape",
+        "URL": "https://github.com/advisories/GHSA-47x8-96vw-5wg6",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has a Sandbox Escape Vulnerability",
+        "URL": "https://github.com/advisories/GHSA-qcp4-v2jj-fjx8",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.10.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 Has a Sandbox Breakout Using Async Generator",
+        "URL": "https://github.com/advisories/GHSA-248r-7h7q-cr24",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.2",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 setup-sandbox.js violates Defense Invariant #11 in stack-trace formatter",
+        "URL": "https://github.com/advisories/GHSA-q3fm-4wcw-g57x",
+        "Severity": "low",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "NodeVM observability builtins leak host process and HTTP request data",
+        "URL": "https://github.com/advisories/GHSA-9g8x-92q2-p28f",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "NodeVM network builtin exclusions bypass via internal _http_client and _http_server",
+        "URL": "https://github.com/advisories/GHSA-r9pm-gxmw-wv6p",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2's Bridge Proxy set trap ignores receiver parameter, enabling host object property injection via prototype chain",
+        "URL": "https://github.com/advisories/GHSA-c4cf-2hgv-2qv6",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has a sandbox escape via unblocked cross-realm Symbol.for keys + missing bridge write-trap symbol checks",
+        "URL": "https://github.com/advisories/GHSA-m5q2-4fm3-vfqp",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "NodeVM builtin denylist bypass via process and inspector/promises allows host code execution",
+        "URL": "https://github.com/advisories/GHSA-rp36-8xq3-r6c4",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 sandbox escape via JSPI-backed Promise `.finally()` species bypass",
+        "URL": "https://github.com/advisories/GHSA-6j2x-vhqr-qr7q",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has a CVE-2023-37903 patch bypass: nesting:true without explicit require still allows full RCE",
+        "URL": "https://github.com/advisories/GHSA-m4wx-m65x-ghrr",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 is Vulnerable to Sandbox Breakout Through Promise Species",
+        "URL": "https://github.com/advisories/GHSA-76w7-j9cq-rx2j",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has a Sandbox Escape issue",
+        "URL": "https://github.com/advisories/GHSA-v6mx-mf47-r5wg",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.3",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 has Memory Exhaustion DoS via bufferAllocLimit Bypass",
+        "URL": "https://github.com/advisories/GHSA-v836-6xw4-9cx3",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.11.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2: NodeVM `builtin: ['*']` exposes `os` and `dns` \u2014 process-wide observability reads AND writes that hijack the host (sibling class of GHSA-9g8x-92q2-p28f)",
+        "URL": "https://github.com/advisories/GHSA-m5w8-4gq2-6f8x",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "VM2 has Missing Error.cause Sanitization that Enables Sandbox Escape to RCE",
+        "URL": "https://github.com/advisories/GHSA-m283-3h24-438v",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2's bufferAllocLimit cap bypassed by Buffer.concat and Buffer.from arrayLike",
+        "URL": "https://github.com/advisories/GHSA-gmc2-2x9w-cgh9",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.11.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2: Sandbox Breakout Using Dangerous Host Proto Mutators",
+        "URL": "https://github.com/advisories/GHSA-cfcw-xp6x-25gj",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.5",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2: NodeVM builtin allowlist bypass via node:test.run() execArgv allows sandbox escape",
+        "URL": "https://github.com/advisories/GHSA-qhwx-74w5-xhxq",
+        "Severity": "critical",
+        "Vulnerable Versions": ">=3.9.6 <=3.11.6",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 CLI provides no sandbox isolation - host-realm require() is reachable from sandboxed scripts",
+        "URL": "https://github.com/advisories/GHSA-jxxv-8r27-vm4p",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.11.6",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 Custom Module Resolver Can Bypass the External Package Allowlist by Loading a Colliding Host Package",
+        "URL": "https://github.com/advisories/GHSA-c48m-32m9-vx93",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.6",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2: NodeVM builtin denylist bypass via fs/promises despite -fs, allowing host filesystem writes",
+        "URL": "https://github.com/advisories/GHSA-6rh5-qq4q-97xh",
+        "Severity": "high",
+        "Vulnerable Versions": "<=3.11.6",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2: NodeVM node:-prefixed negative builtin deny bypass exposes child_process",
+        "URL": "https://github.com/advisories/GHSA-8686-vhfx-7r3j",
+        "Severity": "critical",
+        "Vulnerable Versions": "<=3.11.6",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2: vm.freeze()/vm.readonly() bypass via accessor descriptor",
+        "URL": "https://github.com/advisories/GHSA-633r-hq9m-c4ff",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=3.9.6 <=3.11.6",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2 sandbox escape on Node.js 26 through a stale PromiseThenLookupChain protector",
+        "URL": "https://github.com/advisories/GHSA-27g9-p43v-cw3v",
+        "Severity": "critical",
+        "Vulnerable Versions": ">=3.10.2 <=3.11.6",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "vm2",
+        "Issue": "vm2: External module allowlist uses a raw prefix test, so a prefix-sharing sibling package is treated as allowlisted",
+        "URL": "https://github.com/advisories/GHSA-7q3f-wx44-378m",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=3.11.6",
+        "Tree Versions": [
+          "3.10.5"
+        ]
+      },
+      {
+        "package": "webpack-dev-server",
+        "Issue": "webpack-dev-server vulnerable to cross-origin source code exposure on non-HTTPS origins",
+        "URL": "https://github.com/advisories/GHSA-79cf-xcqc-c78w",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=5.2.3",
+        "Tree Versions": [
+          "5.2.3"
+        ]
+      },
+      {
+        "package": "webpack-dev-server",
+        "Issue": "webpack-dev-server vulnerable to HMR WebSocket interception via permissive user proxies",
+        "URL": "https://github.com/advisories/GHSA-mx8g-39q3-5c79",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<5.2.5",
+        "Tree Versions": [
+          "5.2.3"
+        ]
+      },
+      {
+        "package": "webpack-dev-server",
+        "Issue": "webpack-dev-server vulnerable to cross-site request forgery via internal developer endpoints",
+        "URL": "https://github.com/advisories/GHSA-f5vj-f2hx-8m93",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=5.2.5",
+        "Tree Versions": [
+          "5.2.3"
+        ]
+      },
+      {
+        "package": "webpack-dev-server",
+        "Issue": "webpack-dev-server vulnerable to denial of service via a malformed Host or Origin header",
+        "URL": "https://github.com/advisories/GHSA-m28w-2pqf-7qgj",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<=5.2.5",
+        "Tree Versions": [
+          "5.2.3"
+        ]
+      },
+      {
+        "package": "websocket-driver",
+        "Issue": "websocket-driver: Resource limit bypass via message compression",
+        "URL": "https://github.com/advisories/GHSA-mp7j-qc5w-4988",
+        "Severity": "moderate",
+        "Vulnerable Versions": "<0.7.5",
+        "Tree Versions": [
+          "0.7.4"
+        ]
+      },
+      {
+        "package": "websocket-driver",
+        "Issue": "websocket-driver: Message corruption via abuse of protocol length headers",
+        "URL": "https://github.com/advisories/GHSA-xv26-6w52-cph6",
+        "Severity": "critical",
+        "Vulnerable Versions": "<0.7.5",
+        "Tree Versions": [
+          "0.7.4"
+        ]
+      },
+      {
+        "package": "ws",
+        "Issue": "ws: Uninitialized memory disclosure",
+        "URL": "https://github.com/advisories/GHSA-58qx-3vcg-4xpx",
+        "Severity": "moderate",
+        "Vulnerable Versions": ">=8.0.0 <8.20.1",
+        "Tree Versions": [
+          "8.18.0",
+          "8.20.0"
+        ]
+      },
+      {
+        "package": "ws",
+        "Issue": "ws: Memory exhaustion DoS from tiny fragments and data chunks",
+        "URL": "https://github.com/advisories/GHSA-96hv-2xvq-fx4p",
+        "Severity": "high",
+        "Vulnerable Versions": ">=8.0.0 <8.21.0",
+        "Tree Versions": [
+          "8.18.0",
+          "8.20.0"
+        ]
+      }
+    ]
+  }
+}

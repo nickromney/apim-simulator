@@ -6,6 +6,7 @@
   ],
   "allow_anonymous": false,
   "trace_enabled": true,
+  "trace_allow_unauthenticated": true,
   "tenant_access": {
     "enabled": true,
     "primary_key": "local-dev-tenant-key",

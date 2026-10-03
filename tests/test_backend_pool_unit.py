@@ -55,6 +55,7 @@ def _empty_pool() -> BackendConfig:
 def _config(*backend_ids: str, named_values: dict[str, str] | None = None) -> GatewayConfig:
     return GatewayConfig(
         allow_anonymous=True,
+        workload_identity={"mode": "demo"},
         backends={bid: BackendConfig(url=f"https://{bid}.invalid") for bid in backend_ids},
         named_values={name: NamedValueConfig(value=value) for name, value in (named_values or {}).items()},
     )
@@ -301,7 +302,7 @@ def _policy_request(**headers: str) -> PolicyRequest:
 
 
 def _backend(**fields) -> BackendConfig:
-    return BackendConfig(url="https://upstream.invalid", **fields)
+    return BackendConfig(url="https://upstream.invalid", allow_simulated_certificate=True, **fields)
 
 
 def test_basic_auth_returns_credentials_for_the_upstream_call() -> None:

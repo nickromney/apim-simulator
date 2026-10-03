@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import ast
+import base64
+import datetime
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote_plus
+
+import jwt
 
 if TYPE_CHECKING:
     from app.policy import PolicyRequest
@@ -107,6 +113,109 @@ class JwtValue:
             self.Audiences = [str(audience)]
 
 
+def _as_jwt(value: str) -> JwtValue | None:
+    """AsJwt is an inspection helper, not token authentication."""
+    token = value.removeprefix("Bearer ").strip()
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False, "verify_exp": False, "verify_aud": False})
+    except jwt.InvalidTokenError:
+        return None
+    return JwtValue(claims, token)
+
+
+def _nullable_jwt_subject(value: str) -> str | None:
+    parsed = _as_jwt(value)
+    return parsed.Subject if parsed is not None else None
+
+
+@dataclass(frozen=True)
+class _ExpressionMetadata:
+    """Readonly API-shaped metadata with public member names."""
+
+    Id: str = ""
+    Name: str = ""
+    Path: str = ""
+    Method: str = ""
+    UrlTemplate: str = ""
+    Version: str = ""
+    Revision: str = ""
+    Email: str = ""
+    FirstName: str = ""
+    LastName: str = ""
+    Note: str = ""
+
+
+@dataclass(frozen=True)
+class _ExpressionDeployment:
+    Region: str = "local"
+    GatewayId: str = "local"
+    ServiceId: str = "apim-simulator"
+    ServiceName: str = "apim-simulator"
+
+
+@dataclass(frozen=True)
+class _ExpressionGraphQL:
+    Arguments: dict[str, Any]
+    Parent: Any
+
+
+class _DateTimeNamespace:
+    @property
+    def Now(self) -> datetime.datetime:
+        return datetime.datetime.now().astimezone()
+
+    @property
+    def UtcNow(self) -> datetime.datetime:
+        return datetime.datetime.now(datetime.UTC)
+
+
+class _WebUtility:
+    @staticmethod
+    def UrlEncode(value: Any) -> str:
+        return quote_plus(str(value), safe="")
+
+
+class _RegexGroup:
+    def __init__(self, value: str):
+        self.Value = value
+
+
+class _RegexNamespace:
+    @staticmethod
+    def Match(value: str, pattern: str) -> Any:
+        compiled = re.compile(re.sub(r"\(\?<([A-Za-z_]\w*)>", r"(?P<\1>", pattern))
+        match = compiled.search(value)
+        groups = {name: _RegexGroup((match.group(name) if match else "") or "") for name in compiled.groupindex}
+        return type("RegexMatch", (), {"Groups": groups})()
+
+
+@dataclass(frozen=True)
+class _JsonProperty:
+    name: str
+    value: Any
+
+
+class _JsonObject(dict):
+    def __init__(self, *properties: _JsonProperty):
+        super().__init__((property.name, property.value) for property in properties)
+
+
+class _ConvertNamespace:
+    @staticmethod
+    def FromBase64String(value: str) -> bytes:
+        return base64.b64decode("".join(value.split()), validate=True)
+
+
+class _EncodingUTF8:
+    @staticmethod
+    def GetString(value: bytes) -> str:
+        return value.decode("utf-8", errors="replace")
+
+
+class _EncodingNamespace:
+    UTF8 = _EncodingUTF8()
+
+
 @dataclass(frozen=True)
 class _ExpressionRequest:
     method: str
@@ -127,6 +236,12 @@ class _ExpressionRequest:
     def matched_parameters_get(self, key: str, default: Any = "") -> Any:
         return self.matched_parameters.get(key, default)
 
+    def ToHttpMessage(self, limit: int = 1024) -> str:
+        from app.http_message import request_http_message
+
+        body = self.body.AsString(True).encode("utf-8") if self.body is not None else b""
+        return request_http_message(self.method, self.path, self.headers, body, limit, query=self.query)
+
 
 @dataclass(frozen=True)
 class _ExpressionResponse:
@@ -136,6 +251,12 @@ class _ExpressionResponse:
 
     def headers_get(self, key: str, default: Any = "") -> Any:
         return self.headers.GetValueOrDefault(key, default)
+
+    def ToHttpMessage(self, limit: int = 1024) -> str:
+        from app.http_message import response_http_message
+
+        body = self.body.AsString(True).encode("utf-8") if self.body is not None else b""
+        return response_http_message(self.status_code, self.headers, body, limit)
 
 
 @dataclass(frozen=True)
@@ -161,6 +282,21 @@ class ExpressionContext:
     subscription: _ExpressionSubscription
     variables: ExpressionMap
     LastError: _ExpressionLastError
+    User: _ExpressionMetadata | None = None
+    Deployment: _ExpressionDeployment = _ExpressionDeployment()
+    Api: _ExpressionMetadata = _ExpressionMetadata()
+    Operation: _ExpressionMetadata = _ExpressionMetadata()
+    Product: _ExpressionMetadata | None = None
+    GraphQL: _ExpressionGraphQL | None = None
+    RequestId: str = ""
+
+    @property
+    def Request(self) -> _ExpressionRequest:
+        return self.request
+
+    @property
+    def Response(self) -> _ExpressionResponse:
+        return self.response
 
     def variables_get(self, key: str, default: Any = "") -> Any:
         return self.variables.get(key, default)
@@ -212,6 +348,19 @@ ALLOWED_FUNCTIONS = {
     "_csharp_tostring",
     "_csharp_divide",
     "_dict_contains_key",
+    "_as_jwt",
+    "_nullable_jwt_subject",
+    "_try_get_value",
+    "_parse_int",
+    "DateTime",
+    "WebUtility",
+    "Regex",
+    "Convert",
+    "Encoding",
+    "request",
+    "Guid",
+    "JObject",
+    "JProperty",
 }
 
 
@@ -269,6 +418,24 @@ def build_expression_context(req: PolicyRequest) -> ExpressionContext:
         ),
         subscription=_ExpressionSubscription(id=str(req.variables.get("subscription_id") or "")),
         variables=ExpressionMap(req.variables),
+        User=_ExpressionMetadata(**req.variables["_expression_user"])
+        if req.variables.get("_expression_user")
+        else None,
+        Api=_ExpressionMetadata(**req.variables.get("_expression_api", {})),
+        Operation=_ExpressionMetadata(**req.variables.get("_expression_operation", {})),
+        Product=_ExpressionMetadata(**req.variables["_expression_product"])
+        if req.variables.get("_expression_product")
+        else None,
+        Deployment=_ExpressionDeployment(
+            Region=str(req.variables.get("location") or "local"),
+            GatewayId=str(req.variables.get("gateway_id") or "local"),
+            ServiceId=str(req.variables.get("service_id") or "apim-simulator"),
+            ServiceName=str(req.variables.get("service_name") or "apim-simulator"),
+        ),
+        GraphQL=_ExpressionGraphQL(req.variables["_graphql_arguments"], req.variables.get("_graphql_parent"))
+        if "_graphql_arguments" in req.variables
+        else None,
+        RequestId=str(req.variables.get("request_id") or ""),
         LastError=_ExpressionLastError(
             Source=str(error_values.get("Source") or ""),
             Reason=str(error_values.get("Reason") or ""),
@@ -389,21 +556,34 @@ def _replace_generic_call(match: re.Match[str]) -> str:
 
 def _translate_code_fragment(fragment: str) -> str:
     translated = re.sub(r"\((?:string|bool|IResponse|Jwt|JObject)\)", "", fragment)
+    translated = re.sub(r"\bnew\s+(?=JObject\b|JProperty\b)", "", translated)
     translated = re.sub(r"(?<![\w.)])(-?\d+)\.ToString\(\)", r"str(\1)", translated)
     translated = re.sub(
         r"\b(GetValueOrDefault|As)<([A-Za-z][\w.]*)>",
         _replace_generic_call,
         translated,
     )
+    translated = re.sub(
+        r"\b(AsString|AsJObject)\(\s*preserveContent\s*:\s*(true|false)\b", r"\1(\2", translated, flags=re.IGNORECASE
+    )
     translated = re.sub(r"\btrue\b", "True", translated, flags=re.IGNORECASE)
     translated = re.sub(r"\bfalse\b", "False", translated, flags=re.IGNORECASE)
+    translated = re.sub(r"\bnull\b", "None", translated)
+    translated = re.sub(r"\bout\s+([A-Za-z_]\w*)", r'"\1"', translated)
+    translated = translated.replace(".AsJwt()?.Subject", ".NullableJwtSubject()")
+    translated = translated.replace("]?.Value", "].Value")
+    translated = translated.replace("int.Parse(", "_parse_int(")
+    translated = translated.replace("System.Net.WebUtility.", "WebUtility.")
     translated = translated.replace("&&", " and ").replace("||", " or ")
     translated = translated.replace("!=", " != ")
     translated = re.sub(r"(?<![=!<>])!(?!=)", " not ", translated)
     replacements = (
         ("context.Request.Body", "context.request.body"),
         ("context.Request.Headers.GetValueOrDefault", "context.request.headers_get"),
+        ("context.Request.Headers", "context.request.headers"),
+        ("request.Headers.GetValueOrDefault", "request.headers_get"),
         ("context.Request.Url.Query.GetValueOrDefault", "context.request.query_get"),
+        ("context.Request.Url.Query", "context.request.query"),
         ("context.Request.MatchedParameters.GetValueOrDefault", "context.request.matched_parameters_get"),
         ("context.Request.MatchedParameters", "context.request.matched_parameters"),
         ("context.Request.OriginalUrl.Host", "context.request.original_host"),
@@ -425,7 +605,7 @@ def _translate_code_fragment(fragment: str) -> str:
 
 
 def _translate_expression(expr: str) -> str:
-    translated = _rewrite_outside_strings(expr, _translate_code_fragment)
+    translated = _rewrite_outside_strings(expr.replace('@"', 'r"'), _translate_code_fragment)
     return _translate_ternary(translated).strip()
 
 
@@ -511,6 +691,8 @@ def _csharp_length(value: Any) -> int:
 
 
 def _csharp_tostring(value: Any) -> str:
+    if isinstance(value, _JsonObject):
+        return json.dumps(value, ensure_ascii=False)
     return str(value)
 
 
@@ -530,6 +712,9 @@ class _CSharpAstTransformer(ast.NodeTransformer):
         "Equals": "_csharp_equals",
         "ToString": "_csharp_tostring",
         "ContainsKey": "_dict_contains_key",
+        "AsJwt": "_as_jwt",
+        "NullableJwtSubject": "_nullable_jwt_subject",
+        "TryGetValue": "_try_get_value",
     }
     _aliases = {
         "StartsWith": "startswith",
@@ -584,6 +769,8 @@ def _validate_ast(expression: str, allowed_names: set[str] | None = None) -> ast
     for node in ast.walk(tree):
         if not isinstance(node, ALLOWED_AST_NODES):
             raise ValueError(f"Unsupported expression syntax: {type(node).__name__}")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+            raise ValueError("Private expression members are not accessible")
         if isinstance(node, ast.Name):
             # "True" and "False" parse as ast.Constant, never as ast.Name, so
             # they do not need naming here.
@@ -705,6 +892,13 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
         return _render_interpolated(stripped[2:-1], context, locals_)
     translated = _translate_expression(stripped)
     tree = _validate_ast(translated, set(locals_ or {}))
+    scope = locals_ if locals_ is not None else {}
+
+    def try_get_value(mapping: ExpressionMap, key: str, target: str) -> bool:
+        exists = mapping.ContainsKey(key)
+        scope[target] = mapping[key] if exists else None
+        return exists
+
     environment = {
         "context": context,
         "split_last": split_last,
@@ -716,6 +910,19 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
         "_csharp_tostring": _csharp_tostring,
         "_csharp_divide": _csharp_divide,
         "_dict_contains_key": _dict_contains_key,
+        "_as_jwt": _as_jwt,
+        "_nullable_jwt_subject": _nullable_jwt_subject,
+        "_try_get_value": try_get_value,
+        "_parse_int": int,
+        "DateTime": _DateTimeNamespace(),
+        "WebUtility": _WebUtility(),
+        "Regex": _RegexNamespace(),
+        "Convert": _ConvertNamespace(),
+        "Encoding": _EncodingNamespace(),
+        "request": context.request,
+        "Guid": type("Guid", (), {"NewGuid": staticmethod(uuid.uuid4)}),
+        "JObject": _JsonObject,
+        "JProperty": _JsonProperty,
         **(locals_ or {}),
     }
     return eval(compile(tree, "<apim-expression>", "eval"), {"__builtins__": {}}, environment)

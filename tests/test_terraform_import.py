@@ -901,12 +901,13 @@ def test_management_import_keeps_imported_service_metadata() -> None:
         config=GatewayConfig(
             service={"name": "current-sim", "display_name": "Current Simulator"},
             allow_anonymous=True,
+            network_security={"private_peer_cidrs": ["127.0.0.0/8"]},
             tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
             routes=[RouteConfig(name="bootstrap", path_prefix="/", upstream_base_url=http_url("bootstrap"))],
         )
     )
 
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 50000)) as client:
         imported = client.post(
             "/apim/management/import/tofu-show",
             headers={"X-Apim-Tenant-Key": "t1"},

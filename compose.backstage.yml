@@ -27,7 +27,7 @@ services:
       BACKSTAGE_BASE_URL: ${BACKSTAGE_BASE_URL:-http://localhost:7007}
       HOME: /tmp
     ports:
-      - "${BACKSTAGE_PORT:-7007}:7007"
+      - "${APIM_BIND_ADDRESS:-127.0.0.1}:${BACKSTAGE_PORT:-7007}:7007"
     volumes:
       - ./catalog-info.yaml:/app/catalog/apim-simulator-catalog-info.yaml:ro
       - ./backstage/org.yaml:/app/catalog/apim-simulator-org.yaml:ro

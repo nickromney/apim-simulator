@@ -1,5 +1,7 @@
 services:
   edge-proxy:
     ports:
-      - "${EDGE_TLS_HTTP_PORT:-8080}:8080"
-      - "${EDGE_TLS_PORT:-9443}:8443"
+      - "${APIM_BIND_ADDRESS:-127.0.0.1}:${EDGE_TLS_HTTP_PORT:-8080}:8080"
+      - "${APIM_BIND_ADDRESS:-127.0.0.1}:${EDGE_TLS_PORT:-9443}:8443"
+    volumes:
+      - ./examples/edge/nginx-tls.conf:/etc/nginx/nginx.conf:ro

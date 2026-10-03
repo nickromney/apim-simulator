@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+from fastapi import HTTPException
+
 from app.config import BackendCircuitBreakerConfig, BackendConfig, GatewayConfig
 from app.policy import PolicyRequest, PolicyRuntime, issue_local_managed_identity_token, render_policy_value
 
@@ -135,8 +137,8 @@ def _apply_auth_type(backend: BackendConfig, policy_req: PolicyRequest, cfg: Gat
     """Apply the backend's declared auth scheme.
 
     Basic auth and managed identity replace any caller Authorization header, as
-    APIM authentication policies do. The local managed-identity token is an
-    opaque simulator adaptation, not a Microsoft Entra token.
+    APIM authentication policies do. Signed local issuer tokens are the default;
+    opaque tokens require the explicit workload-identity demo mode.
     """
     auth_type = (backend.auth_type or "none").lower()
 
@@ -151,10 +153,13 @@ def _apply_auth_type(backend: BackendConfig, policy_req: PolicyRequest, cfg: Gat
 
     if auth_type == "managed_identity":
         resource = render_backend_value(backend.managed_identity_resource, policy_req, cfg) or ""
-        token = issue_local_managed_identity_token(resource)
+        token = issue_local_managed_identity_token(resource, config=cfg)
         policy_req.headers["authorization"] = f"Bearer {token}"
     elif auth_type == "client_certificate":
-        policy_req.headers.setdefault("x-apim-client-certificate", "present")
+        if backend.allow_simulated_certificate:
+            policy_req.headers.setdefault("x-apim-client-certificate", "present")
+        elif not backend.client_certificate_file and not backend.client_certificate_thumbprints:
+            raise HTTPException(500, "Backend client certificate is not configured")
     return None
 
 
@@ -191,7 +196,7 @@ def apply_backend_credentials(
     _apply_authorization_header(backend, policy_req, cfg)
     _apply_credential_pairs(backend, policy_req, cfg)
 
-    if backend.client_certificate_thumbprints:
+    if backend.client_certificate_thumbprints and backend.allow_simulated_certificate:
         policy_req.headers.setdefault(
             "x-apim-client-certificate-thumbprints",
             ",".join(backend.client_certificate_thumbprints),

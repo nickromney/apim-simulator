@@ -1,0 +1,110 @@
+{
+  "network": {
+    "source_url": "https://learn.microsoft.com/en-us/azure/api-management/secure-api-management",
+    "source_sha256": "ec2137bb33bfab7edc54a3b4b06c412ba3cbe87835a7328d01f34c6d40cbd340",
+    "read_only": true,
+    "synthetic": true,
+    "probe_transport": "FastAPI TestClient + mock HTTP backend",
+    "disabled_public_internal_metadata": {
+      "settings": {
+        "public_network_access_enabled": false,
+        "virtual_network_type": "Internal"
+      },
+      "http_status": [
+        200
+      ]
+    },
+    "forged_client_certificate": {
+      "requests": [
+        "without certificate",
+        "HTTP with X-Client-Cert-Thumbprint: ABC"
+      ],
+      "settings": "required client certificate; trusted thumbprint ABC",
+      "http_status": [
+        401,
+        200
+      ]
+    },
+    "forged_forwarded_ip": {
+      "requests": [
+        "without forwarded headers",
+        "HTTP with X-Forwarded-For: 198.51.100.7"
+      ],
+      "http_status": [
+        403,
+        200
+      ]
+    },
+    "forged_https_proto": {
+      "requests": [
+        "plain HTTP",
+        "HTTP with X-Forwarded-Proto: https"
+      ],
+      "settings": "API protocols https only",
+      "http_status": [
+        404,
+        200
+      ]
+    },
+    "version_https_restriction": {
+      "requests": [
+        "plain HTTP GET /audit/v1, no forwarded headers"
+      ],
+      "settings": {
+        "versioning_scheme": "Segment",
+        "original_protocols": [
+          "http"
+        ],
+        "v1_protocols": [
+          "https"
+        ],
+        "shared_api_path": "audit"
+      },
+      "http_status": [
+        200
+      ]
+    }
+  },
+  "trace": {
+    "probe": "unauthorized_inline_trace_private_callout",
+    "synthetic_only": true,
+    "configured": {
+      "allow_anonymous": true,
+      "trace_enabled": true,
+      "tenant_access_enabled": true,
+      "admin_token_configured": true
+    },
+    "request": {
+      "method": "GET",
+      "path": "/public",
+      "headers": {
+        "X-Apim-Trace": "true"
+      },
+      "operator_credentials_present": false,
+      "debug_credentials_present": false
+    },
+    "observed": {
+      "gateway_status": 200,
+      "inline_trace_header_present": true,
+      "private_callout_synthetic_token_present_in_trace": true,
+      "legacy_trace_read_status": 403,
+      "management_trace_read_status": 403
+    },
+    "source_lines": [
+      "app/request_pipeline.py:1462",
+      "app/request_pipeline.py:345",
+      "app/request_pipeline.py:346",
+      "app/main.py:397"
+    ]
+  },
+  "reload": {
+    "synthetic_only": true,
+    "transport": "FastAPI TestClient",
+    "tenant_access_enabled": true,
+    "admin_token_configured": false,
+    "operator_credentials_present": false,
+    "management_status": 403,
+    "reload_status": 200,
+    "reload_callback_calls": 1
+  }
+}

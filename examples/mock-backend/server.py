@@ -53,12 +53,48 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self) -> None:
         body = self._read_body()
-        if self.command == "GET" and self._petstore_get():
+        if urlsplit(self.path).path.endswith("/fail"):
+            self._write_json(503, {"status": "unavailable"})
+            return
+        if self.command == "GET" and (self._metrics_get() or self._graphql_get() or self._petstore_get()):
             return
         if self.path.endswith("/health") or self.path.endswith("/startup"):
             self._write_json(200, {"status": "ok", "path": self.path})
             return
         self._write_json(200, self._payload(body))
+
+    def _metrics_get(self) -> bool:
+        url = urlsplit(self.path)
+        if not url.path.startswith("/api/metrics/"):
+            return False
+        metric = url.path.rsplit("/", 1)[-1]
+        values = {"salesdata": 1200, "materiallevels": 40, "throughput": 75, "accidentdata": 0}
+        if metric not in values:
+            self._write_json(404, {"error": "Unknown metric"})
+        else:
+            query = parse_qs(url.query)
+            self._write_json(
+                200,
+                {
+                    "metric": metric,
+                    "from": query.get("from", [""])[-1],
+                    "to": query.get("to", [""])[-1],
+                    "value": values[metric],
+                },
+            )
+        return True
+
+    def _graphql_get(self) -> bool:
+        path = urlsplit(self.path).path
+        if path.startswith("/api/comment/"):
+            self._write_json(200, {"id": path.rsplit("/", 1)[-1], "text": "Local comment", "private": "hidden"})
+        elif path.startswith("/api/blog/"):
+            self._write_json(200, [{"id": "7", "text": "Local comment"}])
+        elif path.startswith("/api/blog-record/"):
+            self._write_json(200, {"id": path.rsplit("/", 1)[-1], "title": "Local blog"})
+        else:
+            return False
+        return True
 
     def _petstore_get(self) -> bool:
         url = urlsplit(self.path)

@@ -298,7 +298,7 @@ def test_ui_is_built_as_a_static_hardened_container() -> None:
     service = _service("compose.ui.yml", "ui")
     assert service["read_only"] is True
     assert service["build"]["context"] == "./ui"
-    assert service["ports"] == ["${OPERATOR_CONSOLE_PORT:-3007}:8080"]
+    assert service["ports"] == ["${APIM_BIND_ADDRESS:-127.0.0.1}:${OPERATOR_CONSOLE_PORT:-3007}:8080"]
 
     makefile = (REPO_ROOT / "Makefile").read_text()
     assert "$(COMPOSE_UI) up --build -d" in makefile
@@ -398,7 +398,7 @@ def test_otel_stack_uses_https_lgtm_host() -> None:
     )
 
     proxy_service = lgtm_compose["services"]["lgtm-proxy"]
-    assert proxy_service["ports"] == ["${GRAFANA_PORT:-8443}:8443"]
+    assert proxy_service["ports"] == ["${APIM_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-8443}:8443"]
 
 
 def test_gitleaks_config_allows_known_demo_credentials() -> None:
@@ -463,3 +463,10 @@ def test_the_bytecode_compile_step_uses_exec_form() -> None:
     """
     compile_line = next(line for line in _dockerfile().splitlines() if "compileall" in line)
     assert compile_line.strip().startswith("RUN ["), "compileall must use exec-form RUN; the runtime image has no shell"
+
+
+def test_security_lab_private_material_is_excluded_from_gateway_image_context() -> None:
+    patterns = (REPO_ROOT / ".dockerignore").read_text().splitlines()
+    assert "examples/apim-security/.runtime" in patterns
+    assert "**/.env" in patterns
+    assert "**/.env.*" in patterns

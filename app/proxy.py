@@ -210,6 +210,7 @@ def _read_version(request: Request, *, config: GatewayConfig, route: RouteConfig
 def _match_versioned_candidate(
     candidate: RouteConfig,
     *,
+    config: GatewayConfig,
     version_set_id: str,
     scheme: ApiVersioningScheme,
     requested_version: str | None,
@@ -225,6 +226,11 @@ def _match_versioned_candidate(
     if requested_version is not None and not _version_matches(candidate, requested_version, scheme):
         return None
     if not candidate.matches_api_path(path) or not _route_matches_host(candidate, request_hosts):
+        return None
+    if not _route_protocol_allowed(candidate, request):
+        return None
+    api = config.apis.get(candidate.api_id or "")
+    if api is not None and api.is_online is False:
         return None
     return candidate.match(method=request.method, path=upstream_path, query=request.query_params)
 
@@ -253,6 +259,7 @@ def _resolve_versioned_route(
     for candidate in config.routes:
         match = _match_versioned_candidate(
             candidate,
+            config=config,
             version_set_id=version_set_id,
             scheme=version_set.versioning_scheme,
             requested_version=requested_version,

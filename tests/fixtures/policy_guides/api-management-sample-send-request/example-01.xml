@@ -1,0 +1,22 @@
+<choose>
+  <when condition="@(context.Response.StatusCode >= 500)">
+    <send-one-way-request mode="new">
+      <set-url>https://example.invalid/slack-webhook</set-url>
+      <set-method>POST</set-method>
+      <set-body>@{
+        return new JObject(
+          new JProperty("username","APIM Alert"),
+          new JProperty("icon_emoji", ":ghost:"),
+          new JProperty("text", String.Format("{0} {1}\nHost: {2}\n{3} {4}\n User: {5}",
+            context.Request.Method,
+            context.Request.Url.Path + context.Request.Url.QueryString,
+            context.Request.Url.Host,
+            context.Response.StatusCode,
+            context.Response.StatusReason,
+            context.User.Email
+          ))
+        ).ToString();
+      }</set-body>
+    </send-one-way-request>
+  </when>
+</choose>

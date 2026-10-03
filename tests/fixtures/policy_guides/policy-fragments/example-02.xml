@@ -1,0 +1,6 @@
+<policies>
+    <inbound>
+        <include-fragment fragment-id="ForwardContext" />
+        <base />
+    </inbound>
+[...]

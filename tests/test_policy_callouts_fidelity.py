@@ -40,7 +40,7 @@ def _request(
 
 def _runtime(handler) -> PolicyRuntime:
     return PolicyRuntime(
-        gateway_config=GatewayConfig(allow_anonymous=True),
+        gateway_config=GatewayConfig(allow_anonymous=True, workload_identity={"mode": "demo"}),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
 
@@ -237,7 +237,7 @@ def test_backend_basic_auth_replaces_client_authorization() -> None:
     auth = apply_backend_credentials(
         BackendConfig(url="https://example.test", auth_type="basic", basic_username="u", basic_password="p"),
         req,
-        GatewayConfig(allow_anonymous=True),
+        GatewayConfig(allow_anonymous=True, workload_identity={"mode": "demo"}),
     )
     assert auth == ("u", "p")
     assert req.headers["authorization"] == "Basic dTpw"
@@ -256,7 +256,7 @@ def test_backend_managed_identity_sets_local_bearer() -> None:
             managed_identity_resource="resource",
         ),
         req,
-        GatewayConfig(allow_anonymous=True),
+        GatewayConfig(allow_anonymous=True, workload_identity={"mode": "demo"}),
     )
     assert req.headers["authorization"].startswith("Bearer local-apim-mi.")
     assert "x-apim-managed-identity" not in req.headers

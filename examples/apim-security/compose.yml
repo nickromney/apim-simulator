@@ -1,0 +1,84 @@
+x-gateway: &gateway
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  image: apim-simulator-security:local
+  user: "${SECURITY_LAB_UID:-1000}:${SECURITY_LAB_GID:-1000}"
+  env_file: .runtime/lab.env
+  environment: &gateway-environment
+    APIM_CONFIG_PATH: /state/config.json
+    APIM_CONFIG_SOURCE_PATH: /seed/config.json
+    APIM_LOCAL_VAULT_BASE_URL: https://secure-backend-private:8443
+    APIM_LOCAL_VAULT_RESOURCE: https://backend.local
+    APIM_LOCAL_VAULT_CA_FILE: /certs/ca.pem
+    APIM_LOCAL_VAULT_CLIENT_CERT_FILE: /certs/gateway-client.pem
+    APIM_LOCAL_VAULT_CLIENT_KEY_FILE: /certs/gateway-client-key.pem
+    APIM_LOCAL_VAULT_CRL_FILE: /certs/ca.crl.pem
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  volumes:
+    - ./.runtime/certs:/certs:ro
+    - ./.runtime/config.json:/seed/config.json:ro
+  networks: [private]
+  depends_on: [secure-backend]
+services:
+  gateway-a:
+    <<: *gateway
+    volumes:
+      - ./.runtime/certs:/certs:ro
+      - ./.runtime/config.json:/seed/config.json:ro
+      - ./.runtime/state-a:/state
+  gateway-b:
+    <<: *gateway
+    environment:
+      <<: *gateway-environment
+      APIM_REGION: local-b
+    volumes:
+      - ./.runtime/certs:/certs:ro
+      - ./.runtime/config.json:/seed/config.json:ro
+      - ./.runtime/state-b:/state
+  secure-backend:
+    image: apim-simulator-security:local
+    user: "${SECURITY_LAB_UID:-1000}:${SECURITY_LAB_GID:-1000}"
+    entrypoint: [/app/.venv/bin/python, /app/examples/apim-security/tls_backend.py]
+    environment:
+      PORT: "8443"
+      PYTHONPATH: /app
+      VAULT_SECRETS_FILE: /vault/secrets.json
+      TLS_CERT_FILE: /certs/backend.pem
+      TLS_KEY_FILE: /certs/backend-key.pem
+      TLS_CA_FILE: /certs/ca.pem
+      TLS_CRL_FILE: /certs/ca.crl.pem
+      WORKLOAD_PUBLIC_KEY_FILE: /certs/workload-public.pem
+      WORKLOAD_ISSUER: https://apim.local/workload-identity
+      WORKLOAD_AUDIENCE: https://backend.local
+      WORKLOAD_ALLOWED_IDENTITIES: system-assigned
+    volumes: [./.runtime/certs:/certs:ro, ./.runtime/vault:/vault:ro]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports: ["127.0.0.1:${SECURITY_BACKEND_PORT:-8944}:8443"]
+    networks:
+      private:
+        aliases: [secure-backend-private]
+      ingress: {}
+  edge:
+    image: nginx:1.29-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./.runtime/certs:/certs:ro
+    ports: ["127.0.0.1:${SECURITY_GATEWAY_PORT:-8943}:8443"]
+    depends_on: [gateway-a, gateway-b]
+    networks:
+      private:
+        ipv4_address: ${SECURITY_EDGE_PRIVATE_IP:-172.30.77.10}
+      ingress: {}
+networks:
+  ingress: {}
+  private:
+    internal: true
+    ipam:
+      config: [{subnet: 172.30.77.0/24}]

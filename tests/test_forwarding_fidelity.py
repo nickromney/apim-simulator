@@ -26,6 +26,7 @@ def _config(
 ) -> GatewayConfig:
     values: dict[str, object] = {
         "allow_anonymous": True,
+        "network_security": {"allow_simulated_forwarded_headers": True},
         "routes": [
             RouteConfig(
                 name="forwarding-test",

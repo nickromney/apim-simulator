@@ -37,6 +37,7 @@ from app.named_values import (
     validate_named_value_references,
 )
 from app.policy_errors import element_name
+from app.throttling_config import TokenBucket, token_bucket
 
 
 @dataclass(frozen=True)
@@ -159,7 +160,7 @@ class PolicyRequest:
 
     @property
     def in_outbound(self) -> bool:
-        return self.section == "outbound"
+        return self.section in {"outbound", "on-error"}
 
 
 @dataclass
@@ -184,17 +185,23 @@ class PolicyRuntime:
     backend_variable_initializers: list[tuple[str, Any]] = field(default_factory=list)
     deferred_actions: list[Any] = field(default_factory=list)
     llm_metric_emitter: Any = None
+    background_tasks: set[asyncio.Task] = field(default_factory=set)
     custom_metric_emitter: Any = None
+    tls_client_pool: Any = None
     clock: Callable[[], float] | None = None
 
 
-def issue_local_managed_identity_token(resource: str, client_id: str | None = None) -> str:
-    """Issue a deterministic opaque token for the local managed-identity adapter.
+def issue_local_managed_identity_token(
+    resource: str, client_id: str | None = None, *, config: GatewayConfig | None = None
+) -> str:
+    """Issue a granted signed local token, or the explicit demo adapter token."""
+    if config is not None and config.workload_identity.mode != "demo":
+        from app.workload_identity import issue_workload_token
 
-    The simulator has no Microsoft Entra tenant, so this is intentionally not a
-    real access token. The payload keeps the selected resource and identity
-    visible to local tests without forwarding the old simulator marker headers.
-    """
+        try:
+            return issue_workload_token(config.workload_identity, resource, client_id)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(500, "Managed identity token acquisition failed") from exc
     payload = json.dumps(
         {"resource": resource, "client_id": client_id or "system-assigned"},
         separators=(",", ":"),
@@ -442,7 +449,14 @@ class AuthenticationManagedIdentity(PolicyNode):
                 return None
             raise HTTPException(status_code=500, detail="authentication-managed-identity token acquisition failed")
 
-        token = issue_local_managed_identity_token(resource, self.client_id)
+        try:
+            token = issue_local_managed_identity_token(
+                resource, self.client_id, config=runtime.gateway_config if runtime else None
+            )
+        except HTTPException:
+            if self.ignore_error:
+                return None
+            raise
         req.headers["authorization"] = f"Bearer {token}"
         if self.output_token_variable_name:
             req.variables[self.output_token_variable_name] = token
@@ -459,9 +473,21 @@ class AuthenticationCertificate(PolicyNode):
     password: str | None = None
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
-        # Learn documents certificate selection, but is silent on a local
-        # gateway without a certificate store; marker headers are the local
-        # transport adaptation and are removed before ordinary proxying.
+        config = runtime.gateway_config if runtime else None
+        if config is not None and not config.allow_simulated_certificate_authentication:
+            from app.certificate_security import select_certificate
+
+            thumbprint = render_policy_value(self.thumbprint, req, runtime) if self.thumbprint else None
+            certificate_id = render_policy_value(self.certificate_id, req, runtime) if self.certificate_id else None
+            try:
+                select_certificate(config, certificate_id=certificate_id, thumbprint=thumbprint)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(500, "Authentication certificate is not configured") from exc
+            if certificate_id:
+                req.variables["_authentication_certificate_id"] = certificate_id
+            else:
+                req.variables["_authentication_certificate_thumbprint"] = thumbprint
+            return None
         if self.thumbprint is not None:
             req.headers["x-apim-authentication-certificate-thumbprint"] = render_policy_value(
                 self.thumbprint, req, runtime
@@ -584,7 +610,7 @@ class SetBody(PolicyNode):
         # https://learn.microsoft.com/en-us/azure/api-management/set-body-policy
         # In the outbound section set-body sets the response body.
         body = render_policy_value(self.value, req, runtime).encode("utf-8")
-        if req.in_outbound:
+        if req.section in {"outbound", "on-error"}:
             req.response_body = body
         else:
             req.body = body
@@ -1145,10 +1171,10 @@ class RateLimit(PolicyNode):
 
         now = _policy_now(runtime)
         rules = self._applicable_rules(req)
-        buckets: list[tuple[ThrottleRule, list[float], str]] = []
+        buckets: list[tuple[ThrottleRule, list[float] | TokenBucket, str]] = []
         for rule in rules:
             rule_key = _throttle_rule_key(key, rule)
-            bucket = _rate_limit_bucket(store, rule_key)
+            bucket = _configured_rate_limit_bucket(store, rule_key, runtime, now, rule.calls, rule.renewal_period)
             _prune_rate_limit_bucket(bucket, now, rule.renewal_period)
             if len(bucket) >= rule.calls:
                 remaining = max(0, rule.calls - len(bucket))
@@ -1493,13 +1519,25 @@ def _rate_limit_bucket(store: dict[str, Any], key: str) -> list[float]:
     return bucket
 
 
-def _prune_rate_limit_bucket(bucket: list[float], now: float, renewal_period: int) -> None:
+def _configured_rate_limit_bucket(
+    store: dict[str, Any], key: str, runtime: PolicyRuntime | None, now: float, calls: int, renewal_period: int
+) -> list[float] | TokenBucket:
+    if runtime and runtime.gateway_config and runtime.gateway_config.throttling.algorithm == "token-bucket":
+        return token_bucket(store, key, now=now, calls=calls, renewal_period=renewal_period)
+    return _rate_limit_bucket(store, key)
+
+
+def _prune_rate_limit_bucket(bucket: list[float] | TokenBucket, now: float, renewal_period: int) -> None:
+    if isinstance(bucket, TokenBucket):
+        return
     threshold = now - renewal_period
     while bucket and bucket[0] <= threshold:
         bucket.pop(0)
 
 
-def _rate_limit_retry_after(bucket: list[float], now: float, renewal_period: int) -> int:
+def _rate_limit_retry_after(bucket: list[float] | TokenBucket, now: float, renewal_period: int) -> int:
+    if isinstance(bucket, TokenBucket):
+        return bucket.retry_after()
     if not bucket:
         return renewal_period
     earliest = bucket[0]
@@ -1745,7 +1783,9 @@ class RateLimitByKeyDeferred(DeferredPolicyAction):
         renewal_period = _rate_period(self.renewal_period, req, runtime)
         counter_key = render_policy_value(self.counter_key, req, runtime)
         now = _policy_now(runtime)
-        bucket = _rate_limit_bucket(store, f"rate-limit-by-key:{counter_key}")
+        bucket = _configured_rate_limit_bucket(
+            store, f"rate-limit-by-key:{counter_key}", runtime, now, calls, renewal_period
+        )
         _prune_rate_limit_bucket(bucket, now, renewal_period)
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
         increment = _nonnegative_policy_int(
@@ -1773,13 +1813,15 @@ class RateLimitByKeyDeferred(DeferredPolicyAction):
         )
 
 
-def _claim_quota_key_increment(req: PolicyRequest, counter_key: str) -> bool:
+def _claim_quota_key_increment(
+    req: PolicyRequest, counter_key: str, *, variable_name: str = "_quota_by_key_incremented"
+) -> bool:
     """True the first time this request increments a quota-by-key counter.
 
     https://learn.microsoft.com/en-us/azure/api-management/quota-by-key-policy
     says a key shared by several policies is incremented only once per request.
     """
-    claimed = req.variables.setdefault("_quota_by_key_incremented", set())
+    claimed = req.__dict__.setdefault(variable_name, set())
     if counter_key in claimed:
         return False
     claimed.add(counter_key)
@@ -1794,6 +1836,7 @@ class QuotaByKeyDeferred(DeferredPolicyAction):
     increment_condition: str | None
     increment_count: str | None
     first_period_start: str | None
+    bandwidth: int | None = None
 
     def finalize(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:
         store = req.variables.get("quota_store")
@@ -1811,8 +1854,14 @@ class QuotaByKeyDeferred(DeferredPolicyAction):
         )
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
         increment = _nonnegative_policy_int(self.increment_count, req, runtime, name="quota-by-key increment-count")
-        if should_increment and increment and _claim_quota_key_increment(req, counter_key):
+        if self.calls > 0 and should_increment and increment and _claim_quota_key_increment(req, counter_key):
             entry["count"] = int(entry.get("count") or 0) + increment
+        if (
+            self.bandwidth is not None
+            and should_increment
+            and _claim_quota_key_increment(req, counter_key, variable_name="_quota_by_key_bandwidth_incremented")
+        ):
+            entry["bandwidth"] = int(entry.get("bandwidth") or 0) + _quota_bandwidth_kilobytes(req)
         _record_step(
             runtime,
             "quota-by-key",
@@ -1820,6 +1869,7 @@ class QuotaByKeyDeferred(DeferredPolicyAction):
                 "counter_key": counter_key,
                 "deferred": True,
                 "count": int(entry.get("count") or 0),
+                "bandwidth": int(entry.get("bandwidth") or 0),
             },
         )
 
@@ -1880,7 +1930,9 @@ class RateLimitByKey(PolicyNode):
         counter_key = render_policy_value(self.counter_key, req, runtime)
 
         now = _policy_now(runtime)
-        bucket = _rate_limit_bucket(store, f"rate-limit-by-key:{counter_key}")
+        bucket = _configured_rate_limit_bucket(
+            store, f"rate-limit-by-key:{counter_key}", runtime, now, calls, renewal_period
+        )
         _prune_rate_limit_bucket(bucket, now, renewal_period)
 
         if _is_deferred_expression(self.increment_condition) or _is_deferred_expression(self.increment_count):
@@ -1963,6 +2015,23 @@ class QuotaByKey(PolicyNode):
     increment_condition: str | None = None
     increment_count: str | None = None
     first_period_start: str | None = None
+    bandwidth: int | None = None
+
+    def _defer(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
+        if self.bandwidth is not None:
+            req.variables["_policy_response_buffering_required"] = True
+        if runtime is not None:
+            runtime.deferred_actions.append(
+                QuotaByKeyDeferred(
+                    calls=self.calls,
+                    renewal_period=self.renewal_period,
+                    counter_key=self.counter_key,
+                    increment_condition=self.increment_condition,
+                    increment_count=self.increment_count,
+                    first_period_start=self.first_period_start,
+                    bandwidth=self.bandwidth,
+                )
+            )
 
     def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
         store = req.variables.get("quota_store")
@@ -1980,32 +2049,34 @@ class QuotaByKey(PolicyNode):
             first_period_start=self.first_period_start,
         )
         current = int(entry.get("count") or 0)
+        already_counted = counter_key in req.__dict__.get("_quota_by_key_incremented", set())
+        bandwidth_exceeded = self.bandwidth is not None and int(entry.get("bandwidth") or 0) >= self.bandwidth
+        if bandwidth_exceeded:
+            return _quota_response(now=now, reset_at=reset_at, bandwidth_exceeded=True)
         if _is_deferred_expression(self.increment_condition) or _is_deferred_expression(self.increment_count):
-            if current >= calls:
+            if calls > 0 and current >= calls and not already_counted:
                 return _quota_response(now=now, reset_at=reset_at, bandwidth_exceeded=False)
-            if runtime is not None:
-                runtime.deferred_actions.append(
-                    QuotaByKeyDeferred(
-                        calls=self.calls,
-                        renewal_period=self.renewal_period,
-                        counter_key=self.counter_key,
-                        increment_condition=self.increment_condition,
-                        increment_count=self.increment_count,
-                        first_period_start=self.first_period_start,
-                    )
-                )
+            self._defer(req, runtime)
             _record_step(runtime, "quota-by-key", {"counter_key": counter_key, "deferred": True, "count": current})
             return None
 
         should_increment = _policy_bool(self.increment_condition, req, runtime, default=True)
         increment = _nonnegative_policy_int(self.increment_count, req, runtime, name="quota-by-key increment-count")
-        would_exceed = should_increment and current + increment > calls
-        if should_increment and increment and not would_exceed and _claim_quota_key_increment(req, counter_key):
+        would_exceed = calls > 0 and should_increment and not already_counted and current + increment > calls
+        if (
+            calls > 0
+            and should_increment
+            and increment
+            and not would_exceed
+            and _claim_quota_key_increment(req, counter_key)
+        ):
             current += increment
             entry["count"] = current
         _record_step(runtime, "quota-by-key", {"counter_key": counter_key, "count": current})
         if would_exceed:
             return _quota_response(now=now, reset_at=reset_at, bandwidth_exceeded=False)
+        if self.bandwidth is not None:
+            self._defer(req, runtime)
         return None
 
 
@@ -4632,7 +4703,9 @@ class SendRequest(PolicyNode):
             path=req.path,
             query=dict(req.query),
             headers=dict(req.headers) if copying else {},
-            variables=req.variables,
+            variables={
+                key: value for key, value in req.variables.items() if not key.startswith("_authentication_certificate_")
+            },
             body=req.body if copying and not req.in_outbound else b"",
             section=req.section,
         )
@@ -4656,7 +4729,9 @@ class SendRequest(PolicyNode):
                 if self.authentication_managed_identity_ignore_error:
                     return
                 raise HTTPException(status_code=500, detail="send-request managed identity token acquisition failed")
-            token = issue_local_managed_identity_token(resource, self.authentication_managed_identity_client_id)
+            token = self._callout_identity_token(resource, runtime)
+            if token is None:
+                return
             temp_req.headers["authorization"] = f"Bearer {token}"
             if self.authentication_managed_identity_output_token_variable_name:
                 req.variables[self.authentication_managed_identity_output_token_variable_name] = token
@@ -4667,9 +4742,19 @@ class SendRequest(PolicyNode):
                     "send-request",
                 )
         if self.authentication_certificate_thumbprint is not None:
-            temp_req.headers["x-apim-authentication-certificate-thumbprint"] = render_policy_value(
-                self.authentication_certificate_thumbprint, req, runtime
+            AuthenticationCertificate(thumbprint=self.authentication_certificate_thumbprint).apply(temp_req, runtime)
+
+    def _callout_identity_token(self, resource, runtime):
+        try:
+            return issue_local_managed_identity_token(
+                resource,
+                self.authentication_managed_identity_client_id,
+                config=runtime.gateway_config if runtime else None,
             )
+        except HTTPException:
+            if self.authentication_managed_identity_ignore_error:
+                return None
+            raise
 
     def _response_variable_name(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> str:
         name = render_policy_value(self.response_variable_name, req, runtime).strip()
@@ -4704,8 +4789,22 @@ class SendRequest(PolicyNode):
         timeout = float(render_policy_value(self.timeout or "60", req, runtime)) if self.timeout else 60.0
 
         try:
-            response = await runtime.http_client.request(
-                method, url, headers=temp_req.headers, content=temp_req.body, timeout=timeout
+            callout_client = runtime.http_client
+            if runtime.tls_client_pool is not None and runtime.gateway_config is not None:
+                from app.certificate_security import selected_backend_certificate
+                from app.config import BackendConfig
+
+                backend = BackendConfig(url=url)
+                certificate = selected_backend_certificate(backend, temp_req.variables, runtime.gateway_config)
+                callout_client = runtime.tls_client_pool.client_for(backend, callout_client, certificate)
+            response = await callout_client.request(
+                method,
+                url,
+                headers=[
+                    (key, value) for key, value in temp_req.headers.as_header_pairs() if key.lower() != "content-length"
+                ],
+                content=temp_req.body,
+                timeout=timeout,
             )
         except httpx.RequestError as exc:
             if not self.ignore_error:
@@ -5304,18 +5403,18 @@ def _parse_quota_by_key(el: ElementTree.Element) -> QuotaByKey:
         },
         "quota-by-key",
     )
-    if "bandwidth" in el.attrib:
-        raise HTTPException(status_code=500, detail="quota-by-key bandwidth is not supported")
     calls = (el.attrib.get("calls") or "").strip()
+    bandwidth = (el.attrib.get("bandwidth") or "").strip()
     renewal_period = (el.attrib.get("renewal-period") or "").strip()
     counter_key = (el.attrib.get("counter-key") or "").strip()
-    if not calls:
-        raise HTTPException(status_code=500, detail="quota-by-key requires calls")
+    if not calls and not bandwidth:
+        raise HTTPException(status_code=500, detail="quota-by-key requires calls or bandwidth")
     if not renewal_period:
         raise HTTPException(status_code=500, detail="quota-by-key requires renewal-period")
     if not counter_key:
         raise HTTPException(status_code=500, detail="quota-by-key requires counter-key")
-    calls_value = _static_positive_int(el, "calls", "quota-by-key")
+    calls_value = _static_positive_int(el, "calls", "quota-by-key", required=False)
+    bandwidth_value = _static_positive_int(el, "bandwidth", "quota-by-key", required=False)
     renewal_value = _static_period(el, "quota-by-key", allow_zero=True, minimum=300)
     first_period_start = el.attrib.get("first-period-start") or "0001-01-01T00:00:00Z"
     if first_period_start:
@@ -5330,6 +5429,7 @@ def _parse_quota_by_key(el: ElementTree.Element) -> QuotaByKey:
         increment_condition=el.attrib.get("increment-condition"),
         increment_count=el.attrib.get("increment-count"),
         first_period_start=first_period_start,
+        bandwidth=bandwidth_value,
     )
 
 
@@ -6139,14 +6239,21 @@ _CONSTANT_ELEMENTS: dict[str, Callable[[], PolicyNode]] = {
 # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
 _POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
     "choose": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "send-service-bus-message": frozenset({"inbound", "outbound", "on-error"}),
+    "log-to-eventhub": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "send-one-way-request": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "find-and-replace": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "cross-domain": frozenset({"inbound"}),
     "include-fragment": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "set-header": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "set-variable": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "set-query-parameter": frozenset({"inbound", "backend"}),
-    "set-body": frozenset({"inbound", "backend", "outbound"}),
+    "set-body": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "set-status": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "rewrite-uri": frozenset({"inbound"}),
     "check-header": frozenset({"inbound"}),
     "ip-filter": frozenset({"inbound"}),
+    "validate-client-certificate": frozenset({"inbound"}),
     "cors": frozenset({"inbound"}),
     "rate-limit": frozenset({"inbound"}),
     "rate-limit-by-key": frozenset({"inbound"}),
@@ -6224,8 +6331,23 @@ def _parse_node(
         return _annotate_policy_node(node, policy_id=el.attrib.get("id"), path=path)
     parser = _ELEMENT_PARSERS.get(tag)
     if parser is None:
-        raise HTTPException(status_code=500, detail=f"Unsupported policy element: {tag}")
+        return _parse_extension(el, path)
+
     return _annotate_policy_node(parser(el), policy_id=el.attrib.get("id"), path=path)
+
+
+def _parse_extension(el, path):
+    from app.policy_certificates import parse_certificate_policy
+    from app.policy_messaging import parse_messaging_policy
+    from app.policy_transforms import parse_transform_policy
+
+    try:
+        node = parse_certificate_policy(el) or parse_messaging_policy(el) or parse_transform_policy(el)
+    except ValueError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    if node is None:
+        raise HTTPException(500, f"Unsupported policy element: {el.tag}")
+    return _annotate_policy_node(node, policy_id=el.attrib.get("id"), path=path)
 
 
 def _iter_policy_nodes(nodes: list[PolicyNode]) -> Iterator[PolicyNode]:
@@ -6404,7 +6526,12 @@ def _reads_response_body(step: PolicyNode) -> bool:
     if isinstance(step, Choose):
         nested = [item for _cond, steps in step.branches for item in steps] + list(step.otherwise)
         return any(_reads_response_body(item) for item in nested)
-    return isinstance(step, SetBody | ValidateContent)
+    from app.policy_messaging import LogToEventHub, SendOneWayRequest, SendServiceBusMessage
+    from app.policy_transforms import FindAndReplace
+
+    return isinstance(
+        step, SetBody | ValidateContent | FindAndReplace | LogToEventHub | SendServiceBusMessage | SendOneWayRequest
+    )
 
 
 def outbound_reads_response_body(docs: list[PolicyDocument]) -> bool:
@@ -6458,6 +6585,7 @@ async def apply_on_error_async(
     req: PolicyRequest,
     runtime: PolicyRuntime | None = None,
 ) -> ResponseSpec | None:
+    req.section = "on-error"
     return await _apply_section_async(docs, "on_error", req, runtime)
 
 

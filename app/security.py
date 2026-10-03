@@ -9,6 +9,7 @@ import jwt
 from fastapi import HTTPException, Request
 from jwt import InvalidTokenError, PyJWKClient
 
+from app.certificate_security import certificate_identity, load_certificates, verify_certificate
 from app.config import (
     ClientCertificateConfig,
     ClientCertificateMode,
@@ -24,7 +25,7 @@ from app.gateway_errors import GatewayError, subscription_key_error
 
 @dataclass(frozen=True)
 class ClientCertContext:
-    """Extracted client certificate information from proxy headers."""
+    """Certificate-derived identity, or explicit demo header claims."""
 
     subject: str | None
     issuer: str | None
@@ -67,11 +68,28 @@ def build_client_principal(claims: dict[str, Any]) -> str:
 
 
 class OIDCVerifier:
-    def __init__(self, issuer: str, audience: str, *, jwks_uri: str | None, jwks: dict[str, Any] | None):
+    def __init__(
+        self,
+        issuer: str,
+        audience: str,
+        *,
+        jwks_uri: str | None,
+        jwks: dict[str, Any] | None,
+        config: GatewayConfig | None = None,
+        ca_file: str | None = None,
+    ):
         self.issuer = issuer
         self.audience = audience
         self._jwks = jwks
-        self._jwks_client = PyJWKClient(jwks_uri) if (jwks_uri and not jwks) else None
+        self._jwks_client = self._remote_jwk_client(jwks_uri, config, ca_file) if (jwks_uri and not jwks) else None
+
+    @staticmethod
+    def _remote_jwk_client(uri, config, ca_file):
+        if config is None:
+            return PyJWKClient(uri)
+        from app.egress_security import GuardedJWKClient
+
+        return GuardedJWKClient(uri, config, ca_file)
 
     def _get_key_from_static_jwks(self, token: str) -> Any:
         header = jwt.get_unverified_header(token)
@@ -420,6 +438,29 @@ def _extract_client_cert_context(request: Request, cert_cfg: ClientCertificateCo
     )
 
 
+def extract_request_certificate(request: Request, config: GatewayConfig) -> ClientCertContext | None:
+    """Read a certificate from actual TLS or an attested TLS terminator."""
+    settings = config.client_certificate
+    tls_chain = request.scope.get("extensions", {}).get("tls", {}).get("client_cert_chain") or []
+    if tls_chain:
+        pem = "\n".join(tls_chain)
+    elif request.scope.get("apim.trusted_proxy"):
+        pem = request.headers.get(settings.cert_header)
+    elif settings.allow_simulated_headers:
+        return _extract_client_cert_context(request, settings)
+    else:
+        return None
+    if not pem:
+        return None
+    try:
+        leaf = load_certificates(pem)[0]
+        identity = certificate_identity(leaf)
+    except ValueError as exc:
+        raise HTTPException(403, "Invalid client certificate") from exc
+    request.scope["apim.client_certificate_pem"] = pem
+    return ClientCertContext(**identity, cert_pem=pem)
+
+
 def _cert_matches_trusted(cert: ClientCertContext, trusted: TrustedClientCertificateConfig) -> bool:
     """Check every configured claim on one trusted identity.
 
@@ -448,24 +489,44 @@ def require_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-def require_tenant_access(request: Request) -> None:
+def require_tenant_access(request: Request, *, permission=None, api_id: str | None = None) -> None:
+    from app.control_plane import authorize_operator
+
     cfg: GatewayConfig = request.app.state.gateway_config
-    if not cfg.tenant_access.enabled:
+    if not cfg.tenant_access.enabled and not cfg.control_plane.enabled:
         raise HTTPException(status_code=404, detail="Not found")
-
+    if cfg.control_plane.enabled and request.headers.get("authorization"):
+        authorize_operator(request, cfg.control_plane, permission=permission, api_id=api_id)
+        return
+    if cfg.control_plane.enabled and not cfg.control_plane.allow_legacy_tenant_keys:
+        authorize_operator(request, cfg.control_plane, permission=permission, api_id=api_id)
+        return
     admin = request.headers.get("x-apim-admin-token", "")
-    if cfg.admin_token and admin == cfg.admin_token:
-        return
-
     provided = request.headers.get("x-apim-tenant-key", "")
-    if not provided:
+    admin_valid = bool(cfg.admin_token and admin == cfg.admin_token)
+    tenant_valid = bool(provided and provided in {cfg.tenant_access.primary_key, cfg.tenant_access.secondary_key})
+    if not admin_valid and not tenant_valid:
         raise HTTPException(status_code=403, detail="Forbidden")
+    request.state.management_actor = {
+        "subject": "legacy-admin" if admin_valid else "legacy-tenant-key",
+        "roles": ["contributor"],
+        "authentication": "legacy-shared-key",
+    }
 
-    if provided == (cfg.tenant_access.primary_key or ""):
+
+def _verify_certificate_trust(request: Request, cert_ctx: ClientCertContext, cert_cfg: ClientCertificateConfig) -> None:
+    if cert_cfg.allow_simulated_headers:
         return
-    if provided == (cfg.tenant_access.secondary_key or ""):
-        return
-    raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        verify_certificate(
+            cert_ctx.cert_pem or "",
+            ca_file=cert_cfg.ca_file,
+            crl_file=cert_cfg.crl_file,
+            validate_revocation=bool(cert_cfg.crl_file),
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(403, "Client certificate not trusted or no longer valid") from exc
+    request.scope["apim.client_certificate_verified"] = True
 
 
 def validate_client_certificate(request: Request, config: GatewayConfig) -> ClientCertContext | None:
@@ -478,16 +539,17 @@ def validate_client_certificate(request: Request, config: GatewayConfig) -> Clie
     cert_cfg = config.client_certificate
     mode = cert_cfg.mode
 
+    cert_ctx = extract_request_certificate(request, config)
     if mode == ClientCertificateMode.Disabled:
-        return None
-
-    cert_ctx = _extract_client_cert_context(request, cert_cfg)
+        return cert_ctx
 
     if mode == ClientCertificateMode.Required and cert_ctx is None:
         raise HTTPException(status_code=401, detail="Client certificate required")
 
     if cert_ctx is None:
         return None
+
+    _verify_certificate_trust(request, cert_ctx, cert_cfg)
 
     # If we have trusted certificates, validate against them
     if cert_cfg.trusted_certificates:

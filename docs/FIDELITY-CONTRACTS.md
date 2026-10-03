@@ -212,35 +212,51 @@ edits and shared-path versions. The paired browser journey is recorded in
 [portal UI pass](portal-ui-pass.md). Confidence: `verified-subset` for local
 snapshots; imported revision metadata remains `adapted`.
 
-## Certificates and cloud identity — adapted local contract
+## Certificates and cloud identity — verified local subset
 
-**Contract.** Certificate and managed-identity features expose policy decisions
-and request shapes locally, while transport and cloud trust are adapted.
+**Contract.** Client certificate identity comes from actual TLS or an attested
+TLS terminator. Configured identity claims use AND within one identity and OR
+across identities. A local CA and signed CRL provide chain, validity and
+revocation checks. The `validate-client-certificate` XML policy implements its
+validation flags, identity selectors and ignore-error behavior; it is restricted
+to inbound. Revocation checking requires a configured current signed local CRL.
 
-**Inputs and defaults.** Client-certificate authentication matches configured
-thumbprint/subject/issuer marker headers; configured identities are AND within
-one identity and OR across identities. Backend certificate references and Key
-Vault named-value references are parsed through the local configuration.
-Managed identity accepts resource/client ID and output-variable options.
+**Inputs and defaults.** Trusted proxy CIDRs refer to real socket peers;
+untrusted forwarded certificate markers cannot establish identity. Backend
+certificate/key files and stored certificate IDs/thumbprints select real mTLS
+transports. Stored certificates may reference signed local vault PKCS#12
+secrets; fetched bundles are bounded and loaded through mode0600 temporary PEM
+files removed immediately after SSLContext loading. Changes to credential files
+or vault bundle digests create a new connection pool. Retired pools close after
+active response streams finish, and the reusable cache is bounded. Callout
+certificate selections do not alter the main backend's certificate. File-based
+certificate selection does not implement inline PKCS#12 policy bodies.
 
-**Order and result.** Certificate checks run in inbound authorization order.
-Authentication-certificate and managed-identity policies set the corresponding
-backend/request headers. Key Vault values resolve through local environment
-overrides; managed identity emits a deterministic opaque local token.
+**Order and result.** Certificate checks run before inbound execution and
+policy checks run in inbound order. Workload identity defaults to signed RS256
+credentials with issuer/audience/identity/lifetime validation and explicit
+resource grants. Local vault requests support signed identity and mTLS; gateway
+requests snapshot secret resolutions, then subsequent requests see rotations.
+OIDC JWKS and vault requests share the outbound firewall with backend/callout
+traffic. Cipher protocol defaults require TLS 1.2 or newer.
 
-**Errors and exclusions.** No Azure certificate store, private-key transport,
-real Entra token issuance, Key Vault call, certificate chain/revocation/validity
-verification, or gateway TLS certificate management is promised. The
-`validate-client-certificate` XML policy is unsupported in the current
-simulator; config-marker mTLS checks do not claim to implement that policy.
-Reject unsupported certificate policy attributes rather than silently treating
-them as validated.
+**Local adaptations.** CA/CRL files and a signed local issuer reproduce the
+security outcomes without requiring external services. They are local trust
+infrastructure rather than Microsoft Entra credentials or an Azure certificate
+store. Teaching examples must explicitly enable simulated certificate headers,
+backend marker authentication, opaque workload tokens, or supplied forwarding
+headers. Those adaptations default to disabled. See
+[network and TLS details](security/network-tls.md) for settings and boundaries.
 
 **Evidence.** [authentication-certificate](https://learn.microsoft.com/en-us/azure/api-management/authentication-certificate-policy),
 [managed identity](https://learn.microsoft.com/en-us/azure/api-management/authentication-managed-identity-policy),
 [validate-client-certificate](https://learn.microsoft.com/en-us/azure/api-management/validate-client-certificate-policy),
 and [custom CA certificates](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-ca-certificates).
-Confidence: `adapted`.
+`tests/test_network_certificate_security.py` verifies real TLS handshakes,
+negative trust/expiry/revocation/protocol cases, signed JWT rejection, private
+socket peers, firewall bypass attempts, and credential/secret rotation.
+Confidence: `verified-subset` for local trust outcomes; cloud issuer/provisioning
+steps use the explicit local adapters above.
 
 ## Cache, throttling, backend pools, and AI policies — adapted contracts
 
@@ -251,12 +267,25 @@ duration, key, default value, and policy order follow the documented subset.
 writes are synchronous. A local cache is volatile and single-process, so shared
 regional/distributed cache behavior is not promised.
 
-**Throttling and quotas.** `rate-limit` and `rate-limit-by-key` use a local
-sliding-window counter for subscription/key scopes and return documented status
-families and headers. This models classic-tier semantics. APIM v2 token-bucket
-behavior, distributed counter drift, and cross-gateway synchronization are not
-claimed. `quota-by-key` call quotas are supported as an adaptation; bandwidth
-enforcement is unsupported.
+**Throttling and quotas — supported subset.** `rate-limit` and
+`rate-limit-by-key` support subscription/key counters with the documented
+status families and headers. `throttling.algorithm` selects `sliding-window`
+(the default, for classic behavior) or `token-bucket` (for v2 behavior).
+Token buckets start full, refill continuously at `calls / renewal-period`,
+and cap their available tokens at `calls`. The guide's six-call, sixty-second
+bucket admits one additional call after ten seconds. `quota-by-key` supports
+call limits, bandwidth limits, or both, with response-conditioned increments
+and renewal. Repeated policies sharing a key count each request once.
+Bandwidth accounting includes request and response bodies after the response
+is known. Rounding up to kilobytes is a local choice where the reference does
+not specify rounding; exhaustion rejects the next request
+with 403 and Retry-After. Counters are local to one gateway process;
+distributed counter drift and cross-gateway synchronization are not claimed.
+Evidence: `tests/test_advanced_throttling_guide.py`,
+`tests/test_policy_throttling.py`, the
+[advanced throttling guide](https://learn.microsoft.com/en-us/azure/api-management/api-management-sample-flexible-throttling),
+and [quota-by-key reference](https://learn.microsoft.com/en-us/azure/api-management/quota-by-key-policy).
+Confidence: `verified-subset` for these local algorithms and limits.
 
 **Backend pools.** Pool backends support local priority/weight selection,
 failover, session-affinity markers, and per-member adapted circuit breakers.
@@ -337,3 +366,36 @@ Learn link. When behavior is intentionally adapted, record the adaptation in
 the contract and matrix before changing the implementation. When a reference
 is silent, label the local choice as an inference instead of presenting it as
 Azure behavior.
+
+## Policy guide adapters — local contracts
+
+The thirteen policy guide journeys live in `examples/apim-policies`. Their
+[dated inventory](policy-validation/INVENTORY.md) records source hashes,
+fixtures and explicit adaptations. Validation proves the listed outcomes,
+not every policy reference or every supported .NET expression.
+
+**Messaging and logging.** A separate Compose HTTP pub/sub container implements
+queue FIFO, independent topic subscriptions, TTL and sender permissions.
+`send-service-bus-message` maps namespace/identity to an explicit local binding;
+`log-to-eventhub` maps logger destinations to broker topics. Logging's local
+`ToHttpMessage` helper preserves bodies and filters credentials. It replaces
+C# LINQ serialization used by the source guide. `send-one-way-request` schedules
+a background HTTP notification without changing the original response on a
+transport failure. AMQP, Azure delivery infrastructure and Moesif analytics
+are outside this adapter's contract.
+
+**Secrets.** Named value display-name changes update references. An explicitly
+configured local vault base maps secret identifiers to a read-only HTTP secret
+endpoint, with no external fallback. Secrets are refreshed for subsequent
+requests. Environment overrides remain available. This simulates the guide's
+secret rotation workflow without cloud identity or Key Vault dependencies.
+
+**GraphQL.** Schema-driven execution supports HTTP data-source field resolvers,
+arguments, nested parent values and resolver request/response policies. Local
+management APIs author schemas and resolver mappings. This guide's HTTP resolver
+workflow does not establish Cosmos DB or Azure SQL resolver support.
+
+**Authoring and debugging.** Copilot and VS Code guides are represented by
+local management authoring, execution of the documented prompt outcomes,
+trace variables/steps and replay. No Azure CLI emulation or editor extension
+is involved.

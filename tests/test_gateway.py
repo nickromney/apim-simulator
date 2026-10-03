@@ -285,6 +285,7 @@ def test_route_host_match_prefers_x_forwarded_host() -> None:
 
     app = create_app(
         config=GatewayConfig(
+            network_security={"allow_simulated_forwarded_headers": True},
             allow_anonymous=True,
             routes=[
                 RouteConfig(
@@ -324,6 +325,7 @@ def test_trace_headers_and_trace_lookup_work() -> None:
     config = GatewayConfig(
         allow_anonymous=True,
         trace_enabled=True,
+        trace_allow_unauthenticated=True,
         proxy_streaming=False,
         emit_simulator_response_headers=True,
         routes=[
@@ -557,6 +559,7 @@ def test_subscription_bypass_allows_missing_key() -> None:
     config = GatewayConfig.model_validate(
         {
             "allow_anonymous": False,
+            "network_security": {"allow_simulated_forwarded_headers": True},
             "allowed_origins": ["*"],
             "products": {"p1": {"name": "p1", "require_subscription": True}},
             "oidc": {"issuer": issuer, "audience": audience, "jwks": jwks},
@@ -1186,6 +1189,7 @@ def test_policy_backend_return_response_short_circuits_upstream() -> None:
     config = GatewayConfig(
         allow_anonymous=True,
         trace_enabled=True,
+        trace_allow_unauthenticated=True,
         routes=[
             RouteConfig(
                 name="r1",
@@ -2130,8 +2134,10 @@ def test_management_plane_rotate_subscription_key_updates_gateway_lookup() -> No
 
 def test_trace_payload_captures_forwarded_headers() -> None:
     config = GatewayConfig(
+        network_security={"allow_simulated_forwarded_headers": True},
         allow_anonymous=True,
         trace_enabled=True,
+        trace_allow_unauthenticated=True,
         proxy_streaming=False,
         routes=[
             RouteConfig(
@@ -3667,6 +3673,7 @@ def test_management_replay_returns_response_and_trace() -> None:
             allow_anonymous=True,
             tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
             trace_enabled=True,
+            trace_allow_unauthenticated=True,
             proxy_streaming=False,
             routes=[
                 RouteConfig(
@@ -3721,6 +3728,7 @@ def test_management_replay_uses_https_replay_base_url(monkeypatch: pytest.Monkey
             allow_anonymous=True,
             tenant_access=TenantAccessConfig(enabled=True, primary_key="t1"),
             trace_enabled=True,
+            trace_allow_unauthenticated=True,
             proxy_streaming=False,
             routes=[
                 RouteConfig(
@@ -3796,7 +3804,9 @@ def test_mtls_mode_required_accepts_request_with_cert() -> None:
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
-            client_certificate=ClientCertificateConfig(mode=ClientCertificateMode.Required),
+            client_certificate=ClientCertificateConfig(
+                allow_simulated_headers=True, mode=ClientCertificateMode.Required
+            ),
             routes=[
                 RouteConfig(
                     name="default",
@@ -3848,6 +3858,7 @@ def test_mtls_trusted_cert_by_thumbprint() -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             client_certificate=ClientCertificateConfig(
+                allow_simulated_headers=True,
                 mode=ClientCertificateMode.Required,
                 trusted_certificates=[
                     TrustedClientCertificateConfig(
@@ -3892,6 +3903,7 @@ def test_mtls_trusted_cert_by_subject() -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             client_certificate=ClientCertificateConfig(
+                allow_simulated_headers=True,
                 mode=ClientCertificateMode.Required,
                 trusted_certificates=[
                     TrustedClientCertificateConfig(
@@ -3935,6 +3947,7 @@ def test_mtls_trusted_identity_requires_all_configured_claims() -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             client_certificate=ClientCertificateConfig(
+                allow_simulated_headers=True,
                 mode=ClientCertificateMode.Required,
                 trusted_certificates=[
                     TrustedClientCertificateConfig(
@@ -3983,6 +3996,7 @@ def test_mtls_trusted_cert_by_issuer() -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             client_certificate=ClientCertificateConfig(
+                allow_simulated_headers=True,
                 mode=ClientCertificateMode.Required,
                 trusted_certificates=[
                     TrustedClientCertificateConfig(
@@ -4023,6 +4037,7 @@ def test_mtls_custom_header_names() -> None:
         config=GatewayConfig(
             allow_anonymous=True,
             client_certificate=ClientCertificateConfig(
+                allow_simulated_headers=True,
                 mode=ClientCertificateMode.Required,
                 subject_header="X-SSL-Client-Subject",
                 issuer_header="X-SSL-Client-Issuer",
@@ -4082,6 +4097,7 @@ def test_reload_endpoint_reloads_config() -> None:
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
+            admin_token="reload-test-admin",
             routes=[
                 RouteConfig(
                     name="default",
@@ -4093,7 +4109,7 @@ def test_reload_endpoint_reloads_config() -> None:
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True}))),
     )
     with TestClient(app) as client:
-        resp = client.post("/apim/reload")
+        resp = client.post("/apim/reload", headers={"X-Apim-Admin-Token": "reload-test-admin"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "reloaded"
         assert "routes" in resp.json()
@@ -4130,6 +4146,7 @@ def test_named_values_resolve_in_backend_credentials_and_are_masked_in_trace() -
     config = GatewayConfig(
         allow_anonymous=True,
         trace_enabled=True,
+        trace_allow_unauthenticated=True,
         proxy_streaming=False,
         named_values={
             "backend-host": NamedValueConfig(value="backend.example.test"),
@@ -4183,6 +4200,7 @@ def test_backend_managed_identity_and_client_certificate_headers_are_applied() -
     app = create_app(
         config=GatewayConfig(
             allow_anonymous=True,
+            workload_identity={"mode": "demo"},
             backends={
                 "managed-identity": BackendConfig(
                     url=_http_url("managed-identity-upstream"),
@@ -4192,6 +4210,7 @@ def test_backend_managed_identity_and_client_certificate_headers_are_applied() -
                 "client-certificate": BackendConfig(
                     url=_http_url("client-certificate-upstream"),
                     auth_type="client_certificate",
+                    allow_simulated_certificate=True,
                     client_certificate_thumbprints=["thumb-a", "thumb-b"],
                 ),
             },
@@ -4271,6 +4290,7 @@ def test_validate_jwt_policy_uses_openid_config_and_updates_claim_headers() -> N
         config=GatewayConfig(
             allow_anonymous=True,
             trace_enabled=True,
+            trace_allow_unauthenticated=True,
             proxy_streaming=False,
             inject_simulator_identity_headers=True,
             routes=[
@@ -4434,6 +4454,7 @@ def test_rate_limit_by_key_supports_response_condition_and_custom_headers() -> N
         config=GatewayConfig(
             allow_anonymous=True,
             trace_enabled=True,
+            trace_allow_unauthenticated=True,
             proxy_streaming=False,
             routes=[
                 RouteConfig(name="r1", path_prefix="/api", upstream_base_url=_http_url("upstream"), policies_xml=policy)
@@ -5061,7 +5082,7 @@ def test_cached_gateway_response_populates_trace_headers_and_trace_store() -> No
         policy_runtime=PolicyRuntime(gateway_config=GatewayConfig(trace_enabled=True)),
         trace_base={"route_name": "r1"},
         trace_collector=None,
-        cfg=GatewayConfig(trace_enabled=True, emit_simulator_response_headers=True),
+        cfg=GatewayConfig(trace_enabled=True, trace_allow_unauthenticated=True, emit_simulator_response_headers=True),
         gateway_metrics=SimpleNamespace(cache_events=SimpleNamespace(add=lambda *args, **kwargs: None)),
         correlation_id="corr-123",
         trace_id="trace-123",

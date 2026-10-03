@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.config import (
     ApiConfig,
@@ -193,11 +194,29 @@ def project_subscription(config: GatewayConfig, config_key: str, subscription: S
     }
 
 
+def _backend_public_url(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "[redacted]"
+    host = parsed.netloc.rsplit("@", 1)[-1]
+    netloc = "[redacted]@" + host if "@" in parsed.netloc else host
+    query = urlencode([(key, "[redacted]") for key, _ in parse_qsl(parsed.query, keep_blank_values=True)])
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, parsed.fragment))
+
+
 def project_backend(config: GatewayConfig, backend_id: str, backend: BackendConfig) -> dict[str, Any]:
+    payload = backend.model_dump(mode="json")
+    for field in ("basic_password", "authorization_parameter"):
+        if payload.get(field) is not None:
+            payload[field] = "[redacted]"
+    for field in ("header_credentials", "query_credentials"):
+        payload[field] = dict.fromkeys(payload.get(field, {}), "[redacted]")
+    payload["url"] = _backend_public_url(backend.url)
     return {
         "id": backend_id,
         "resource_id": nested_resource_id(config, "backends", backend_id),
-        **backend.model_dump(mode="json"),
+        **payload,
     }
 
 
@@ -206,6 +225,7 @@ def project_named_value(config: GatewayConfig, named_value_id: str, named_value:
     return {
         "id": named_value_id,
         "resource_id": nested_resource_id(config, "named-values", named_value_id),
+        "display_name": named_value.display_name or named_value_id,
         "secret": named_value.secret,
         "value": named_value.value,
         "value_from_key_vault": (

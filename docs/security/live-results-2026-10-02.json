@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-02",
+  "base_url": "https://localhost:<SECURITY_GATEWAY_PORT>",
+  "checks": [
+    {
+      "check": "tls-host-port",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "signed-workload-and-backend-mtls",
+      "passed": true,
+      "detail": "{\"ok\": true, \"identity\": \"system-assigned\", \"client_thumbprint\": \"59D7D8AD7B0B261972A0DC5415B0D3130B3B627F\", \"path\": \"/echo\", \"body\": {\"payload\": \"preserved\"}, \"vault_secret_sha256\": \"96af759e69e4bfbb598c43f717c498ebd2a21e11e1de488ab67db763ba8b82ae\"}"
+    },
+    {
+      "check": "request-body-preserved",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "signed-vault-secret-rotation",
+      "passed": true,
+      "detail": "{\"ok\": true, \"identity\": \"system-assigned\", \"client_thumbprint\": \"59D7D8AD7B0B261972A0DC5415B0D3130B3B627F\", \"path\": \"/echo\", \"body\": {\"rotation\": true}, \"vault_secret_sha256\": \"adbc8fdd2b6fc5a9b8b360fea0e0dea8580f34484119656628619aeeb03bf0f9\"}"
+    },
+    {
+      "check": "signed-vault-certificate-rotation",
+      "passed": true,
+      "detail": "{\"ok\": true, \"identity\": \"system-assigned\", \"client_thumbprint\": \"79E47AFC59F3C6BCC4DBF21AF5C662EFCB7870C0\", \"path\": \"/echo\", \"body\": {\"certificate_rotation\": true}, \"vault_secret_sha256\": \"96af759e69e4bfbb598c43f717c498ebd2a21e11e1de488ab67db763ba8b82ae\"}"
+    },
+    {
+      "check": "public-trace-denied",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "reload-anonymous-denied",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "reader-write-denied",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "administrator-mfa-required",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "administrator-device-required",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "waf-script-denied",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "bounded-body-denied",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "delete-lock-enforced",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "encrypted-backup",
+      "passed": true,
+      "detail": "{\"format\":\"apim-encrypted-config-v1\",\"key_env\":\"APIM_CONFIG_ENCRYPTION_KEY\",\"ciphertext\":\"gAAAAABqv7"
+    },
+    {
+      "check": "backup-hides-secrets",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "restore-valid-snapshot",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "operator-restore-denied",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "check": "attributed-durable-events",
+      "passed": true,
+      "detail": "{\"events\":[{\"id\":334,\"timestamp\":1790951370.2416,\"kind\":\"management_write\",\"actor\":\"local-security-operator\",\"method\":\"POST\",\"path\":\"/apim/security/re"
+    },
+    {
+      "check": "local-region-failover",
+      "passed": true,
+      "detail": "[200, 200, 200, 200, 200]"
+    },
+    {
+      "check": "incoming-client-certificate-required",
+      "passed": true,
+      "detail": "{\"statusCode\":403,\"message\":\"Client certificate validation failed\"}"
+    },
+    {
+      "check": "forged-certificate-metadata-denied",
+      "passed": true,
+      "detail": "{\"statusCode\":403,\"message\":\"Client certificate validation failed\"}"
+    },
+    {
+      "check": "backend-direct-access-requires-client-certificate",
+      "passed": true,
+      "detail": ""
+    }
+  ]
+}
