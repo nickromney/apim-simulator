@@ -1555,20 +1555,20 @@ function App() {
             </select>
           </label>
         </nav>
-        <nav className="service-nav" aria-label="Management areas">
-          {(["apis", "subscriptions", "traces"] as const).map((area) => (
-            <button
-              key={area}
-              type="button"
-              className={activeArea === area ? "active" : ""}
-              aria-current={activeArea === area ? "page" : undefined}
-              onClick={() => setActiveArea(area)}
-            >
-              {area === "apis" ? "APIs" : area === "subscriptions" ? "Subscriptions" : "Request traces"}
-            </button>
-          ))}
-        </nav>
       </header>
+      <nav className="service-nav" aria-label="Management areas">
+        {(["apis", "subscriptions", "traces"] as const).map((area) => (
+          <button
+            key={area}
+            type="button"
+            className={activeArea === area ? "active" : ""}
+            aria-current={activeArea === area ? "page" : undefined}
+            onClick={() => setActiveArea(area)}
+          >
+            {area === "apis" ? "APIs" : area === "subscriptions" ? "Subscriptions" : "Request traces"}
+          </button>
+        ))}
+      </nav>
 
       <details className="connection-control" ref={connectionControl}>
         <summary>
