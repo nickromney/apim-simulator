@@ -13,10 +13,9 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "astro": "^6.1.6"
+    "astro": "^7.3.5"
   },
   "overrides": {
-    "vite": "7.3.2",
     "yaml": "2.8.3",
     "yaml-language-server": "1.21.0"
   },

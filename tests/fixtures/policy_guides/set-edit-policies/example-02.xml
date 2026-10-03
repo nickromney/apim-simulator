@@ -1,0 +1,9 @@
+<policies>
+  <inbound>
+      <base />
+        <ip-filter action="allow">
+            <address>127.0.0.1</address>
+        </ip-filter>
+  </inbound>
+  [...]
+</policies>

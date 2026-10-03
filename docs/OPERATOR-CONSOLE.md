@@ -4,7 +4,16 @@ The browser UI uses a compact Azure APIM-inspired layout with separate API and o
 
 ## Connect
 
-Start the simulator with its management plane enabled, then open the UI. Enter the gateway base URL and tenant key and choose **Connect**. **Load Local Demo** fills the default local development URL and tenant key; choose **Connect** afterward to load current state. The console stores these two connection values in browser local storage.
+Start the simulator with its management plane enabled, then open the UI. Enter the gateway base URL, choose **Signed operator token**, paste a JWT from the configured local operator issuer, and choose **Connect**. The console sends `Authorization: Bearer ...`; the gateway verifies the signature, expiry and permissions. Choose **Local tenant key** for stacks that explicitly permit that mode. **Load Local Demo** fills the demo URL and key for the current page session; choose **Connect** afterward.
+
+Credential fields are masked and kept in memory. Only the gateway URL is saved; saving settings also removes old saved tenant credentials. Reloading requires entering credentials again. A 401 clears the active credential and opens the connection panel so you can enter a fresh token or key and reconnect.
+
+Reader and operator tokens can connect without access to subscription secrets:
+when the full summary is forbidden, the console loads permitted API, service,
+product and version metadata instead. Forbidden trace collections are left empty.
+For an API-scoped token, enter its known **API ID for scoped access**; the console
+loads that API directly without requesting global collections. Editing, policy
+content, replay and trace actions still require their gateway permissions.
 
 The API Explorer searches API IDs, names, paths, and operation IDs, display names, methods, and templates. Selecting an API or operation opens its workflow and loads that resource’s policy scope. If an edit is dirty, changing the selected resource prompts before discarding it. Leaving the page also triggers the browser's unsaved-changes warning.
 

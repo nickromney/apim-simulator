@@ -55,6 +55,7 @@ def _replay_config() -> GatewayConfig:
     return GatewayConfig(
         allow_anonymous=True,
         trace_enabled=True,
+        trace_allow_unauthenticated=True,
         tenant_access=TenantAccessConfig(enabled=True, primary_key=TENANT_KEY),
         routes=[
             RouteConfig(

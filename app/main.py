@@ -20,11 +20,14 @@ from app.config import GatewayConfig, load_config, validate_policy_config
 from app.cors_preflight import answer_preflight
 from app.debug_credentials import build_debug_router
 from app.gateway_errors import GatewayError, gateway_error_handler
+from app.graphql_resolvers import build_graphql_management_router
 from app.local_api_center import build_api_center_router
 from app.local_monitoring import MonitoringStore, build_monitoring_router
 from app.management_api import build_management_router
 from app.management_service import ManagementService
+from app.messaging_management import build_logger_authoring_router
 from app.openapi_export import build_openapi_export_router
+from app.policy_transforms import build_cross_domain_router
 from app.portal_customization import build_portal_customization_router
 from app.proxy import build_user_payload
 from app.request_pipeline import (
@@ -37,7 +40,7 @@ from app.request_pipeline import (
     cached_gateway_response,
     execute_gateway_request,
 )
-from app.security import OIDCVerifier, authenticate_request, require_admin
+from app.security import OIDCVerifier, authenticate_request, require_admin, require_tenant_access
 from app.telemetry import (
     ObservabilityRuntime,
     configure_observability,
@@ -72,6 +75,10 @@ def _serialize_gateway_config(cfg: GatewayConfig) -> str:
     payload = cfg.model_dump(mode="json")
     if payload.get("apis"):
         payload["routes"] = []
+    if cfg.secret_storage.enabled:
+        from app.secret_storage import encrypt_config
+
+        payload = encrypt_config(payload, cfg.secret_storage.key_env)
     return json.dumps(payload, indent=2) + "\n"
 
 
@@ -198,6 +205,8 @@ def _build_oidc_verifiers(cfg: GatewayConfig) -> dict[str, OIDCVerifier]:
             provider_id: OIDCVerifier(
                 provider.issuer,
                 provider.audience,
+                config=cfg,
+                ca_file=provider.ca_file,
                 jwks_uri=provider.jwks_uri,
                 jwks=provider.jwks,
             )
@@ -208,6 +217,8 @@ def _build_oidc_verifiers(cfg: GatewayConfig) -> dict[str, OIDCVerifier]:
             "default": OIDCVerifier(
                 cfg.oidc.issuer,
                 cfg.oidc.audience,
+                config=cfg,
+                ca_file=cfg.oidc.ca_file,
                 jwks_uri=cfg.oidc.jwks_uri,
                 jwks=cfg.oidc.jwks,
             )
@@ -325,6 +336,7 @@ def _reset_runtime_stores(app: FastAPI) -> None:
     app.state.quota_store = {}
     app.state.trace_store = {}
     app.state.debug_credentials = {}
+    app.state.policy_background_tasks = set()
     app.state.monitoring_store = MonitoringStore()
     app.state.backend_health = {}
 
@@ -371,7 +383,9 @@ def _build_gateway_router(*, require_management_plane: Callable[[], ManagementSe
     async def reload_config(request: Request) -> dict[str, Any]:
         """Reload configuration from file. Requires the admin token when one is set."""
         cfg: GatewayConfig = request.app.state.gateway_config
-        if cfg.admin_token:
+        if cfg.tenant_access.enabled or cfg.control_plane.enabled:
+            require_tenant_access(request, permission="operate")
+        else:
             require_admin(request)
         reload_fn = getattr(request.app.state, "config_reload_fn", None)
         if reload_fn is None:
@@ -389,11 +403,16 @@ def _build_gateway_router(*, require_management_plane: Callable[[], ManagementSe
         cfg: GatewayConfig = request.app.state.gateway_config
         if not cfg.trace_enabled:
             raise HTTPException(status_code=404, detail="Not found")
-        if cfg.admin_token:
-            require_admin(request)
-
         trace_store: dict[str, Any] = request.app.state.trace_store
         entry = trace_store.get(trace_id)
+        api_id = entry.get("api_id") if entry is not None else None
+        if (cfg.tenant_access.enabled or cfg.control_plane.enabled) and not cfg.trace_allow_unauthenticated:
+            require_tenant_access(request, permission="debug", api_id=api_id)
+        elif cfg.admin_token:
+            require_admin(request)
+        elif not cfg.trace_allow_unauthenticated:
+            raise HTTPException(status_code=404, detail="Not found")
+
         if entry is None:
             raise HTTPException(status_code=404, detail="Not found")
         return entry
@@ -484,6 +503,33 @@ def _add_observability_middleware(app: FastAPI, telemetry: ObservabilityRuntime)
             reset_correlation_id(token)
 
 
+def _initialize_http_clients(app, http_client):
+    from app.certificate_security import TLSClientPool
+    from app.egress_security import EgressTransport
+
+    def provider():
+        return app.state.gateway_config
+
+    owns_client = http_client is None
+    app.state.tls_client_pool = TLSClientPool(config_provider=provider)
+    transport = httpx.AsyncHTTPTransport() if owns_client else http_client._transport
+    guarded_transport = EgressTransport(transport, provider)
+    if owns_client:
+        app.state.http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0), transport=guarded_transport, trust_env=False
+        )
+    else:
+        app.state.original_http_transport = http_client._transport
+        app.state.original_http_mounts = dict(http_client._mounts)
+        http_client._transport = guarded_transport
+        http_client._mounts = {
+            pattern: EgressTransport(mounted, provider) if mounted else None
+            for pattern, mounted in http_client._mounts.items()
+        }
+        app.state.http_client = http_client
+    return owns_client
+
+
 def _build_lifespan(
     *,
     gateway_config: GatewayConfig,
@@ -496,13 +542,15 @@ def _build_lifespan(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        owns_client = http_client is None
-        app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0)) if owns_client else http_client
+        owns_client = _initialize_http_clients(app, http_client)
         instrument_httpx_client(app.state.http_client, telemetry)
 
         manager = require_management_plane()
         manager.apply_runtime_config(gateway_config)
         _reset_runtime_stores(app)
+        from app.security_monitoring import SecurityAuditSink
+
+        app.state.security_audit_sink = SecurityAuditSink(gateway_config.security_observability)
         app.state.config_reload_fn = manager.reload_config
         app.state.startup_complete = True
 
@@ -528,8 +576,18 @@ def _build_lifespan(
                 await watcher_task
             except asyncio.CancelledError:
                 pass
+        tasks = list(app.state.policy_background_tasks)
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=5)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
         if owns_client:
             await app.state.http_client.aclose()
+        else:
+            app.state.http_client._transport = app.state.original_http_transport
+            app.state.http_client._mounts = app.state.original_http_mounts
+        await app.state.tls_client_pool.aclose()
 
     return lifespan
 
@@ -550,6 +608,9 @@ class _SimulatorCORSMiddleware(CORSMiddleware):
 
 
 def _add_cors_middleware(app: FastAPI, gateway_config: GatewayConfig) -> None:
+    from app.named_values import NamedValueResolutionMiddleware
+
+    app.add_middleware(NamedValueResolutionMiddleware)
     app.add_middleware(
         _SimulatorCORSMiddleware,
         allow_origins=gateway_config.allowed_origins or ["*"],
@@ -621,6 +682,13 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 
     _add_cors_middleware(app, gateway_config)
     _add_observability_middleware(app, telemetry)
+    from app.network_security import NetworkSecurityMiddleware
+    from app.security_ingress import SecurityIngressMiddleware
+    from app.security_monitoring import SecurityMonitoringMiddleware
+
+    app.add_middleware(SecurityIngressMiddleware)
+    app.add_middleware(SecurityMonitoringMiddleware)
+    app.add_middleware(NetworkSecurityMiddleware, config_provider=lambda: app.state.gateway_config)
 
     app.include_router(_build_gateway_router(require_management_plane=_require_management_plane))
     app.include_router(build_management_router(require_management_plane=_require_management_plane))
@@ -630,6 +698,16 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     app.include_router(build_openapi_export_router())
     app.include_router(build_version_workflow_router(require_management_plane=_require_management_plane))
     app.include_router(build_portal_customization_router(require_management_plane=_require_management_plane))
+    app.include_router(build_graphql_management_router(require_management_plane=_require_management_plane))
+    app.include_router(build_cross_domain_router())
+    app.include_router(build_logger_authoring_router(require_management_plane=_require_management_plane))
+    from app.security_governance import build_security_governance_router
+    from app.security_monitoring import build_security_monitoring_router
+    from app.security_recovery import build_security_recovery_router
+
+    app.include_router(build_security_recovery_router(require_management_plane=_require_management_plane))
+    app.include_router(build_security_governance_router(require_management_plane=_require_management_plane))
+    app.include_router(build_security_monitoring_router())
     app.include_router(_build_catch_all_router())
 
     instrument_fastapi_app(app, telemetry)

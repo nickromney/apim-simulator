@@ -1,0 +1,7 @@
+<policies>
+    <inbound>
+        <cross-domain />
+        <base />
+        <find-and-replace from="xyz" to="abc" />
+    </inbound>
+</policies>

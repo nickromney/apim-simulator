@@ -39,6 +39,7 @@
     "enabled": true
   },
   "trace_enabled": true,
+  "trace_allow_unauthenticated": true,
   "apis": {
     "default": {
       "name": "Default",

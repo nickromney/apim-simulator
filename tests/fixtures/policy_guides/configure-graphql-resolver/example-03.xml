@@ -1,0 +1,7 @@
+<http-data-source>
+    <http-request>
+        <set-method>GET</set-method>
+        <set-url>@($"https://data.contoso.com/api/blog/{context.GraphQL.Parent["id"]}")
+        </set-url>
+    </http-request>
+</http-data-source>

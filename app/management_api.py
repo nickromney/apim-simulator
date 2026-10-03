@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,11 +51,11 @@ from app.policy_inspection import inspect_effective_policy
 from app.portal import (
     create_portal_subscription,
     portal_catalog,
+    portal_identity_users,
     portal_subscriptions,
-    portal_users,
+    portal_user_id,
     project_portal_subscription,
     render_portal_page,
-    require_portal_user,
 )
 from app.resource_projection import (
     project_api,
@@ -258,6 +258,7 @@ class BackendUpsert(BaseModel):
 
 
 class NamedValueUpsert(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1)
     value: str | None = None
     secret: bool = False
     value_from_key_vault: KeyVaultNamedValueConfig | None = None
@@ -1020,8 +1021,7 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
             raise HTTPException(status_code=404, detail="Portal is not enabled")
 
     def _portal_user_id(request: Request, cfg: GatewayConfig) -> str:
-        user = require_portal_user(cfg, request.headers.get(cfg.portal.user_header))
-        return user.id
+        return portal_user_id(request, cfg)
 
     @router.get("/apim/portal", response_class=HTMLResponse)
     async def portal_page(request: Request) -> HTMLResponse:
@@ -1030,25 +1030,31 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
         return HTMLResponse(render_portal_page(cfg.portal_content.published))
 
     @router.get("/apim/portal/users")
-    async def portal_list_users(request: Request) -> dict[str, Any]:
+    async def portal_list_users(request: Request, response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
         cfg: GatewayConfig = request.app.state.gateway_config
         _require_portal_enabled(cfg)
-        return portal_users(cfg)
+        return portal_identity_users(request, cfg)
 
     @router.get("/apim/portal/catalog")
-    async def portal_get_catalog(request: Request) -> dict[str, Any]:
+    async def portal_get_catalog(request: Request, response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
         cfg: GatewayConfig = request.app.state.gateway_config
         _require_portal_enabled(cfg)
         return portal_catalog(cfg, _portal_user_id(request, cfg))
 
     @router.get("/apim/portal/subscriptions")
-    async def portal_list_subscriptions(request: Request) -> dict[str, Any]:
+    async def portal_list_subscriptions(request: Request, response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
         cfg: GatewayConfig = request.app.state.gateway_config
         _require_portal_enabled(cfg)
         return portal_subscriptions(cfg, _portal_user_id(request, cfg))
 
     @router.post("/apim/portal/subscriptions", status_code=201)
-    async def portal_request_subscription(request: Request, body: PortalSubscriptionRequest) -> dict[str, Any]:
+    async def portal_request_subscription(
+        request: Request, body: PortalSubscriptionRequest, response: Response
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
         cfg = _config_for_management_write(request)
         _require_portal_enabled(cfg)
         user_id = _portal_user_id(request, cfg)

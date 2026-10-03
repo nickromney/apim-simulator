@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.config import (
+    DEFAULT_GLOBAL_POLICY_XML,
     ApiConfig,
     ApiReleaseConfig,
     ApiRevisionConfig,
@@ -152,6 +153,11 @@ class ManagementService:
         *,
         clear_result_caches: bool,
     ) -> GatewayConfig:
+        from app.security_monitoring import SecurityAuditSink
+
+        current_sink = getattr(self.app.state, "security_audit_sink", None)
+        if current_sink is None or current_sink.settings != cfg.security_observability:
+            self.app.state.security_audit_sink = SecurityAuditSink(cfg.security_observability)
         self.app.state.gateway_config = cfg
         self.app.state.oidc_verifiers = oidc_verifiers
         self.app.state.policy_cache = {}
@@ -189,6 +195,9 @@ class ManagementService:
 
     def reload_config(self) -> GatewayConfig:
         new_config = load_config()
+        from app.security_governance import validate_governance_mutation
+
+        validate_governance_mutation(self.app.state.gateway_config, new_config)
         new_config, oidc_verifiers = self._prepare_config(new_config)
         self._publish_config(new_config, oidc_verifiers, clear_result_caches=True)
         metrics = getattr(self.app.state, "gateway_metrics", None)
@@ -203,6 +212,9 @@ class ManagementService:
         return new_config
 
     def apply_runtime_config(self, cfg: GatewayConfig) -> GatewayConfig:
+        from app.security_governance import validate_governance_mutation
+
+        validate_governance_mutation(getattr(self.app.state, "gateway_config", None), cfg)
         prepared, oidc_verifiers = self._prepare_config(cfg)
         return self._publish_config(prepared, oidc_verifiers, clear_result_caches=True)
 
@@ -227,6 +239,9 @@ class ManagementService:
                     pass
 
     def persist_or_apply_config(self, cfg: GatewayConfig) -> GatewayConfig:
+        from app.security_governance import validate_governance_mutation
+
+        validate_governance_mutation(self.app.state.gateway_config, cfg)
         staged = cfg.model_copy(deep=True)
         _sync_current_revision_definitions(staged)
         try:
@@ -477,13 +492,10 @@ class ManagementService:
             raise HTTPException(status_code=400, detail=exc.detail) from exc
 
     def validate_fragment_xml(self, cfg: GatewayConfig, xml: str) -> None:
-        from defusedxml import ElementTree
+        from app.policy_fragments import validate_fragment_xml
 
         try:
-            ElementTree.fromstring(f"<fragment>{xml}</fragment>")
-        except ElementTree.ParseError as exc:
-            raise HTTPException(status_code=400, detail="Invalid policy fragment XML") from exc
-        try:
+            validate_fragment_xml(xml)
             validate_named_value_references(xml, cfg)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -552,6 +564,10 @@ class ManagementService:
 
     def policy_xml_for_target(self, target: Any) -> str:
         documents = policy_xml_documents_for_target(target)
+        if not documents and isinstance(target, GatewayConfig):
+            # Reading then saving the implicit global document must preserve
+            # the backend forwarding policy that runtime inheritance uses.
+            return DEFAULT_GLOBAL_POLICY_XML
         if len(documents) == 1:
             return documents[0]
         return effective_policy_xml(*([document] for document in documents))
@@ -931,8 +947,26 @@ class ManagementService:
         return self.persist_or_apply_config(cfg)
 
     def upsert_named_value(self, cfg: GatewayConfig, named_value_id: str, body: Any) -> GatewayConfig:
-        payload = body.model_dump(mode="json") if hasattr(body, "model_dump") else dict(body)
+        changes = body.model_dump(mode="json", exclude_unset=True) if hasattr(body, "model_dump") else dict(body)
+        from app.named_values import rename_named_value_references
+
+        existing = cfg.named_values.get(named_value_id)
+        payload = {**(existing.model_dump(mode="json") if existing else {}), **changes}
+        if changes.get("value_from_key_vault") is not None:
+            payload["value"] = None
+        elif changes.get("value") is not None:
+            payload["value_from_key_vault"] = None
+            if existing and existing.value_from_key_vault and "secret" not in changes:
+                payload["secret"] = True
+        new_name = payload.get("display_name") or (existing.display_name if existing else None) or named_value_id
+        for identifier, entry in cfg.named_values.items():
+            if identifier != named_value_id and new_name in {identifier, entry.display_name}:
+                raise HTTPException(status_code=400, detail="Named value display name is already in use")
+        payload["display_name"] = new_name
+        old_name = (existing.display_name or named_value_id) if existing else new_name
         cfg.named_values[named_value_id] = NamedValueConfig(**payload)
+        if old_name != new_name:
+            cfg = rename_named_value_references(cfg, old_name, new_name)
         return self.persist_or_apply_config(cfg)
 
     def delete_named_value(self, cfg: GatewayConfig, named_value_id: str) -> GatewayConfig:
@@ -1004,6 +1038,20 @@ class ManagementService:
         imported.admin_token = current.admin_token
         imported.tenant_access = current.tenant_access
         imported.trace_enabled = current.trace_enabled
+        for field in (
+            "trace_allow_unauthenticated",
+            "network_security",
+            "certificates",
+            "workload_identity",
+            "control_plane",
+            "secret_storage",
+            "security_governance",
+            "security_ingress",
+            "security_observability",
+            "portal",
+            "local_messaging",
+        ):
+            setattr(imported, field, getattr(current.model_copy(deep=True), field))
         imported.policy_fragments = current.policy_fragments
         imported_client_certificate_mode = imported.client_certificate.mode
         imported.client_certificate = current.client_certificate.model_copy(deep=True)

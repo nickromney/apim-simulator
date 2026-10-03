@@ -80,7 +80,7 @@ def test_subscription_throttling_parser_matches_supported_attributes_and_childre
         ('<rate-limit calls="1" renewal-period="60" scope="subscription" />', "scope"),
         ('<rate-limit calls="1" renewal-period="301" />', "300"),
         ('<quota-by-key calls="1" renewal-period="299" counter-key="demo" />', "300"),
-        ('<quota-by-key bandwidth="1" renewal-period="300" counter-key="demo" />', "bandwidth"),
+        ('<quota-by-key bandwidth="@(1)" renewal-period="300" counter-key="demo" />', "bandwidth"),
     ],
 )
 def test_throttling_parser_rejects_non_apim_or_unsupported_configuration(xml: str, detail: str) -> None:

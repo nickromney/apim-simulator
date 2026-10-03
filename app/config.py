@@ -11,10 +11,19 @@ from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.certificate_security import TLSCertificateConfig
+from app.control_plane import ControlPlaneConfig, PortalIdentityConfig
+from app.graphql_resolvers import GraphQLApiConfig
 from app.local_api_center import ApiCenterState
 from app.local_monitoring import MonitoringConfig
+from app.messaging_config import LocalMessagingConfig
+from app.network_security import NetworkSecurityConfig
 from app.portal_customization import PortalContentConfig
+from app.secret_storage import SecretStorageConfig, decrypt_config
+from app.security_settings import SecurityGovernanceConfig, SecurityIngressConfig, SecurityObservabilityConfig
+from app.throttling_config import RateLimitSettings
 from app.urls import http_url
+from app.workload_identity import WorkloadIdentityConfig
 
 # APIM creates this global backend policy when no global policy document exists.
 # https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies
@@ -46,6 +55,7 @@ class ApiVersionSetConfig(BaseModel):
 class ServiceMetadataConfig(BaseModel):
     name: str = "apim-simulator"
     display_name: str = "Local APIM Simulator"
+    region: str = "local"
     public_network_access_enabled: bool | None = None
     virtual_network_type: str | None = None
     hostname_configurations: list[ServiceHostnameConfiguration] = Field(default_factory=list)
@@ -203,11 +213,13 @@ class OIDCConfig(BaseModel):
     audience: str
     jwks_uri: str | None = None
     jwks: dict[str, Any] | None = None
+    ca_file: str | None = None
 
 
 class PortalConfig(BaseModel):
     enabled: bool = False
     user_header: str = "X-Apim-Portal-User"
+    identity: PortalIdentityConfig = Field(default_factory=PortalIdentityConfig)
 
 
 class TenantAccessConfig(BaseModel):
@@ -252,10 +264,15 @@ class ClientCertificateConfig(BaseModel):
     - X-Client-Cert-Thumbprint: SHA1 fingerprint
     - X-Client-Cert: Base64-encoded DER or PEM
 
-    The simulator validates these headers against trusted_certificates when mode != disabled.
+    Secure mode accepts certificate bytes only from actual TLS or an attested
+    trusted proxy, derives claims, and validates its CA/CRL. Header claim
+    simulation requires allow_simulated_headers explicitly enabled.
     """
 
     mode: ClientCertificateMode = ClientCertificateMode.Disabled
+    allow_simulated_headers: bool = False
+    ca_file: str | None = None
+    crl_file: str | None = None
     trusted_certificates: list[TrustedClientCertificateConfig] = Field(default_factory=list)
     # Header names (configurable to match your proxy)
     subject_header: str = "X-Client-Cert-Subject"
@@ -344,6 +361,7 @@ class KeyVaultNamedValueConfig(BaseModel):
 
 
 class NamedValueConfig(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1)
     value: str | None = None
     secret: bool = False
     value_from_key_vault: KeyVaultNamedValueConfig | None = None
@@ -573,6 +591,13 @@ class BackendConfig(BaseModel):
     header_credentials: dict[str, str] = Field(default_factory=dict)
     query_credentials: dict[str, str] = Field(default_factory=dict)
     client_certificate_thumbprints: list[str] = Field(default_factory=list)
+    ca_file: str | None = None
+    crl_file: str | None = None
+    client_certificate_file: str | None = None
+    client_certificate_key_file: str | None = None
+    allow_simulated_certificate: bool = False
+    verify_certificate_chain: bool = True
+    verify_certificate_name: bool = True
 
     @model_validator(mode="before")
     @classmethod
@@ -871,6 +896,10 @@ class GatewayConfig(BaseModel):
     allowed_origins: list[str] = Field(default_factory=lambda: [http_url("localhost:3007")])
     allow_anonymous: bool = False
     client_certificate: ClientCertificateConfig = Field(default_factory=ClientCertificateConfig)
+    network_security: NetworkSecurityConfig = Field(default_factory=NetworkSecurityConfig)
+    certificates: dict[str, TLSCertificateConfig] = Field(default_factory=dict)
+    allow_simulated_certificate_authentication: bool = False
+    workload_identity: WorkloadIdentityConfig = Field(default_factory=WorkloadIdentityConfig)
     oidc: OIDCConfig | None = None
     oidc_providers: dict[str, OIDCConfig] = Field(default_factory=dict)
     products: dict[str, ProductConfig] = Field(default_factory=dict)
@@ -883,10 +912,17 @@ class GatewayConfig(BaseModel):
     subscription: SubscriptionConfig = Field(default_factory=SubscriptionConfig)
     admin_token: str | None = None
     tenant_access: TenantAccessConfig = Field(default_factory=TenantAccessConfig)
+    secret_storage: SecretStorageConfig = Field(default_factory=SecretStorageConfig)
+    control_plane: ControlPlaneConfig = Field(default_factory=ControlPlaneConfig)
     portal: PortalConfig = Field(default_factory=PortalConfig)
     portal_content: PortalContentConfig = Field(default_factory=PortalContentConfig)
     api_center: ApiCenterState = Field(default_factory=ApiCenterState)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    security_governance: SecurityGovernanceConfig = Field(default_factory=SecurityGovernanceConfig)
+    security_observability: SecurityObservabilityConfig = Field(default_factory=SecurityObservabilityConfig)
+    security_ingress: SecurityIngressConfig = Field(default_factory=SecurityIngressConfig)
+    throttling: RateLimitSettings = Field(default_factory=RateLimitSettings)
+    local_messaging: LocalMessagingConfig = Field(default_factory=LocalMessagingConfig)
     proxy_timeout_seconds: float = 30.0
     proxy_max_attempts: int = 1
     proxy_retry_statuses: list[int] = Field(default_factory=lambda: [502, 503, 504])
@@ -901,6 +937,7 @@ class GatewayConfig(BaseModel):
     cache_ttl_seconds: float = 5.0
     cache_max_entries: int = 1024
     trace_enabled: bool = False
+    trace_allow_unauthenticated: bool = False
     api_version_sets: dict[str, ApiVersionSetConfig] = Field(default_factory=dict)
     policy_fragments: dict[str, str] = Field(default_factory=dict)
     policies_xml: str | None = None
@@ -974,12 +1011,30 @@ def _policy_xml_entries(cfg: GatewayConfig) -> list[tuple[str, str]]:
     return entries
 
 
+def _validate_graphql_configs(cfg: GatewayConfig) -> None:
+    from app.graphql_resolvers import validate_graphql_api
+    from app.named_values import validate_named_value_references
+
+    for api_id, api in cfg.apis.items():
+        if api.graphql is not None:
+            try:
+                validate_graphql_api(api.graphql, cfg)
+                for resolver in api.graphql.resolvers.values():
+                    validate_named_value_references(resolver.policies_xml, cfg)
+            except ValueError as exc:
+                raise ValueError(f"Invalid GraphQL API at {api_id}: {exc}") from exc
+
+
 def validate_policy_config(cfg: GatewayConfig) -> GatewayConfig:
     """Reject malformed policy documents before the gateway can serve them."""
     from defusedxml import ElementTree
 
     from app.effective_policy import validate_policy_xml_syntax
     from app.named_values import validate_named_value_references
+    from app.policy_fragments import validate_config_fragments
+
+    validate_config_fragments(cfg, _policy_xml_entries(cfg))
+    _validate_graphql_configs(cfg)
 
     for fragment_id, xml in cfg.policy_fragments.items():
         try:
@@ -1112,6 +1167,7 @@ class ApiConfig(BaseModel):
     schemas: dict[str, ApiSchemaConfig] = Field(default_factory=dict)
     revisions: dict[str, ApiRevisionConfig] = Field(default_factory=dict)
     releases: dict[str, ApiReleaseConfig] = Field(default_factory=dict)
+    graphql: GraphQLApiConfig | None = None
 
 
 def _default_config_from_env() -> GatewayConfig:
@@ -1191,4 +1247,10 @@ def load_config() -> GatewayConfig:
         return _default_config_from_env()
     with open(config_path, encoding="utf-8") as f:
         data = json.load(f)
-    return validate_policy_config(GatewayConfig.model_validate(data))
+    decoded = decrypt_config(data)
+    if decoded.get("secret_storage", {}).get("enabled") and data.get("format") != "apim-encrypted-config-v1":
+        raise ValueError("Encrypted secret storage requires an encrypted configuration file")
+    region = os.getenv("APIM_REGION", "").strip()
+    if region:
+        decoded.setdefault("service", {})["region"] = region
+    return validate_policy_config(GatewayConfig.model_validate(decoded))

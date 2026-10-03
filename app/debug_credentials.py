@@ -92,20 +92,21 @@ def build_debug_router(*, require_management_plane: Callable[[], ManagementServi
 
     @router.post("/apim/management/gateways/{gateway_id}/listDebugCredentials")
     async def credentials(gateway_id: str, body: DebugRequest, request: Request) -> dict[str, str]:
-        require_tenant_access(request)
+        api_id = body.apiId.rsplit("/apis/", 1)[-1].split(";rev=", 1)[0]
+        require_tenant_access(request, permission="debug", api_id=api_id)
         if gateway_id != "managed":
             raise HTTPException(status_code=404, detail="Gateway not found")
-        api_id = body.apiId.rsplit("/apis/", 1)[-1].split(";rev=", 1)[0]
         if api_id not in request.app.state.gateway_config.apis:
             raise HTTPException(status_code=404, detail="API not found")
         return _mint_credentials(request, api_id, duration_seconds(body.credentialsExpireAfter))
 
     @router.post("/apim/management/gateways/{gateway_id}/listTrace")
     async def trace(gateway_id: str, body: TraceRequest, request: Request) -> dict[str, Any]:
-        require_tenant_access(request)
+        entry = request.app.state.trace_store.get(body.traceId)
+        api_id = entry.get("api_id") if entry is not None else None
+        require_tenant_access(request, permission="debug", api_id=api_id)
         if gateway_id != "managed":
             raise HTTPException(status_code=404, detail="Gateway not found")
-        entry = request.app.state.trace_store.get(body.traceId)
         if entry is None:
             raise HTTPException(status_code=404, detail="Trace not found")
         return entry

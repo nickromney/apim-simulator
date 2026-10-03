@@ -10,6 +10,8 @@ Development and testing only. This project is for local iteration, not productio
 - Demo passwords, tenant keys, and subscription keys in this repository are intentional and exist only for local examples, tutorials, and smoke tests.
 - Do not expose or port-forward the demo Keycloak service on `localhost:8180`, especially when running management-enabled stacks.
 
+The [security lab](examples/apim-security/README.md) exercises real local TLS/mTLS, signed scoped identities, encrypted configuration and recovery, outbound restrictions, WAF/request limits, governance locks, durable audit and gateway failover. Run `make -C examples/apim-security up` followed by `make -C examples/apim-security verify`.
+
 ## About the Simulator
 
 The simulator gives you a local APIM-shaped gateway with:
@@ -23,7 +25,9 @@ The simulator gives you a local APIM-shaped gateway with:
 - Terraform/OpenTofu import and static compatibility reporting
 - direct public, edge HTTP, edge TLS, private/internal, OIDC, MCP, hello starter, todo demo, and OTEL/[LGTM](https://github.com/grafana/docker-otel-lgtm) runtime shapes
 
-Local internal caching is supported for the `cache-*` policies. External cache backends and `quota-by-key` bandwidth enforcement remain out of scope.
+Local internal caching is supported for the `cache-*` policies. External cache backends remain out of scope. Call and bandwidth quotas and selectable sliding-window/token-bucket throttling run locally.
+
+The [policy guide lab](examples/apim-policies/README.md) exercises thirteen Microsoft policy guides with a separate Compose pub/sub and secret-store container.
 
 ## Prerequisites
 

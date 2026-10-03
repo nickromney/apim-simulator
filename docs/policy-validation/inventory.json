@@ -1,0 +1,1541 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-02",
+  "scope": "Only the 13 explicitly requested policy guides; no recursive policy-reference audit.",
+  "source_license": {
+    "code": "MIT",
+    "documentation": "CC BY 4.0",
+    "attribution": "Microsoft and contributors",
+    "code_license_url": "https://github.com/MicrosoftDocs/azure-docs/blob/main/LICENSE-CODE"
+  },
+  "baseline_revision": "be578e3",
+  "evidence_rules": [
+    "registered means parser registration observed, not runtime fidelity",
+    "not_registered_as_standalone may still mean supported as a nested element",
+    "existing_test_candidates identifies relevant files, not passing tests",
+    "not_run must remain until a concrete execution result is recorded"
+  ],
+  "summary": {
+    "guides": 13,
+    "code_blocks": 48,
+    "xml_fixtures": 33,
+    "source_markup_requires_repair": 15,
+    "guide_validation_counts": {
+      "verified_local_equivalent": 13
+    },
+    "adapted_xml_fixtures": 5,
+    "specimen_validation_counts": {
+      "initial_six_source_expressions_local_execution": 1,
+      "not_run": 31,
+      "source-backed local gateway and published-port execution": 4,
+      "source-backed local gateway execution": 8,
+      "source-backed published-port execution": 1,
+      "source_expression_equivalent_local_and_published_execution": 1,
+      "source_fixture_adapted_local_and_published_execution": 2
+    }
+  },
+  "guides": [
+    {
+      "id": "guide-01",
+      "title": "Policy overview",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-policies",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-howto-policies.md",
+      "source_sha256": "17b4432a63cf54c64046564c7476e7e7788330de66bb556bc4ac32cf7776d3b0",
+      "source_ms_date": "05/14/2026",
+      "policy_elements_in_snippets": [
+        "base",
+        "cross-domain",
+        "find-and-replace",
+        "set-header"
+      ],
+      "parser_baseline": {
+        "base": "registered",
+        "cross-domain": "not_registered_as_standalone",
+        "find-and-replace": "not_registered_as_standalone",
+        "set-header": "registered"
+      },
+      "existing_test_candidates": [
+        "tests/test_effective_policy.py",
+        "tests/test_policy_scopes.py",
+        "tests/test_policy_transforms.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "xml",
+          "source_line": 45,
+          "heading": "Understanding policy configuration",
+          "source_sha256": "c84937cab95a4e74c25fb1cec68eea4c715bae018fe78920c14e031ac48a4c5d",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-howto-policies/example-01.xml",
+          "adaptations": [],
+          "fixture_sha256": "c84937cab95a4e74c25fb1cec68eea4c715bae018fe78920c14e031ac48a4c5d",
+          "source_complete_document": true,
+          "xml_markup": "well_formed_as_fragment"
+        },
+        {
+          "ordinal": 2,
+          "language": "xml",
+          "source_line": 141,
+          "heading": "Apply policies specified at different scopes",
+          "source_sha256": "a41da46d151df335bc2e4373f8a0f8a38a206c9753c5d477a618dfb8809ca0eb",
+          "policy_elements": [
+            "base",
+            "cross-domain",
+            "find-and-replace"
+          ],
+          "validation": "source-backed local gateway execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-howto-policies/example-02.xml",
+          "adaptations": [],
+          "fixture_sha256": "a41da46d151df335bc2e4373f8a0f8a38a206c9753c5d477a618dfb8809ca0eb",
+          "source_complete_document": true,
+          "xml_markup": "well_formed_as_fragment",
+          "evidence": [
+            "tests/test_policy_transforms.py",
+            "tests/test_policy_scopes.py",
+            "tests/test_effective_policy.py"
+          ],
+          "execution_adaptations": [
+            "Source overview fragment wrapped at API scope; authored parent/outbound policies make order and body effects observable."
+          ]
+        },
+        {
+          "ordinal": 3,
+          "language": "xml",
+          "source_line": 162,
+          "heading": "Use policy expressions to modify requests",
+          "source_sha256": "9c8d5449a5df187656c41f334fafee28e1580ae7930cea5358251a3a9dba8095",
+          "policy_elements": [
+            "base",
+            "set-header"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-howto-policies/example-03.xml",
+          "adaptations": [],
+          "fixture_sha256": "9c8d5449a5df187656c41f334fafee28e1580ae7930cea5358251a3a9dba8095",
+          "source_complete_document": true,
+          "xml_markup": "well_formed_as_fragment"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "authoring._overview",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_policy_transforms.py",
+            "tests/test_policy_scopes.py",
+            "tests/test_effective_policy.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "workflow": "examples/apim-policies/authoring.py::run",
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-02",
+      "title": "Set or edit policies",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/set-edit-policies",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/set-edit-policies.md",
+      "source_sha256": "f1b31b3925d19a4efcc582f6c1e36c13fe482879cad28f64370a192fb45171e2",
+      "source_ms_date": "03/13/2026",
+      "policy_elements_in_snippets": [
+        "base",
+        "ip-filter"
+      ],
+      "parser_baseline": {
+        "base": "registered",
+        "ip-filter": "registered"
+      },
+      "existing_test_candidates": [
+        "tests/test_policy_guide_authoring.py",
+        "tests/test_policy_inspection.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "xml",
+          "source_line": 102,
+          "heading": "Configure policy in the portal",
+          "source_sha256": "679890487fbe74f2cf8d31ccf3523acd267628109f522b707edd2d9a6c9644f0",
+          "policy_elements": [
+            "base",
+            "ip-filter"
+          ],
+          "validation": "source-backed published-port execution",
+          "fixture": "tests/fixtures/policy_guides/set-edit-policies/example-01.xml",
+          "adaptations": [
+            "Replace the documented private example IP range with the local loopback range; preserve allow-rule structure."
+          ],
+          "fixture_sha256": "c11147a6318711a9be6fca51cfb41e7f8e31ec7e5522bfbf0bbdb9039b174045",
+          "source_complete_document": true,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Replace private source range with loopback range; authoring._editor proves allow/deny."
+          ],
+          "evidence": [
+            "tests/test_policy_guide_authoring.py"
+          ]
+        },
+        {
+          "ordinal": 2,
+          "language": "xml",
+          "source_line": 224,
+          "heading": "Use `base` element to set policy evaluation order",
+          "source_sha256": "f6a3020ffe9e3b90b10ee5b32e511749c7bc9e8d3e4930aa1f2aad7206149d1f",
+          "policy_elements": [
+            "base",
+            "ip-filter"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/set-edit-policies/example-02.xml",
+          "adaptations": [
+            "Replace documented private example address the source private address with loopback 127.0.0.1; policy ordering is unchanged."
+          ],
+          "fixture_sha256": "12bcc75234dac771cd58b427ab72b7a834c6044807c3f9969ece6c396eebd8bc",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "authoring._editor",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_policy_guide_authoring.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "workflow": "examples/apim-policies/authoring.py::run",
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-03",
+      "title": "Author policies using Azure Copilot",
+      "url": "https://learn.microsoft.com/en-us/azure/copilot/author-api-management-policies",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-management-docs/main/articles/copilot/author-api-management-policies.md",
+      "source_sha256": "12665f41fe0a6abc637cd188201fd8e253c4cff5d8fb33a3a253865d1910ccfe",
+      "source_ms_date": "11/24/2025",
+      "policy_elements_in_snippets": [],
+      "parser_baseline": {},
+      "existing_test_candidates": [
+        "tests/test_policy_guide_authoring.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "authoring._copilot and expressions_graphql.role_filters",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_policy_guide_authoring.py",
+            "tests/test_policy_guide_expressions.py::test_five_guide_journey_helper_contract"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "adaptation": "Locally authored XML for deterministic prompt outcomes; no claim to call Azure Copilot.",
+      "workflow": "examples/apim-policies/authoring.py::run",
+      "limits": [
+        "Local authoring/debugging workflows execute prompt and editor outcomes; no connection to Azure Copilot or VS Code extension is claimed."
+      ],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status.",
+        "Authored prompt/editor outcomes and API-scoped trace/replay are the requested local equivalents; Azure Copilot/VS Code transport is not claimed."
+      ]
+    },
+    {
+      "id": "guide-04",
+      "title": "Create and debug policies in VS Code",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-debug-policies",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-debug-policies.md",
+      "source_sha256": "f58d8973ee37098fe5db282bfc72905da0a6db640ea9f36fb8a71e10bd391caf",
+      "source_ms_date": "04/23/2026",
+      "policy_elements_in_snippets": [],
+      "parser_baseline": {},
+      "existing_test_candidates": [
+        "tests/test_debug_credentials.py",
+        "tests/test_policy_guide_authoring.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "copilot-prompt",
+          "source_line": 59,
+          "heading": "Create a policy using GitHub Copilot for Azure",
+          "source_sha256": "5a5cb28468e4c97efd4dcb9ff088773f4c6d8178d1429a7db2ffd1f841cfe9f1",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 2,
+          "language": "copilot-prompt",
+          "source_line": 63,
+          "heading": "Create a policy using GitHub Copilot for Azure",
+          "source_sha256": "52911fa6e1a6ac0de32e0b28a82627190cf68ca0699a3f49c3d2b6ba76e0af85",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "authoring._vscode",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_policy_guide_authoring.py",
+            "tests/test_debug_credentials.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "adaptation": "Local scoped credentials, effective-policy inspection, stored trace and replay; no claim to use VS Code or Azure debugging transport.",
+      "workflow": "examples/apim-policies/authoring.py::run",
+      "limits": [
+        "Local authoring/debugging workflows execute prompt and editor outcomes; no connection to Azure Copilot or VS Code extension is claimed."
+      ],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status.",
+        "Authored prompt/editor outcomes and API-scoped trace/replay are the requested local equivalents; Azure Copilot/VS Code transport is not claimed."
+      ]
+    },
+    {
+      "id": "guide-05",
+      "title": "Policy expressions",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-policy-expressions",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-policy-expressions.md",
+      "source_sha256": "afc80a7737e417b1e659719604b3efd6a5a66f93d040bb44f402e6133cbdd42d",
+      "source_ms_date": "01/15/2026",
+      "policy_elements_in_snippets": [],
+      "parser_baseline": {},
+      "existing_test_candidates": [
+        "tests/test_apim_expr.py",
+        "tests/test_apim_expr_unit.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "unspecified",
+          "source_line": 28,
+          "heading": "<a name=\"PolicyExpressionsExamples\"></a> Examples",
+          "source_sha256": "27081892fd1e2b1fdc19de0d62e7116ed736ef037da475e66b36d0bfb7c15691",
+          "policy_elements": [],
+          "validation": "initial_six_source_expressions_local_execution",
+          "fixture": null,
+          "adaptations": [],
+          "evidence": "tests/test_policy_guide_expressions.py; allowed type reference table not claimed"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "expressions_graphql.expressions",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_policy_guide_expressions.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status.",
+        "The initial six expression examples execute; this does not establish every member in the allowed .NET type table."
+      ]
+    },
+    {
+      "id": "guide-06",
+      "title": "Policy fragments",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/policy-fragments",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/policy-fragments.md",
+      "source_sha256": "e33421924c631348ac26eef3738fd443cfc0cdb6d07d1ed6cf3fb19d68828ff3",
+      "source_ms_date": "02/10/2026",
+      "policy_elements_in_snippets": [
+        "base",
+        "include-fragment",
+        "set-header"
+      ],
+      "parser_baseline": {
+        "base": "registered",
+        "include-fragment": "registered",
+        "set-header": "registered"
+      },
+      "existing_test_candidates": [
+        "tests/test_policy_inspection.py",
+        "tests/test_policy_structure.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "xml",
+          "source_line": 57,
+          "heading": "Create a policy fragment",
+          "source_sha256": "97a645860661f9d11e81db1a5e50fa2f9314434bf74dafeb6c1376a8a82cc3a6",
+          "policy_elements": [
+            "set-header"
+          ],
+          "validation": "source-backed local gateway and published-port execution",
+          "fixture": "tests/fixtures/policy_guides/policy-fragments/example-01.xml",
+          "adaptations": [],
+          "fixture_sha256": "97a645860661f9d11e81db1a5e50fa2f9314434bf74dafeb6c1376a8a82cc3a6",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Persist children of fragment wrapper; subscription owner and configured local deployment region supply context."
+          ],
+          "evidence": [
+            "tests/test_policy_guide_expressions.py",
+            "tests/test_policy_structure.py"
+          ]
+        },
+        {
+          "ordinal": 2,
+          "language": "xml",
+          "source_line": 77,
+          "heading": "Include a fragment in a policy definition",
+          "source_sha256": "908384dbbdc3a400acfa710799fd71e147ec8b058eca594fac7e7c83b2ed0eb7",
+          "policy_elements": [
+            "base",
+            "include-fragment"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/policy-fragments/example-02.xml",
+          "adaptations": [],
+          "fixture_sha256": "908384dbbdc3a400acfa710799fd71e147ec8b058eca594fac7e7c83b2ed0eb7",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "mismatched tag: line 7, column 2"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "expressions_graphql.fragments",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_policy_guide_expressions.py",
+            "tests/test_policy_structure.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-07",
+      "title": "Error handling",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-error-handling-policies",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-error-handling-policies.md",
+      "source_sha256": "f4521d12529eed21a2fa478d55ec760fc0adb06d0f09e35ac1e86010c5456b65",
+      "source_ms_date": "04/22/2026",
+      "policy_elements_in_snippets": [
+        "base",
+        "set-header"
+      ],
+      "parser_baseline": {
+        "base": "registered",
+        "set-header": "registered"
+      },
+      "existing_test_candidates": [
+        "tests/test_policy_on_error.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "xml",
+          "source_line": 21,
+          "heading": "Error handling in API Management",
+          "source_sha256": "6c5687bb2ede3cefaddaa200178f9844e70d24114bee5f1de587042b2fa2a1f9",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-error-handling-policies/example-01.xml",
+          "adaptations": [],
+          "fixture_sha256": "6c5687bb2ede3cefaddaa200178f9844e70d24114bee5f1de587042b2fa2a1f9",
+          "source_complete_document": true,
+          "xml_markup": "well_formed_as_fragment"
+        },
+        {
+          "ordinal": 2,
+          "language": "xml",
+          "source_line": 132,
+          "heading": "Example",
+          "source_sha256": "81f3386ba04b80efd9331604ec84bcabba24e1ba2d88736b9b22048914528ed5",
+          "policy_elements": [
+            "base",
+            "set-header"
+          ],
+          "validation": "source-backed local gateway and published-port execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-error-handling-policies/example-02.xml",
+          "adaptations": [],
+          "fixture_sha256": "81f3386ba04b80efd9331604ec84bcabba24e1ba2d88736b9b22048914528ed5",
+          "source_complete_document": true,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Source complete policy retained; prepend authored inbound check-header to produce a concrete LastError."
+          ],
+          "evidence": [
+            "tests/test_policy_guide_expressions.py",
+            "tests/test_policy_on_error.py",
+            "tests/test_policy_transforms.py"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "expressions_graphql.errors",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_policy_guide_expressions.py",
+            "tests/test_policy_on_error.py",
+            "tests/test_policy_transforms.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-08",
+      "title": "Advanced logging",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-log-to-eventhub-sample",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-log-to-eventhub-sample.md",
+      "source_sha256": "7be98a2af7372bb2412a2541d6b588880a4537d79c373a7237621b9cf12d8cb0",
+      "source_ms_date": "10/01/2025",
+      "policy_elements_in_snippets": [
+        "forward-request",
+        "log-to-eventhub",
+        "set-variable"
+      ],
+      "parser_baseline": {
+        "forward-request": "registered",
+        "log-to-eventhub": "not_registered_as_standalone",
+        "set-variable": "registered"
+      },
+      "existing_test_candidates": [],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "xml",
+          "source_line": 46,
+          "heading": "A policy to send application/HTTP messages",
+          "source_sha256": "f0f088bbdb843bedeea846cb07c9b1f1e5c871c5537cb3c57dc380d3291e0c93",
+          "policy_elements": [
+            "log-to-eventhub"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-log-to-eventhub-sample/example-01.xml",
+          "adaptations": [],
+          "fixture_sha256": "f0f088bbdb843bedeea846cb07c9b1f1e5c871c5537cb3c57dc380d3291e0c93",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 8, column 21"
+        },
+        {
+          "ordinal": 2,
+          "language": "xml",
+          "source_line": 94,
+          "heading": "Message Metadata",
+          "source_sha256": "9341440962ca6c6f1e317c65c9bf557fee06d18b23d0b4098f669acc32b79a7c",
+          "policy_elements": [
+            "set-variable"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-log-to-eventhub-sample/example-02.xml",
+          "adaptations": [],
+          "fixture_sha256": "9341440962ca6c6f1e317c65c9bf557fee06d18b23d0b4098f669acc32b79a7c",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment"
+        },
+        {
+          "ordinal": 3,
+          "language": "xml",
+          "source_line": 102,
+          "heading": "Message Metadata",
+          "source_sha256": "c4108860397ed920ec37bea5e47e1d2dfa5afb8b84c8c014126a33640c132861",
+          "policy_elements": [
+            "forward-request",
+            "log-to-eventhub",
+            "set-variable"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-log-to-eventhub-sample/example-03.xml",
+          "adaptations": [],
+          "fixture_sha256": "c4108860397ed920ec37bea5e47e1d2dfa5afb8b84c8c014126a33640c132861",
+          "source_complete_document": true,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 11, column 28"
+        },
+        {
+          "ordinal": 4,
+          "language": "csharp",
+          "source_line": 174,
+          "heading": "IEventProcessor",
+          "source_sha256": "7f8d96a04ce2df6253bcd4ac74469a94f1420161ae9b571f5f8b06bdf974a8fe",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 5,
+          "language": "csharp",
+          "source_line": 202,
+          "heading": "HttpMessage",
+          "source_sha256": "10aa2bdbb34a1be534220675f291fad24ab6ba06c8513141ee66c5be203c8d5e",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 6,
+          "language": "csharp",
+          "source_line": 227,
+          "heading": "Forwarding the HTTP message",
+          "source_sha256": "a43ab83092e266efaf9c5422263020d51d90b4b0ec7ebd4c870a424d57fd0ae4",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "verify.logging",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_local_pubsub.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-09",
+      "title": "Advanced request throttling",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-sample-flexible-throttling",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-sample-flexible-throttling.md",
+      "source_sha256": "23bbf070e92ecab21ff775af0abdbfeb82f222fa9aefe38059b0e63329b58d12",
+      "source_ms_date": "08/19/2026",
+      "policy_elements_in_snippets": [
+        "quota-by-key",
+        "rate-limit-by-key"
+      ],
+      "parser_baseline": {
+        "quota-by-key": "registered",
+        "rate-limit-by-key": "registered"
+      },
+      "existing_test_candidates": [
+        "tests/test_policy_throttling.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "xml",
+          "source_line": 47,
+          "heading": "Rate limits",
+          "source_sha256": "b585a23c3e554e9e17a0f99ec08096afafd0f20fa7db63f488d55b00e5bfff27",
+          "policy_elements": [
+            "rate-limit-by-key"
+          ],
+          "validation": "source-backed local gateway execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-flexible-throttling/example-01.xml",
+          "adaptations": [],
+          "fixture_sha256": "b585a23c3e554e9e17a0f99ec08096afafd0f20fa7db63f488d55b00e5bfff27",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Outer XML expression attribute quotes normalized in specimens 03/04; original expressions retained."
+          ],
+          "evidence": [
+            "tests/test_advanced_throttling_guide.py"
+          ]
+        },
+        {
+          "ordinal": 2,
+          "language": "xml",
+          "source_line": 80,
+          "heading": "IP address throttling",
+          "source_sha256": "656ce9735f3ebf44c7315118350a85fc114895bfde045fd668f60f4528850f24",
+          "policy_elements": [
+            "quota-by-key",
+            "rate-limit-by-key"
+          ],
+          "validation": "source-backed local gateway execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-flexible-throttling/example-02.xml",
+          "adaptations": [],
+          "fixture_sha256": "656ce9735f3ebf44c7315118350a85fc114895bfde045fd668f60f4528850f24",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Outer XML expression attribute quotes normalized in specimens 03/04; original expressions retained."
+          ],
+          "evidence": [
+            "tests/test_advanced_throttling_guide.py"
+          ]
+        },
+        {
+          "ordinal": 3,
+          "language": "xml",
+          "source_line": 97,
+          "heading": "User identity throttling",
+          "source_sha256": "74e2a882e235c993cdf568197c2cf67bc8af8059d40dbe1e20eaea754f92172c",
+          "policy_elements": [
+            "rate-limit-by-key"
+          ],
+          "validation": "source-backed local gateway execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-flexible-throttling/example-03.xml",
+          "adaptations": [],
+          "fixture_sha256": "74e2a882e235c993cdf568197c2cf67bc8af8059d40dbe1e20eaea754f92172c",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 3, column 62",
+          "runtime_adaptations": [
+            "Switch outer expression-containing XML attribute quotes to single quotes; preserve expression semantics."
+          ],
+          "execution_adaptations": [
+            "Outer XML expression attribute quotes normalized in specimens 03/04; original expressions retained."
+          ],
+          "evidence": [
+            "tests/test_advanced_throttling_guide.py"
+          ]
+        },
+        {
+          "ordinal": 4,
+          "language": "xml",
+          "source_line": 113,
+          "heading": "Client-driven throttling",
+          "source_sha256": "f2f8027318b926c8e97c5bf1dea84afca495dcfe57389b90620252a44c602d30",
+          "policy_elements": [
+            "rate-limit-by-key"
+          ],
+          "validation": "source-backed local gateway execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-flexible-throttling/example-04.xml",
+          "adaptations": [],
+          "fixture_sha256": "f2f8027318b926c8e97c5bf1dea84afca495dcfe57389b90620252a44c602d30",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 3, column 60",
+          "runtime_adaptations": [
+            "Switch outer expression-containing XML attribute quotes to single quotes; preserve expression semantics."
+          ],
+          "execution_adaptations": [
+            "Outer XML expression attribute quotes normalized in specimens 03/04; original expressions retained."
+          ],
+          "evidence": [
+            "tests/test_advanced_throttling_guide.py"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "throttling.run",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_advanced_throttling_guide.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-10",
+      "title": "Using external services",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-sample-send-request",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-sample-send-request.md",
+      "source_sha256": "97c7b9cedd8fda9ce13de6ffb89654a9ee8f9bf7496ea0011c8ed751da95199b",
+      "source_ms_date": "09/29/2025",
+      "policy_elements_in_snippets": [
+        "base",
+        "choose",
+        "return-response",
+        "send-one-way-request",
+        "send-request",
+        "set-body",
+        "set-header",
+        "set-method",
+        "set-status",
+        "set-url",
+        "set-variable"
+      ],
+      "parser_baseline": {
+        "base": "registered",
+        "choose": "registered",
+        "return-response": "registered",
+        "send-one-way-request": "not_registered_as_standalone",
+        "send-request": "registered",
+        "set-body": "registered",
+        "set-header": "registered",
+        "set-method": "not_registered_as_standalone",
+        "set-status": "not_registered_as_standalone",
+        "set-url": "not_registered_as_standalone",
+        "set-variable": "registered"
+      },
+      "existing_test_candidates": [
+        "tests/test_policy_callouts_fidelity.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "xml",
+          "source_line": 26,
+          "heading": "Alerting with Slack",
+          "source_sha256": "08244a37a39d479725efe6bd659d4a921ba12a2a0d8f1c0cf0e6bff1637205d5",
+          "policy_elements": [
+            "choose",
+            "send-one-way-request",
+            "set-body",
+            "set-method",
+            "set-url"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-01.xml",
+          "adaptations": [
+            "Replace the source webhook URL with https://example.invalid/slack-webhook; do not store or contact source webhook credentials."
+          ],
+          "fixture_sha256": "50f04d99ebe5ba56de7922ed2604c5c26a70aae3c8ece034ac2fe5d231baa3ee",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment"
+        },
+        {
+          "ordinal": 2,
+          "language": "xml",
+          "source_line": 75,
+          "heading": "Extracting the token",
+          "source_sha256": "879c40ad7b60388c7b777d12670f7ddcfe6d02c822e893f55e0e122d5b4811a4",
+          "policy_elements": [
+            "set-variable"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-02.xml",
+          "adaptations": [],
+          "fixture_sha256": "879c40ad7b60388c7b777d12670f7ddcfe6d02c822e893f55e0e122d5b4811a4",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 1, column 90"
+        },
+        {
+          "ordinal": 3,
+          "language": "xml",
+          "source_line": 83,
+          "heading": "Making the validation request",
+          "source_sha256": "3d68abca4b1e378483f8ed81556b2e24dec476e3544d4d36a2e2791652b309f1",
+          "policy_elements": [
+            "send-request",
+            "set-body",
+            "set-header",
+            "set-method",
+            "set-url"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-03.xml",
+          "adaptations": [
+            "Replace the concrete source Azure web application host with https://example.invalid; introspection path and policy semantics remain unchanged."
+          ],
+          "fixture_sha256": "9d302a5dbc43615ff2ae6c154dad974ccc5f4dfd0894b36c0996cc163f5722ce",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment"
+        },
+        {
+          "ordinal": 4,
+          "language": "xml",
+          "source_line": 105,
+          "heading": "Checking the response",
+          "source_sha256": "bd97864e5d13fb907a1120325dec7c90a2283b9abacb77e2daea812edb5708e1",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-04.xml",
+          "adaptations": [],
+          "fixture_sha256": "bd97864e5d13fb907a1120325dec7c90a2283b9abacb77e2daea812edb5708e1",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 1, column 61"
+        },
+        {
+          "ordinal": 5,
+          "language": "xml",
+          "source_line": 113,
+          "heading": "Reporting failure",
+          "source_sha256": "541053db313ef5d5d0f4d35d42df6feb0658906322c28128e16b2098ff39a2e5",
+          "policy_elements": [
+            "choose",
+            "return-response",
+            "set-header",
+            "set-status"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-05.xml",
+          "adaptations": [],
+          "fixture_sha256": "541053db313ef5d5d0f4d35d42df6feb0658906322c28128e16b2098ff39a2e5",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 2, column 58"
+        },
+        {
+          "ordinal": 6,
+          "language": "xml",
+          "source_line": 132,
+          "heading": "Final solution",
+          "source_sha256": "17df501f53ac513de93f0bbd6684093a7b3b456d4bf05a7229d900542bce9b05",
+          "policy_elements": [
+            "base",
+            "choose",
+            "return-response",
+            "send-request",
+            "set-body",
+            "set-header",
+            "set-method",
+            "set-status",
+            "set-url",
+            "set-variable"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-06.xml",
+          "adaptations": [
+            "Replace the concrete source Azure web application host with https://example.invalid; introspection path and policy semantics remain unchanged."
+          ],
+          "fixture_sha256": "34929a7b8b354b7e5a85048c73534c1c9a14270fc372257c54ceb754a4c4f8bc",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 3, column 81"
+        },
+        {
+          "ordinal": 7,
+          "language": "xml",
+          "source_line": 190,
+          "heading": "Making the requests",
+          "source_sha256": "8bb73384c4d452eae725b27677f807c9f0f6c0a5b2a73170411cc9534eb7df24",
+          "policy_elements": [
+            "set-variable"
+          ],
+          "validation": "source_expression_equivalent_local_and_published_execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-07.xml",
+          "adaptations": [],
+          "fixture_sha256": "8bb73384c4d452eae725b27677f807c9f0f6c0a5b2a73170411cc9534eb7df24",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 1, column 77",
+          "evidence": [
+            "tests/test_external_composition_guide.py",
+            "examples/apim-policies/external_composition.py",
+            "docs/policy-validation/live-results-2026-10-02.json"
+          ],
+          "execution_adaptations": [
+            "Close set-variable tags and quote XML expression attributes; escape URL ampersands and generic type brackets; replace illustrative metric hosts with bundled backend; remove illustrative existing-response-variable placeholder.",
+            "Preserve published fromDate used for both from/to parameters first; separately refine authored policy to pass toDate and assert different dates."
+          ]
+        },
+        {
+          "ordinal": 8,
+          "language": "xml",
+          "source_line": 197,
+          "heading": "Making the requests",
+          "source_sha256": "f2b32b90691e57e59b65a38b6d3d02568b75670888f43caaaa5dc3ea97a9f2cd",
+          "policy_elements": [
+            "send-request",
+            "set-method",
+            "set-url"
+          ],
+          "validation": "source_fixture_adapted_local_and_published_execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-08.xml",
+          "adaptations": [],
+          "fixture_sha256": "f2b32b90691e57e59b65a38b6d3d02568b75670888f43caaaa5dc3ea97a9f2cd",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 2, column 100",
+          "evidence": [
+            "tests/test_external_composition_guide.py",
+            "examples/apim-policies/external_composition.py",
+            "docs/policy-validation/live-results-2026-10-02.json"
+          ],
+          "execution_adaptations": [
+            "Close set-variable tags and quote XML expression attributes; escape URL ampersands and generic type brackets; replace illustrative metric hosts with bundled backend; remove illustrative existing-response-variable placeholder.",
+            "Preserve published fromDate used for both from/to parameters first; separately refine authored policy to pass toDate and assert different dates."
+          ]
+        },
+        {
+          "ordinal": 9,
+          "language": "xml",
+          "source_line": 225,
+          "heading": "Responding",
+          "source_sha256": "d3a6fc1934960989becd25efd9d4b2e0539dfec97f09ab1cc4f1b17c9998ad36",
+          "policy_elements": [
+            "return-response",
+            "set-body",
+            "set-header",
+            "set-status"
+          ],
+          "validation": "source_fixture_adapted_local_and_published_execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-09.xml",
+          "adaptations": [],
+          "fixture_sha256": "d3a6fc1934960989becd25efd9d4b2e0539dfec97f09ab1cc4f1b17c9998ad36",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "mismatched tag: line 12, column 4",
+          "evidence": [
+            "tests/test_external_composition_guide.py",
+            "examples/apim-policies/external_composition.py",
+            "docs/policy-validation/live-results-2026-10-02.json"
+          ],
+          "execution_adaptations": [
+            "Close set-variable tags and quote XML expression attributes; escape URL ampersands and generic type brackets; replace illustrative metric hosts with bundled backend; remove illustrative existing-response-variable placeholder.",
+            "Preserve published fromDate used for both from/to parameters first; separately refine authored policy to pass toDate and assert different dates."
+          ]
+        },
+        {
+          "ordinal": 10,
+          "language": "xml",
+          "source_line": 243,
+          "heading": "Responding",
+          "source_sha256": "7e5667fe0b5f02411e3f5729eb37a631b146686d276a68f6562c13b3d6d4284c",
+          "policy_elements": [
+            "base",
+            "return-response",
+            "send-request",
+            "set-body",
+            "set-header",
+            "set-method",
+            "set-status",
+            "set-url",
+            "set-variable"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-sample-send-request/example-10.xml",
+          "adaptations": [],
+          "fixture_sha256": "7e5667fe0b5f02411e3f5729eb37a631b146686d276a68f6562c13b3d6d4284c",
+          "source_complete_document": true,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 3, column 70"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "verify.external and external_composition.run",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_policy_callouts_fidelity.py",
+            "tests/test_local_pubsub.py",
+            "tests/test_external_composition_guide.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-11",
+      "title": "Send messages to Service Bus",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-send-service-bus",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-howto-send-service-bus.md",
+      "source_sha256": "e5e1375471cd6ebe9e8a92f00e5a892d58735d1be351b31d74852e3ce0784656",
+      "source_ms_date": "09/30/2025",
+      "policy_elements_in_snippets": [
+        "send-service-bus-message"
+      ],
+      "parser_baseline": {
+        "send-service-bus-message": "not_registered_as_standalone"
+      },
+      "existing_test_candidates": [],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "xml",
+          "source_line": 74,
+          "heading": "Configure send-service-bus-message policy",
+          "source_sha256": "9409d5e71a789280148eac2363e5a1d2febcde187e1ba1e4829d8288248ff3ba",
+          "policy_elements": [
+            "send-service-bus-message"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-howto-send-service-bus/example-01.xml",
+          "adaptations": [],
+          "fixture_sha256": "9409d5e71a789280148eac2363e5a1d2febcde187e1ba1e4829d8288248ff3ba",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "mismatched tag: line 2, column 51"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "verify.messaging",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_local_pubsub.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-12",
+      "title": "Named values",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-properties",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/api-management-howto-properties.md",
+      "source_sha256": "af46b58d1af95bbe534a6c5b0171010c5675ad9a043ca1039295db6f190e5c64",
+      "source_ms_date": "05/11/2026",
+      "policy_elements_in_snippets": [
+        "set-header"
+      ],
+      "parser_baseline": {
+        "set-header": "registered"
+      },
+      "existing_test_candidates": [
+        "tests/test_management_save_workflows.py",
+        "tests/test_management_service.py",
+        "tests/test_named_values_unit.py"
+      ],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "azurecli",
+          "source_line": 121,
+          "heading": "[Azure CLI](#tab/azure-cli)",
+          "source_sha256": "3d36536d0f52c66031cc5aaa493f56abffd12cb6969d76aa7b11a5ebe2fc458c",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 2,
+          "language": "azurecli",
+          "source_line": 129,
+          "heading": "[Azure CLI](#tab/azure-cli)",
+          "source_sha256": "56f4776e5fc7b775e88fa15315101ed5db72ce0e4af471dfa3b5760a2e907291",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 3,
+          "language": "azurecli",
+          "source_line": 136,
+          "heading": "[Azure CLI](#tab/azure-cli)",
+          "source_sha256": "67ea50ad5a4b95bc0623d3b8b9cfdd5a0b9667db7174260a74572a978a7b946f",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 4,
+          "language": "azurecli",
+          "source_line": 143,
+          "heading": "[Azure CLI](#tab/azure-cli)",
+          "source_sha256": "1a2dca5c11f6158a42bcdea27acfa5a6d621827700e59e835e2ddd59c6d71acc",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 5,
+          "language": "azurecli",
+          "source_line": 150,
+          "heading": "[Azure CLI](#tab/azure-cli)",
+          "source_sha256": "e362c049db034a2682ea23903b7b36bb0fc0de777eb7f2b8848533956541d2f8",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 6,
+          "language": "xml",
+          "source_line": 170,
+          "heading": "Use a named value",
+          "source_sha256": "36f1c6e87f0d57a6fd25ce215cd80bba660e7926e20d7d0e6dd39ff3927506ab",
+          "policy_elements": [
+            "set-header"
+          ],
+          "validation": "source-backed local gateway execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-howto-properties/example-06.xml",
+          "adaptations": [],
+          "fixture_sha256": "36f1c6e87f0d57a6fd25ce215cd80bba660e7926e20d7d0e6dd39ff3927506ab",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Wrap source fragment in inbound policy and provide plain/secret/expression named values."
+          ],
+          "evidence": [
+            "tests/test_named_value_guide_lifecycle.py",
+            "tests/test_policy_guide_expressions.py"
+          ]
+        },
+        {
+          "ordinal": 7,
+          "language": "xml",
+          "source_line": 180,
+          "heading": "Use a named value",
+          "source_sha256": "0d46ad0df3b550cabba7ac489b40bbd6062840b8d571fce3b03eddb2d5752aec",
+          "policy_elements": [
+            "set-header"
+          ],
+          "validation": "not_run",
+          "fixture": "tests/fixtures/policy_guides/api-management-howto-properties/example-07.xml",
+          "adaptations": [],
+          "fixture_sha256": "0d46ad0df3b550cabba7ac489b40bbd6062840b8d571fce3b03eddb2d5752aec",
+          "source_complete_document": false,
+          "xml_markup": "source_markup_requires_repair",
+          "xml_markup_error": "not well-formed (invalid token): line 1, column 62"
+        },
+        {
+          "ordinal": 8,
+          "language": "xml",
+          "source_line": 186,
+          "heading": "Use a named value",
+          "source_sha256": "8e8f411794d87e30323cc45de1a8c418089710338a241ddfdda7b4f22c0233de",
+          "policy_elements": [
+            "set-header"
+          ],
+          "validation": "source-backed local gateway execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-howto-properties/example-08.xml",
+          "adaptations": [],
+          "fixture_sha256": "8e8f411794d87e30323cc45de1a8c418089710338a241ddfdda7b4f22c0233de",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Wrap source fragment in inbound policy and provide plain/secret/expression named values."
+          ],
+          "evidence": [
+            "tests/test_named_value_guide_lifecycle.py",
+            "tests/test_policy_guide_expressions.py"
+          ]
+        },
+        {
+          "ordinal": 9,
+          "language": "xml",
+          "source_line": 204,
+          "heading": "Use a named value",
+          "source_sha256": "51612f0ee4b8180128b0863d5b59044637457e9b33ad4a8d18195a5e858aa874",
+          "policy_elements": [
+            "set-header"
+          ],
+          "validation": "source-backed local gateway execution",
+          "fixture": "tests/fixtures/policy_guides/api-management-howto-properties/example-09.xml",
+          "adaptations": [],
+          "fixture_sha256": "51612f0ee4b8180128b0863d5b59044637457e9b33ad4a8d18195a5e858aa874",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Wrap source fragment in inbound policy and provide plain/secret/expression named values."
+          ],
+          "evidence": [
+            "tests/test_named_value_guide_lifecycle.py",
+            "tests/test_policy_guide_expressions.py"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "expressions_graphql.named_values",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_named_value_guide_lifecycle.py",
+            "tests/test_policy_guide_expressions.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status."
+      ]
+    },
+    {
+      "id": "guide-13",
+      "title": "Configure a GraphQL resolver",
+      "url": "https://learn.microsoft.com/en-us/azure/api-management/configure-graphql-resolver",
+      "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/main/articles/api-management/configure-graphql-resolver.md",
+      "source_sha256": "3cda3efc65f2c53b99a1f593379e068a50affa7847ae058e1dbce88d22c3f958",
+      "source_ms_date": "10/01/2025",
+      "policy_elements_in_snippets": [
+        "http-data-source",
+        "set-method",
+        "set-url"
+      ],
+      "parser_baseline": {
+        "http-data-source": "not_registered_as_standalone",
+        "set-method": "not_registered_as_standalone",
+        "set-url": "not_registered_as_standalone"
+      },
+      "existing_test_candidates": [],
+      "validation": "verified_local_equivalent",
+      "code_blocks": [
+        {
+          "ordinal": 1,
+          "language": "graphql",
+          "source_line": 104,
+          "heading": "context.GraphQL.parent",
+          "source_sha256": "85e28a8d151581b2b758f24ad23b1e3bd2083c6495bcfe4c30e3c127ff91e304",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 2,
+          "language": "graphql",
+          "source_line": 127,
+          "heading": "context.GraphQL.parent",
+          "source_sha256": "f99edcecc942dbc15feaa2ee161ce202b7d59a1e5d5825a94cf2f9410da07f5d",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 3,
+          "language": "xml",
+          "source_line": 143,
+          "heading": "context.GraphQL.parent",
+          "source_sha256": "c146bb5c9c595ca3c3db632a7a67710e5a31d3bf96ece8c95367520e2f4acd7d",
+          "policy_elements": [
+            "http-data-source",
+            "set-method",
+            "set-url"
+          ],
+          "validation": "source-backed local gateway and published-port execution",
+          "fixture": "tests/fixtures/policy_guides/configure-graphql-resolver/example-03.xml",
+          "adaptations": [],
+          "fixture_sha256": "c146bb5c9c595ca3c3db632a7a67710e5a31d3bf96ece8c95367520e2f4acd7d",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Replace illustrative data.contoso.com host with bundled HTTP data backend; retain Parent/Arguments expressions."
+          ],
+          "evidence": [
+            "tests/test_graphql_resolvers.py"
+          ]
+        },
+        {
+          "ordinal": 4,
+          "language": "graphql",
+          "source_line": 157,
+          "heading": "context.GraphQL.Arguments",
+          "source_sha256": "90cf40663330790fd13a6ef4bbf3c69804781194758a5a5e010cd96c73e08c29",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 5,
+          "language": "json",
+          "source_line": 173,
+          "heading": "context.GraphQL.Arguments",
+          "source_sha256": "c0c07cf9b52b85f4b1ba0604c789a870b3389aeead70147c45f168dcb3bb0dc7",
+          "policy_elements": [],
+          "validation": "not_run",
+          "fixture": null,
+          "adaptations": []
+        },
+        {
+          "ordinal": 6,
+          "language": "xml",
+          "source_line": 186,
+          "heading": "context.GraphQL.Arguments",
+          "source_sha256": "025055eec1119ac637f0f6d0fb1365206ab3cfbfa87804bb1ed5d5677ae9e399",
+          "policy_elements": [
+            "http-data-source",
+            "set-method",
+            "set-url"
+          ],
+          "validation": "source-backed local gateway and published-port execution",
+          "fixture": "tests/fixtures/policy_guides/configure-graphql-resolver/example-06.xml",
+          "adaptations": [],
+          "fixture_sha256": "025055eec1119ac637f0f6d0fb1365206ab3cfbfa87804bb1ed5d5677ae9e399",
+          "source_complete_document": false,
+          "xml_markup": "well_formed_as_fragment",
+          "execution_adaptations": [
+            "Replace illustrative data.contoso.com host with bundled HTTP data backend; retain Parent/Arguments expressions."
+          ],
+          "evidence": [
+            "tests/test_graphql_resolvers.py"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "published_localhost_gateway",
+          "execution": "policy-guide-aggregate-live-final",
+          "runner": "expressions_graphql.graphql",
+          "record": "docs/policy-validation/live-results-2026-10-02.json"
+        },
+        {
+          "kind": "local_gateway_tests",
+          "files": [
+            "tests/test_graphql_resolvers.py"
+          ]
+        }
+      ],
+      "pending_outcomes": [],
+      "limits": [],
+      "boundaries": [
+        "Verified local management/gateway outcomes. Source scaffolding, templates and unasserted reference examples keep individual not_run status.",
+        "HTTP resolver examples execute. Linked SQL/Cosmos policy reference pages are outside the 13-guide source scope."
+      ]
+    }
+  ],
+  "executions": [
+    {
+      "id": "authoring-transform-focused",
+      "date": "2026-10-02",
+      "kind": "local_ASGI_gateway",
+      "command": "UV_CACHE_DIR=/tmp/apim-audit-uv-cache uv run --extra dev pytest tests/test_policy_guide_authoring.py tests/test_policy_transforms.py tests/test_policy_scopes.py tests/test_effective_policy.py tests/test_policy_inspection.py tests/test_debug_credentials.py -q --tb=short",
+      "result": "55 passed",
+      "limits": "No published-port claim; authoring workflow runner and final host verification are separate."
+    },
+    {
+      "id": "authoring-runner-local-regression",
+      "date": "2026-10-02",
+      "kind": "local_ASGI_gateway",
+      "command": "UV_CACHE_DIR=/tmp/apim-audit-uv-cache uv run --extra dev pytest tests/test_policy_guide_authoring.py -q --tb=short",
+      "result": "6 passed",
+      "test": "tests/test_policy_guide_authoring.py::test_published_port_authoring_runner_assertions_exercise_gateway_and_restore_global_policy",
+      "limits": "Runner exercises local management, gateway and trace routes with controlled backend; actual published-port run is separate."
+    },
+    {
+      "id": "policy-guide-aggregate-live",
+      "date": "2026-10-02",
+      "kind": "published_localhost_gateway_and_broker",
+      "command": "APIM_BASE=http://localhost:8900 BROKER_BASE=http://localhost:8901 APIM_TENANT_KEY=<local-tenant-key> uv run --extra dev python examples/apim-policies/verify.py",
+      "result": "Parent agent inspected /tmp/apim-policy-live.log: all 13 guide helpers passed. Composition/null-introspection added subsequently; await repeat for those outcomes.",
+      "evidence_owner": "root agent",
+      "limits": "Guide-level workflow result does not mark every source specimen executed; untouched specimens remain not_run. Role filtering and exact IP allow/deny were added for the final repeat."
+    },
+    {
+      "id": "full-suite-before-composition",
+      "date": "2026-10-02",
+      "kind": "local_python_suite",
+      "result": "Parent agent reported 920 passed, 1 skipped in /tmp/apim-policy-suite-final.log. Subsequent composition/expression additions require their focused checks and final aggregate repeat."
+    },
+    {
+      "id": "policy-guide-aggregate-live-final",
+      "date": "2026-10-02",
+      "kind": "published_localhost_gateway_and_broker",
+      "command": "make -C examples/apim-policies verify",
+      "result": "passed twice, final and repeat",
+      "record": "docs/policy-validation/live-results-2026-10-02.json",
+      "limits": "Local management/gateway equivalents of all thirteen guides; specimen statuses remain independent."
+    },
+    {
+      "id": "final-focused-authoring-composition-status",
+      "date": "2026-10-02",
+      "kind": "local_ASGI_gateway",
+      "command": "UV_CACHE_DIR=/tmp/apim-audit-uv-cache uv run --extra dev pytest tests/test_external_composition_guide.py tests/test_policy_guide_authoring.py tests/test_policy_transforms.py tests/test_policy_guide_expressions.py tests/test_policy_on_error.py tests/test_effective_policy.py tests/test_policy_inspection.py -q --tb=short",
+      "result": "86 passed"
+    },
+    {
+      "id": "full-python-suite-final",
+      "date": "2026-10-02",
+      "kind": "local_python_suite",
+      "command": "uv run --extra dev pytest -q",
+      "result": "927 passed, 1 optional Keycloak integration test skipped",
+      "evidence_owner": "root agent",
+      "log": "/tmp/apim-policy-suite-final.log"
+    }
+  ]
+}

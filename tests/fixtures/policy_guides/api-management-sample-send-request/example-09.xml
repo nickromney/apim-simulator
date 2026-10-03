@@ -1,0 +1,13 @@
+<return-response response-variable-name="existing response variable">
+  <set-status code="200" reason="OK" />
+  <set-header name="Content-Type" exists-action="override">
+    <value>application/json</value>
+  </set-header>
+  <set-body>
+    @(new JObject(new JProperty("revenuedata",((IResponse)context.Variables["revenuedata"]).Body.As<JObject>()),
+                  new JProperty("materialdata",((IResponse)context.Variables["materialdata"]).Body.As<JObject>()),
+                  new JProperty("throughputdata",((IResponse)context.Variables["throughputdata"]).Body.As<JObject>()),
+                  new JProperty("accidentdata",((IResponse)context.Variables["accidentdata"]).Body.As<JObject>())
+                  ).ToString())
+  </set-body>
+</return-response>

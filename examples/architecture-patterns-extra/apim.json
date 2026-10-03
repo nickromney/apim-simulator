@@ -1,6 +1,7 @@
 {
   "allow_anonymous": true,
   "trace_enabled": true,
+  "trace_allow_unauthenticated": true,
   "proxy_max_attempts": 1,
   "backends": {
     "order-adapter": {"url": "http://order-adapter:8000"},

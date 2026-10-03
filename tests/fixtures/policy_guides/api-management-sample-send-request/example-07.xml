@@ -1,0 +1,2 @@
+<set-variable name="fromDate" value="@(context.Request.Url.Query["fromDate"].Last())">
+<set-variable name="toDate" value="@(context.Request.Url.Query["toDate"].Last())">

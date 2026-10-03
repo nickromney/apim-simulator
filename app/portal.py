@@ -2,9 +2,9 @@
 
 This is the adapted local equivalent of the Azure developer portal's consumer
 surface: browse published products, inspect API operations, request a
-subscription, and try calls with a key. Identity is simulator-grade — the
-acting user is a config-defined user passed in a header, not a signed-in
-account. Draft content, styles, and publication are persisted separately from
+subscription, and try calls with a key. Signed bearer identities bind users
+to their subscriptions; explicit development compatibility accepts a user
+header. Draft content, styles, and publication are persisted separately from
 the public portal through the operator editor.
 """
 
@@ -14,7 +14,7 @@ from html import escape
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from app.config import (
     ApiConfig,
@@ -39,6 +39,29 @@ def require_portal_user(cfg: GatewayConfig, user_id: str | None) -> UserConfig:
     if user.state and user.state.lower() != "active":
         raise HTTPException(status_code=403, detail=f"Portal user is not active (state: {user.state})")
     return user
+
+
+def portal_user_id(request: Request, cfg: GatewayConfig) -> str:
+    from app.control_plane import decode_identity
+
+    identity = cfg.portal.identity
+    if identity.enabled and (request.headers.get("authorization") or not identity.allow_legacy_user_header):
+        claims = decode_identity(request, identity)
+        subject = claims["sub"]
+        require_portal_user(cfg, subject)
+        request.state.portal_actor = {"subject": subject, "authentication": "signed-jwt"}
+        return subject
+    user = require_portal_user(cfg, request.headers.get(cfg.portal.user_header))
+    request.state.portal_actor = {"subject": user.id, "authentication": "legacy-user-header"}
+    return user.id
+
+
+def portal_identity_users(request: Request, cfg: GatewayConfig) -> dict[str, Any]:
+    if not cfg.portal.identity.enabled:
+        return portal_users(cfg)
+    user_id = portal_user_id(request, cfg)
+    user = cfg.users[user_id]
+    return {"users": [{"id": user_id, "name": user.name or user_id}]}
 
 
 def user_group_ids(cfg: GatewayConfig, user_id: str) -> set[str]:
@@ -283,7 +306,11 @@ PORTAL_HTML = r"""<!doctype html>
   </p>
 
   <section>
-    <h2>Acting user</h2>
+    <h2>Portal identity</h2>
+    <label>Signed portal token
+      <input id="portal-token" type="password" autocomplete="off" placeholder="Bearer token from the local issuer" />
+    </label>
+    <button id="portal-sign-in" type="button">Sign in</button>
     <label>Signed in as
       <select id="user-select"></select>
     </label>
@@ -328,6 +355,8 @@ PORTAL_HTML = r"""<!doctype html>
   const state = { user: "", catalog: null, subscriptions: [], apiGroups: new Map(), selectedApi: null };
 
   function headers() {
+    const token = document.getElementById("portal-token").value.trim();
+    if (token) return { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
     return { "X-Apim-Portal-User": state.user, "Content-Type": "application/json" };
   }
 
@@ -520,7 +549,8 @@ PORTAL_HTML = r"""<!doctype html>
 
   async function boot() {
     const select = document.getElementById("user-select");
-    const payload = await (await fetch("/apim/portal/users")).json();
+    const payload = await fetchJson("/apim/portal/users");
+    select.replaceChildren();
     for (const user of payload.users) {
       select.append(el("option", { value: user.id, text: user.name + " (" + user.id + ")" }));
     }
@@ -535,7 +565,15 @@ PORTAL_HTML = r"""<!doctype html>
     await refresh();
   }
 
-  void boot();
+  document.getElementById("portal-sign-in").onclick = () => void boot().catch(showIdentityError);
+  function showIdentityError(error) {
+    state.user = ""; state.subscriptions = []; state.catalog = null;
+    document.getElementById("user-status").textContent = error.message;
+    document.getElementById("catalog").replaceChildren();
+    document.getElementById("subs-body").replaceChildren();
+    document.getElementById("key-select").replaceChildren();
+  }
+  void boot().catch(showIdentityError);
 </script>
 </body>
 </html>

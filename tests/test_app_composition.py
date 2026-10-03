@@ -8,6 +8,21 @@ deliberately, update the inventory below in the same change.
 from app.main import create_app
 
 EXPECTED_ROUTES = {
+    ("GET", "/apim/management/security/events"),
+    ("GET", "/apim/management/security/governance"),
+    ("GET", "/apim/management/security/posture"),
+    ("GET", "/apim/management/security/threats"),
+    ("POST", "/apim/security/backups"),
+    ("POST", "/apim/security/restore"),
+    ("PUT", "/apim/management/security/governance"),
+    ("DELETE", "/apim/management/apis/{api_id}/resolvers/{resolver_id}"),
+    ("DELETE", "/apim/management/loggers/{logger_id}"),
+    ("GET", "/apim/management/apis/{api_id}/graphql"),
+    ("GET", "/apim/management/apis/{api_id}/resolvers"),
+    ("GET", "/crossdomain.xml"),
+    ("PUT", "/apim/management/apis/{api_id}/graphql"),
+    ("PUT", "/apim/management/apis/{api_id}/resolvers/{resolver_id}"),
+    ("PUT", "/apim/management/loggers/{logger_id}"),
     ("DELETE", "/apim/management/api-center/link"),
     ("DELETE", "/apim/management/monitoring/alert-rules/{rule_id}"),
     ("GET", "/apim/management/api-center/link"),
@@ -149,11 +164,20 @@ EXPECTED_ROUTES = {
 }
 
 
+def _flatten_routes(routes):
+    for route in routes:
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            yield from _flatten_routes(included.routes)
+        else:
+            yield route
+
+
 def test_route_inventory_is_stable() -> None:
     app = create_app()
     actual = {
         (method, route.path)
-        for route in app.routes
+        for route in _flatten_routes(app.routes)
         if hasattr(route, "methods")
         for method in (route.methods or set())
         if method not in {"HEAD", "OPTIONS"}
@@ -172,7 +196,7 @@ def test_gateway_catch_all_is_registered_last() -> None:
     still reports as present. The inventory test cannot see that; this can.
     """
     app = create_app()
-    paths = [route.path for route in app.routes if hasattr(route, "methods")]
+    paths = [route.path for route in _flatten_routes(app.routes) if hasattr(route, "methods")]
     catch_all_positions = [index for index, path in enumerate(paths) if path == "/{full_path:path}"]
 
     assert catch_all_positions, "gateway catch-all route is missing"

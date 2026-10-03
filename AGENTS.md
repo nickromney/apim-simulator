@@ -6,7 +6,9 @@ Use this file for durable, concise guidance for coding agents in this repository
 - Before changing code, read `README.md` and the nearest package/build manifest for the commands and constraints that apply.
 - Run Python tests and lint with `uv run --extra dev`; do not invoke `.venv/bin/python` directly.
 - Keep new example lifecycle commands in `examples/<name>/Makefile`; the root lists entrypoints and delegates repo-wide validation.
+- When forwarding a transformed body or assembling a callout/resolver request, let HTTPX recalculate Content-Length; do not copy the incoming length.
 - Trace serialization must preserve request and callout bodies; enabling tracing must not change policy results.
+- When patching `app/policy.py`, include its containing policy/helper context; repeated `PolicyRequest` constructors have different variable-sharing semantics.
 - Keep example XML in Microsoft's documented element order; the local parser can accept orders Azure rejects.
 - Verify Docker smoke through published localhost ports; in-container checks can miss inaccessible host ports.
 - Public examples, reports, and docs must use placeholders or environment inputs for real deployment identifiers, including storage accounts, subscriptions, resource names, endpoints, and private IPs.

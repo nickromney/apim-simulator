@@ -133,6 +133,7 @@ type ReplayResult = {
 };
 type WorkflowTab = "policy" | "details" | "test" | "revisions" | "changelog";
 type ManagementArea = "apis" | "subscriptions" | "traces";
+type AuthenticationMode = "operator-token" | "local-tenant";
 type ApiRevisionRecord = {
   id: string;
   description?: string | null;
@@ -143,6 +144,14 @@ type ApiRevisionRecord = {
 type ApiReleaseRecord = { id: string; name?: string | null; notes?: string | null; revision: string };
 
 const STORAGE_KEY = "apim-console-settings";
+class ManagementResponseError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 const defaultHeaders = `{
   "x-apim-trace": "true"
 }`;
@@ -159,9 +168,9 @@ function scopeId(scope: PolicyScope): string {
   return `${scope.scope_type}:${scope.scope_name}`;
 }
 
-function flattenPolicyScopes(summary: SummaryPayload | null): PolicyScope[] {
+function flattenPolicyScopes(summary: SummaryPayload | null, includeGateway = true): PolicyScope[] {
   if (!summary) return [];
-  const scopes: PolicyScope[] = [summary.gateway_policy_scope];
+  const scopes: PolicyScope[] = includeGateway ? [summary.gateway_policy_scope] : [];
   for (const product of summary.products) scopes.push({ scope_type: "product", scope_name: product.id });
   for (const api of summary.apis) {
     scopes.push(api.policy_scope);
@@ -278,16 +287,20 @@ function apiRevisionPath(apiPath: string, revisionId: string, operationPath: str
 }
 
 function App() {
-  const storedSettings = (() => {
+  const [baseUrl, setBaseUrl] = useState(() => {
     try {
-      return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
+      const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
+      return typeof stored?.baseUrl === "string" ? stored.baseUrl : localDemoDefaults.baseUrl;
     } catch {
-      return {};
+      return localDemoDefaults.baseUrl;
     }
-  })() as { baseUrl?: string; tenantKey?: string };
-
-  const [baseUrl, setBaseUrl] = useState(storedSettings.baseUrl ?? "http://localhost:8000");
-  const [tenantKey, setTenantKey] = useState(storedSettings.tenantKey ?? "");
+  });
+  const [authenticationMode, setAuthenticationMode] = useState<AuthenticationMode>("operator-token");
+  const [tenantKey, setTenantKey] = useState("");
+  const [operatorToken, setOperatorToken] = useState("");
+  const [scopedApiId, setScopedApiId] = useState("");
+  const credential =
+    authenticationMode === "operator-token" ? operatorToken.trim().replace(/^Bearer\s+/i, "") : tenantKey.trim();
   const [summary, setSummary] = useState<SummaryPayload | null>(null);
   const [traces, setTraces] = useState<TraceItem[]>([]);
   const [selectedTraceId, setSelectedTraceId] = useState("");
@@ -367,8 +380,9 @@ function App() {
   const revisionRequest = useRef(0);
   const releaseRequest = useRef(0);
   const connectionControl = useRef<HTMLDetailsElement>(null);
+  const authenticationFailed = useRef(false);
 
-  const scopes = useMemo(() => flattenPolicyScopes(summary), [summary]);
+  const scopes = useMemo(() => flattenPolicyScopes(summary, !scopedApiId.trim()), [summary, scopedApiId]);
   const selectedApi = summary?.apis.find((api) => api.id === selectedApiId) ?? null;
   const selectedOperation = selectedApi?.operations.find((operation) => operation.id === selectedOperationId) ?? null;
   const revisionOperationMap =
@@ -392,8 +406,13 @@ function App() {
   });
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, tenantKey }));
-  }, [baseUrl, tenantKey]);
+    try {
+      // Replace legacy settings too, removing any previously persisted credentials.
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ baseUrl }));
+    } catch {
+      // Storage restrictions must not prevent an in-memory connection.
+    }
+  }, [baseUrl]);
 
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -437,14 +456,86 @@ function App() {
 
   async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     const headers = new Headers(init?.headers);
-    headers.set("X-Apim-Tenant-Key", tenantKey);
+    headers.delete("X-Apim-Tenant-Key");
+    headers.delete("Authorization");
+    if (!credential)
+      throw new Error(
+        authenticationMode === "operator-token"
+          ? "Enter a signed operator token to connect."
+          : "Enter a local tenant key to connect.",
+      );
+    if (authenticationMode === "operator-token") headers.set("Authorization", `Bearer ${credential}`);
+    else headers.set("X-Apim-Tenant-Key", credential);
     if (init?.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers });
+    if (response.status === 401) {
+      authenticationFailed.current = true;
+      if (authenticationMode === "operator-token") setOperatorToken("");
+      else setTenantKey("");
+      setSummary(null);
+      setTraces([]);
+      setReplayResult(null);
+      if (connectionControl.current) connectionControl.current.open = true;
+      const message =
+        authenticationMode === "operator-token"
+          ? "Management access expired or was rejected. Enter a valid signed operator token and reconnect."
+          : "Management access was rejected. Enter a valid local tenant key and reconnect.";
+      setStatusMessage(message);
+      throw new Error(message);
+    }
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`${response.status} ${response.statusText}: ${text}`);
+      const safeText = [credential, operatorToken.trim(), tenantKey.trim()].reduce(
+        (value, secret) => (secret ? value.replaceAll(secret, "[redacted]") : value),
+        text,
+      );
+      throw new ManagementResponseError(response.status, `${response.status} ${response.statusText}: ${safeText}`);
     }
     return (await response.json()) as T;
+  }
+
+  async function permittedMetadata<T>(path: string, deniedValue: T): Promise<T> {
+    try {
+      return await apiFetch<T>(path);
+    } catch (error) {
+      if (error instanceof ManagementResponseError && error.status === 403) return deniedValue;
+      throw error;
+    }
+  }
+
+  async function loadDashboardSummary(): Promise<{ payload: SummaryPayload; metadataOnly: boolean }> {
+    const apiId = scopedApiId.trim();
+    if (!apiId) {
+      try {
+        return { payload: await apiFetch<SummaryPayload>("/apim/management/summary"), metadataOnly: false };
+      } catch (error) {
+        if (!(error instanceof ManagementResponseError) || error.status !== 403) throw error;
+      }
+    }
+    const [apis, status, products, versionSets] = await Promise.all([
+      apiId
+        ? apiFetch<ApiSummary>(`/apim/management/apis/${encodeURIComponent(apiId)}`).then((api) => [api])
+        : apiFetch<ApiSummary[]>("/apim/management/apis"),
+      apiId
+        ? Promise.resolve({ gateway_policy_scope: { scope_type: "gateway", scope_name: "gateway" } })
+        : apiFetch<{ gateway_policy_scope: PolicyScope }>("/apim/management/status"),
+      apiId ? Promise.resolve([]) : permittedMetadata<ProductSummary[]>("/apim/management/products", []),
+      apiId
+        ? Promise.resolve([])
+        : permittedMetadata<NonNullable<SummaryPayload["api_version_sets"]>>("/apim/management/api-version-sets", []),
+    ]);
+    return {
+      payload: {
+        gateway_policy_scope: status.gateway_policy_scope,
+        apis,
+        products,
+        api_version_sets: versionSets,
+        routes: [],
+        subscriptions: [],
+        backends: [],
+      },
+      metadataOnly: true,
+    };
   }
 
   function discardUnsaved(): boolean {
@@ -550,11 +641,16 @@ function App() {
   ) {
     const resetAuthoring = hasUnsaved;
     if (resetAuthoring && !allowDirty && !discardUnsaved()) return;
-    if (!tenantKey.trim()) {
-      setStatusMessage("Tenant key is required for management access.");
+    if (!credential) {
+      setStatusMessage(
+        authenticationMode === "operator-token"
+          ? "Enter a signed operator token to connect."
+          : "Enter a local tenant key to connect.",
+      );
       return;
     }
     const requestId = ++dashboardRequest.current;
+    authenticationFailed.current = false;
     revisionRequest.current += 1;
     releaseRequest.current += 1;
     setRevisionLoading(false);
@@ -563,17 +659,19 @@ function App() {
     setBusy(true);
     setStatusMessage("Refreshing APIs, policies, and traces.");
     try {
-      const [summaryPayload, tracesPayload] = await Promise.all([
-        apiFetch<SummaryPayload>("/apim/management/summary"),
-        apiFetch<{ items: TraceItem[] }>("/apim/management/traces"),
+      const [{ payload: summaryPayload, metadataOnly }, tracesPayload] = await Promise.all([
+        loadDashboardSummary(),
+        scopedApiId.trim()
+          ? Promise.resolve({ items: [] })
+          : permittedMetadata<{ items: TraceItem[] }>("/apim/management/traces", { items: [] }),
       ]);
       if (requestId !== dashboardRequest.current) return;
       const nextApis = summaryPayload.apis ?? [];
       const nextApi = nextApis.find((api) => api.id === (preferredApiId ?? selectedApiId)) ?? nextApis[0] ?? null;
       const nextScope =
-        flattenPolicyScopes(summaryPayload).find((scope) => scopeId(scope) === preferredScope) ??
-        flattenPolicyScopes(summaryPayload).find((scope) => scopeId(scope) === selectedScopeId) ??
-        flattenPolicyScopes(summaryPayload)[0];
+        flattenPolicyScopes(summaryPayload, !scopedApiId.trim()).find((scope) => scopeId(scope) === preferredScope) ??
+        flattenPolicyScopes(summaryPayload, !scopedApiId.trim()).find((scope) => scopeId(scope) === selectedScopeId) ??
+        flattenPolicyScopes(summaryPayload, !scopedApiId.trim())[0];
       startTransition(() => {
         setSummary(summaryPayload);
         if (connectionControl.current) connectionControl.current.open = false;
@@ -603,7 +701,12 @@ function App() {
         }
       });
       if (nextScope && !policyDirty) await loadPolicy(nextScope);
-      setStatusMessage("Console is in sync with the simulator.");
+      if (!authenticationFailed.current)
+        setStatusMessage(
+          metadataOnly
+            ? "Connected with permitted metadata. Subscription credentials and unavailable trace contents are not loaded."
+            : "Console is in sync with the simulator.",
+        );
     } catch (error) {
       if (requestId === dashboardRequest.current)
         setStatusMessage(error instanceof Error ? error.message : "Unable to refresh the console.");
@@ -615,6 +718,9 @@ function App() {
   function loadLocalDemo() {
     if (!discardUnsaved()) return;
     setBaseUrl(localDemoDefaults.baseUrl);
+    setAuthenticationMode("local-tenant");
+    setOperatorToken("");
+    setScopedApiId("");
     setTenantKey(localDemoDefaults.tenantKey);
     setSummary(null);
     if (connectionControl.current) connectionControl.current.open = true;
@@ -705,8 +811,12 @@ function App() {
       setStatusMessage("Choose a specification file or enter an OpenAPI URL.");
       return;
     }
-    if (!tenantKey.trim()) {
-      setStatusMessage("Tenant key is required for management access.");
+    if (!credential) {
+      setStatusMessage(
+        authenticationMode === "operator-token"
+          ? "Enter a signed operator token to connect."
+          : "Enter a local tenant key to connect.",
+      );
       return;
     }
     setBusy(true);
@@ -1443,14 +1553,52 @@ function App() {
             void refreshDashboard();
           }}
         >
-          <label className="connection-url">
-            <span className="field-label">Gateway base URL</span>
-            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} disabled={busy} />
-          </label>
-          <label className="connection-key">
-            <span className="field-label">Tenant key</span>
-            <input value={tenantKey} onChange={(event) => setTenantKey(event.target.value)} disabled={busy} />
-          </label>
+          <div className="connection-url">
+            <label>
+              <span className="field-label">Gateway base URL</span>
+              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} disabled={busy} />
+            </label>
+            <label>
+              <span className="field-label">API ID for scoped access (optional)</span>
+              <input value={scopedApiId} onChange={(event) => setScopedApiId(event.target.value)} disabled={busy} />
+            </label>
+          </div>
+          <div className="connection-key">
+            <label>
+              <span className="field-label">Management authentication</span>
+              <select
+                value={authenticationMode}
+                disabled={busy}
+                onChange={(event) => {
+                  setAuthenticationMode(event.target.value as AuthenticationMode);
+                  setSummary(null);
+                  setTraces([]);
+                  setReplayResult(null);
+                  setStatusMessage("Enter your management credential and connect.");
+                }}
+              >
+                <option value="operator-token">Signed operator token</option>
+                <option value="local-tenant">Local tenant key</option>
+              </select>
+            </label>
+            <label>
+              <span className="field-label">
+                {authenticationMode === "operator-token" ? "Operator JWT" : "Tenant key"}
+              </span>
+              <input
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                value={authenticationMode === "operator-token" ? operatorToken : tenantKey}
+                onChange={(event) =>
+                  authenticationMode === "operator-token"
+                    ? setOperatorToken(event.target.value)
+                    : setTenantKey(event.target.value)
+                }
+                disabled={busy}
+              />
+            </label>
+          </div>
           <div className="connection-actions">
             <button type="button" className="secondary-button" onClick={loadLocalDemo} disabled={busy}>
               Load Local Demo
@@ -1460,7 +1608,8 @@ function App() {
             </button>
           </div>
           <p className="connection-hint">
-            The demo preset targets the management-enabled stack on <code>localhost:8000</code>.
+            The demo preset targets the management-enabled stack on <code>localhost:8000</code>. Credentials stay in
+            memory; only the gateway URL is saved.
           </p>
         </form>
       </details>

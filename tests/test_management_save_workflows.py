@@ -94,7 +94,7 @@ def test_successful_management_save_is_atomic_published_and_watcher_acknowledged
         assert app.state.policy_response_cache == {"retained": "response"}
         assert app.state.policy_value_cache == {"retained": "value"}
 
-        reloaded = client.post("/apim/reload")
+        reloaded = client.post("/apim/reload", headers={"X-Apim-Tenant-Key": "tenant-test"})
         assert reloaded.status_code == 200
         assert app.state.gateway_config.products["starter"].description == "Saved"
         assert app.state.policy_response_cache == {}

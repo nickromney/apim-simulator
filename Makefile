@@ -140,6 +140,8 @@ help:
 	@echo ""
 	@echo "BFF demo: make -C examples/bff help"
 	@echo "APIM tutorials: make -C examples/apim-tutorials help"
+	@echo "APIM policies: make -C examples/apim-policies help"
+	@echo "APIM security: make -C examples/apim-security up / verify / down"
 
 .PHONY: help-stacks help-dev help-verify help-release help-config help-all
 
@@ -772,3 +774,11 @@ examples:
 	@echo ""
 	@echo "BFF and architecture patterns have their own Makefiles; other demos use root targets."
 	@echo "For stack variants, logs, and smoke checks: make help-stacks or make help-verify"
+
+.PHONY: security-lab-up security-lab-verify security-lab-down
+security-lab-up:
+	$(MAKE) -C examples/apim-security up
+security-lab-verify:
+	$(MAKE) -C examples/apim-security verify
+security-lab-down:
+	$(MAKE) -C examples/apim-security down

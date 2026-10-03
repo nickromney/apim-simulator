@@ -1,0 +1,328 @@
+{
+  "date": "2026-10-02",
+  "command": "node .yarn/releases/yarn-4.4.1.cjs npm audit --all --recursive --json",
+  "scope": "Backstage complete recursive dependency graph, including development dependencies",
+  "exit_code": 1,
+  "advisory_count": 8,
+  "advisories_by_severity": {
+    "moderate": 6,
+    "low": 1,
+    "high": 1,
+    "critical": 0
+  },
+  "deprecation_count": 17,
+  "untriaged_high_or_critical": 0,
+  "advisories": [
+    {
+      "package": "@octokit/plugin-paginate-rest",
+      "severity": "moderate",
+      "issue": "@octokit/plugin-paginate-rest has a Regular Expression in iterator Leads to ReDoS Vulnerability Due to Catastrophic Backtracking",
+      "versions": [
+        "6.1.2"
+      ],
+      "dependents": [
+        "@octokit/rest@npm:19.0.13"
+      ],
+      "source": "https://github.com/advisories/GHSA-h5c3-5r3r-rr8q",
+      "affected_range": ">=1.0.0 <9.2.2",
+      "triage": "reviewed; see dependency-remediation-2026-10-02.md"
+    },
+    {
+      "package": "@octokit/request",
+      "severity": "moderate",
+      "issue": "@octokit/request has a Regular Expression in fetchWrapper that Leads to ReDoS Vulnerability Due to Catastrophic Backtracking",
+      "versions": [
+        "6.2.8"
+      ],
+      "dependents": [
+        "@octokit/auth-app@npm:4.0.13"
+      ],
+      "source": "https://github.com/advisories/GHSA-rmvr-2pp2-xj38",
+      "affected_range": ">=1.0.0 <8.4.1",
+      "triage": "reviewed; see dependency-remediation-2026-10-02.md"
+    },
+    {
+      "package": "@octokit/request-error",
+      "severity": "moderate",
+      "issue": "@octokit/request-error has a Regular Expression in index that Leads to ReDoS Vulnerability Due to Catastrophic Backtracking",
+      "versions": [
+        "3.0.3"
+      ],
+      "dependents": [
+        "@octokit/auth-app@npm:4.0.13"
+      ],
+      "source": "https://github.com/advisories/GHSA-xx4v-prfh-6cgc",
+      "affected_range": ">=1.0.0 <5.1.1",
+      "triage": "reviewed; see dependency-remediation-2026-10-02.md"
+    },
+    {
+      "package": "elliptic",
+      "severity": "low",
+      "issue": "Elliptic Uses a Cryptographic Primitive with a Risky Implementation",
+      "versions": [
+        "6.6.1"
+      ],
+      "dependents": [
+        "browserify-sign@npm:4.2.6"
+      ],
+      "source": "https://github.com/advisories/GHSA-848j-6mx2-7j84",
+      "affected_range": "<=6.6.1",
+      "triage": "reviewed; see dependency-remediation-2026-10-02.md"
+    },
+    {
+      "package": "node-forge",
+      "severity": "high",
+      "issue": "node-forge RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements",
+      "versions": [
+        "1.4.0"
+      ],
+      "dependents": [
+        "@backstage/backend-defaults@npm:0.18.0"
+      ],
+      "source": "https://github.com/advisories/GHSA-86w9-cpqp-85rv",
+      "affected_range": "<=1.4.0",
+      "triage": "reviewed; see dependency-remediation-2026-10-02.md"
+    },
+    {
+      "package": "react-router",
+      "severity": "moderate",
+      "issue": "React Router: Open redirect via backslash in <Link> and useNavigate (CVE-2025-68470 bypass)",
+      "versions": [
+        "6.30.6"
+      ],
+      "dependents": [
+        "app@workspace:packages/app"
+      ],
+      "source": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+      "affected_range": ">=6.0.0 <7.18.0",
+      "triage": "reviewed; see dependency-remediation-2026-10-02.md",
+      "local_mitigation": "Upstream PR15176 normalization backported to @remix-run/router1.23.4 through Yarnpatch;5regressionspassed."
+    },
+    {
+      "package": "react-router",
+      "severity": "moderate",
+      "issue": "React Router: Arbitrary Constructor Injection via deserializeErrors() in React Router SSR Hydration",
+      "versions": [
+        "6.30.6"
+      ],
+      "dependents": [
+        "app@workspace:packages/app"
+      ],
+      "source": "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+      "affected_range": ">=6.4.0 <7.18.0",
+      "triage": "reviewed; see dependency-remediation-2026-10-02.md"
+    },
+    {
+      "package": "uuid",
+      "severity": "moderate",
+      "issue": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+      "versions": [
+        "3.4.0",
+        "8.3.2",
+        "9.0.1"
+      ],
+      "dependents": [
+        "@google-cloud/storage@npm:7.19.0",
+        "@material-table/core@npm:3.2.5",
+        "google-gax@npm:4.6.1"
+      ],
+      "source": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+      "affected_range": "<11.1.1",
+      "triage": "reviewed; see dependency-remediation-2026-10-02.md"
+    }
+  ],
+  "deprecations": [
+    {
+      "package": "@humanwhocodes/config-array",
+      "severity": "moderate",
+      "issue": "Use @eslint/config-array instead",
+      "versions": [
+        "0.13.0"
+      ],
+      "dependents": [
+        "eslint@npm:8.57.1"
+      ]
+    },
+    {
+      "package": "@humanwhocodes/object-schema",
+      "severity": "moderate",
+      "issue": "Use @eslint/object-schema instead",
+      "versions": [
+        "2.0.3"
+      ],
+      "dependents": [
+        "@humanwhocodes/config-array@npm:0.13.0"
+      ]
+    },
+    {
+      "package": "@material-ui/core",
+      "severity": "moderate",
+      "issue": "Material UI v4 doesn't receive active development since September 2021. See the guide https://mui.com/material-ui/migration/migration-v4/ to upgrade to v5.",
+      "versions": [
+        "4.12.4"
+      ],
+      "dependents": [
+        "app@workspace:packages/app"
+      ]
+    },
+    {
+      "package": "@material-ui/lab",
+      "severity": "moderate",
+      "issue": "Material UI v4 doesn't receive active development since September 2021. See the guide https://mui.com/material-ui/migration/migration-v4/ to upgrade to v5.",
+      "versions": [
+        "4.0.0-alpha.61"
+      ],
+      "dependents": [
+        "@backstage/core-components@npm:0.18.14"
+      ]
+    },
+    {
+      "package": "@material-ui/pickers",
+      "severity": "moderate",
+      "issue": "This package no longer supported. It has been relaced by @mui/x-date-pickers",
+      "versions": [
+        "3.3.11"
+      ],
+      "dependents": [
+        "@material-table/core@npm:3.2.5"
+      ]
+    },
+    {
+      "package": "@material-ui/styles",
+      "severity": "moderate",
+      "issue": "Material UI v4 doesn't receive active development since September 2021. See the guide https://mui.com/material-ui/migration/migration-v4/ to upgrade to v5.",
+      "versions": [
+        "4.11.5"
+      ],
+      "dependents": [
+        "@material-ui/core@npm:4.12.4"
+      ]
+    },
+    {
+      "package": "@react-hookz/deep-equal",
+      "severity": "moderate",
+      "issue": "PACKAGE IS DEPRECATED AND WILL BE DETED SOON, USE @ver0/deep-equal INSTEAD",
+      "versions": [
+        "1.0.4"
+      ],
+      "dependents": [
+        "@react-hookz/web@npm:24.0.4"
+      ]
+    },
+    {
+      "package": "atlassian-openapi",
+      "severity": "moderate",
+      "issue": "DEPRECATED: atlassian-openapi has moved to @atlassian/atlassian-openapi. The latest version is 1.0.6. Please update your dependency.",
+      "versions": [
+        "1.0.21"
+      ],
+      "dependents": [
+        "openapi-merge@npm:1.3.3"
+      ]
+    },
+    {
+      "package": "eslint",
+      "severity": "moderate",
+      "issue": "This version is no longer supported. Please see https://eslint.org/version-support for other options.",
+      "versions": [
+        "8.57.1"
+      ],
+      "dependents": [
+        "@backstage/cli@npm:0.36.6"
+      ]
+    },
+    {
+      "package": "glob",
+      "severity": "moderate",
+      "issue": "Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me",
+      "versions": [
+        "7.2.3"
+      ],
+      "dependents": [
+        "fork-ts-checker-webpack-plugin@npm:6.5.3"
+      ]
+    },
+    {
+      "package": "inflight",
+      "severity": "moderate",
+      "issue": "This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.",
+      "versions": [
+        "1.0.6"
+      ],
+      "dependents": [
+        "glob@npm:8.1.0"
+      ]
+    },
+    {
+      "package": "lodash.get",
+      "severity": "moderate",
+      "issue": "This package is deprecated. Use the optional chaining (?.) operator instead.",
+      "versions": [
+        "4.4.2"
+      ],
+      "dependents": [
+        "express-openapi-validator@npm:5.6.2"
+      ]
+    },
+    {
+      "package": "prebuild-install",
+      "severity": "moderate",
+      "issue": "No longer maintained. Please contact the author of the relevant native addon; alternatives are available.",
+      "versions": [
+        "7.1.3"
+      ],
+      "dependents": [
+        "better-sqlite3@npm:12.11.1"
+      ]
+    },
+    {
+      "package": "prom-client",
+      "severity": "moderate",
+      "issue": "prom-client has been replaced by @prometheus-io/client",
+      "versions": [
+        "15.1.3"
+      ],
+      "dependents": [
+        "@backstage/plugin-catalog-backend@npm:4.0.0"
+      ]
+    },
+    {
+      "package": "react-beautiful-dnd",
+      "severity": "moderate",
+      "issue": "react-beautiful-dnd is now deprecated. Context and options: https://github.com/atlassian/react-beautiful-dnd/issues/2672",
+      "versions": [
+        "13.1.1"
+      ],
+      "dependents": [
+        "@material-table/core@npm:3.2.5"
+      ]
+    },
+    {
+      "package": "rimraf",
+      "severity": "moderate",
+      "issue": "Rimraf versions prior to v4 are no longer supported",
+      "versions": [
+        "3.0.2"
+      ],
+      "dependents": [
+        "flat-cache@npm:3.2.0"
+      ]
+    },
+    {
+      "package": "stable",
+      "severity": "moderate",
+      "issue": "Modern JS already guarantees Array#sort() is a stable sort, so this library is deprecated. See the compatibility table on MDN: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort#browser_compatibility",
+      "versions": [
+        "0.1.8"
+      ],
+      "dependents": [
+        "svgo@npm:2.8.4"
+      ]
+    }
+  ],
+  "file_sha256": {
+    "backstage/app/package.json": "cca79565e9b67dd4cf0221b35321bf05d6bd3a2bc17276e249c5c7656122ee6c",
+    "backstage/app/yarn.lock": "875ad2542fe68d26776392c4c62b27cb10d15a22d8ea6c6a93b100a8de807a91",
+    "backstage/app/.yarn/patches/@remix-run-router-npm-1.23.4-3931f898d4.patch": "bf35ea810f8f4e3d3d9d7c27ae4aa234003b9ff55e2ff4f8c66df94dcfb88397"
+  }
+}

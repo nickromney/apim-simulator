@@ -11,3 +11,8 @@
 **/playwright-report
 **/test-results
 examples/edge/certs
+examples/apim-security/.runtime
+**/.run
+**/.env
+**/.env.*
+!**/.env.example

@@ -336,6 +336,7 @@ def test_api_protocols_allow_forwarded_https_and_reject_disallowed_scheme() -> N
     https://learn.microsoft.com/en-us/rest/api/apimanagement/apis/create-or-update
     """
     config = GatewayConfig(
+        network_security={"allow_simulated_forwarded_headers": True},
         allow_anonymous=True,
         apis={
             "secure": ApiConfig(

@@ -32,7 +32,7 @@ from app.backend_pool import (
     render_backend_value,
     select_pool_member,
 )
-from app.config import GatewayConfig, RouteConfig, SubscriptionScope
+from app.config import BackendConfig, GatewayConfig, RouteConfig, SubscriptionScope
 from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
@@ -289,7 +289,11 @@ def trace_payload(
         "selected_backend": trace_collector.selected_backend if trace_collector else None,
         **extra,
     }
-    return mask_secret_data(payload, cfg)
+    masked = mask_secret_data(payload, cfg)
+    if "api_id" in trace_base:
+        # Resource ownership is authoritative metadata, never policy-controlled or redacted.
+        masked["api_id"] = trace_base["api_id"]
+    return masked
 
 
 def request_cache_key(
@@ -317,6 +321,8 @@ def request_cache_key(
 def _store_trace(trace_store: dict[str, Any], trace_id: str | None, payload: dict[str, Any]) -> None:
     if not trace_id:
         return
+    while len(trace_store) >= 1000:
+        trace_store.pop(next(iter(trace_store)))
     trace_store[trace_id] = {
         "trace_id": trace_id,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -716,7 +722,7 @@ async def _apply_outbound_policies(
     if outbound_req.response_body != content:
         headers = {k: v for k, v in headers.items() if k.lower() != "content-length"}
     return _OutboundResult(
-        upstream_status_code,
+        outbound_req.response_status_code or upstream_status_code,
         headers,
         outbound_req.response_body,
         outbound_req.response_media_type or media_type,
@@ -910,7 +916,13 @@ def _policy_document_stack(
     documents are re-parsed on every single request otherwise.
     """
 
+    from app.named_values import named_values_are_dynamic
+
+    dynamic_values = named_values_are_dynamic(cfg)
+
     def _doc_for(xml: str) -> Any:
+        if dynamic_values:
+            return parse_policies_xml(xml, policy_fragments=cfg.policy_fragments, gateway_config=cfg)
         cache_key = (xml, tuple(sorted(cfg.policy_fragments.items())))
         cached = policy_cache.get(cache_key)
         if cached is not None:
@@ -928,14 +940,15 @@ def _policy_document_stack(
 
 async def _read_body_within_limit(request: Request, cfg: GatewayConfig) -> bytes:
     """The request body, or a 413 when it exceeds the configured ceiling."""
-    body = await request.body()
-    if len(body) > cfg.max_request_body_bytes:
-        request.state.apim_result_reason = "request_body_too_large"
-        # Learn documents validation size errors, but not this simulator limit's
-        # public text; retain the local 413 contract inside the APIM envelope:
-        # https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
-        raise HTTPException(status_code=413, detail="Request body too large")
-    return body
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > cfg.max_request_body_bytes:
+            request.state.apim_result_reason = "request_body_too_large"
+            raise HTTPException(status_code=413, detail="Request body too large")
+        body.extend(chunk)
+    # Retain Starlette's normal request.body() cache for downstream consumers.
+    request._body = bytes(body)
+    return request._body
 
 
 def _upstream_last_error(last_exc: Exception | None) -> dict[str, str]:
@@ -1328,6 +1341,22 @@ def _transport_failure_trips_breaker(pool: _PoolState) -> bool:
     return backend_connection_failure_matches(pool_member_breaker(pool.pool_backend, pool.backend))
 
 
+def _backend_tls_client(client, tls_client_pool, cfg, backend, upstream_url, policy_req):
+    if tls_client_pool is None:
+        return client
+    from app.certificate_security import selected_backend_certificate
+
+    selected = backend.model_copy(update={"url": upstream_url}) if backend else BackendConfig(url=upstream_url)
+    from app.security_governance import enforce_backend_transport
+
+    enforce_backend_transport(cfg, upstream_url, selected)
+    try:
+        certificate = selected_backend_certificate(selected, policy_req.variables, cfg)
+        return tls_client_pool.client_for(selected, client, certificate)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(500, "Backend TLS credentials could not be loaded") from exc
+
+
 async def _send_upstream_with_retries(
     *,
     client: httpx.AsyncClient,
@@ -1338,6 +1367,7 @@ async def _send_upstream_with_retries(
     upstream_auth: tuple[str, str] | None,
     route: Any,
     pool: _PoolState,
+    tls_client_pool: Any = None,
 ) -> _UpstreamAttempt:
     """Call the upstream, retrying on transport errors and retryable statuses.
 
@@ -1366,16 +1396,19 @@ async def _send_upstream_with_retries(
 
     for attempt in range(1, max_attempts + 1):
         attempts_used = attempt
-        req = client.build_request(
+        outgoing_client = _backend_tls_client(client, tls_client_pool, cfg, pool.backend, upstream_url, policy_req)
+        req = outgoing_client.build_request(
             method,
             upstream_url,
             content=policy_req.body if attempt == 1 or buffer_request_body else b"",
-            headers=policy_req.headers.as_header_pairs(),
+            headers=[
+                (key, value) for key, value in policy_req.headers.as_header_pairs() if key.lower() != "content-length"
+            ],
             params=policy_req.query.as_pairs(),
             timeout=timeout,
         )
         try:
-            upstream_response = await client.send(
+            upstream_response = await outgoing_client.send(
                 req,
                 stream=cfg.proxy_streaming,
                 auth=upstream_auth,
@@ -1451,7 +1484,11 @@ class _TraceContext:
         from app.debug_credentials import authorize_debug
 
         authorized = authorize_debug(request, api_id)
-        requested = authorized or (cfg.trace_enabled and request.headers.get("x-apim-trace", "").lower() == "true")
+        requested = authorized or (
+            cfg.trace_enabled
+            and cfg.trace_allow_unauthenticated
+            and request.headers.get("x-apim-trace", "").lower() == "true"
+        )
         request.state.apim_trace_requested = requested
         return cls(
             requested=requested,
@@ -1578,6 +1615,8 @@ def _build_policy_request(
         upstream_query.set_list(name, upstream_query.get_list(name, []) + [value])
     api = cfg.apis.get(route.api_id or "")
     operation = api.operations.get(route.operation_id or "") if api is not None else None
+    user = cfg.users.get((subscription_owner or "").removeprefix("portal:"))
+    product = cfg.products.get(effective_product_id)
     expression_headers = headers.copy()
     incoming_values: dict[str, list[str]] = {}
     for name_bytes, value_bytes in request.scope.get("headers", []):
@@ -1604,10 +1643,34 @@ def _build_policy_request(
             "products": auth.subscription_products,
             "product_id": effective_product_id,
             "user_id": str(auth.claims.get("sub") or (subscription_owner or "").removeprefix("portal:")),
-            # APIM's deployment dimensions have no equivalent local service
-            # metadata; these stable local values are the simulator mapping.
-            "location": "local",
+            "_expression_user": {
+                "Id": user.id,
+                "Email": user.email or "",
+                "FirstName": user.first_name or "",
+                "LastName": user.last_name or "",
+                "Note": user.note or "",
+            }
+            if user
+            else None,
+            "_expression_api": {
+                "Id": route.api_id or "",
+                "Name": api.name if api else "",
+                "Path": api.path if api else "",
+                "Version": api.api_version or "" if api else "",
+                "Revision": api.revision or "" if api else "",
+            },
+            "_expression_operation": {
+                "Id": route.operation_id or "",
+                "Name": operation.name if operation else "",
+                "Method": operation.method if operation else request.method,
+                "UrlTemplate": operation.url_template if operation else "",
+            },
+            "_expression_product": {"Id": effective_product_id, "Name": product.name} if product else None,
+            "location": cfg.service.region,
             "gateway_id": "local",
+            "service_id": cfg.service.name,
+            "service_name": cfg.service.name,
+            "request_id": str(uuid.uuid4()),
             "backend_id": route.backend or "",
             "client_ip": forwarding.client_ip,
             "correlation_id": correlation_id,
@@ -1621,6 +1684,8 @@ def _build_policy_request(
             "quota_store": request.app.state.quota_store,
             "original_request_url": str(request.url),
             "_request_headers": expression_headers,
+            "_client_certificate_pem": request.scope.get("apim.client_certificate_pem"),
+            "_client_certificate_verified": request.scope.get("apim.client_certificate_verified", False),
             "_request_query": upstream_query,
             "_request_path": request.url.path,
             "_matched_parameters": dict(resolved.matched_parameters),
@@ -1976,6 +2041,7 @@ async def _respond_without_backend(
     trace_store: dict[str, Any],
     trace_base: dict[str, Any],
     trace_collector: Any,
+    prepared_response: httpx.Response | None = None,
 ) -> Response:
     """Run outbound policies after backend forwarding was intentionally skipped.
 
@@ -1986,12 +2052,16 @@ async def _respond_without_backend(
     https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy
     https://learn.microsoft.com/en-us/azure/api-management/return-response-policy
     """
-    synthetic_response = httpx.Response(200, request=httpx.Request(policy_req.method, "http://apim.local"))
+    synthetic_response = (
+        prepared_response
+        if prepared_response is not None
+        else httpx.Response(200, request=httpx.Request(policy_req.method, "http://apim.local"))
+    )
     synthetic_upstream = _UpstreamPayload(
-        status_code=200,
-        headers={},
-        media_type=None,
-        content=b"",
+        status_code=synthetic_response.status_code,
+        headers=dict(synthetic_response.headers),
+        media_type=synthetic_response.headers.get("content-type"),
+        content=synthetic_response.content,
         buffered=True,
     )
     outbound = await _guarded_outbound(
@@ -2161,6 +2231,21 @@ def _initial_upstream_headers(
     return headers
 
 
+async def _local_response(
+    cfg: GatewayConfig, route: RouteConfig, policy_req: PolicyRequest, runtime: PolicyRuntime
+) -> httpx.Response | None:
+    from app.graphql_resolvers import execute_graphql_request
+
+    api = cfg.apis.get(route.api_id or "")
+    if api is not None and api.graphql is not None:
+        response = await execute_graphql_request(api.graphql, policy_req, runtime)
+        response.extensions["apim_backend_id"] = "graphql"
+        return response
+    if not policy_req.variables.get("_forward_request_present"):
+        return httpx.Response(200, content=b"", extensions={"apim_backend_id": "none"})
+    return None
+
+
 async def execute_gateway_request(request: Request) -> Response:
     from app.telemetry import set_current_span_attributes
 
@@ -2207,6 +2292,8 @@ async def execute_gateway_request(request: Request) -> Response:
     trace_requested, trace_id, trace_collector = trace.requested, trace.trace_id, trace.collector
     client: httpx.AsyncClient = request.app.state.http_client
     policy_runtime = PolicyRuntime(
+        tls_client_pool=request.app.state.tls_client_pool,
+        background_tasks=request.app.state.policy_background_tasks,
         gateway_config=cfg,
         http_client=client,
         timeout_seconds=cfg.proxy_timeout_seconds,
@@ -2227,6 +2314,7 @@ async def execute_gateway_request(request: Request) -> Response:
 
     trace_store: dict[str, Any] = request.app.state.trace_store
     trace_base = {
+        "api_id": route.api_id,
         "route": route.name,
         "correlation_id": correlation_id,
         **forwarding.as_trace_fields(),
@@ -2252,16 +2340,12 @@ async def execute_gateway_request(request: Request) -> Response:
 
     _enforce_authz_with_policy_claims(request=request, route=route, auth=auth, policy_req=policy_req, cfg=cfg)
 
-    if not policy_req.variables.get("_forward_request_present"):
-        request.state.apim_backend_id = "none"
+    response_trace_id = trace_id if trace_requested else None
+    graphql_response = await _local_response(cfg, route, policy_req, policy_runtime)
+    if graphql_response is not None:
+        request.state.apim_backend_id = graphql_response.extensions["apim_backend_id"]
         request.state.apim_upstream_attempts = 0
         request.state.apim_upstream_duration_seconds = 0.0
-        set_current_span_attributes(
-            **{
-                APIM_BACKEND_ID_ATTR: "none",
-                "apim.policy.documents": len(policy_docs),
-            }
-        )
         return await _respond_without_backend(
             policy_docs=policy_docs,
             policy_runtime=policy_runtime,
@@ -2269,10 +2353,11 @@ async def execute_gateway_request(request: Request) -> Response:
             policy_req=policy_req,
             cfg=cfg,
             correlation_id=correlation_id,
-            trace_id=trace_id if trace_requested else None,
+            trace_id=response_trace_id,
             trace_store=trace_store,
             trace_base=trace_base,
             trace_collector=trace_collector,
+            prepared_response=graphql_response,
         )
 
     choice = _choose_backend(
@@ -2330,6 +2415,7 @@ async def execute_gateway_request(request: Request) -> Response:
         return hit
 
     attempt_result = await _send_upstream_with_retries(
+        tls_client_pool=request.app.state.tls_client_pool,
         client=client,
         cfg=cfg,
         method=request.method,
@@ -2403,7 +2489,7 @@ async def execute_gateway_request(request: Request) -> Response:
         trace=trace,
         trace_store=trace_store,
         trace_base=trace_base,
-        trace_id=trace_id if trace_requested else None,
+        trace_id=response_trace_id,
         trace_collector=trace_collector,
         correlation_id=correlation_id,
     )
@@ -2419,7 +2505,7 @@ async def execute_gateway_request(request: Request) -> Response:
         upstream=upstream,
         cfg=cfg,
         correlation_id=correlation_id,
-        trace_id=trace_id if trace_requested else None,
+        trace_id=response_trace_id,
         trace_store=trace_store,
         trace_base=trace_base,
         trace_collector=trace_collector,
@@ -2461,7 +2547,7 @@ async def execute_gateway_request(request: Request) -> Response:
             content=content,
             attempts_used=attempts_used,
             elapsed_seconds=elapsed_seconds,
-            trace_id=trace_id if trace_requested else None,
+            trace_id=response_trace_id,
             trace_store=trace_store,
             trace_base=trace_base,
             trace_collector=trace_collector,

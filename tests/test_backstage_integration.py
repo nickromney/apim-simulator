@@ -36,7 +36,7 @@ def test_backstage_compose_overlay_is_opt_in_and_image_based() -> None:
         "dockerfile": "${BACKSTAGE_DOCKERFILE:-Dockerfile}",
     }
     assert service["image"] == "${BACKSTAGE_IMAGE:-apim-simulator-backstage:local}"
-    assert "${BACKSTAGE_PORT:-7007}:7007" in service["ports"]
+    assert "${APIM_BIND_ADDRESS:-127.0.0.1}:${BACKSTAGE_PORT:-7007}:7007" in service["ports"]
     assert "./catalog-info.yaml:/app/catalog/apim-simulator-catalog-info.yaml:ro" in service["volumes"]
     assert service["depends_on"]["apim-simulator"]["condition"] == "service_started"
 

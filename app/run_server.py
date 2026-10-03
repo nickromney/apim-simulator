@@ -37,6 +37,7 @@ def main() -> None:
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8000")),
         access_log=False,
+        proxy_headers=False,
     )
 
 

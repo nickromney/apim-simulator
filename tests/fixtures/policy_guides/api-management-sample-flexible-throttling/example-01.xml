@@ -1,0 +1,1 @@
+<rate-limit-by-key calls="6" renewal-period="60" counter-key="Counter1"/>
