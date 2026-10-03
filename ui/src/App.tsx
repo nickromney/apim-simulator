@@ -1541,13 +1541,11 @@ function App() {
       <div className="ambient ambient-right" />
       <header className="masthead">
         <div className="brand-lockup">
-          <span className="brand-mark">A</span>
-          <h1>APIM Simulator</h1>
-          <span className="brand-context">Local simulator</span>
+          <h1>APIM Simulator - console</h1>
         </div>
         <nav className="application-nav" aria-label="Applications">
           <a href={`${baseUrl.replace(/\/$/, "")}/apim/portal`}>Developer portal</a>
-          <span aria-current="page">Manage APIs</span>
+          <span aria-current="page">Console</span>
           <label>
             Appearance{" "}
             <select value={appearance} onChange={(event) => setAppearance(event.target.value)}>
