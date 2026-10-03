@@ -301,11 +301,19 @@ html[data-theme="dark"] button { color:#111827; }
 .masthead nav a,.masthead label { color:white;font-size:14px;line-height:20px; }
 .masthead label { flex-direction:row;align-items:center;gap:8px;margin:0; }
 .masthead select { width:auto;height:32px;min-height:32px;padding:4px 8px;font:inherit; }
+.project-notice { flex:1 1 100%;color:rgba(255,255,255,.86);font-size:12px;line-height:1.4; }
+.surface-guide { margin:.5rem 0 1.5rem;padding:.75rem 1rem;border-left:3px solid var(--accent);background:var(--panel);font-size:.9rem; }
+.surface-guide code { font-size:.9em; }
+#getting-started { margin:1.5rem 0;padding:1.25rem;background:var(--panel);border:1px solid var(--line);font-size:.9rem;line-height:1.5; }
+#getting-started summary { cursor:pointer;font-size:1rem;font-weight:600; }
+#getting-started ol { padding-left:1.25rem; }
+#getting-started li { margin:.5rem 0; }
+#getting-started p { margin-bottom:0; }
 @media(max-width:760px) { .masthead strong { flex-basis:100%; } }
 </style>
 </head>
 <body>
-  <header class="masthead"><strong>APIM Simulator - developer portal</strong><nav aria-label="Applications"><a href="/apim/portal" aria-current="page">Developer portal</a><a href="__OPERATOR_URL__">Console</a><label>Appearance <select id="theme-select"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav></header>
+  <header class="masthead"><strong>APIM Simulator - developer portal</strong><nav aria-label="Applications"><a href="/apim/portal" aria-current="page">Developer portal</a><a href="__OPERATOR_URL__">Console</a><label>Appearance <select id="theme-select"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav><small class="project-notice">Unofficial community project. Not affiliated with, endorsed by, or supported by Microsoft; behavior may differ from Azure API Management.</small></header>
   <script src="/apim/portal/assets/theme.js"></script>
 <main>
   <h1>Developer Portal</h1>
@@ -329,13 +337,24 @@ html[data-theme="dark"] button { color:#111827; }
     <p class="status" id="user-status" role="status"></p>
   </section>
 
+  <details open id="getting-started">
+    <summary>Getting started</summary>
+    <ol>
+      <li>In the <a href="#product-catalog">Product catalog</a>, choose a published product marked <strong>subscription required</strong>.</li>
+      <li>Choose <strong>Request subscription</strong>, then check <a href="#my-subscriptions">My subscriptions</a> for its state and key. Use it when the state is <strong>active</strong>; a <strong>submitted</strong> subscription needs operator approval first.</li>
+      <li>In <a href="#explore-api">Explore an API</a>, choose the API and subscription key. In Scalar, open an operation, choose <strong>Test Request</strong>, then <strong>Send</strong>.</li>
+      <li>Send once with <strong>none</strong> selected, then again with your key to compare the access results.</li>
+    </ol>
+    <p>With the default demo fixture, use <strong>API learning demo</strong>, choose the <strong>Subscription demo</strong> API, and call <code>GET /demo/echo</code>: <strong>none</strong> returns <code>401</code>, while its active subscription key returns <code>200</code>. The separate <code>/api/echo</code> example is anonymous.</p>
+  </details>
+
   <section>
-    <h2>Product catalog</h2>
+    <h2 id="product-catalog">Product catalog</h2>
     <div id="catalog"></div>
   </section>
 
   <section>
-    <h2>My subscriptions</h2>
+    <h2 id="my-subscriptions">My subscriptions</h2>
     <div class="table-scroll"><table>
       <thead><tr><th>Name</th><th>State</th><th>Products</th><th>Primary key</th></tr></thead>
       <tbody id="subs-body"></tbody>
@@ -343,7 +362,7 @@ html[data-theme="dark"] button { color:#111827; }
   </section>
 
   <section>
-    <h2>Explore an API</h2>
+    <h2 id="explore-api">Explore an API</h2>
     <p class="section-description">Choose an API and version, then inspect its documentation or send a request. API documentation and requests powered by <a href="https://github.com/scalar/scalar" target="_blank" rel="noopener noreferrer">Scalar</a>.</p>
     <div class="tryit-grid">
       <label>API<select id="api-select"></select></label>
@@ -698,7 +717,16 @@ def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
         else ""
     )
     navigation = f'<nav aria-label="Portal pages">{logo}{links}</nav>' if len(site.pages) > 1 or logo else ""
-    content = f'<h1>{escape(page.title)}</h1><p class="lede" style="white-space:pre-wrap">{escape(page.content)}</p>'
+    surface_guide = (
+        '<p class="surface-guide"><strong>How the local surfaces fit:</strong> with default ports, the gateway is '
+        "<code>localhost:8000</code>, this consumer portal is <code>localhost:8000/apim/portal</code>, and the "
+        "operator console is a separate app at <code>localhost:3007</code>. Portal user access and API subscription "
+        "keys are separate from management tenant keys, which belong in the operator console.</p>"
+    )
+    content = (
+        f'<h1>{escape(page.title)}</h1><p class="lede" style="white-space:pre-wrap">{escape(page.content)}</p>'
+        + surface_guide
+    )
     html = PORTAL_HTML.replace(
         "<title>APIM Simulator Developer Portal</title>",
         f"<title>APIM Simulator - developer portal | {escape(site.site_title)}</title>",

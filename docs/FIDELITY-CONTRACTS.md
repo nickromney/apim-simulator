@@ -322,9 +322,13 @@ reload the gateway. Trace lookup uses the local trace ID and optional trace
 headers. Logger and diagnostic resources preserve descriptive settings.
 
 **Order and result.** Management writes are validated and normally reflected in
-subsequent gateway requests. Persistence and reload are local best-effort
-operations: the current implementation does not promise an atomic transaction
-or rollback if a file write/reload fails. Replay executes through the same local
+subsequent gateway requests. Management updates prepare and validate the new
+configuration, atomically replace a configured local file, then publish it in
+memory. A persistence failure leaves the running configuration unchanged;
+this does not provide distributed transactions, concurrent-writer coordination,
+or durability for a temporary container filesystem. See
+`tests/test_management_save_workflows.py` and [the local lifecycle](LOCAL-LIFECYCLE.md).
+Replay executes through the same local
 gateway pipeline. Trace summaries expose policy steps, routing, selected
 backend, cache/throttle actions, and forwarded-header fields where enabled.
 
