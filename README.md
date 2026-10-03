@@ -634,6 +634,7 @@ make test
 - Capability matrix: [docs/CAPABILITY-MATRIX.md](docs/CAPABILITY-MATRIX.md)
 - Management-surface guide: [docs/APIM-SDK-SURFACE-GUIDE.md](docs/APIM-SDK-SURFACE-GUIDE.md)
 - Roadmap: [docs/NEXT-FEATURES.md](docs/NEXT-FEATURES.md)
+- Full APIM documentation feasibility assessment: [docs/apim-coverage/README.md](docs/apim-coverage/README.md)
 - Cyclomatic complexity gate and ratchet: [docs/complexity.md](docs/complexity.md)
 - Mutation testing: [docs/mutation-testing.md](docs/mutation-testing.md)
 - Quality pass digest (2026-09-07): [docs/2026-09-07-quality-pass-digest.md](docs/2026-09-07-quality-pass-digest.md)

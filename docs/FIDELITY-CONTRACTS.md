@@ -1,5 +1,9 @@
 # APIM fidelity contracts
 
+Additional verified subsets: [Postman collection export](POSTMAN-EXPORT.md) and
+[set-method policy](SET-METHOD.md). Their owner tests and primary references are
+listed in `contracts/contract_matrix.yml`.
+
 This project implements a narrow, testable subset of Azure API Management. A
 feature contract describes the observable behavior that the simulator promises
 for that subset. It does not imply parity with every APIM tier, policy option,

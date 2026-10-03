@@ -6250,6 +6250,7 @@ _POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
     "set-query-parameter": frozenset({"inbound", "backend"}),
     "set-body": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "set-status": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "set-method": frozenset({"inbound", "on-error"}),
     "rewrite-uri": frozenset({"inbound"}),
     "check-header": frozenset({"inbound"}),
     "ip-filter": frozenset({"inbound"}),

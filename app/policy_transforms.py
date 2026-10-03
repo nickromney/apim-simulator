@@ -7,6 +7,7 @@ https://learn.microsoft.com/en-us/azure/api-management/cross-domain-policy
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from xml.etree.ElementTree import Element, tostring
 
@@ -33,6 +34,19 @@ class FindAndReplace(PolicyNode):
         else:
             req.body = result
         _record_step(runtime, "find-and-replace", {"length": len(result), "replacements": body.count(source)})
+
+
+@dataclass(frozen=True)
+class SetMethod(PolicyNode):
+    method: str
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> None:
+        method = render_policy_value(self.method, req, runtime).strip().upper()
+        if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Z-]+", method, flags=re.ASCII):
+            raise HTTPException(status_code=500, detail="set-method requires a valid HTTP method token")
+        original = req.method
+        req.method = method
+        _record_step(runtime, "set-method", {"original_method": original, "method": method})
 
 
 @dataclass(frozen=True)
@@ -83,6 +97,16 @@ def _parse_set_status(element: Element) -> PolicyNode:
     return SetStatus(element.attrib["code"], element.attrib["reason"])
 
 
+def _parse_set_method(element: Element) -> PolicyNode:
+    _validate_shape(element, set())
+    if list(element):
+        raise HTTPException(status_code=500, detail="set-method does not allow child elements")
+    value = (element.text or "").strip()
+    if not value:
+        raise HTTPException(status_code=500, detail="set-method requires a method")
+    return SetMethod(value)
+
+
 def parse_transform_policy(element: Element) -> PolicyNode | None:
     """Return a transform node, or None for another policy family.
 
@@ -93,6 +117,7 @@ def parse_transform_policy(element: Element) -> PolicyNode | None:
         "find-and-replace": _parse_find_replace,
         "cross-domain": _parse_cross_domain,
         "set-status": _parse_set_status,
+        "set-method": _parse_set_method,
     }.get(element.tag)
     return parser(element) if parser else None
 
