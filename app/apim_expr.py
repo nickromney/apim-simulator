@@ -182,6 +182,34 @@ class _RegexGroup:
 
 class _RegexNamespace:
     @staticmethod
+    def Replace(value: str, pattern: str, replacement: str) -> str:
+        compiled = re.compile(re.sub(r"\(\?<([A-Za-z_]\w*)>", r"(?P<\1>", pattern))
+
+        def replace_match(match):
+            def substitute(token):
+                key = token.group(1)
+                special = {
+                    "$": "$",
+                    "&": match.group(0),
+                    "`": value[: match.start()],
+                    "'": value[match.end() :],
+                    "_": value,
+                    "+": (match.group(compiled.groups) or "") if compiled.groups else match.group(0),
+                }
+                if key in special:
+                    return special[key]
+                group = key[1:-1] if key.startswith("{") else key
+                group = int(group) if group.isdigit() else group
+                try:
+                    return match.group(group) or ""
+                except (IndexError, KeyError):
+                    return token.group(0)
+
+            return re.sub(r"\$(\d+|\{\w+\}|[$&`'_+])", substitute, replacement)
+
+        return compiled.sub(replace_match, value)
+
+    @staticmethod
     def Match(value: str, pattern: str) -> Any:
         compiled = re.compile(re.sub(r"\(\?<([A-Za-z_]\w*)>", r"(?P<\1>", pattern))
         match = compiled.search(value)

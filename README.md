@@ -29,6 +29,10 @@ Local internal caching is supported for the `cache-*` policies. External cache b
 
 The [policy guide lab](examples/apim-policies/README.md) exercises thirteen Microsoft policy guides with a separate Compose pub/sub and secret-store container.
 
+The [Azure comparison lab](examples/azure-validation/README.md) deploys isolated
+policy fixtures to a real APIM and compares their outcomes with the simulator.
+Its dated reports distinguish live matches from cases blocked by Azure Policy.
+
 ## Prerequisites
 
 Before running the simulator:

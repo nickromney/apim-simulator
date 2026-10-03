@@ -1,0 +1,95 @@
+{
+  "cases": 22,
+  "passed": 22,
+  "failures": [],
+  "results": [
+    {
+      "name": "literal",
+      "passed": true
+    },
+    {
+      "name": "request-header",
+      "passed": true
+    },
+    {
+      "name": "missing-header",
+      "passed": true
+    },
+    {
+      "name": "query",
+      "passed": true
+    },
+    {
+      "name": "query-override",
+      "passed": true
+    },
+    {
+      "name": "header-override",
+      "passed": true
+    },
+    {
+      "name": "header-delete",
+      "passed": true
+    },
+    {
+      "name": "path-parameter",
+      "passed": true
+    },
+    {
+      "name": "body-echo",
+      "passed": true
+    },
+    {
+      "name": "body-transform",
+      "passed": true
+    },
+    {
+      "name": "method",
+      "passed": true
+    },
+    {
+      "name": "set-method",
+      "passed": true
+    },
+    {
+      "name": "variable",
+      "passed": true
+    },
+    {
+      "name": "choose-match",
+      "passed": true
+    },
+    {
+      "name": "choose-fallback",
+      "passed": true
+    },
+    {
+      "name": "response-header",
+      "passed": true
+    },
+    {
+      "name": "custom-status",
+      "passed": true
+    },
+    {
+      "name": "named-value",
+      "passed": true
+    },
+    {
+      "name": "json-body",
+      "passed": true
+    },
+    {
+      "name": "regex",
+      "passed": true
+    },
+    {
+      "name": "check-header",
+      "passed": true
+    },
+    {
+      "name": "on-error",
+      "passed": true
+    }
+  ]
+}
