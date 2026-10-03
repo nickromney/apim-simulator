@@ -49,6 +49,8 @@ def prepare() -> None:
         save(
             "excluded.json", [{"name": "fragment", "reason": "Explicitly excluded: deployment policy blocks fragments"}]
         )
+    else:
+        save("excluded.json", [])
     config["subscription"]["subscriptions"] = {
         prefix: {
             "id": prefix,

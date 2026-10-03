@@ -45,10 +45,13 @@ case is not evidence of parity, and this lab never changes policy assignments.
 ## Evidence and limits
 
 On 2026-10-03, a fresh Developer-tier APIM in External VNet mode compiled and
-executed all 22 permitted cases, matching the simulator's expected statuses,
+executed all 23 cases, matching the simulator's expected statuses,
 exact bodies and selected response headers. See [the live comparison report](results-2026-10-03.json).
-The fragment case was excluded because an inherited resource-type allowlist
-denied `Microsoft.ApiManagement/service/policyFragments`; no exemption was used.
+The first run excluded fragments because an inherited resource-type allowlist
+denied `Microsoft.ApiManagement/service/policyFragments`. The allowlist was then
+extended through a reviewed Terraform plan adding only that resource type, and
+the full corpus passed on rerun. No exemption was used; the Developer-only SKU
+guard remained intact.
 All 23 cases, including fragments, passed locally. This run exposed missing
 `Regex.Replace` expression support, now implemented and covered by regression
 tests. The original APIM was verified restored to Internal mode after testing

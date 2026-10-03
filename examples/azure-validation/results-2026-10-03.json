@@ -1,6 +1,6 @@
 {
-  "cases": 22,
-  "passed": 22,
+  "cases": 23,
+  "passed": 23,
   "failures": [],
   "results": [
     {
@@ -73,6 +73,10 @@
     },
     {
       "name": "named-value",
+      "passed": true
+    },
+    {
+      "name": "fragment",
       "passed": true
     },
     {
