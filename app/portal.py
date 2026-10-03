@@ -243,22 +243,22 @@ PORTAL_HTML = r"""<!doctype html>
     color-scheme: light;
     --bg: #f2ede1;
     --panel: #ffffff;
-    --ink: #1a1711;
-    --muted: #655f54;
-    --line: rgba(26, 23, 17, 0.18);
+    --ink: #242424;
+    --muted: #605e5c;
+    --line: #d2d0ce;
     --accent: #12705f;
     --accent-soft: rgba(18, 112, 95, 0.14);
     --warn-soft: rgba(190, 93, 38, 0.2);
   }
   * { box-sizing: border-box; }
-  body { margin:0; font-family:Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); line-height:1.5; }
+  body { margin:0; font-family:"Segoe UI", SegoeUI, -apple-system, BlinkMacSystemFont, sans-serif; color:var(--ink); background:var(--bg); line-height:1.5; }
   main { max-width:1200px; margin:auto; padding:2rem 1.5rem 4rem; }
   h1 { font-size:1.8rem; letter-spacing:-.035em; margin:0; }
   .lede { color:var(--muted); margin:.5rem 0 2rem; max-width:70ch; }
-  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1.5rem; margin-bottom:1.25rem; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:2px; padding:1.5rem; margin-bottom:1.25rem; }
   h2 { margin:0 0 1rem; font-size:1.1rem; letter-spacing:-.015em; }
   label { display:flex; flex-direction:column; gap:.4rem; font-size:.85rem; color:var(--muted); min-width:0; }
-  input, select, button { font:inherit; min-height:42px; padding:.55rem .75rem; border-radius:6px; border:1px solid var(--line); background:var(--panel); color:var(--ink); }
+  input, select, button { font:inherit; min-height:42px; padding:.55rem .75rem; border-radius:2px; border:1px solid var(--line); background:var(--panel); color:var(--ink); }
   input, select { width:100%; min-width:0; }
   button { cursor:pointer; background:var(--accent); color:#fff; border-color:var(--accent); white-space:nowrap; }
   button.secondary { background:transparent; color:var(--accent); }
@@ -285,22 +285,28 @@ PORTAL_HTML = r"""<!doctype html>
   .reference-toolbar .status { margin:0; }
   .quick-test { border-top:1px solid var(--line); margin-top:1.5rem; padding-top:1rem; }
   .quick-test summary { cursor:pointer; color:var(--muted); margin-bottom:1rem; }
-  pre { background:#171410; color:#f4efe4; padding:1rem; border-radius:6px; overflow:auto; font-size:.82rem; }
+  pre { background:#171410; color:#f4efe4; padding:1rem; border-radius:2px; overflow:auto; font-size:.82rem; }
   .status { color:var(--muted); font-size:.9rem; margin:.75rem 0 0; }
   .status:empty { display:none; }
   .empty-reference { border:1px dashed var(--line); padding:2rem; text-align:center; color:var(--muted); }
   @media(max-width:720px) { .identity-grid { grid-template-columns:1fr; } .tryit-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
   @media(max-width:480px) { main { padding:1.25rem .75rem; } section { padding:1rem; } .tryit-grid,.reference-toolbar { grid-template-columns:1fr; } }
-html[data-theme="dark"] { color-scheme:dark; --bg:#111827; --panel:#1f2937; --ink:#f3f4f6; --muted:#c4cbd5; --line:#4b5563; --accent:#6ee7b7; }
+html[data-theme="dark"] { color-scheme:dark; --bg:#111827; --panel:#1f2937; --ink:#f3f4f6; --muted:#c4cbd5; --line:#4b5563; --accent:#60a5fa; }
 html[data-theme="light"] { color-scheme:light; }
 html[data-theme="dark"] input,html[data-theme="dark"] select { background:var(--panel);color:var(--ink); }
 html[data-theme="dark"] button { color:#111827; }
+.masthead { display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;background:#087e78;color:white;padding:.75rem 1.125rem;min-height:56px; }
+.masthead strong { font-size:1.05rem;font-weight:600;line-height:1; }
+.masthead nav { display:flex;align-items:center;gap:1rem;margin:0;flex-wrap:wrap; }
+.masthead nav a,.masthead label { color:white; font-size:.9rem; }
+.masthead label { flex-direction:row;align-items:center;gap:.5rem; }
+.masthead select { width:auto;min-height:32px;padding:.3rem .5rem; }
 </style>
 </head>
 <body>
-<main>
-  <nav aria-label="Applications"><strong>APIM Simulator</strong><a href="/apim/portal" aria-current="page">Developer portal</a><a href="__OPERATOR_URL__">Manage APIs</a><label>Appearance <select id="theme-select"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav>
+  <header class="masthead"><strong>APIM Simulator - developer portal</strong><nav aria-label="Applications"><a href="/apim/portal" aria-current="page">Developer portal</a><a href="__OPERATOR_URL__">Console</a><label>Appearance <select id="theme-select"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav></header>
   <script src="/apim/portal/assets/theme.js"></script>
+<main>
   <h1>Developer Portal</h1>
   <p class="lede">
     Browse published products, request a subscription, and try API calls against the local simulator.
@@ -337,7 +343,7 @@ html[data-theme="dark"] button { color:#111827; }
 
   <section>
     <h2>Explore an API</h2>
-    <p class="section-description">Choose an API and version, then inspect its documentation or send a request with Scalar.</p>
+    <p class="section-description">Choose an API and version, then inspect its documentation or send a request. API documentation and requests powered by <a href="https://github.com/scalar/scalar" target="_blank" rel="noopener noreferrer">Scalar</a>.</p>
     <div class="tryit-grid">
       <label>API<select id="api-select"></select></label>
       <label>Version<select id="version-select"></select></label>
@@ -688,7 +694,8 @@ def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
     navigation = f'<nav aria-label="Portal pages">{logo}{links}</nav>' if len(site.pages) > 1 or logo else ""
     content = f'<h1>{escape(page.title)}</h1><p class="lede" style="white-space:pre-wrap">{escape(page.content)}</p>'
     html = PORTAL_HTML.replace(
-        "<title>APIM Simulator Developer Portal</title>", f"<title>{escape(site.site_title)}</title>"
+        "<title>APIM Simulator Developer Portal</title>",
+        f"<title>APIM Simulator - developer portal | {escape(site.site_title)}</title>",
     )
     start = html.index("  <h1>Developer Portal</h1>")
     end = html.index("  <section>", start)
@@ -698,7 +705,11 @@ def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
     if slug != "home":
         html = html[: html.index("  <section>")] + "</main></body></html>"
     dark = "--panel:#242424;--ink:#f4efe4;--muted:#d4cfc4;--line:#777;" if site.theme == "dark" else ""
-    background = "#181818" if site.theme == "dark" and site.background_color == "#f2ede1" else site.background_color
+    background = (
+        "#181818"
+        if site.theme == "dark" and site.background_color == "#f2ede1"
+        else ("#f3f2f1" if site.background_color == "#f2ede1" else site.background_color)
+    )
     image = ""
     if site.background_image_url:
         # HTML escaping alone cannot quote a CSS URL: escape CSS delimiters first.
@@ -713,7 +724,7 @@ def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
     style = (
         f"<style>:root{{color-scheme:{site.theme};--accent:{site.accent_color};--bg:{background};{dark}}}"
         f"nav{{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}}"
-        f"nav a{{color:var(--accent)}}{image}</style>"
+        f"nav a{{color:var(--accent)}}.masthead nav a{{color:white}}{image}</style>"
     )
     return html.replace(
         "__OPERATOR_URL__", escape(os.getenv("OPERATOR_CONSOLE_URL", "http://localhost:3007"), quote=True)
