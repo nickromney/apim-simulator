@@ -73,6 +73,20 @@ def test_source_regex_and_max_age_default():
     assert _evaluate(conditional, variables={"maxAge": "600"}) == 600
 
 
+@pytest.mark.parametrize(
+    ("replacement", "expected"),
+    [("${word}-$1-$$-$&", "ab-ab-$-ab"), ("$9", "$9"), (r"\n", r"\n")],
+)
+def test_regex_replace_uses_dotnet_substitutions(replacement, expected):
+    assert (
+        _evaluate(
+            '@(Regex.Replace("ab", "(?<word>ab)", (string)context.Variables["replacement"]))',
+            variables={"replacement": replacement},
+        )
+        == expected
+    )
+
+
 def test_source_multi_statement_out_parameter_and_named_body_argument():
     assert _evaluate(BASE64, headers={"Authorization": base64.b64encode("hello £".encode()).decode()}) == "hello £"
     assert _evaluate(BASE64) is None

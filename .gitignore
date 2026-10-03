@@ -34,3 +34,5 @@ examples/apim-security/.runtime/
 
 # Build outputs left by the retired optional Backstage app.
 /backstage/
+
+examples/azure-validation/.runtime/
