@@ -72,7 +72,7 @@ SMOKE_SHARED_KEYCLOAK_BASE_URL ?= $(KEYCLOAK_BASE_URL)
 SMOKE_AWS_BASE_URL ?= http://127.0.0.1:$(AWS_GATEWAY_PORT)
 PORTS ?= $(TODO_FRONTEND_PORT) $(GRAFANA_PORT) $(OTEL_GRPC_PORT) $(OTEL_HTTP_PORT) $(APIM_GATEWAY_PORT) $(EDGE_HTTP_PORT) $(EDGE_TLS_HTTP_PORT) $(EDGE_TLS_PORT) $(OPERATOR_CONSOLE_PORT) $(KEYCLOAK_PORT)
 UP_ALL_SLOT_BASE ?= 0
-UP_ALL_STACKS := up up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-shared up-todo up-todo-otel
+UP_ALL_STACKS := up up-otel up-oidc up-mcp up-edge up-tls up-private up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-shared up-todo up-todo-otel
 
 export STACK_SLOT STACK_SLOT_WIDTH PORT_OFFSET
 export APIM_GATEWAY_PORT GRAFANA_PORT OTEL_GRPC_PORT OTEL_HTTP_PORT KEYCLOAK_PORT OPERATOR_CONSOLE_PORT EDGE_HTTP_PORT EDGE_TLS_HTTP_PORT EDGE_TLS_PORT AWS_GATEWAY_PORT TODO_FRONTEND_PORT VITE_DEV_PORT
@@ -83,14 +83,15 @@ export APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST APIM_ALLOWED_ORIGIN_OPERATOR_CONSOL
 export EDGE_HTTP_BASE_URL EDGE_TLS_BASE_URL
 export SMOKE_HELLO_BASE_URL SMOKE_HELLO_KEYCLOAK_BASE_URL SMOKE_OIDC_BASE_URL SMOKE_OIDC_KEYCLOAK_BASE_URL SMOKE_MCP_URL SMOKE_EDGE_BASE_URL SMOKE_AI_BASE_URL SMOKE_AI_FOUNDRY_BASE_URL SMOKE_SHARED_BASE_URL SMOKE_SHARED_KEYCLOAK_BASE_URL SMOKE_AWS_BASE_URL
 
-COMPOSE_CORE := $(call compose_stack,core) -f compose.yml -f compose.public.yml
+COMPOSE_GATEWAY := $(call compose_stack,core) -f compose.yml -f compose.public.yml
+COMPOSE_CORE := $(COMPOSE_GATEWAY) -f compose.ui.yml
 COMPOSE_CORE_OTEL := $(call compose_stack,core-otel) -f compose.yml -f compose.public.yml -f compose.otel.yml
 COMPOSE_OIDC := $(call compose_stack,oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml
 COMPOSE_MCP := $(call compose_stack,mcp) -f compose.yml -f compose.public.yml -f compose.mcp.yml
 COMPOSE_EDGE := $(call compose_stack,edge) -f compose.yml -f compose.edge.yml -f compose.mcp.yml
 COMPOSE_TLS := $(call compose_stack,tls) -f compose.yml -f compose.edge.yml -f compose.tls.yml -f compose.mcp.yml
 COMPOSE_PRIVATE := $(call compose_stack,private) -f compose.yml -f compose.private.yml -f compose.mcp.yml
-COMPOSE_UI := $(call compose_stack,ui) -f compose.yml -f compose.public.yml -f compose.ui.yml
+COMPOSE_UI := $(COMPOSE_CORE)
 COMPOSE_HELLO := $(call compose_stack,hello) -f compose.yml -f compose.public.yml -f compose.hello.yml
 COMPOSE_HELLO_OTEL := $(call compose_stack,hello-otel) -f compose.yml -f compose.public.yml -f compose.hello.yml -f compose.otel.yml -f compose.hello.otel.yml
 COMPOSE_HELLO_OIDC := $(call compose_stack,hello-oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.hello.yml
@@ -119,7 +120,7 @@ RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 help:
 	@echo "Local APIM Simulator"
 	@echo ""
-	@echo "Start here: make up-ui    Stop stacks: make down"
+	@echo "Start here: make up    Stop stacks: make down"
 	@echo ""
 	@printf $(HELP_FMT) "make examples" "Choose a demo and see how to run it"
 	@printf $(HELP_FMT) "make help-all" "Show the complete command reference"
@@ -163,6 +164,7 @@ help-stacks:
 	@printf $(HELP_FMT) "up-tls" "Start the edge TLS MCP stack on $(APIM_EDGE_HOST):9443"
 	@printf $(HELP_FMT) "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
 	@printf $(HELP_FMT) "up-todo-otel" "Start the todo demo stack with LGTM at $(GRAFANA_BASE_URL)"
+	@printf $(HELP_FMT) "up-gateway" "Start only the gateway and mock backend"
 	@printf $(HELP_FMT) "up-ui" "Start the operator console on localhost:3007"
 	@printf "\nStack Isolation:\n"
 	@printf $(HELP_FMT) "PORT_OFFSET=100 make up-ui" "Shift published ports by a fixed offset without changing defaults"
@@ -291,6 +293,9 @@ $(DEV_CERTS): check-mkcert-prerequisites
 up:
 	$(COMPOSE_CORE) up --build -d
 
+up-gateway:
+	$(COMPOSE_GATEWAY) up --build -d
+
 up-otel:
 	$(COMPOSE_CORE_OTEL) up --build -d
 
@@ -309,8 +314,7 @@ up-tls: ensure-certs
 up-private:
 	$(COMPOSE_PRIVATE) up --build -d
 
-up-ui:
-	$(COMPOSE_UI) up --build -d
+up-ui: up
 
 up-hello:
 	$(COMPOSE_HELLO) up --build -d
@@ -370,7 +374,6 @@ down:
 	$(COMPOSE_EDGE) down --remove-orphans
 	$(COMPOSE_TLS) down --remove-orphans
 	$(COMPOSE_PRIVATE) down --remove-orphans
-	$(COMPOSE_UI) down --remove-orphans
 	$(COMPOSE_HELLO) down --remove-orphans
 	$(COMPOSE_HELLO_OTEL) down --remove-orphans
 	$(COMPOSE_HELLO_OIDC) down --remove-orphans
@@ -742,3 +745,5 @@ security-lab-verify:
 	$(MAKE) -C examples/apim-security verify
 security-lab-down:
 	$(MAKE) -C examples/apim-security down
+
+.PHONY: up-gateway

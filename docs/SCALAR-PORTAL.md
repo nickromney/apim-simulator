@@ -10,10 +10,17 @@ The reproducible browser lab is `make -C examples/portal up`, followed by
 `make -C examples/portal smoke` and `make -C examples/portal down`.
 
 Run `make up` and open <http://localhost:8000/apim/portal>. Select an API,
-version and subscription key, then use the **API reference and client** section
+version and subscription key, then use the **Explore an API** section
 to inspect schemas, edit parameters and bodies, and send requests. **Reload API
 reference** fetches the current contract after a management edit. The existing
-quick operation tester remains available above it.
+quick operation tester is available in **Quick operation check** below it.
+
+`make up` also starts **Manage APIs** on <http://localhost:3007>, where APIs
+are created and configured. Both surfaces link to each other and offer
+**Light**, **Dark**, and **System** appearance. Each origin saves only the
+appearance preference; System follows operating-system changes. Demo access
+is labelled separately from verified token access. **Sign out** removes the
+portal token, visible private data, selected keys, and Scalar frame.
 
 Definitions come from `GET /apim/portal/apis/{api_id}/openapi`, with the same
 signed portal identity or explicitly enabled legacy user header as the product

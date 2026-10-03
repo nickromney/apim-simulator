@@ -193,7 +193,8 @@ stays on a hardened runtime base.
 
 | Scenario | Start command | Entry point | Use when |
 | --- | --- | --- | --- |
-| Direct public gateway | `make up` | [http://localhost:8000](http://localhost:8000) | You want the smallest APIM-shaped gateway path |
+| Gateway and operator console | `make up` | [Developer portal](http://localhost:8000/apim/portal), [Manage APIs](http://localhost:3007) | Browse APIs and manage the simulator |
+| Gateway only | `make up-gateway` | [http://localhost:8000](http://localhost:8000) | You want the smallest gateway path |
 | Direct public gateway with OTEL | `make up-otel` | [http://localhost:8000](http://localhost:8000), [https://lgtm.apim.127.0.0.1.sslip.io:8443](https://lgtm.apim.127.0.0.1.sslip.io:8443) | You want logs, metrics, and traces immediately |
 | Todo demo with OTEL | `make up-todo-otel` | [http://localhost:3000](http://localhost:3000) | You want the richest browser-backed teaching flow |
 | Hello starter | `make up-hello` | [http://localhost:8000/api/hello](http://localhost:8000/api/hello) | You want the smallest backend scaffold behind APIM |

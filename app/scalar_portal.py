@@ -69,7 +69,7 @@ def scalar_asset(request: Request, asset: str) -> Response:
         else:
             content = gzip.decompress(content)
         return Response(content, media_type="text/javascript", headers=headers)
-    if asset == "reference.js":
+    if asset in {"reference.js", "theme.js"}:
         return Response(
             (ASSET_DIR / asset).read_bytes(), media_type="text/javascript", headers={"Cache-Control": "no-cache"}
         )
