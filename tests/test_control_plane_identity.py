@@ -218,7 +218,9 @@ def test_signed_portal_subject_binds_keys_and_user_inventory():
         assert response.json()["user"] == "alice"
         assert response.headers["cache-control"] == "no-store"
         assert "alice-primary" in response.text and "bob-primary" not in response.text
-        assert client.get("/apim/portal/users", headers=headers).json()["users"] == [{"id": "alice", "name": "alice"}]
+        users = client.get("/apim/portal/users", headers=headers).json()
+        assert users["users"] == [{"id": "alice", "name": "alice"}]
+        assert users["authentication"] == "signed-jwt"
         page = client.get("/apim/portal").text
         assert 'id="portal-token"' in page and "localStorage" not in page
 

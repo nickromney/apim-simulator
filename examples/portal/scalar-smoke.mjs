@@ -17,10 +17,30 @@ page.on('pageerror', (error) => errors.push(error.message));
 try {
   await page.goto(baseURL + '/apim/portal');
   await expect(page.locator('#key-select option')).toHaveCount(2);
+  await expect(page.locator('#identity-status')).toHaveText('Demo access');
+  await expect(page.locator('#portal-sign-out')).toBeHidden();
+  for (const width of [390, 679, 1048]) {
+    await page.setViewportSize({width, height:903});
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  }
+  await page.emulateMedia({colorScheme:'dark'});
+  await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+  await page.locator('#theme-select').selectOption('light');
+  await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+  await page.reload();
+  await expect(page.locator('#theme-select')).toHaveValue('light');
+  await page.locator('#theme-select').selectOption('system');
+  await page.emulateMedia({colorScheme:'light'});
+  await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+  await expect(page.locator('#key-select option')).toHaveCount(2);
   await page.locator('#version-select').selectOption('echo-v2');
   await page.locator('#key-select').selectOption('scalar-demo-key');
   const reference = page.frameLocator('#api-reference iframe');
   await reference.getByRole('heading', { name: 'Echo v2', exact: true }).waitFor();
+  await page.locator('#theme-select').selectOption('dark');
+  await expect(reference.locator('.dark-mode').first()).toBeVisible();
+  await page.locator('#theme-select').selectOption('light');
+  await expect(reference.locator('.light-mode').first()).toBeVisible();
   await reference.getByRole('button', { name: /Test Request/ }).first().click();
   const waitForCall = () => page.waitForResponse((response) => response.url() === baseURL + '/echo/v2/json'
     && response.request().method() === 'POST');

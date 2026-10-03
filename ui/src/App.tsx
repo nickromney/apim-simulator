@@ -287,6 +287,27 @@ function apiRevisionPath(apiPath: string, revisionId: string, operationPath: str
 }
 
 function App() {
+  const [appearance, setAppearance] = useState(() => {
+    try {
+      const saved = localStorage.getItem("apim-appearance");
+      return saved === "light" || saved === "dark" ? saved : "system";
+    } catch {
+      return "system";
+    }
+  });
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      document.documentElement.dataset.theme =
+        appearance === "system" ? (media.matches ? "dark" : "light") : appearance;
+    };
+    try {
+      localStorage.setItem("apim-appearance", appearance);
+    } catch {}
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [appearance]);
   const [baseUrl, setBaseUrl] = useState(() => {
     try {
       const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
@@ -1524,6 +1545,18 @@ function App() {
           <h1>APIM Simulator</h1>
           <span className="brand-context">Local simulator</span>
         </div>
+        <nav className="application-nav" aria-label="Applications">
+          <a href={`${baseUrl.replace(/\/$/, "")}/apim/portal`}>Developer portal</a>
+          <span aria-current="page">Manage APIs</span>
+          <label>
+            Appearance{" "}
+            <select value={appearance} onChange={(event) => setAppearance(event.target.value)}>
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+        </nav>
         <nav className="service-nav" aria-label="Management areas">
           {(["apis", "subscriptions", "traces"] as const).map((area) => (
             <button

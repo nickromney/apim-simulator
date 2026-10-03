@@ -4,7 +4,7 @@ pre {
 }
 
 .field-label {
-  color: #605e5c;
+  color: var(--muted);
   font-size: 0.76rem;
   letter-spacing: 0;
   text-transform: none;
@@ -1027,8 +1027,8 @@ body::before,
   padding: 0.3rem 0.5rem;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 2px;
-  background: #fff;
-  color: #242424;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 0.82rem;
 }
 .connection-actions {
@@ -1043,8 +1043,8 @@ body::before,
   padding: 0.45rem 0.75rem;
   border: 1px solid #fff;
   border-radius: 2px;
-  background: #fff;
-  color: #005a9e;
+  background: var(--panel);
+  color: var(--accent);
   font-weight: 600;
   font-size: 0.82rem;
 }
@@ -1062,14 +1062,14 @@ body::before,
   padding: 0.35rem 0.65rem;
   border: 1px solid var(--line);
   border-radius: 2px;
-  background: #fff;
+  background: var(--panel);
   box-shadow: none;
   font-size: 0.82rem;
 }
 .status-bar button {
   padding: 0.3rem 0.65rem;
   border: 1px solid var(--line);
-  color: #242424;
+  color: var(--ink);
 }
 .workspace-grid {
   gap: 0.75rem;
@@ -1083,7 +1083,7 @@ body::before,
   padding: 0.9rem;
   border: 1px solid #d2d0ce;
   border-radius: 2px;
-  background: #fff;
+  background: var(--panel);
   box-shadow: none;
 }
 .panel::before {
@@ -1101,7 +1101,7 @@ body::before,
 }
 .eyebrow {
   margin-bottom: 0.15rem;
-  color: #605e5c;
+  color: var(--muted);
   font-size: 0.7rem;
   letter-spacing: 0.04em;
 }
@@ -1115,22 +1115,22 @@ body::before,
   border: 0;
   border-bottom: 1px solid #d2d0ce;
   border-radius: 0;
-  background: #fff;
+  background: var(--panel);
 }
 .workflow-tabs button {
   flex: 0 0 auto;
   min-width: 76px;
   padding: 0.65rem 1rem;
   border-radius: 0;
-  color: #323130;
+  color: var(--ink);
   font-size: 0.9rem;
   font-weight: 400;
 }
 .workflow-tabs button.active {
   position: relative;
-  background: #fff;
+  background: var(--panel);
   box-shadow: none;
-  color: #005a9e;
+  color: var(--accent);
   font-weight: 600;
 }
 .workflow-tabs button.active::after {
@@ -1192,11 +1192,11 @@ select {
 .tree-item {
   gap: 0.55rem;
   border-radius: 2px;
-  background: #fff;
+  background: var(--panel);
 }
 .tree-item.selected {
   border-color: #0078d4;
-  background: #f0f7fd;
+  background: var(--accent-soft);
   box-shadow: inset 3px 0 #0078d4;
 }
 .tree-operation {
@@ -1214,7 +1214,7 @@ select {
 }
 .operation-browser h3 {
   margin: 0 0 0.25rem;
-  color: #605e5c;
+  color: var(--muted);
   font-size: 0.75rem;
   font-weight: 600;
 }
@@ -1222,13 +1222,13 @@ select {
   min-width: 2.9rem;
   padding: 0.18rem 0.32rem;
   border-radius: 2px;
-  background: #e5f1fb;
-  color: #005a9e;
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 0.68rem;
 }
 .tree-count {
   border-radius: 2px;
-  background: #f3f2f1;
+  background: var(--bg);
 }
 .explorer-foot {
   margin-top: 0.5rem;
@@ -1254,7 +1254,7 @@ select {
   padding: 0.75rem;
   border: 1px solid #edebe9;
   border-radius: 2px;
-  background: #fff;
+  background: var(--panel);
 }
 .form-title h3,
 .response-heading h3 {
@@ -1277,7 +1277,7 @@ select {
 .policy-editor textarea,
 .policy-editor textarea {
   min-height: 21rem;
-  background: #f8f8f8;
+  background: var(--bg);
   font-family: Consolas, "Courier New", monospace;
   font-size: 0.82rem;
 }
@@ -1295,10 +1295,10 @@ select {
   padding: 0.55rem 0.65rem;
   margin-bottom: 0.3rem;
   border-radius: 2px;
-  background: #fff;
+  background: var(--panel);
 }
 .trace-chip.active {
-  background: #f0f7fd;
+  background: var(--accent-soft);
   border-color: #0078d4;
 }
 .trace-detail,
@@ -1309,7 +1309,7 @@ select {
 .subscription-card {
   padding: 0.8rem;
   border-radius: 2px;
-  background: #fff;
+  background: var(--panel);
   border-color: #edebe9;
 }
 .state-pill {
@@ -1377,8 +1377,8 @@ button,
 input,
 textarea,
 select {
-  background-color: #fff;
-  color: #242424;
+  background-color: var(--panel);
+  color: var(--ink);
 }
 .explorer-panel {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1404,41 +1404,41 @@ select {
 }
 .trace-detail,
 .replay-output pre {
-  background: #f8f8f8;
-  color: #242424;
+  background: var(--bg);
+  color: var(--ink);
   border-color: #d2d0ce;
 }
 .trace-kicker,
 .trace-duration,
 .trace-facts dt,
 .policy-steps > p {
-  color: #605e5c;
+  color: var(--muted);
 }
 .trace-summary-heading strong,
 .trace-facts dd,
 .policy-steps h3,
 .policy-steps li,
 .policy-steps li > strong {
-  color: #242424;
+  color: var(--ink);
 }
 .trace-facts div {
   border-color: #edebe9;
-  background: #fff;
+  background: var(--panel);
 }
 .policy-steps h3 span {
-  background: #e5f1fb;
-  color: #005a9e;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .policy-steps li::marker {
   color: #0078d4;
 }
 .policy-steps li pre,
 .raw-trace pre {
-  background: #f3f2f1;
-  color: #323130;
+  background: var(--bg);
+  color: var(--ink);
 }
 .raw-trace summary {
-  color: #005a9e;
+  color: var(--accent);
 }
 .policy-design-grid {
   display: grid;
@@ -1453,8 +1453,8 @@ select {
   align-content: start;
   border: 1px solid #d2d0ce;
   border-radius: 2px;
-  color: #242424;
-  background: #fff;
+  color: var(--ink);
+  background: var(--panel);
   text-decoration: none;
   font: inherit;
   text-align: left;
@@ -1506,10 +1506,10 @@ select {
 }
 .policy-stage-card:hover {
   border-color: #0078d4;
-  background: #f7fbfe;
+  background: var(--accent-soft);
 }
 .policy-stage-card > span {
-  color: #605e5c;
+  color: var(--muted);
   font-size: 0.78rem;
 }
 .policy-stage-card > strong {
@@ -1519,10 +1519,10 @@ select {
 }
 .policy-stage-card > small {
   align-self: end;
-  color: #605e5c;
+  color: var(--muted);
 }
 .policy-editor textarea {
-  background: #f8f8f8;
+  background: var(--bg);
   font-family: Consolas, "Courier New", monospace;
   font-size: 0.82rem;
 }
@@ -1609,7 +1609,7 @@ button.policy-stage-card {
   z-index: 20;
   margin-bottom: 0.65rem;
   border: 1px solid #d2d0ce;
-  background: #fff;
+  background: var(--panel);
 }
 .connection-control > summary {
   display: flex;
@@ -1617,7 +1617,7 @@ button.policy-stage-card {
   align-items: center;
   gap: 0.55rem;
   padding: 0.4rem 0.65rem;
-  color: #242424;
+  color: var(--ink);
   cursor: pointer;
   list-style: none;
   font-size: 0.82rem;
@@ -1630,13 +1630,13 @@ button.policy-stage-card {
   height: 0;
   margin-left: 0.15rem;
   border: 4px solid transparent;
-  border-top-color: #605e5c;
+  border-top-color: var(--muted);
   content: "";
   transform: translateY(2px);
 }
 .connection-control[open] > summary::after {
   border-top-color: transparent;
-  border-bottom-color: #605e5c;
+  border-bottom-color: var(--muted);
   transform: translateY(-2px);
 }
 .connection-control > summary:focus-visible,
@@ -1659,13 +1659,13 @@ button.policy-stage-card {
 }
 .connection-endpoint {
   overflow: hidden;
-  color: #605e5c;
+  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .connection-manage {
   margin-left: auto;
-  color: #005a9e;
+  color: var(--accent);
   font-weight: 600;
 }
 .connection-control .connection-panel {
@@ -1676,7 +1676,7 @@ button.policy-stage-card {
   padding: 0.75rem;
   border: 0;
   border-top: 1px solid #edebe9;
-  background: #faf9f8;
+  background: var(--bg);
 }
 .connection-control .connection-panel label {
   min-width: 0;
@@ -1687,7 +1687,7 @@ button.policy-stage-card {
   max-width: none;
 }
 .connection-control .field-label {
-  color: #605e5c;
+  color: var(--muted);
   font-size: 0.7rem;
 }
 .connection-control .connection-panel input {
@@ -1709,8 +1709,8 @@ button.policy-stage-card {
 }
 .connection-control .connection-panel button.secondary-button {
   border-color: #8a8886;
-  background: #fff;
-  color: #242424;
+  background: var(--panel);
+  color: var(--ink);
 }
 .connection-control .connection-hint {
   grid-column: 1 / -1;
@@ -1723,7 +1723,7 @@ button.policy-stage-card {
   padding: 2.5rem;
   border: 1px solid #d2d0ce;
   border-top: 3px solid #087e78;
-  background: #fff;
+  background: var(--panel);
 }
 .welcome-kicker {
   color: #087e78;
@@ -1741,7 +1741,7 @@ button.policy-stage-card {
 .welcome-panel p {
   max-width: 38rem;
   margin: 0;
-  color: #605e5c;
+  color: var(--muted);
   line-height: 1.55;
 }
 .welcome-actions {
@@ -1761,11 +1761,11 @@ button.policy-stage-card {
 }
 .welcome-panel .welcome-actions button.secondary-button {
   border-color: #8a8886;
-  background: #fff;
-  color: #242424;
+  background: var(--panel);
+  color: var(--ink);
 }
 .welcome-panel > small {
-  color: #605e5c;
+  color: var(--muted);
 }
 .welcome-panel code {
   font-family: Consolas, "Courier New", monospace;
@@ -1823,7 +1823,7 @@ button.policy-stage-card {
   gap: 0.8rem;
   padding: 1rem;
   border: 1px solid #d2d0ce;
-  background: #fff;
+  background: var(--panel);
 }
 .api-create-options {
   display: grid;
@@ -1837,19 +1837,19 @@ button.policy-stage-card {
   gap: 0.7rem;
   padding: 1rem;
   border: 1px solid #d2d0ce;
-  background: #fff;
+  background: var(--panel);
   text-align: left;
 }
 .api-create-option:hover {
   border-color: #0078d4;
-  background: #f7fbfe;
+  background: var(--accent-soft);
 }
 .api-create-option strong {
-  color: #005a9e;
+  color: var(--accent);
   font-size: 1.05rem;
 }
 .api-create-option span {
-  color: #605e5c;
+  color: var(--muted);
   font-weight: 400;
 }
 .checkbox-field {
@@ -1864,7 +1864,7 @@ button.policy-stage-card {
   accent-color: #0078d4;
 }
 .checkbox-field span {
-  color: #323130;
+  color: var(--ink);
   font-size: 0.85rem;
 }
 .api-create-form input[type="file"] {
@@ -1889,7 +1889,7 @@ button.policy-stage-card {
   min-width: 0;
   padding: 0.85rem;
   border: 1px solid #d2d0ce;
-  background: #fff;
+  background: var(--panel);
 }
 .revision-create-form {
   display: grid;
@@ -1910,7 +1910,7 @@ button.policy-stage-card {
 .revision-editor p,
 .release-list p {
   margin: 0.25rem 0 0;
-  color: #605e5c;
+  color: var(--muted);
   font-size: 0.82rem;
 }
 .revision-layout {
@@ -1933,7 +1933,7 @@ button.policy-stage-card {
   gap: 0.2rem;
   padding: 0.55rem;
   border: 1px solid #d2d0ce;
-  background: #fff;
+  background: var(--panel);
   text-align: left;
 }
 .revision-list-item strong {
@@ -1941,12 +1941,12 @@ button.policy-stage-card {
 }
 .revision-list-item span,
 .revision-list-item small {
-  color: #605e5c;
+  color: var(--muted);
   font-size: 0.78rem;
 }
 .revision-list-item.selected {
   border-color: #0078d4;
-  background: #f0f7fd;
+  background: var(--accent-soft);
   box-shadow: inset 3px 0 #0078d4;
 }
 .revision-editor {
@@ -1955,7 +1955,7 @@ button.policy-stage-card {
 }
 .revision-editor textarea,
 .release-create-form textarea {
-  background: #f8f8f8;
+  background: var(--bg);
   font-family: Consolas, "Courier New", monospace;
   font-size: 0.82rem;
 }
@@ -1984,7 +1984,7 @@ button.policy-stage-card {
   gap: 1rem;
 }
 .release-entry > div span {
-  color: #605e5c;
+  color: var(--muted);
   font-size: 0.8rem;
 }
 .release-entry p {
@@ -2044,7 +2044,7 @@ button.policy-stage-card {
 }
 .search-field input {
   border-radius: 2px;
-  background: #fff;
+  background: var(--panel);
 }
 @media (max-width: 1120px) {
   .workspace-grid {
@@ -2211,4 +2211,43 @@ html {
   .workspace-grid.app-page-apis {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.application-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.application-nav a {
+  color: inherit;
+}
+.application-nav label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111827;
+  --panel: #1f2937;
+  --panel-strong: #1f2937;
+  --ink: #f3f4f6;
+  --muted: #c4cbd5;
+  --line: #4b5563;
+  --accent: #60a5fa;
+  --accent-soft: #243b53;
+}
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] button {
+  color: var(--ink);
+}
+html[data-theme="dark"] .connection-control summary {
+  color: var(--ink);
 }

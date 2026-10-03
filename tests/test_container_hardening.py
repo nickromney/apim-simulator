@@ -301,7 +301,13 @@ def test_ui_is_built_as_a_static_hardened_container() -> None:
     assert service["ports"] == ["${APIM_BIND_ADDRESS:-127.0.0.1}:${OPERATOR_CONSOLE_PORT:-3007}:8080"]
 
     makefile = (REPO_ROOT / "Makefile").read_text()
-    assert "$(COMPOSE_UI) up --build -d" in makefile
+    assert "up-ui: up" in makefile
+    default = subprocess.run(["make", "-n", "up"], cwd=REPO_ROOT, check=True, capture_output=True, text=True).stdout
+    gateway = subprocess.run(
+        ["make", "-n", "up-gateway"], cwd=REPO_ROOT, check=True, capture_output=True, text=True
+    ).stdout
+    assert "-f compose.ui.yml" in default and "up --build -d" in default
+    assert "-f compose.ui.yml" not in gateway and "up --build -d" in gateway
 
 
 def test_private_smoke_runner_is_non_root_and_read_only() -> None:

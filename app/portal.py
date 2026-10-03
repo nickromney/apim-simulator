@@ -10,6 +10,7 @@ the public portal through the operator editor.
 
 from __future__ import annotations
 
+import os
 from html import escape
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -58,10 +59,13 @@ def portal_user_id(request: Request, cfg: GatewayConfig) -> str:
 
 def portal_identity_users(request: Request, cfg: GatewayConfig) -> dict[str, Any]:
     if not cfg.portal.identity.enabled:
-        return portal_users(cfg)
+        return {**portal_users(cfg), "authentication": "demo"}
     user_id = portal_user_id(request, cfg)
     user = cfg.users[user_id]
-    return {"users": [{"id": user_id, "name": user.name or user_id}]}
+    return {
+        "users": [{"id": user_id, "name": user.name or user_id}],
+        "authentication": request.state.portal_actor["authentication"],
+    }
 
 
 def user_group_ids(cfg: GatewayConfig, user_id: str) -> set[str]:
@@ -238,7 +242,7 @@ PORTAL_HTML = r"""<!doctype html>
   :root {
     color-scheme: light;
     --bg: #f2ede1;
-    --panel: rgba(255, 250, 242, 0.94);
+    --panel: #ffffff;
     --ink: #1a1711;
     --muted: #655f54;
     --line: rgba(26, 23, 17, 0.18);
@@ -247,58 +251,56 @@ PORTAL_HTML = r"""<!doctype html>
     --warn-soft: rgba(190, 93, 38, 0.2);
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: "Helvetica Neue", Arial, sans-serif;
-    color: var(--ink);
-    background: radial-gradient(circle at top left, rgba(18, 112, 95, 0.14), transparent 34%), var(--bg);
-    min-height: 100vh;
-  }
-  main { max-width: 960px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-  h1 { font-size: 1.7rem; margin: 0; }
-  .lede { color: var(--muted); margin: 0.4rem 0 1.6rem; }
-  section {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 1.2rem 1.4rem;
-    margin-bottom: 1.4rem;
-  }
-  h2 { margin: 0 0 0.8rem; font-size: 1.15rem; }
-  label { display: inline-flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
-  select, input, button {
-    font: inherit;
-    padding: 0.45rem 0.7rem;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: #fff;
-  }
-  button { cursor: pointer; background: var(--accent); color: #fff; border: none; }
-  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  .product { border-top: 1px solid var(--line); padding: 0.9rem 0; }
-  .product:first-of-type { border-top: none; }
-  .product h3 { margin: 0; }
-  .badges { display: inline-flex; gap: 0.4rem; margin-left: 0.6rem; vertical-align: middle; }
-  .badge {
-    font-size: 0.72rem;
-    padding: 0.15rem 0.55rem;
-    border-radius: 999px;
-    background: var(--accent-soft);
-  }
-  .badge.warn { background: var(--warn-soft); }
-  .apis { margin: 0.5rem 0 0.7rem; padding-left: 1.1rem; color: var(--muted); font-size: 0.9rem; }
-  .apis code { color: var(--ink); }
-  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
-  td.keys { font-family: monospace; font-size: 0.8rem; word-break: break-all; }
-  .tryit-grid { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; }
-  pre { background: #171410; color: #f4efe4; padding: 0.9rem; border-radius: 10px; overflow: auto; font-size: 0.82rem; }
-  .status { color: var(--muted); font-size: 0.9rem; min-height: 1.2rem; margin: 0.6rem 0 0; }
+  body { margin:0; font-family:Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); line-height:1.5; }
+  main { max-width:1200px; margin:auto; padding:2rem 1.5rem 4rem; }
+  h1 { font-size:1.8rem; letter-spacing:-.035em; margin:0; }
+  .lede { color:var(--muted); margin:.5rem 0 2rem; max-width:70ch; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1.5rem; margin-bottom:1.25rem; }
+  h2 { margin:0 0 1rem; font-size:1.1rem; letter-spacing:-.015em; }
+  label { display:flex; flex-direction:column; gap:.4rem; font-size:.85rem; color:var(--muted); min-width:0; }
+  input, select, button { font:inherit; min-height:42px; padding:.55rem .75rem; border-radius:6px; border:1px solid var(--line); background:var(--panel); color:var(--ink); }
+  input, select { width:100%; min-width:0; }
+  button { cursor:pointer; background:var(--accent); color:#fff; border-color:var(--accent); white-space:nowrap; }
+  button.secondary { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+  .identity-grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:1.5rem; align-items:end; }
+  .token-entry { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:.75rem; align-items:end; }
+  .section-description { color:var(--muted); font-size:.9rem; margin:-.5rem 0 1rem; }
+  .product { border-top:1px solid var(--line); padding:1rem 0; }
+  .product:first-of-type { border-top:none; }
+  .product h3 { margin:0; font-size:1rem; }
+  .badges { display:inline-flex; gap:.4rem; margin-left:.6rem; flex-wrap:wrap; }
+  .badge { font-size:.72rem; padding:.15rem .55rem; border-radius:4px; background:var(--accent-soft); }
+  .badge.warn { background:var(--warn-soft); }
+  .apis { margin:.5rem 0 1rem; padding-left:1.1rem; color:var(--muted); font-size:.9rem; }
+  .apis code { color:var(--ink); }
+  .table-scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th,td { text-align:left; padding:.75rem; border-bottom:1px solid var(--line); }
+  th { font-weight:500; color:var(--muted); }
+  td.keys { font-family:monospace; font-size:.8rem; overflow-wrap:anywhere; }
+  .tryit-grid { display:grid; gap:1rem; grid-template-columns:repeat(3,minmax(0,1fr)); align-items:end; }
+  .reference-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:center; margin:1.25rem 0; }
+  .reference-toolbar .status { margin:0; }
+  .quick-test { border-top:1px solid var(--line); margin-top:1.5rem; padding-top:1rem; }
+  .quick-test summary { cursor:pointer; color:var(--muted); margin-bottom:1rem; }
+  pre { background:#171410; color:#f4efe4; padding:1rem; border-radius:6px; overflow:auto; font-size:.82rem; }
+  .status { color:var(--muted); font-size:.9rem; margin:.75rem 0 0; }
+  .status:empty { display:none; }
+  .empty-reference { border:1px dashed var(--line); padding:2rem; text-align:center; color:var(--muted); }
+  @media(max-width:720px) { .identity-grid { grid-template-columns:1fr; } .tryit-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media(max-width:480px) { main { padding:1.25rem .75rem; } section { padding:1rem; } .tryit-grid,.reference-toolbar { grid-template-columns:1fr; } }
+html[data-theme="dark"] { color-scheme:dark; --bg:#111827; --panel:#1f2937; --ink:#f3f4f6; --muted:#c4cbd5; --line:#4b5563; --accent:#6ee7b7; }
+html[data-theme="light"] { color-scheme:light; }
+html[data-theme="dark"] input,html[data-theme="dark"] select { background:var(--panel);color:var(--ink); }
+html[data-theme="dark"] button { color:#111827; }
 </style>
 </head>
 <body>
 <main>
+  <nav aria-label="Applications"><strong>APIM Simulator</strong><a href="/apim/portal" aria-current="page">Developer portal</a><a href="__OPERATOR_URL__">Manage APIs</a><label>Appearance <select id="theme-select"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav>
+  <script src="/apim/portal/assets/theme.js"></script>
   <h1>Developer Portal</h1>
   <p class="lede">
     Browse published products, request a subscription, and try API calls against the local simulator.
@@ -307,14 +309,17 @@ PORTAL_HTML = r"""<!doctype html>
 
   <section>
     <h2>Portal identity</h2>
-    <label>Signed portal token
-      <input id="portal-token" type="password" autocomplete="off" placeholder="Bearer token from the local issuer" />
+    <p class="section-description" id="identity-description">Choose a local demo user or supply a signed portal token.</p>
+    <div class="identity-grid"><div class="token-entry">
+    <label>Portal token
+      <input id="portal-token" type="password" autocomplete="off" placeholder="Paste a signed portal token" />
     </label>
-    <button id="portal-sign-in" type="button">Sign in</button>
-    <label>Signed in as
+    <button id="portal-sign-in" type="button">Use token</button><button id="portal-sign-out" type="button" hidden>Sign out</button>
+    </div><label><span id="user-label">Demo user</span>
       <select id="user-select"></select>
     </label>
-    <p class="status" id="user-status"></p>
+    </div><p class="status" id="identity-status"></p>
+    <p class="status" id="user-status" role="status"></p>
   </section>
 
   <section>
@@ -324,36 +329,35 @@ PORTAL_HTML = r"""<!doctype html>
 
   <section>
     <h2>My subscriptions</h2>
-    <table>
+    <div class="table-scroll"><table>
       <thead><tr><th>Name</th><th>State</th><th>Products</th><th>Primary key</th></tr></thead>
       <tbody id="subs-body"></tbody>
-    </table>
+    </table></div>
   </section>
 
   <section>
-    <h2>Try it</h2>
+    <h2>Explore an API</h2>
+    <p class="section-description">Choose an API and version, then inspect its documentation or send a request with Scalar.</p>
     <div class="tryit-grid">
       <label>API<select id="api-select"></select></label>
       <label>Version<select id="version-select"></select></label>
-      <label>Operation
-        <select id="op-select"></select>
-      </label>
-      <label>Path
-        <input id="try-path" placeholder="/hello/greet" />
-      </label>
-      <label>Subscription key
-        <select id="key-select"></select>
-      </label>
-      <button id="try-send" type="button">Send</button>
+      <label>Subscription key<select id="key-select"></select></label>
     </div>
-    <p class="status" id="try-status"></p>
-    <pre id="try-output">Pick an operation and send a request.</pre>
-  </section>
-  <section>
-    <h2>API reference and client</h2>
-    <p class="status">The API and version selected above load a live OpenAPI contract. The selected subscription key is available in Scalar's request client.</p>
-    <button id="reference-refresh" type="button" class="secondary">Reload API reference</button>
+    <div class="reference-toolbar">
+      <p class="status">The selected key is used by the request client.</p>
+      <button id="reference-refresh" type="button" class="secondary">Reload API reference</button>
+    </div>
     <div id="api-reference"></div>
+    <details class="quick-test" id="quick-test">
+      <summary>Quick operation check</summary>
+      <div class="tryit-grid">
+        <label>Operation<select id="op-select"></select></label>
+        <label>Path<input id="try-path" placeholder="/hello/greet" /></label>
+        <button id="try-send" type="button">Send</button>
+      </div>
+      <p class="status" id="try-status" role="status"></p>
+      <pre id="try-output">Pick an operation and send a request.</pre>
+    </details>
   </section>
 </main>
 
@@ -365,7 +369,12 @@ PORTAL_HTML = r"""<!doctype html>
     const root = document.getElementById('api-reference');
     root.replaceChildren();
     const api = state.selectedApi;
-    if (!api) return;
+    document.getElementById('reference-refresh').disabled = !api;
+    document.getElementById('quick-test').hidden = !api;
+    if (!api) {
+      root.append(el('p', {class:'empty-reference', text:'API documentation will appear here when a published product is available to your user.'}));
+      return;
+    }
     try {
       const contract = await fetchJson('/apim/portal/apis/' + encodeURIComponent(api.id) + '/openapi');
       if (generation !== state.referenceGeneration) return;
@@ -374,7 +383,7 @@ PORTAL_HTML = r"""<!doctype html>
       frame.addEventListener('load', () => {
         if (generation !== state.referenceGeneration) return;
         frame.contentWindow.postMessage({ type: 'apim-reference', document: contract,
-          key: document.getElementById('key-select').value }, location.origin);
+          key: document.getElementById('key-select').value, dark: document.documentElement.dataset.theme === 'dark' }, location.origin);
       }, { once: true });
       root.append(frame);
     } catch (error) {
@@ -520,6 +529,7 @@ PORTAL_HTML = r"""<!doctype html>
       versionSelect.replaceChildren(...group.map(api => el('option', {value:api.id, text:api.api_version ?? 'Original'})));
       chooseVersion();
     };
+    apiSelect.disabled = !state.apiGroups.size; versionSelect.disabled = !state.apiGroups.size;
     apiSelect.onchange = chooseApi; versionSelect.onchange = chooseVersion; chooseApi();
   }
 
@@ -585,6 +595,13 @@ PORTAL_HTML = r"""<!doctype html>
     const select = document.getElementById("user-select");
     const payload = await fetchJson("/apim/portal/users");
     if (generation !== state.identityGeneration) return;
+    const signed = payload.authentication === 'signed-jwt';
+    document.getElementById('portal-sign-out').hidden = !signed;
+    document.getElementById('user-label').textContent = signed ? 'Verified user' : 'Demo user';
+    document.getElementById('identity-description').textContent = signed
+      ? 'Your portal access is verified by the supplied token.' : 'Local demo access uses the selected configured user. No sign-in is required.';
+    document.getElementById('identity-status').textContent = signed ? 'Token identity verified.' : 'Demo access';
+    select.disabled = signed;
     select.replaceChildren();
     for (const user of payload.users) {
       select.append(el("option", { value: user.id, text: user.name + " (" + user.id + ")" }));
@@ -600,7 +617,26 @@ PORTAL_HTML = r"""<!doctype html>
     await refresh();
   }
 
-  document.getElementById("portal-sign-in").onclick = () => void boot().catch(showIdentityError);
+  document.getElementById("portal-sign-in").onclick = () => {
+    if (!document.getElementById('portal-token').value.trim()) return;
+    void boot().catch(showIdentityError);
+  };
+  document.getElementById('portal-sign-out').onclick = () => {
+    ++state.identityGeneration;
+    state.user = '';
+    document.getElementById('portal-token').value = '';
+    document.getElementById('user-select').replaceChildren();
+    document.getElementById('portal-sign-out').hidden = true;
+    document.getElementById('user-status').textContent = '';
+    document.getElementById('user-label').textContent = 'User';
+    document.getElementById('identity-status').textContent = 'Signed out';
+    document.getElementById('identity-description').textContent = 'Supply a portal token to verify your identity.';
+    clearPortalData();
+  };
+  window.addEventListener('apim-theme-change', () => {
+    document.querySelector('#api-reference iframe')?.contentWindow.postMessage(
+      {type:'apim-theme', dark:document.documentElement.dataset.theme === 'dark'}, location.origin);
+  });
   document.getElementById('key-select').onchange = () => void renderReference();
   document.getElementById('reference-refresh').onclick = () => void renderReference();
   function clearReference() {
@@ -617,6 +653,8 @@ PORTAL_HTML = r"""<!doctype html>
   function showIdentityError(error) {
     ++state.identityGeneration;
     state.user = "";
+    document.getElementById('portal-sign-out').hidden = true;
+    document.getElementById('identity-status').textContent = 'No verified identity';
     document.getElementById("user-status").textContent = error.message;
     clearPortalData();
   }
@@ -647,7 +685,7 @@ def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
         if site.logo_url
         else ""
     )
-    navigation = f'<nav aria-label="Portal pages">{logo}{links}</nav>'
+    navigation = f'<nav aria-label="Portal pages">{logo}{links}</nav>' if len(site.pages) > 1 or logo else ""
     content = f'<h1>{escape(page.title)}</h1><p class="lede" style="white-space:pre-wrap">{escape(page.content)}</p>'
     html = PORTAL_HTML.replace(
         "<title>APIM Simulator Developer Portal</title>", f"<title>{escape(site.site_title)}</title>"
@@ -677,4 +715,6 @@ def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
         f"nav{{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}}"
         f"nav a{{color:var(--accent)}}{image}</style>"
     )
-    return html.replace("</head>", style + "</head>")
+    return html.replace(
+        "__OPERATOR_URL__", escape(os.getenv("OPERATOR_CONSOLE_URL", "http://localhost:3007"), quote=True)
+    ).replace("</head>", style + "</head>")

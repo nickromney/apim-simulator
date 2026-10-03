@@ -106,6 +106,7 @@ def test_scalar_assets_are_local_and_disabled_with_the_portal():
         plain = client.get("/apim/portal/assets/scalar.js", headers={"Accept-Encoding": "identity"})
         assert plain.content == bundle.content
         assert "content-encoding" not in plain.headers
+        assert client.get("/apim/portal/assets/theme.js").status_code == 200
         assert client.get("/apim/portal/assets/unknown").status_code == 404
     with _client(_portal_config(portal=PortalConfig(enabled=False))) as client:
         for path in ("reference", "assets/scalar.js", "apis/hello/openapi"):
