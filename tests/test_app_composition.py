@@ -8,6 +8,9 @@ deliberately, update the inventory below in the same change.
 from app.main import create_app
 
 EXPECTED_ROUTES = {
+    ("GET", "/apim/portal/apis/{api_id}/openapi"),
+    ("GET", "/apim/portal/reference"),
+    ("GET", "/apim/portal/assets/{asset}"),
     ("GET", "/apim/management/security/events"),
     ("GET", "/apim/management/security/governance"),
     ("GET", "/apim/management/security/posture"),

@@ -1,0 +1,148 @@
+{
+  "allow_anonymous": true,
+  "tenant_access": {
+    "enabled": true,
+    "primary_key": "scalar-demo-tenant-key",
+    "secondary_key": "scalar-demo-tenant-secondary"
+  },
+  "portal": {
+    "enabled": true
+  },
+  "users": {
+    "scalar-dev": {
+      "id": "scalar-dev",
+      "name": "Scalar Developer"
+    },
+    "other-dev": {
+      "id": "other-dev",
+      "name": "Other Developer"
+    }
+  },
+  "products": {
+    "starter": {
+      "name": "Starter"
+    }
+  },
+  "api_version_sets": {
+    "echo-versions": {
+      "id": "echo-versions",
+      "display_name": "Echo versions",
+      "versioning_scheme": "Segment"
+    }
+  },
+  "subscription": {
+    "required": true,
+    "subscriptions": {
+      "demo": {
+        "id": "demo",
+        "name": "Scalar demo",
+        "created_by": "portal:scalar-dev",
+        "products": [
+          "starter"
+        ],
+        "keys": {
+          "primary": "scalar-demo-key",
+          "secondary": "scalar-demo-secondary"
+        }
+      }
+    }
+  },
+  "apis": {
+    "echo-v1": {
+      "name": "Echo v1",
+      "path": "echo",
+      "upstream_base_url": "http://example.invalid",
+      "products": [
+        "starter"
+      ],
+      "api_version_set": "echo-versions",
+      "api_version": "v1",
+      "subscription_header_names": [
+        "X-Echo-Key"
+      ],
+      "operations": {
+        "echo": {
+          "name": "Echo JSON v1",
+          "method": "POST",
+          "url_template": "/json",
+          "description": "Echo a local JSON request without an external backend.",
+          "request": {
+            "representations": [
+              {
+                "content_type": "application/json",
+                "examples": [
+                  {
+                    "name": "greeting",
+                    "value": {
+                      "message": "hello v1"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "responses": [
+            {
+              "status_code": 200,
+              "description": "Echoed request",
+              "representations": [
+                {
+                  "content_type": "application/json"
+                }
+              ]
+            }
+          ],
+          "policies_xml": "<policies><inbound><base /><set-variable name=\"echo\" value=\"@(context.Request.Body.As&lt;string&gt;(preserveContent: true))\" /><return-response><set-status code=\"200\" reason=\"OK\" /><set-header name=\"Content-Type\" exists-action=\"override\"><value>application/json</value></set-header><set-body>@((string)context.Variables[\"echo\"])</set-body></return-response></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>"
+        }
+      }
+    },
+    "echo-v2": {
+      "name": "Echo v2",
+      "path": "echo",
+      "upstream_base_url": "http://example.invalid",
+      "products": [
+        "starter"
+      ],
+      "api_version_set": "echo-versions",
+      "api_version": "v2",
+      "subscription_header_names": [
+        "X-Echo-Key"
+      ],
+      "operations": {
+        "echo": {
+          "name": "Echo JSON v2",
+          "method": "POST",
+          "url_template": "/json",
+          "description": "Echo a local JSON request without an external backend.",
+          "request": {
+            "representations": [
+              {
+                "content_type": "application/json",
+                "examples": [
+                  {
+                    "name": "greeting",
+                    "value": {
+                      "message": "hello v2"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "responses": [
+            {
+              "status_code": 200,
+              "description": "Echoed request",
+              "representations": [
+                {
+                  "content_type": "application/json"
+                }
+              ]
+            }
+          ],
+          "policies_xml": "<policies><inbound><base /><set-variable name=\"echo\" value=\"@(context.Request.Body.As&lt;string&gt;(preserveContent: true))\" /><return-response><set-status code=\"200\" reason=\"OK\" /><set-header name=\"Content-Type\" exists-action=\"override\"><value>application/json</value></set-header><set-body>@((string)context.Variables[\"echo\"])</set-body></return-response></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>"
+        }
+      }
+    }
+  }
+}

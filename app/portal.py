@@ -349,10 +349,38 @@ PORTAL_HTML = r"""<!doctype html>
     <p class="status" id="try-status"></p>
     <pre id="try-output">Pick an operation and send a request.</pre>
   </section>
+  <section>
+    <h2>API reference and client</h2>
+    <p class="status">The API and version selected above load a live OpenAPI contract. The selected subscription key is available in Scalar's request client.</p>
+    <button id="reference-refresh" type="button" class="secondary">Reload API reference</button>
+    <div id="api-reference"></div>
+  </section>
 </main>
 
 <script>
-  const state = { user: "", catalog: null, subscriptions: [], apiGroups: new Map(), selectedApi: null };
+  const state = { user: "", catalog: null, subscriptions: [], apiGroups: new Map(), selectedApi: null, referenceGeneration: 0, identityGeneration: 0 };
+
+  async function renderReference() {
+    const generation = ++state.referenceGeneration;
+    const root = document.getElementById('api-reference');
+    root.replaceChildren();
+    const api = state.selectedApi;
+    if (!api) return;
+    try {
+      const contract = await fetchJson('/apim/portal/apis/' + encodeURIComponent(api.id) + '/openapi');
+      if (generation !== state.referenceGeneration) return;
+      const frame = el('iframe', { title: 'Scalar API reference and client', src: '/apim/portal/reference',
+        style: 'width:100%;height:800px;border:0', referrerpolicy: 'no-referrer' });
+      frame.addEventListener('load', () => {
+        if (generation !== state.referenceGeneration) return;
+        frame.contentWindow.postMessage({ type: 'apim-reference', document: contract,
+          key: document.getElementById('key-select').value }, location.origin);
+      }, { once: true });
+      root.append(frame);
+    } catch (error) {
+      if (generation === state.referenceGeneration) root.textContent = error.message;
+    }
+  }
 
   function headers() {
     const token = document.getElementById("portal-token").value.trim();
@@ -470,6 +498,7 @@ PORTAL_HTML = r"""<!doctype html>
     const updatePath = () => { document.getElementById("try-path").value = select.selectedOptions[0]?.request.request_url ?? ''; };
     document.getElementById('try-send').disabled = select.options.length === 0;
     updatePath(); select.onchange = updatePath;
+    void renderReference();
   }
 
   function renderApiVersions() {
@@ -496,11 +525,14 @@ PORTAL_HTML = r"""<!doctype html>
 
   async function refresh() {
     const status = document.getElementById("user-status");
+    const generation = ++state.identityGeneration;
+    clearPortalData();
     try {
       const [catalog, subs] = await Promise.all([
         fetchJson("/apim/portal/catalog"),
         fetchJson("/apim/portal/subscriptions"),
       ]);
+      if (generation !== state.identityGeneration) return;
       state.catalog = catalog;
       state.subscriptions = subs.subscriptions;
       status.textContent = "";
@@ -508,7 +540,7 @@ PORTAL_HTML = r"""<!doctype html>
       renderSubscriptions();
       renderApiVersions();
     } catch (error) {
-      status.textContent = String(error.message ?? error);
+      if (generation === state.identityGeneration) showIdentityError(error);
     }
   }
 
@@ -548,8 +580,11 @@ PORTAL_HTML = r"""<!doctype html>
   }
 
   async function boot() {
+    const generation = ++state.identityGeneration;
+    clearPortalData();
     const select = document.getElementById("user-select");
     const payload = await fetchJson("/apim/portal/users");
+    if (generation !== state.identityGeneration) return;
     select.replaceChildren();
     for (const user of payload.users) {
       select.append(el("option", { value: user.id, text: user.name + " (" + user.id + ")" }));
@@ -566,12 +601,24 @@ PORTAL_HTML = r"""<!doctype html>
   }
 
   document.getElementById("portal-sign-in").onclick = () => void boot().catch(showIdentityError);
+  document.getElementById('key-select').onchange = () => void renderReference();
+  document.getElementById('reference-refresh').onclick = () => void renderReference();
+  function clearReference() {
+    ++state.referenceGeneration;
+    document.getElementById('api-reference').replaceChildren();
+  }
+  function clearPortalData() {
+    clearReference();
+    state.catalog = null; state.subscriptions = []; state.selectedApi = null;
+    renderCatalog(); renderSubscriptions(); renderApiVersions();
+    document.getElementById('try-output').textContent = 'Pick an operation and send a request.';
+    document.getElementById('try-status').textContent = '';
+  }
   function showIdentityError(error) {
-    state.user = ""; state.subscriptions = []; state.catalog = null;
+    ++state.identityGeneration;
+    state.user = "";
     document.getElementById("user-status").textContent = error.message;
-    document.getElementById("catalog").replaceChildren();
-    document.getElementById("subs-body").replaceChildren();
-    document.getElementById("key-select").replaceChildren();
+    clearPortalData();
   }
   void boot().catch(showIdentityError);
 </script>

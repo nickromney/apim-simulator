@@ -1,5 +1,29 @@
 # Portal comparison fixture
 
+## Scalar browser lab
+
+Run the versioned JSON echo fixture with:
+
+```sh
+make -C examples/portal up
+make -C examples/portal smoke
+make -C examples/portal down
+```
+
+Open <http://localhost:8000/apim/portal>. The smoke uses installed Google Chrome
+and development-only Playwright tooling. To use a downloaded Chromium instead,
+run `npm --prefix examples/portal exec -- playwright install chromium` and set
+`PLAYWRIGHT_CHANNEL=chromium` when running smoke. `STACK_SLOT=1` shifts the
+published port to 8100; `APIM_BASE_URL` can target another instance of this fixture.
+
+The browser blocks every external request, renders the OpenAPI contract, selects
+v2 and the custom subscription header, sends the example JSON, edits the body,
+checks the actual response, verifies that the key is not persisted, then changes
+identity and confirms that the previous key disappears. The fixture uses local
+`return-response` policies and intentionally synthetic demo credentials.
+
+## Creation and revision comparison
+
 The OpenAPI document describes a small contract adapted from the platform subnet
 calculator: Health and IPv4 subnet information. Its backend URL intentionally
 uses `example.invalid`; importing it does not deploy or call a real backend.

@@ -1,2 +1,1 @@
-backstage/app/.yarn/releases/* linguist-generated=true
-backstage/app/yarn.lock linguist-generated=true
+app/static/scalar/scalar.js.gz binary linguist-generated=true

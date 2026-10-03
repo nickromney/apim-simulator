@@ -71,7 +71,7 @@ things about this repo's tests worth fixing on their own merits.
   `scripts/` and `examples/` are listed in `also_copy` because without them
   collection fails before a single mutant is scored.
 - **Some tests assert on repository artifacts, not on application behaviour.**
-  `test_container_hardening.py`, `test_backstage_integration.py`,
+  `test_container_hardening.py`, `test_catalog_metadata.py`,
   `test_release_artifacts.py` and `test_dependency_footprint.py` check the
   Dockerfile, the Backstage catalog, the release artifact and the packaging
   metadata. They are worth having and they can kill no mutant in `app/`, so they

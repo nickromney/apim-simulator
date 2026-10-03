@@ -1,5 +1,9 @@
 # Dependency remediation, 2026-10-02
 
+Historical evidence: the bundled Backstage app was removed in the Scalar portal migration.
+Its dependencies and local patches are no longer shipped. The results below describe
+the earlier Backstage build, not the current runtime.
+
 The runtime Python scan and both npm application scans report zero known
 advisories. Backstage's complete recursive scan retains **eight advisories:
 one high, six moderate, one low, and zero critical** in the recorded scan. Each remaining advisory is

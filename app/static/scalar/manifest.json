@@ -1,0 +1,10 @@
+{
+  "package": "@scalar/api-reference",
+  "version": "1.72.1",
+  "released": "2026-09-25T10:46:16.196Z",
+  "tarball": "https://registry.npmjs.org/@scalar/api-reference/-/api-reference-1.72.1.tgz",
+  "integrity": "sha512-XpEJ0rfc/cXbCrR+iC4kK0o/WwX2dTtGQbT049OlPKAHD6IMIFdTeGz2r+M27P2EDWKyUITRm/NzlP8z2pw/Ow==",
+  "member": "package/dist/browser/standalone.js",
+  "sha256": "bf091006bdc3af6067af77c2f534812e3e633e94a94e87138069f570f33b762c",
+  "license": "MIT"
+}
