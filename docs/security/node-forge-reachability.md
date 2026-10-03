@@ -1,5 +1,9 @@
 # node-forge advisory reachability, 2026-10-02
 
+Historical evidence: the bundled Backstage app was removed in the Scalar portal migration.
+Its dependencies and local patches are no longer shipped. The results below describe
+the earlier Backstage build, not the current runtime.
+
 The current Backstage lockfile resolves `node-forge` 1.4.0 through
 `@backstage/backend-defaults` 0.18.0 and development dependencies.
 [GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv)

@@ -31,3 +31,6 @@ mutants/
 examples/todo-app/api-clients/proxyman/
 
 examples/apim-security/.runtime/
+
+# Build outputs left by the retired optional Backstage app.
+/backstage/

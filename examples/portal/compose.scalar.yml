@@ -1,0 +1,4 @@
+services:
+  apim-simulator:
+    environment:
+      APIM_CONFIG_SOURCE_PATH: /app/examples/portal/scalar-runtime.json

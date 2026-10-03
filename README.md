@@ -208,7 +208,7 @@ stays on a hardened runtime base.
 | Edge TLS | `make up-tls` | [https://edge.apim.127.0.0.1.sslip.io:9443](https://edge.apim.127.0.0.1.sslip.io:9443) | You want local TLS termination behaviour |
 | Private internal stack | `make up-private` | no host gateway port | You want the MCP stack reachable only from the internal compose network |
 | Operator console | `make up-ui` | `http://localhost:3007` | You want the fastest control-room view of a running management-enabled stack |
-| Backstage API catalog | `make up-backstage` | `http://localhost:7007` | You want an optional API-aware developer portal over the simulator catalog |
+| Developer portal with Scalar | `make up` | `http://localhost:8000/apim/portal` | Browse products, request keys and use interactive OpenAPI documentation |
 | Every compose stack at once | `make up-all` | slot-based; printed during startup | You want the whole repo up simultaneously without port collisions |
 
 ## Quick Start
@@ -382,33 +382,34 @@ uv run apimsim --tenant-key local-dev-tenant-key delete-api weather --yes
 
 Run `uv run apimsim --help` for the full command list.
 
-### Optional Backstage Portal
+### Developer portal and Scalar API client
 
-The simulator publishes [Backstage catalog metadata](catalog-info.yaml) for the
-gateway and management APIs. The repository also carries a minimal catalog/API
-docs Backstage app under [backstage/app](backstage/app), so a fresh clone can
-start the portal without cloning a platform repo.
+Open <http://localhost:8000/apim/portal> after `make up`. The native portal
+handles product discovery, subscriptions, approval and signed portal identities.
+Select an API, version and subscription key to load its interactive
+[Scalar API Reference](https://github.com/scalar/scalar) and request client.
+Request bodies, schemas, parameters and response examples come from the running
+API configuration. Use **Reload API reference** after editing that API.
 
-This starts Backstage beside the direct public APIM stack:
+Scalar's pinned browser bundle is included in the Python app, Docker image,
+wheel and runtime archive. No CDN, hosted proxy, account or additional service
+is needed; the portal works without internet access when its local backends are
+available. Fonts, cloud Agent, telemetry and credential persistence are disabled.
+Calls go directly to the same gateway origin. Portal identity tokens stay in the
+portal; only the selected subscription key is passed to Scalar in memory.
 
-```bash
-make up-backstage
-make smoke-backstage
-```
+`GET /apim/portal/apis/{api_id}/openapi` returns a live consumer contract after
+checking the portal identity and product visibility. It contains no upstream
+configuration or subscription key. Private contracts use `Cache-Control: no-store`.
+This embedded client is our local workflow; Scalar's separate desktop client
+and framework Watch Mode are optional upstream tools, not extra simulator services.
 
-You can also opt the portal into the smallest stack:
+The small [catalog-info.yaml](catalog-info.yaml) remains optional discovery
+metadata. It contains no copied API definitions or release version; repository
+tests verify its project name and route links against the application.
+The bundled Backstage app and Compose overlay have been removed.
 
-```bash
-BACKSTAGE_ENABLED=true make up
-```
-
-The Backstage app itself is not part of the narrow runtime artifact intended for
-downstream vendoring. Consumers such as `platform` should vendor
-`catalog-info.yaml`, not a second Backstage application.
-
-The app follows Backstage's current Yarn 4 workspace layout. The committed
-`yarn.lock` and vendored Yarn release are marked as generated review artifacts
-with `.gitattributes`.
+For reproducible asset maintenance, see [the Scalar integration notes](docs/SCALAR-PORTAL.md).
 
 ### Request tracing
 

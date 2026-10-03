@@ -67,6 +67,8 @@ def test_runtime_artifact_contains_only_gitea_build_inputs(tmp_path: Path) -> No
     assert "pyproject.toml" in names
     assert "uv.lock" in names
     assert "app/main.py" in names
+    assert "app/static/scalar/scalar.js.gz" in names
+    assert "app/static/scalar/LICENSE" in names
     assert "contracts/contract_matrix.yml" in names
     assert "ARG PYTHON_BUILD_IMAGE=dhi.io/python:3.13-debian13-dev" in dockerfile
     assert "ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13" in dockerfile

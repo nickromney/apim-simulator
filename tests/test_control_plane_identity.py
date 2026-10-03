@@ -237,6 +237,36 @@ def test_portal_rejects_management_audience_unknown_and_inactive_subjects():
             )
 
 
+def test_signed_portal_openapi_uses_verified_subject_and_never_returns_keys():
+    from app.config import ApiConfig, GroupConfig, OperationConfig, ProductConfig
+
+    client, cfg = portal_client()
+    cfg.groups["alice-group"] = GroupConfig(id="alice-group", name="Alice", users=["alice"])
+    cfg.products["private"] = ProductConfig(name="Private", groups=["alice-group"])
+    cfg.apis["private"] = ApiConfig(
+        name="Private",
+        path="private",
+        upstream_base_url="http://private-backend.invalid",
+        products=["private"],
+        operations={"get": OperationConfig(name="Get", url_template="/", method="GET")},
+    )
+    with client:
+        path = "/apim/portal/apis/private/openapi"
+        assert client.get(path, headers={"X-Apim-Portal-User": "alice"}).status_code == 401
+        forged = {
+            "Authorization": "Bearer " + token(audience="apim-portal", subject="bob"),
+            "X-Apim-Portal-User": "alice",
+        }
+        assert client.get(path, headers=forged).status_code == 404
+        response = client.get(
+            path, headers={"Authorization": "Bearer " + token(audience="apim-portal", subject="alice")}
+        )
+        assert response.status_code == 200
+        assert "alice-primary" not in response.text and "bob-primary" not in response.text
+        assert "private-backend" not in response.text
+        assert response.headers["Cache-Control"] == "no-store"
+
+
 def test_portal_legacy_header_requires_explicit_signed_mode_compatibility():
     client, _ = portal_client(allow_legacy_user_header=True)
     with client:

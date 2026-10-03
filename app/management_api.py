@@ -1050,6 +1050,29 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
         _require_portal_enabled(cfg)
         return portal_subscriptions(cfg, _portal_user_id(request, cfg))
 
+    @router.get("/apim/portal/apis/{api_id}/openapi")
+    async def portal_api_openapi(api_id: str, request: Request, response: Response) -> dict[str, Any]:
+        from app.scalar_portal import portal_openapi
+
+        response.headers["Cache-Control"] = "no-store"
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _require_portal_enabled(cfg)
+        return portal_openapi(cfg, _portal_user_id(request, cfg), api_id)
+
+    @router.get("/apim/portal/reference", response_class=HTMLResponse)
+    async def portal_reference(request: Request) -> HTMLResponse:
+        from app.scalar_portal import scalar_reference_page
+
+        _require_portal_enabled(request.app.state.gateway_config)
+        return scalar_reference_page()
+
+    @router.get("/apim/portal/assets/{asset}")
+    async def portal_asset(asset: str, request: Request) -> Response:
+        from app.scalar_portal import scalar_asset
+
+        _require_portal_enabled(request.app.state.gateway_config)
+        return scalar_asset(request, asset)
+
     @router.post("/apim/portal/subscriptions", status_code=201)
     async def portal_request_subscription(
         request: Request, body: PortalSubscriptionRequest, response: Response

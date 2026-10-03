@@ -1,0 +1,13 @@
+{
+  "name": "apim-simulator-portal-smoke",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "scripts": {
+    "check": "node --check scalar-smoke.mjs && node --check ../../app/static/scalar/reference.js",
+    "smoke": "node scalar-smoke.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1"
+  }
+}
