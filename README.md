@@ -1,8 +1,45 @@
 # Local APIM Simulator
 
-Docker-first Azure API Management lab for local gateway work, policy testing, auth flows, management-surface experiments, and OTEL-backed debugging.
+An independent, community-built simulator for testing Azure API Management (APIM) workflows quickly and cheaply on your own machine.
 
-Development and testing only. This project is for local iteration, not production APIM replacement.
+**Unofficial project. Not affiliated with, endorsed by, or supported by Microsoft.** Azure and Azure API Management are Microsoft product names. This repository implements a documented subset of APIM behaviour; it is not Microsoft's APIM service or self-hosted gateway.
+
+The default stack needs no Azure account, subscription, or cloud deployment. Use it for local gateway work, policy testing, auth flows, and debugging. Local results establish the [supported simulator contracts](docs/FIDELITY-CONTRACTS.md), not full Azure compatibility or production performance. The [Azure comparison lab](examples/azure-validation/README.md) is a separate, optional cloud workflow that can incur Azure charges.
+
+## Start Here
+
+Follow the [getting-started journey](docs/GETTING-STARTED.md): start the stack, call anonymous echo, see a protected call fail, request a portal subscription, use its key in Scalar, and inspect the gateway trace. Each step has an expected result and a recovery point.
+
+```bash
+make up
+curl -i http://localhost:8000/api/echo
+```
+
+The first build downloads dependencies and container images. Subsequent local requests use the running containers. Docker Hardened Images require `docker login dhi.io`; the [public-image overrides](#container-hardening) are available if you need them.
+
+| Address | Role | What you do here |
+| --- | --- | --- |
+| [localhost:3007](http://localhost:3007) | Operator console — **Manage APIs** | Define APIs and policies, inspect configuration, test and trace requests. Choose **Load Local Demo**, then connect. |
+| [localhost:8000](http://localhost:8000/api/echo) | Gateway and local API service | Applications, curl and Bruno call configured routes such as `/api/echo`. Local health, trace and management endpoints also live under `/apim/`. |
+| [localhost:8000/apim/portal](http://localhost:8000/apim/portal) | Consumer developer portal — **Explore APIs** | Discover products, request subscription keys and try APIs with the embedded Scalar client. |
+
+There are two browser interfaces and one gateway service. The developer portal is served by that gateway on port `8000`; it is not another container or port. The console on `3007` calls the gateway's management API using a tenant key. API consumers use the gateway with the API's required subscription key and/or bearer token.
+
+In the portal, request a subscription to **API learning demo**, select its key and try `/demo/echo`. This protected route reaches the same mock backend as anonymous `/api/echo`; a call without a valid subscription key returns `401`.
+
+```mermaid
+flowchart LR
+  Operator["Operator console<br/>localhost:3007"] -. "Configure: /apim/management/*" .-> Service
+  Consumer["Consumer portal<br/>localhost:8000/apim/portal"] -->|"Try an API"| Service
+  Client["Your app / curl / Bruno"] -->|"Call /api/*"| Service["Gateway service<br/>localhost:8000"]
+  Service --> Backend["Local backend<br/>Docker network only"]
+```
+
+For the smallest runtime, use `make up-gateway` (gateway and mock backend, without the operator console). Start with the [ten-minute API lesson](docs/API-BASICS.md), then the [local address guide](docs/LOCAL-ADDRESSES.md). Keep `localhost` as the default; existing `sslip.io` edge/TLS stacks are useful when hostnames and certificates are part of the test.
+
+See [what we learned from Azurite and the Service Bus emulator](docs/EMULATOR-DESIGN.md) for the compatibility, lifecycle and support principles behind this local workflow.
+
+The default configuration is temporary: management edits are lost when the gateway container stops or restarts. [Save edits and reset a chosen stack](docs/LOCAL-LIFECYCLE.md) before changing its lifecycle. Report simulator defects in [this project's issue tracker](https://github.com/nickromney/apim-simulator/issues).
 
 ## Security Note
 
@@ -37,7 +74,7 @@ Its dated reports distinguish live matches from cases blocked by Azure Policy.
 
 Before running the simulator:
 
-- run `make prereqs` to verify Docker, `mkcert`, and the common local host ports are ready
+- run `make prereqs` for the full-stack checks (Docker, `mkcert` and common host ports); the default HTTP stack itself needs Docker, while TLS/OTEL stacks also need `mkcert` and its installed local CA
 - make sure Docker Engine or Docker Desktop is running
 - use `uv` if you want to run smoke scripts, import helpers, or tests from the host
 - use `npm` only for the browser-facing demo checks such as Playwright, Bruno, or the UI toolchain
@@ -220,22 +257,13 @@ stays on a hardened runtime base.
 
 ### New To APIM?
 
-If you do not already have an APIM mental model, start with the control room:
+Start with the [getting-started journey](docs/GETTING-STARTED.md) through one real local request:
 
 ```bash
-make up-ui
+make up
 ```
 
-Then open [http://localhost:3007](http://localhost:3007), click `Load Local Demo`, and connect.
-
-Use that first pass to answer four basic questions:
-
-- what APIs, routes, products, and backends are loaded
-- which policy scopes exist
-- what a traced request looks like
-- what a replay through the gateway returns
-
-After that, move to the browser-backed todo flow if you want to see a client calling APIM end to end.
+The walkthrough starts as an API consumer in the [developer portal](http://localhost:8000/apim/portal#getting-started) and finishes in the [operator console](http://localhost:3007), where the trace explains why the gateway allowed or rejected a call. Use the browser-backed todo flow afterward to explore a writable application.
 
 ### Browser-Backed Teaching Flow
 
@@ -257,7 +285,7 @@ Then open:
 For the smallest possible gateway bring-up:
 
 ```bash
-make up
+make up-gateway
 curl http://localhost:8000/apim/health
 curl http://localhost:8000/api/echo
 ```
@@ -627,6 +655,10 @@ make test
 
 ## Further Reading
 
+- APIs before APIM: [docs/API-BASICS.md](docs/API-BASICS.md)
+- Local surfaces, containers and optional DNS: [docs/LOCAL-ADDRESSES.md](docs/LOCAL-ADDRESSES.md)
+- Lessons from Microsoft's emulators: [docs/EMULATOR-DESIGN.md](docs/EMULATOR-DESIGN.md)
+- Cheap local iteration, saving edits and reset: [docs/LOCAL-LIFECYCLE.md](docs/LOCAL-LIFECYCLE.md)
 - Basics and onboarding: [docs/APIM-TRAINING-GUIDE.md](docs/APIM-TRAINING-GUIDE.md)
 - First-day checklist: [docs/FIRST-DAY-APIM-CHECKLIST.md](docs/FIRST-DAY-APIM-CHECKLIST.md)
 - APIM vocabulary in repo terms: [docs/AZURE-APIM-TERM-MAP.md](docs/AZURE-APIM-TERM-MAP.md)

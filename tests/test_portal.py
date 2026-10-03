@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -99,6 +101,29 @@ def test_portal_page_and_users_are_served_when_enabled() -> None:
         users = client.get("/apim/portal/users")
         assert users.status_code == 200
         assert {user["id"] for user in users.json()["users"]} == {"dev-1", "dev-2"}
+
+
+def test_basic_fixture_portal_exposes_a_protected_demo_without_gating_anonymous_echo(monkeypatch) -> None:
+    """The first-run portal can teach access checks while curl's starter stays anonymous."""
+    monkeypatch.delenv("APIM_CONFIG_PATH", raising=False)
+    config = GatewayConfig.model_validate_json(Path("examples/basic.json").read_text())
+    headers = {"X-Apim-Portal-User": "demo-dev"}
+    with _client(config) as client:
+        catalog = client.get("/apim/portal/catalog", headers=headers)
+        assert catalog.status_code == 200
+        product = next(p for p in catalog.json()["products"] if p["id"] == "portal-demo")
+        assert [api["id"] for api in product["apis"]] == ["portal-demo"]
+        assert client.get("/api/echo").status_code == 200
+        assert client.get("/demo/echo").status_code == 401
+        created = client.post(
+            "/apim/portal/subscriptions",
+            headers=headers,
+            json={"product_id": "portal-demo", "name": "First local call"},
+        )
+        assert created.status_code == 201
+        key = created.json()["keys"]["primary"]
+        assert client.get("/demo/echo", headers={"Ocp-Apim-Subscription-Key": key}).status_code == 200
+        assert client.get("/demo/echo", headers={"Ocp-Apim-Subscription-Key": "invalid-key"}).status_code == 401
 
 
 @pytest.mark.contract("PORTAL-CATALOG-VISIBILITY")

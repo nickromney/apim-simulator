@@ -1750,7 +1750,10 @@ button.policy-stage-card {
   gap: 0.55rem;
   margin: 1.25rem 0 0.9rem;
 }
-.welcome-actions button {
+.welcome-actions button,
+.welcome-actions a {
+  display: inline-flex;
+  align-items: center;
   min-height: 36px;
   padding: 0.45rem 0.8rem;
   border: 1px solid #0078d4;
@@ -1758,6 +1761,7 @@ button.policy-stage-card {
   background: #0078d4;
   color: #fff;
   font-weight: 600;
+  text-decoration: none;
 }
 .welcome-panel .welcome-actions button.secondary-button {
   border-color: #8a8886;
@@ -2286,6 +2290,17 @@ html[data-theme="dark"] .connection-control summary {
   background: #087e78;
   min-height: 36px;
   margin-bottom: 8px;
+}
+.project-notice {
+  margin: -0.35rem 0 0.75rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.connection-control .connection-hint {
+  display: block;
 }
 @media (max-width: 760px) {
   .masthead .brand-lockup {
