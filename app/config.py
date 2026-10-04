@@ -786,6 +786,11 @@ def _match_path_prefix(prefix: str, path: str) -> RouteMatch | None:
     )
 
 
+@lru_cache(maxsize=1024)
+def _matches_api_path(prefix: str, path: str) -> bool:
+    return _match_path_prefix(prefix, path) is not None
+
+
 def _remove_path_prefix(path: str, prefix: str) -> str:
     normalized_prefix = _normalize_path(prefix)
     incoming = path or "/"
@@ -852,7 +857,7 @@ class RouteConfig(BaseModel):
 
     def matches_api_path(self, path: str) -> bool:
         prefix = self.api_path_prefix or self.path_prefix
-        return _match_path_prefix(prefix, path) is not None
+        return _matches_api_path(prefix, path)
 
     def _path_match(self, path: str, *, query: Any = None) -> RouteMatch | None:
         if self.url_template is not None:

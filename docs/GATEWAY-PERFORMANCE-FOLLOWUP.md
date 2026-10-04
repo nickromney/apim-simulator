@@ -10,8 +10,8 @@ against unchanged behavior oracles, measured, and committed separately.
 The 100-route profile made 150,000 operation matches for 1,000 requests:
 50 candidate matches and 100 repeated matches of the selected operation per
 request. `RouteConfig.match` consumed 4.151 of 14.742 profiled seconds.
-Retaining the final match in the existing request-local version cache removes
-the 100 repeated matches without removing any outer route eligibility checks.
+Retaining the final match in the existing request-local version cache reduces
+those 100 repeated matches to one, preserving outer route eligibility checks.
 
 | Opportunity | Impact | Confidence | Effort | Score |
 | --- | --- | --- | --- | --- |
@@ -88,5 +88,83 @@ focused tests pass, including mutable parameters, config edits, unusual path
 forms, and eviction. The enhanced seeded differential probe found zero
 mismatches across 2,000 routing cases, 67,504 generated helper comparisons, and
 608 fixed path-shape comparisons. Independent review found no issues.
-Rollback uses `git revert` on the commit titled
-`Cache immutable routing path segments`.
+Rollback is `git revert 386b6bd`.
+
+## Iteration 3 Cache API-prefix eligibility
+
+The fresh iteration 2 profile puts `_match_path_prefix` second by self time:
+150,000 calls consume 0.325 of 4.132 profiled seconds cumulatively. All are API
+eligibility checks, which discard the match object and only need a boolean.
+The latest ten-run iteration 2 confirmation is the baseline for this iteration.
+
+| Opportunity | Impact | Confidence | Effort | Score |
+| --- | --- | --- | --- | --- |
+| Bound pure API-prefix eligibility to 1,024 boolean entries | 2 | 5 | 1 | 10 |
+
+- Ordering preserved: route iteration and outer eligibility checks remain.
+- Tie-breaking unchanged: matching and precedence rules remain unchanged.
+- Floating-point: N/A.
+- RNG seeds: N/A.
+- Golden outputs: both existing SHA-256 checks pass without fixture changes.
+
+The effective prefix is read from the current route before every lookup. Keys
+contain its exact string and the incoming path. Positive and negative results
+are pure booleans; cached values contain no match parameters, route, or request
+objects. Configuration edits and different paths naturally use different keys.
+`_match_path_prefix` remains unchanged for callers that need a fresh match.
+Rollback uses `git revert` on the commit titled `Cache API-prefix eligibility`.
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Median p50 (ms) | 1.141 | 1.015 |
+| Median p95 (ms) | 1.366 | 1.204 |
+| Median p99 (ms) | 1.524 | 1.305 |
+| Median requests/s | 838.5 | 947.0 |
+| Median peak RSS (MiB) | 101.34 | 101.62 |
+
+Throughput increased by 12.9%, and p95 fell by 11.8%. The fresh profile removes
+all 150,000 prefix-match calls after the repeated URL is warmed; varying URLs
+still require one computation per new prefix/path pair. All 43 focused tests
+pass. The enhanced probe found zero mismatches across 2,000 routing cases,
+101,256 generated helper comparisons, and 969 path-shape comparisons.
+Independent reviews of this lever and the combined changes found no issues.
+
+## Combined check with varying request IDs
+
+A second workload gives every request a new parameter ID, including warmups,
+using [the same benchmark](../scripts/benchmark_varying_gateway.py). Both the
+frozen `36cacd6` app and final app use the identical wrapper and core harness.
+This reduces reuse across requests while preserving repeated work within each
+request. Ten measured runs follow three discarded process warmups for every
+comparison; each process also performs 20 gateway warmups. No tests or profiles
+run concurrently with timing.
+
+| Metric | Starting source | After three iterations |
+| --- | ---: | ---: |
+| Median p50 (ms) | 1.685 | 1.037 |
+| Median p95 (ms) | 1.912 | 1.247 |
+| Median p99 (ms) | 2.153 | 1.395 |
+| Median requests/s | 578.0 | 921.0 |
+| Median peak RSS (MiB) | 101.61 | 102.13 |
+
+This confirms 59.3% more throughput and 34.7% lower p95, with 0.52 MiB higher
+peak RSS. Both new caches cap entry counts at 1,024. These measurements describe
+local gateway CPU work with an in-memory backend and 100 versioned routes;
+network latency and other route distributions can change the benefit.
+Raw per-run measurements are retained in
+[the results file](gateway-performance-followup-results.json).
+
+To reproduce, freeze the baseline app and run the same harness against both:
+
+```bash
+mkdir -p /private/tmp/apim-baseline
+git archive 36cacd6 app | tar -x -C /private/tmp/apim-baseline
+UV_CACHE_DIR=/private/tmp/apim-uv-cache hyperfine --warmup 3 --runs 10 \
+  'uv run --extra dev python scripts/benchmark_varying_gateway.py \
+    --app-root /private/tmp/apim-baseline --scenario versioned-routes' \
+  'uv run --extra dev python scripts/benchmark_varying_gateway.py \
+    --scenario versioned-routes'
+```
+
+The final profile places repeated request-scheme reads among the remaining
+hotspots. This pass stops at the requested three additional iterations.
