@@ -1,0 +1,435 @@
+{
+  "bodies": [
+    {
+      "expression": "@(context.Request.Body.As<string>(preserveContent: true))",
+      "request_body": "{\"message\":\"request\"}",
+      "response_body": "{\"message\":\"response\"}",
+      "type": "str",
+      "value": "{\"message\":\"request\"}"
+    },
+    {
+      "expression": "@(context.Request.Body.As<JObject>(preserveContent: true))",
+      "request_body": "{\"message\":\"request\"}",
+      "response_body": "{\"message\":\"response\"}",
+      "type": "dict",
+      "value": {
+        "message": "request"
+      }
+    },
+    {
+      "expression": "@(context.Request.Body.As<string>())",
+      "request_body": "",
+      "response_body": "{\"message\":\"response\"}",
+      "type": "str",
+      "value": "{\"message\":\"request\"}"
+    },
+    {
+      "error": "AttributeError",
+      "expression": "@(context.Request.Body.As<string>())",
+      "message": "'NoneType' object has no attribute 'AsString'",
+      "request_body": "",
+      "response_body": "{\"message\":\"response\"}"
+    },
+    {
+      "expression": "@(context.Response.Body.As<string>(preserveContent: true))",
+      "request_body": "{\"message\":\"request\"}",
+      "response_body": "{\"message\":\"response\"}",
+      "type": "str",
+      "value": "{\"message\":\"response\"}"
+    },
+    {
+      "expression": "@(context.Response.Body.As<JObject>(preserveContent: true))",
+      "request_body": "{\"message\":\"request\"}",
+      "response_body": "{\"message\":\"response\"}",
+      "type": "dict",
+      "value": {
+        "message": "response"
+      }
+    },
+    {
+      "expression": "@(context.Response.Body.As<string>())",
+      "request_body": "{\"message\":\"request\"}",
+      "response_body": "",
+      "type": "str",
+      "value": "{\"message\":\"response\"}"
+    },
+    {
+      "error": "AttributeError",
+      "expression": "@(context.Response.Body.As<string>())",
+      "message": "'NoneType' object has no attribute 'AsString'",
+      "request_body": "{\"message\":\"request\"}",
+      "response_body": ""
+    }
+  ],
+  "callouts": [
+    {
+      "calls": [
+        {
+          "body": "{\"message\":\"request\"}",
+          "method": "POST",
+          "url": "https://example.test/orders"
+        }
+      ],
+      "remaining_callout_body": "",
+      "request_body": "{\"message\":\"request\"}",
+      "response_body": "{\"orders\":3}",
+      "response_headers": {
+        "X-Response": "alpha"
+      },
+      "trace": null,
+      "traced": false
+    },
+    {
+      "calls": [
+        {
+          "body": "{\"message\":\"request\"}",
+          "method": "POST",
+          "url": "https://example.test/orders"
+        }
+      ],
+      "remaining_callout_body": "",
+      "request_body": "{\"message\":\"request\"}",
+      "response_body": "{\"orders\":3}",
+      "response_headers": {
+        "X-Response": "alpha"
+      },
+      "trace": {
+        "jwt_validations": [],
+        "selected_backend": null,
+        "send_requests": [
+          {
+            "method": "POST",
+            "response_variable_name": "orders",
+            "status_code": 200,
+            "url": "https://example.test/orders"
+          }
+        ],
+        "steps": [
+          {
+            "length": 12,
+            "step": "set-body"
+          },
+          {
+            "action": "override",
+            "name": "x-mode",
+            "step": "set-header",
+            "value": "alpha"
+          }
+        ],
+        "variable_writes": [
+          {
+            "name": "mode",
+            "source": "set-variable",
+            "value": "alpha"
+          },
+          {
+            "name": "orders",
+            "source": "send-request",
+            "value": {
+              "body_text": "{\"orders\":3}",
+              "headers": {
+                "content-length": "12",
+                "content-type": "application/json"
+              },
+              "reason": "OK",
+              "status_code": 200,
+              "type": "response"
+            }
+          }
+        ]
+      },
+      "traced": true
+    }
+  ],
+  "expressions": [
+    {
+      "expression": "@(context.Request.Headers.GetValueOrDefault(\"x-value\", \"missing\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Request.Url.Query[\"repeated\"].Last())",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Request.MatchedParameters.GetValueOrDefault(\"id\", \"\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Variables.GetValueOrDefault(\"key\", \"\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Response.Headers.GetValueOrDefault(\"x-response\", \"\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Request.Url.Query.GetValueOrDefault(\"mode\", \"\") == \"alpha\" ? \"yes\" : \"no\")",
+      "request": "alpha",
+      "type": "str",
+      "value": "yes"
+    },
+    {
+      "expression": "@($\"{context.Request.Method}:{context.Request.Url.Path}:{context.Response.StatusCode}\")",
+      "request": "alpha",
+      "type": "str",
+      "value": "POST:/api/alpha:201"
+    },
+    {
+      "expression": "@(Regex.Replace(\"abc123\", @\"(?<letters>[a-z]+)([0-9]+)\", \"${letters}-$2\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "abc-123"
+    },
+    {
+      "expression": "@(-7 / 2)",
+      "request": "alpha",
+      "type": "int",
+      "value": -3
+    },
+    {
+      "expression": "@(7.0 / 2)",
+      "request": "alpha",
+      "type": "float",
+      "value": 3.5
+    },
+    {
+      "expression": "@(Guid.NewGuid().ToString())",
+      "request": "alpha",
+      "type": "str",
+      "value": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "expression": "@(DateTime.UtcNow.ToString())",
+      "request": "alpha",
+      "type": "str",
+      "value": "2026-01-02 03:04:05+00:00"
+    },
+    {
+      "expression": "@{\n    string[] value;\n    if (context.Request.Headers.TryGetValue(\"Authorization\", out value)) {\n        if (value != null && value.Length > 0) { return value[0].ToUpper(); }\n    }\n    return null;\n}",
+      "request": "alpha",
+      "type": "str",
+      "value": "ALPHA"
+    },
+    {
+      "expression": "@(context.Request.Headers.GetValueOrDefault(\"x-value\", \"missing\"))",
+      "request": "beta",
+      "type": "str",
+      "value": "beta"
+    },
+    {
+      "expression": "@(context.Request.Url.Query[\"repeated\"].Last())",
+      "request": "beta",
+      "type": "str",
+      "value": "beta"
+    },
+    {
+      "expression": "@(context.Request.MatchedParameters.GetValueOrDefault(\"id\", \"\"))",
+      "request": "beta",
+      "type": "str",
+      "value": "beta"
+    },
+    {
+      "expression": "@(context.Variables.GetValueOrDefault(\"key\", \"\"))",
+      "request": "beta",
+      "type": "str",
+      "value": "beta"
+    },
+    {
+      "expression": "@(context.Response.Headers.GetValueOrDefault(\"x-response\", \"\"))",
+      "request": "beta",
+      "type": "str",
+      "value": "beta"
+    },
+    {
+      "expression": "@(context.Request.Url.Query.GetValueOrDefault(\"mode\", \"\") == \"alpha\" ? \"yes\" : \"no\")",
+      "request": "beta",
+      "type": "str",
+      "value": "no"
+    },
+    {
+      "expression": "@($\"{context.Request.Method}:{context.Request.Url.Path}:{context.Response.StatusCode}\")",
+      "request": "beta",
+      "type": "str",
+      "value": "POST:/api/beta:201"
+    },
+    {
+      "expression": "@(Regex.Replace(\"abc123\", @\"(?<letters>[a-z]+)([0-9]+)\", \"${letters}-$2\"))",
+      "request": "beta",
+      "type": "str",
+      "value": "abc-123"
+    },
+    {
+      "expression": "@(-7 / 2)",
+      "request": "beta",
+      "type": "int",
+      "value": -3
+    },
+    {
+      "expression": "@(7.0 / 2)",
+      "request": "beta",
+      "type": "float",
+      "value": 3.5
+    },
+    {
+      "expression": "@(Guid.NewGuid().ToString())",
+      "request": "beta",
+      "type": "str",
+      "value": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "expression": "@(DateTime.UtcNow.ToString())",
+      "request": "beta",
+      "type": "str",
+      "value": "2026-01-02 03:04:05+00:00"
+    },
+    {
+      "expression": "@{\n    string[] value;\n    if (context.Request.Headers.TryGetValue(\"Authorization\", out value)) {\n        if (value != null && value.Length > 0) { return value[0].ToUpper(); }\n    }\n    return null;\n}",
+      "request": "beta",
+      "type": "str",
+      "value": "BETA"
+    },
+    {
+      "expression": "@(context.Request.Headers.GetValueOrDefault(\"x-value\", \"missing\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Request.Url.Query[\"repeated\"].Last())",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Request.MatchedParameters.GetValueOrDefault(\"id\", \"\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Variables.GetValueOrDefault(\"key\", \"\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Response.Headers.GetValueOrDefault(\"x-response\", \"\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "alpha"
+    },
+    {
+      "expression": "@(context.Request.Url.Query.GetValueOrDefault(\"mode\", \"\") == \"alpha\" ? \"yes\" : \"no\")",
+      "request": "alpha",
+      "type": "str",
+      "value": "yes"
+    },
+    {
+      "expression": "@($\"{context.Request.Method}:{context.Request.Url.Path}:{context.Response.StatusCode}\")",
+      "request": "alpha",
+      "type": "str",
+      "value": "POST:/api/alpha:201"
+    },
+    {
+      "expression": "@(Regex.Replace(\"abc123\", @\"(?<letters>[a-z]+)([0-9]+)\", \"${letters}-$2\"))",
+      "request": "alpha",
+      "type": "str",
+      "value": "abc-123"
+    },
+    {
+      "expression": "@(-7 / 2)",
+      "request": "alpha",
+      "type": "int",
+      "value": -3
+    },
+    {
+      "expression": "@(7.0 / 2)",
+      "request": "alpha",
+      "type": "float",
+      "value": 3.5
+    },
+    {
+      "expression": "@(Guid.NewGuid().ToString())",
+      "request": "alpha",
+      "type": "str",
+      "value": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "expression": "@(DateTime.UtcNow.ToString())",
+      "request": "alpha",
+      "type": "str",
+      "value": "2026-01-02 03:04:05+00:00"
+    },
+    {
+      "expression": "@{\n    string[] value;\n    if (context.Request.Headers.TryGetValue(\"Authorization\", out value)) {\n        if (value != null && value.Length > 0) { return value[0].ToUpper(); }\n    }\n    return null;\n}",
+      "request": "alpha",
+      "type": "str",
+      "value": "ALPHA"
+    },
+    {
+      "expression": "@{ var scoped = 7; return scoped; }",
+      "type": "int",
+      "value": 7
+    },
+    {
+      "error": "ValueError",
+      "expression": "@(scoped)",
+      "message": "Unsupported expression name: scoped"
+    },
+    {
+      "error": "ValueError",
+      "expression": "@{ var other = 8; return scoped; }",
+      "message": "Unsupported expression name: scoped"
+    },
+    {
+      "expression": "@{ var scoped = 9; var other = 0; return scoped; }",
+      "type": "int",
+      "value": 9
+    },
+    {
+      "expression": "@{ var scoped = 11; return scoped; }",
+      "type": "int",
+      "value": 11
+    },
+    {
+      "error": "ValueError",
+      "expression": "@(context.Request.ToHttpMessage.__globals__)",
+      "message": "Private expression members are not accessible"
+    },
+    {
+      "error": "ValueError",
+      "expression": "@(context.__class__)",
+      "message": "Private expression members are not accessible"
+    },
+    {
+      "error": "ValueError",
+      "expression": "@(unknown)",
+      "message": "Unsupported expression name: unknown"
+    },
+    {
+      "error": "ZeroDivisionError",
+      "expression": "@(1 / 0)",
+      "message": "division by zero"
+    },
+    {
+      "error": "ValueError",
+      "expression": "@{ var value = 1; }",
+      "message": "Multi-statement expression must return on all code paths."
+    },
+    {
+      "error": "SyntaxError",
+      "expression": "@(1 +)",
+      "message": "invalid syntax (<unknown>, line 1)"
+    }
+  ]
+}
