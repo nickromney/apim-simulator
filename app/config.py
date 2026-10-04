@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
@@ -642,9 +643,10 @@ def _normalize_path(path: str) -> str:
     return value.rstrip("/") or "/"
 
 
-def _path_segments(path: str) -> list[str]:
+@lru_cache(maxsize=1024)
+def _path_segments(path: str) -> tuple[str, ...]:
     normalized = _normalize_path(path)
-    return [] if normalized == "/" else normalized.lstrip("/").split("/")
+    return () if normalized == "/" else tuple(normalized.lstrip("/").split("/"))
 
 
 def _template_parts(url_template: str) -> tuple[str, list[tuple[str, str]]]:
@@ -677,7 +679,7 @@ def _match_nonwildcard_segment(expected: str, actual: str) -> tuple[str | None, 
     return None, 3
 
 
-def _match_segments(template: list[str], request: list[str]) -> tuple[dict[str, str], tuple[int, ...]] | None:
+def _match_segments(template: Sequence[str], request: Sequence[str]) -> tuple[dict[str, str], tuple[int, ...]] | None:
     parameters: dict[str, str] = {}
     precedence: list[int] = []
     wildcard = False
