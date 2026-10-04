@@ -292,6 +292,7 @@ def _resolve_route_candidate(
     route: RouteConfig,
     path: str,
     request_hosts: list[str],
+    version_cache: dict[tuple[str, str], ResolvedRoute | None],
 ) -> tuple[RouteMatch, ResolvedRoute] | None:
     if not _route_matches_host(route, request_hosts) or not _route_protocol_allowed(route, request):
         return None
@@ -310,13 +311,19 @@ def _resolve_route_candidate(
         )
     if not route.matches_api_path(path):
         return None
-    resolved = _resolve_versioned_route(
-        config,
-        request,
-        route=route,
-        path=path,
-        request_hosts=request_hosts,
-    )
+    # Only the version set and effective API prefix vary between source routes
+    # in a single request/host group. Retain the exact prefix spelling because
+    # segment versioning uses it to construct the upstream path.
+    version_key = (route.api_version_set, route.api_path_prefix or route.path_prefix)
+    if version_key not in version_cache:
+        version_cache[version_key] = _resolve_versioned_route(
+            config,
+            request,
+            route=route,
+            path=path,
+            request_hosts=request_hosts,
+        )
+    resolved = version_cache[version_key]
     if resolved is None:
         return None
     match = resolved.route.match(
@@ -392,6 +399,10 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
         request_host_groups = [[]]
 
     for request_hosts in request_host_groups:
+        # Both successful and missing selections are request-local. Host
+        # fallback must rescan with its own host group, never a cached result
+        # from a different forwarded or direct host.
+        version_cache: dict[tuple[str, str], ResolvedRoute | None] = {}
         candidates: list[tuple[RouteMatch, int, ResolvedRoute]] = []
         for index, route in enumerate(config.routes):
             candidate = _resolve_route_candidate(
@@ -400,6 +411,7 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
                 route=route,
                 path=path,
                 request_hosts=request_hosts,
+                version_cache=version_cache,
             )
             if candidate is None:
                 continue
