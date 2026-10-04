@@ -7,6 +7,8 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
+from types import CodeType
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote_plus
 
@@ -914,12 +916,23 @@ def _parse_sequence(text: str, position: int, stop: str | None) -> tuple[list[An
         statements.append(statement)
 
 
+@lru_cache(maxsize=1024)
+def _compile_expression(expression: str, allowed_names: frozenset[str]) -> CodeType:
+    """Reuse pure compilation, retaining local-name validation across scopes.
+
+    Request data and local values never enter the cache: each evaluation still
+    builds its own environment and performs all runtime effects.
+    """
+    translated = _translate_expression(expression)
+    tree = _validate_ast(translated, set(allowed_names))
+    return compile(tree, "<apim-expression>", "eval")
+
+
 def _evaluate_expression(expression: str, context: ExpressionContext, locals_: dict[str, Any] | None = None) -> Any:
     stripped = expression.strip()
     if stripped.startswith('$"') and stripped.endswith('"'):
         return _render_interpolated(stripped[2:-1], context, locals_)
-    translated = _translate_expression(stripped)
-    tree = _validate_ast(translated, set(locals_ or {}))
+    code = _compile_expression(stripped, frozenset(locals_ or {}))
     scope = locals_ if locals_ is not None else {}
 
     def try_get_value(mapping: ExpressionMap, key: str, target: str) -> bool:
@@ -953,7 +966,7 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
         "JProperty": _JsonProperty,
         **(locals_ or {}),
     }
-    return eval(compile(tree, "<apim-expression>", "eval"), {"__builtins__": {}}, environment)
+    return eval(code, {"__builtins__": {}}, environment)
 
 
 def _execute_simple(

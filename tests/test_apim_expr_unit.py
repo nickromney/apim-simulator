@@ -8,6 +8,9 @@ branch of the request normaliser.
 
 from __future__ import annotations
 
+import uuid
+from unittest.mock import patch
+
 import pytest
 
 from app.apim_expr import (
@@ -15,6 +18,7 @@ from app.apim_expr import (
     CalloutResponse,
     ExpressionMap,
     JwtValue,
+    _compile_expression,
     _strip_outer_expression,
     build_expression_context,
     evaluate_apim_expression,
@@ -42,6 +46,50 @@ def _context(**overrides: object):
 
 def _evaluate(expression: str, **overrides: object):
     return evaluate_apim_expression(expression, _context(**overrides))
+
+
+def test_compiled_expression_reads_each_requests_current_values() -> None:
+    expression = '@(context.Request.Headers.GetValueOrDefault("x-key", "missing"))'
+    assert _evaluate(expression, headers={"x-key": "first"}) == "first"
+    assert _evaluate(expression, headers={"x-key": "second"}) == "second"
+    assert _evaluate(expression, headers={}) == "missing"
+
+
+def test_compiled_expression_keeps_local_validation_scoped_to_each_evaluation() -> None:
+    assert _evaluate("@{ var scoped = 7; return scoped; }") == 7
+    with pytest.raises(ValueError, match="Unsupported expression name: scoped"):
+        _evaluate("@(scoped)")
+    with pytest.raises(ValueError, match="Unsupported expression name: scoped"):
+        _evaluate("@{ var other = 8; return scoped; }")
+    assert _evaluate("@{ var scoped = 11; return scoped; }") == 11
+
+
+def test_compiled_expression_repeats_runtime_effects() -> None:
+    first, second = uuid.UUID(int=1), uuid.UUID(int=2)
+    context = _context()
+    with patch("app.apim_expr.uuid.uuid4", side_effect=[first, second]):
+        assert evaluate_apim_expression("@(Guid.NewGuid().ToString())", context) == str(first)
+        assert evaluate_apim_expression("@(Guid.NewGuid().ToString())", context) == str(second)
+    request = _request(body=b"first")
+    expression = "@(context.Request.Body.As<string>())"
+    context = build_expression_context(request)
+    assert evaluate_apim_expression(expression, context) == "first"
+    assert request.body == b""
+    assert evaluate_apim_expression(expression, context) == ""
+    request.body = b"second"
+    assert evaluate_apim_expression(expression, build_expression_context(request)) == "second"
+
+
+def test_expression_cache_is_bounded_and_evicted_expressions_still_evaluate() -> None:
+    _compile_expression.cache_clear()
+    try:
+        for value in range(1100):
+            assert _evaluate(f"@({value})") == value
+        assert _compile_expression.cache_info().currsize == 1024
+        assert _evaluate("@(0)") == 0
+        assert _compile_expression.cache_info().currsize == 1024
+    finally:
+        _compile_expression.cache_clear()
 
 
 # --- ExpressionMap ---------------------------------------------------------
