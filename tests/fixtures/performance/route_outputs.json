@@ -1,0 +1,686 @@
+[
+  {
+    "case": "Header:literal-precedence-and-first-tie",
+    "normalized_path": "/catalog/items/me",
+    "path": "/catalog/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Header:parameter",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "parameter",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Header:method",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "post",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Header:wildcard",
+    "normalized_path": "/catalog/items/a/b",
+    "path": "/catalog/items/a/b",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "rest": "a/b"
+      },
+      "query_parameters": [],
+      "route": "wildcard",
+      "upstream_path": "/catalog/items/a/b"
+    }
+  },
+  {
+    "case": "Header:case-and-trailing-slash",
+    "normalized_path": "/CATALOG/ITEMS/ME/",
+    "path": "/CATALOG/ITEMS/ME/",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/CATALOG/ITEMS/ME/"
+    }
+  },
+  {
+    "case": "Header:query-literal",
+    "normalized_path": "/catalog/search",
+    "path": "/catalog/search",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [
+        "term"
+      ],
+      "route": "query-literal",
+      "upstream_path": "/catalog/search"
+    }
+  },
+  {
+    "case": "Header:query-parameter-first-repeated",
+    "normalized_path": "/catalog/search",
+    "path": "/catalog/search",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "term": "first"
+      },
+      "query_parameters": [
+        "term"
+      ],
+      "route": "query-parameter",
+      "upstream_path": "/catalog/search"
+    }
+  },
+  {
+    "case": "Header:query-missing",
+    "normalized_path": "/catalog/search",
+    "path": "/catalog/search",
+    "result": null
+  },
+  {
+    "case": "Header:v1",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": "v1",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "v1",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Header:original",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": null,
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "original",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Header:unknown-version",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Header:forwarded-host-first",
+    "normalized_path": "/catalog/items/me",
+    "path": "/catalog/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "admin",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Header:forwarded-host-fallback",
+    "normalized_path": "/catalog/items/me",
+    "path": "/catalog/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Header:different-prefix-same-version-set",
+    "normalized_path": "/catalog/child/items/42",
+    "path": "/catalog/child/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "nested-prefix",
+      "upstream_path": "/catalog/child/items/42"
+    }
+  },
+  {
+    "case": "Header:protocol-denied",
+    "normalized_path": "/catalog/secure",
+    "path": "/catalog/secure",
+    "result": null
+  },
+  {
+    "case": "Header:protocol-allowed",
+    "normalized_path": "/catalog/secure",
+    "path": "/catalog/secure",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "https",
+      "upstream_path": "/catalog/secure"
+    }
+  },
+  {
+    "case": "Header:forwarded-protocol",
+    "normalized_path": "/catalog/secure",
+    "path": "/catalog/secure",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "https",
+      "upstream_path": "/catalog/secure"
+    }
+  },
+  {
+    "case": "Header:offline-api",
+    "normalized_path": "/catalog/offline",
+    "path": "/catalog/offline",
+    "result": null
+  },
+  {
+    "case": "Header:wrong-method",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Header:missing-version-without-original",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Header:missing-version-set",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Query:literal-precedence-and-first-tie",
+    "normalized_path": "/catalog/items/me",
+    "path": "/catalog/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Query:parameter",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "parameter",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Query:method",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "post",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Query:wildcard",
+    "normalized_path": "/catalog/items/a/b",
+    "path": "/catalog/items/a/b",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "rest": "a/b"
+      },
+      "query_parameters": [],
+      "route": "wildcard",
+      "upstream_path": "/catalog/items/a/b"
+    }
+  },
+  {
+    "case": "Query:case-and-trailing-slash",
+    "normalized_path": "/CATALOG/ITEMS/ME/",
+    "path": "/CATALOG/ITEMS/ME/",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/CATALOG/ITEMS/ME/"
+    }
+  },
+  {
+    "case": "Query:query-literal",
+    "normalized_path": "/catalog/search",
+    "path": "/catalog/search",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [
+        "term"
+      ],
+      "route": "query-literal",
+      "upstream_path": "/catalog/search"
+    }
+  },
+  {
+    "case": "Query:query-parameter-first-repeated",
+    "normalized_path": "/catalog/search",
+    "path": "/catalog/search",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "term": "first"
+      },
+      "query_parameters": [
+        "term"
+      ],
+      "route": "query-parameter",
+      "upstream_path": "/catalog/search"
+    }
+  },
+  {
+    "case": "Query:query-missing",
+    "normalized_path": "/catalog/search",
+    "path": "/catalog/search",
+    "result": null
+  },
+  {
+    "case": "Query:v1",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": "v1",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "v1",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Query:original",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": null,
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "original",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Query:unknown-version",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Query:forwarded-host-first",
+    "normalized_path": "/catalog/items/me",
+    "path": "/catalog/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "admin",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Query:forwarded-host-fallback",
+    "normalized_path": "/catalog/items/me",
+    "path": "/catalog/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Query:different-prefix-same-version-set",
+    "normalized_path": "/catalog/child/items/42",
+    "path": "/catalog/child/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "nested-prefix",
+      "upstream_path": "/catalog/child/items/42"
+    }
+  },
+  {
+    "case": "Query:protocol-denied",
+    "normalized_path": "/catalog/secure",
+    "path": "/catalog/secure",
+    "result": null
+  },
+  {
+    "case": "Query:protocol-allowed",
+    "normalized_path": "/catalog/secure",
+    "path": "/catalog/secure",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "https",
+      "upstream_path": "/catalog/secure"
+    }
+  },
+  {
+    "case": "Query:forwarded-protocol",
+    "normalized_path": "/catalog/secure",
+    "path": "/catalog/secure",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "https",
+      "upstream_path": "/catalog/secure"
+    }
+  },
+  {
+    "case": "Query:offline-api",
+    "normalized_path": "/catalog/offline",
+    "path": "/catalog/offline",
+    "result": null
+  },
+  {
+    "case": "Query:wrong-method",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Query:missing-version-without-original",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Query:missing-version-set",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Segment:literal-precedence-and-first-tie",
+    "normalized_path": "/catalog/v2/items/me",
+    "path": "/catalog/v2/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Segment:parameter",
+    "normalized_path": "/catalog/v2/items/42",
+    "path": "/catalog/v2/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "parameter",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Segment:method",
+    "normalized_path": "/catalog/v2/items/42",
+    "path": "/catalog/v2/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "post",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Segment:wildcard",
+    "normalized_path": "/catalog/v2/items/a/b",
+    "path": "/catalog/v2/items/a/b",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "rest": "a/b"
+      },
+      "query_parameters": [],
+      "route": "wildcard",
+      "upstream_path": "/catalog/items/a/b"
+    }
+  },
+  {
+    "case": "Segment:case-and-trailing-slash",
+    "normalized_path": "/CATALOG/V2/ITEMS/ME/",
+    "path": "/CATALOG/V2/ITEMS/ME/",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/catalog/ITEMS/ME/"
+    }
+  },
+  {
+    "case": "Segment:query-literal",
+    "normalized_path": "/catalog/v2/search",
+    "path": "/catalog/v2/search",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [
+        "term"
+      ],
+      "route": "query-literal",
+      "upstream_path": "/catalog/search"
+    }
+  },
+  {
+    "case": "Segment:query-parameter-first-repeated",
+    "normalized_path": "/catalog/v2/search",
+    "path": "/catalog/v2/search",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "term": "first"
+      },
+      "query_parameters": [
+        "term"
+      ],
+      "route": "query-parameter",
+      "upstream_path": "/catalog/search"
+    }
+  },
+  {
+    "case": "Segment:query-missing",
+    "normalized_path": "/catalog/v2/search",
+    "path": "/catalog/v2/search",
+    "result": null
+  },
+  {
+    "case": "Segment:v1",
+    "normalized_path": "/catalog/v1/items/42",
+    "path": "/catalog/v1/items/42",
+    "result": {
+      "api_version": "v1",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "v1",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Segment:original",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": {
+      "api_version": null,
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "original",
+      "upstream_path": "/catalog/items/42"
+    }
+  },
+  {
+    "case": "Segment:unknown-version",
+    "normalized_path": "/catalog/v3/items/42",
+    "path": "/catalog/v3/items/42",
+    "result": null
+  },
+  {
+    "case": "Segment:forwarded-host-first",
+    "normalized_path": "/catalog/v2/items/me",
+    "path": "/catalog/v2/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "admin",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Segment:forwarded-host-fallback",
+    "normalized_path": "/catalog/v2/items/me",
+    "path": "/catalog/v2/items/me",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "literal-first",
+      "upstream_path": "/catalog/items/me"
+    }
+  },
+  {
+    "case": "Segment:different-prefix-same-version-set",
+    "normalized_path": "/catalog/child/v2/items/42",
+    "path": "/catalog/child/v2/items/42",
+    "result": {
+      "api_version": "v2",
+      "parameters": {
+        "id": "42"
+      },
+      "query_parameters": [],
+      "route": "nested-prefix",
+      "upstream_path": "/catalog/child/items/42"
+    }
+  },
+  {
+    "case": "Segment:protocol-denied",
+    "normalized_path": "/catalog/v2/secure",
+    "path": "/catalog/v2/secure",
+    "result": null
+  },
+  {
+    "case": "Segment:protocol-allowed",
+    "normalized_path": "/catalog/v2/secure",
+    "path": "/catalog/v2/secure",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "https",
+      "upstream_path": "/catalog/secure"
+    }
+  },
+  {
+    "case": "Segment:forwarded-protocol",
+    "normalized_path": "/catalog/v2/secure",
+    "path": "/catalog/v2/secure",
+    "result": {
+      "api_version": "v2",
+      "parameters": {},
+      "query_parameters": [],
+      "route": "https",
+      "upstream_path": "/catalog/secure"
+    }
+  },
+  {
+    "case": "Segment:offline-api",
+    "normalized_path": "/catalog/v2/offline",
+    "path": "/catalog/v2/offline",
+    "result": null
+  },
+  {
+    "case": "Segment:wrong-method",
+    "normalized_path": "/catalog/v2/items/42",
+    "path": "/catalog/v2/items/42",
+    "result": null
+  },
+  {
+    "case": "Segment:missing-version-without-original",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  },
+  {
+    "case": "Segment:missing-version-set",
+    "normalized_path": "/catalog/items/42",
+    "path": "/catalog/items/42",
+    "result": null
+  }
+]
