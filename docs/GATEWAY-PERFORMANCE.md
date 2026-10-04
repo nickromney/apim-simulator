@@ -163,3 +163,6 @@ version cache from `app/proxy.py` (and its scan-count assertion). Keep the
 behavior oracles and benchmark harness, then rerun golden checksums and the
 application suite. For committed changes, use `git revert <optimization-commit>`
 for the corresponding lever.
+
+The [4 October follow-up](GATEWAY-PERFORMANCE-FOLLOWUP.md) records three further
+iterations, repeated comparisons, and final verification against these commits.

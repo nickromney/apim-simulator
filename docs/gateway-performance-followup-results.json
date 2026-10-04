@@ -1752,7 +1752,8 @@
           "seed": 20261004
         },
         "independent_review": "no findings"
-      }
+      },
+      "commit": "618a233"
     }
   },
   "overall_varying_paths": {
@@ -2094,5 +2095,30 @@
       }
     ],
     "reproduction_harness": "scripts/benchmark_varying_gateway.py"
+  },
+  "final_source_revision": "618a233",
+  "final_verification": {
+    "python_tests_passed": 1187,
+    "python_tests_skipped": 1,
+    "skipped_test": "Keycloak integration",
+    "branch_aware_coverage_percent": 86.91,
+    "coverage_gate_percent": 82,
+    "ruff": "passed",
+    "format": "passed",
+    "markdownlint": "passed",
+    "diff_check": "passed",
+    "golden_checksums": "unchanged",
+    "independent_reviews": "no findings",
+    "real_localhost_http": {
+      "checks": 16,
+      "forwarded": 9,
+      "rejected": 7,
+      "backend_calls": 9,
+      "configuration": "allows simulated forwarded headers"
+    },
+    "not_run": [
+      "Docker smoke: container wiring unchanged",
+      "frontend checks: frontend unchanged"
+    ]
   }
 }

@@ -4,6 +4,8 @@ This report records up to three additional optimization iterations on
 4 October 2026, following the changes in [the initial report](GATEWAY-PERFORMANCE.md).
 The starting source revision is `36cacd6`. Each lever is profiled, checked
 against unchanged behavior oracles, measured, and committed separately.
+The combined varying-ID workload confirms 59.3% more throughput and 34.7%
+lower p95 latency beyond that starting point.
 
 ## Iteration 1 Reuse the final versioned operation match
 
@@ -112,7 +114,7 @@ contain its exact string and the incoming path. Positive and negative results
 are pure booleans; cached values contain no match parameters, route, or request
 objects. Configuration edits and different paths naturally use different keys.
 `_match_path_prefix` remains unchanged for callers that need a fresh match.
-Rollback uses `git revert` on the commit titled `Cache API-prefix eligibility`.
+Rollback is `git revert 618a233`.
 
 | Metric | Before | After |
 | --- | ---: | ---: |
@@ -168,3 +170,23 @@ UV_CACHE_DIR=/private/tmp/apim-uv-cache hyperfine --warmup 3 --runs 10 \
 
 The final profile places repeated request-scheme reads among the remaining
 hotspots. This pass stops at the requested three additional iterations.
+
+## Final verification
+
+The optimization commits are `7171902`, `386b6bd`, and `618a233`, in order.
+The full Python suite passed with 1,187 tests and one skipped Keycloak
+integration test. Branch-aware coverage is 86.91%, above the 82% gate.
+Repository-wide Ruff lint, formatting, the complexity ratchet, Markdown lint,
+diff whitespace checks, and both unchanged golden checksums pass.
+
+An actual uvicorn server on an ephemeral localhost port passed 16 HTTP checks:
+nine forwarded requests and seven correct rejections, with exactly nine backend
+calls. Checks cover distinct IDs, version selection, query repetition, wildcard
+paths, protocol eligibility, method rejection, and live template/prefix edits.
+The fixture explicitly permits simulated forwarded headers, as required by the
+existing security configuration; an initial fixture omission was corrected
+before rerunning this check successfully.
+
+Per-lever and combined independent reviews found no correctness issues.
+Docker and frontend checks were not run because container wiring and frontend
+code did not change.
