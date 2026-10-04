@@ -1,0 +1,675 @@
+{
+  "date": "2026-10-03",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "python": "3.14.8",
+  "baseline_source_revision": "6ba8e81abf8e105c37a0907fdc5f8503089497f1",
+  "method": "3 Hyperfine process warmups discarded, then 10 measured runs; each process has 20 gateway warmups",
+  "workloads": {
+    "expressions": {
+      "measured_runs": {
+        "before": [
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.7273254999963683,
+            "requests_per_second": 578.9296805970284,
+            "p50_ms": 1.5716249981778674,
+            "p95_ms": 2.2469590039690956,
+            "p99_ms": 2.922874999057967,
+            "peak_rss_mib": 100.796875
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.6054775419979705,
+            "requests_per_second": 622.8676352305301,
+            "p50_ms": 1.5223750015138648,
+            "p95_ms": 1.870375002908986,
+            "p99_ms": 2.110250003170222,
+            "peak_rss_mib": 101.0
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.6797457080028835,
+            "requests_per_second": 595.328206665841,
+            "p50_ms": 1.559625001391396,
+            "p95_ms": 2.0454589975997806,
+            "p99_ms": 2.4498339989804663,
+            "peak_rss_mib": 100.59375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.622537209004804,
+            "requests_per_second": 616.318685605588,
+            "p50_ms": 1.5341250036726706,
+            "p95_ms": 1.9006670045200735,
+            "p99_ms": 2.1159579991945066,
+            "peak_rss_mib": 100.984375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 2.2181589169995277,
+            "requests_per_second": 450.8243265783165,
+            "p50_ms": 1.5555830032099038,
+            "p95_ms": 2.6097919981111772,
+            "p99_ms": 5.321874996297993,
+            "peak_rss_mib": 100.84375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.6061328750001849,
+            "requests_per_second": 622.6134932951204,
+            "p50_ms": 1.522416998341214,
+            "p95_ms": 1.861124997958541,
+            "p99_ms": 2.1192499989410862,
+            "peak_rss_mib": 100.984375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.9923466250038473,
+            "requests_per_second": 501.92069364339096,
+            "p50_ms": 1.7310420007561333,
+            "p95_ms": 3.316000002087094,
+            "p99_ms": 4.964833002304658,
+            "peak_rss_mib": 100.921875
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 2.626660665999225,
+            "requests_per_second": 380.71152964084285,
+            "p50_ms": 2.269791999424342,
+            "p95_ms": 4.5192079996922985,
+            "p99_ms": 6.423458005883731,
+            "peak_rss_mib": 100.4375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 2.837807709001936,
+            "requests_per_second": 352.384693588595,
+            "p50_ms": 2.4238339974544942,
+            "p95_ms": 5.157332998351194,
+            "p99_ms": 6.391000002622604,
+            "peak_rss_mib": 101.109375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 2.1468324579982436,
+            "requests_per_second": 465.8025344615961,
+            "p50_ms": 1.9169160004821606,
+            "p95_ms": 3.3369999946444295,
+            "p99_ms": 4.545333002170082,
+            "peak_rss_mib": 101.265625
+          }
+        ],
+        "after": [
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.3503191250056261,
+            "requests_per_second": 740.5656792395897,
+            "p50_ms": 1.1562079962459393,
+            "p95_ms": 2.3216250046971254,
+            "p99_ms": 3.268792002927512,
+            "peak_rss_mib": 101.046875
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 3.0768351669976255,
+            "requests_per_second": 325.00928575117644,
+            "p50_ms": 1.363292001769878,
+            "p95_ms": 7.5841669968212955,
+            "p99_ms": 33.57474999938859,
+            "peak_rss_mib": 100.15625
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.5304593330001808,
+            "requests_per_second": 653.3986094486327,
+            "p50_ms": 1.295082998694852,
+            "p95_ms": 2.6342499986640178,
+            "p99_ms": 3.9344999968307093,
+            "peak_rss_mib": 101.359375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.2358937919998425,
+            "requests_per_second": 809.1310163326133,
+            "p50_ms": 1.1369170024408959,
+            "p95_ms": 1.6384160044253804,
+            "p99_ms": 2.0916670036967844,
+            "peak_rss_mib": 101.265625
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.6715759159997106,
+            "requests_per_second": 598.2378607087883,
+            "p50_ms": 1.3382090037339367,
+            "p95_ms": 3.279125005064998,
+            "p99_ms": 4.650791997846682,
+            "peak_rss_mib": 101.234375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.695474166997883,
+            "requests_per_second": 589.805506603893,
+            "p50_ms": 1.3955419999547303,
+            "p95_ms": 3.2480419977218844,
+            "p99_ms": 4.138291995332111,
+            "peak_rss_mib": 100.78125
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.3485427499981597,
+            "requests_per_second": 741.5411932631462,
+            "p50_ms": 1.220040998305194,
+            "p95_ms": 1.906375000544358,
+            "p99_ms": 2.3253330000443384,
+            "peak_rss_mib": 101.578125
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.4500331660019583,
+            "requests_per_second": 689.6393982195642,
+            "p50_ms": 1.2050420045852661,
+            "p95_ms": 2.483708994986955,
+            "p99_ms": 4.431790999660734,
+            "peak_rss_mib": 101.328125
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 1.2422068749947357,
+            "requests_per_second": 805.0188902748085,
+            "p50_ms": 1.1309999972581863,
+            "p95_ms": 1.6146659982041456,
+            "p99_ms": 2.0328750033513643,
+            "peak_rss_mib": 101.375
+          },
+          {
+            "scenario": "expressions",
+            "requests": 1000,
+            "elapsed_seconds": 2.0059476669994183,
+            "requests_per_second": 498.5174919821525,
+            "p50_ms": 1.411040997481905,
+            "p95_ms": 4.2502079959376715,
+            "p99_ms": 6.469416999607347,
+            "peak_rss_mib": 101.0
+          }
+        ]
+      },
+      "median_of_run_metrics": {
+        "before": {
+          "p50_ms": 1.5656249997846317,
+          "p95_ms": 2.4283755010401364,
+          "p99_ms": 3.7341040006140247,
+          "requests_per_second": 540.4251871202097,
+          "peak_rss_mib": 100.953125
+        },
+        "after": {
+          "p50_ms": 1.257561998500023,
+          "p95_ms": 2.5589794968254864,
+          "p99_ms": 4.03639599608141,
+          "requests_per_second": 671.5190038340984,
+          "peak_rss_mib": 101.25
+        }
+      },
+      "hyperfine": {
+        "results": [
+          {
+            "command": "uv run --extra dev python /private/tmp/apim-benchmark-before.py --requests 1000 --jsonl /private/tmp/apim-controlled-before.jsonl",
+            "mean": 2.8203984216600007,
+            "stddev": 0.5741458912724882,
+            "median": 2.63346517986,
+            "user": 2.4136205399999997,
+            "system": 0.13839565999999998,
+            "min": 2.28476245086,
+            "max": 3.9550694928600003,
+            "times": [
+              2.4736013258600003,
+              2.28476245086,
+              2.52393478386,
+              2.31497045086,
+              2.92109970086,
+              2.3288665758600002,
+              2.74299557586,
+              3.60593582586,
+              3.9550694928600003,
+              3.05274803386
+            ],
+            "memory_usage_byte": [
+              105824256,
+              105922560,
+              105922560,
+              105922560,
+              105922560,
+              105922560,
+              105922560,
+              105922560,
+              106037248,
+              106201088
+            ],
+            "exit_codes": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "command": "uv run --extra dev python scripts/benchmark_gateway.py --requests 1000 --jsonl /private/tmp/apim-controlled-after.jsonl",
+            "mean": 2.4766825591600004,
+            "stddev": 0.5553085816397108,
+            "median": 2.38438057586,
+            "user": 1.9969353399999998,
+            "system": 0.13693326,
+            "min": 1.9920235338600003,
+            "max": 3.89180849186,
+            "times": [
+              2.16293136786,
+              3.89180849186,
+              2.3841222008600003,
+              1.9920235338600003,
+              2.45956120086,
+              2.51172653386,
+              2.18414257586,
+              2.38463895086,
+              1.9961577848600003,
+              2.79971295086
+            ],
+            "memory_usage_byte": [
+              106561536,
+              106561536,
+              106561536,
+              106561536,
+              106561536,
+              106561536,
+              106561536,
+              106561536,
+              106561536,
+              106561536
+            ],
+            "exit_codes": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    "versioned-routes": {
+      "measured_runs": {
+        "before": [
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 3.794825832999777,
+            "requests_per_second": 26.35167051156887,
+            "p50_ms": 28.5275409987662,
+            "p95_ms": 61.556708002171945,
+            "p99_ms": 130.62758299929556,
+            "peak_rss_mib": 101.0
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 2.8522937089946936,
+            "requests_per_second": 35.059503053507605,
+            "p50_ms": 26.961957999446895,
+            "p95_ms": 38.803124996775296,
+            "p99_ms": 53.54091600020183,
+            "peak_rss_mib": 101.015625
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 2.9037275000009686,
+            "requests_per_second": 34.43849328146896,
+            "p50_ms": 27.05904199683573,
+            "p95_ms": 37.12587500194786,
+            "p99_ms": 46.68079199473141,
+            "peak_rss_mib": 100.875
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 2.8697925829983433,
+            "requests_per_second": 34.845723900896196,
+            "p50_ms": 27.792417000455316,
+            "p95_ms": 33.68854099971941,
+            "p99_ms": 40.78333399957046,
+            "peak_rss_mib": 101.109375
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 3.669462666999607,
+            "requests_per_second": 27.251946422380843,
+            "p50_ms": 29.85029199771816,
+            "p95_ms": 50.340249996224884,
+            "p99_ms": 198.6992910024128,
+            "peak_rss_mib": 100.953125
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 2.772970957994403,
+            "requests_per_second": 36.06240437235832,
+            "p50_ms": 26.92837499489542,
+            "p95_ms": 32.53624999342719,
+            "p99_ms": 33.884915996168274,
+            "peak_rss_mib": 101.03125
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 2.793701707996661,
+            "requests_per_second": 35.794802184414,
+            "p50_ms": 27.32549999927869,
+            "p95_ms": 30.780291999690235,
+            "p99_ms": 34.351292000792455,
+            "peak_rss_mib": 100.875
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 2.6939385419973405,
+            "requests_per_second": 37.12037169409885,
+            "p50_ms": 26.315541996154934,
+            "p95_ms": 30.807875002210494,
+            "p99_ms": 32.59029200125951,
+            "peak_rss_mib": 100.96875
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 2.8830561249997118,
+            "requests_per_second": 34.68541563685653,
+            "p50_ms": 27.699040998413693,
+            "p95_ms": 34.11012500146171,
+            "p99_ms": 39.522458995634224,
+            "peak_rss_mib": 100.765625
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 2.654767957996228,
+            "requests_per_second": 37.66807554641357,
+            "p50_ms": 26.469082993571647,
+            "p95_ms": 27.619166998192668,
+            "p99_ms": 28.6335409982712,
+            "peak_rss_mib": 101.125
+          }
+        ],
+        "after": [
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.19719812499533873,
+            "requests_per_second": 507.104213097177,
+            "p50_ms": 1.8855839953175746,
+            "p95_ms": 2.440417003526818,
+            "p99_ms": 3.018666000571102,
+            "peak_rss_mib": 100.984375
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.18662866600061534,
+            "requests_per_second": 535.8233659542435,
+            "p50_ms": 1.79283299803501,
+            "p95_ms": 2.1900830033700913,
+            "p99_ms": 2.3383750012726523,
+            "peak_rss_mib": 100.84375
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.1822713340006885,
+            "requests_per_second": 548.6326226131765,
+            "p50_ms": 1.7629170033615083,
+            "p95_ms": 2.1128339940332808,
+            "p99_ms": 2.2301669960143045,
+            "peak_rss_mib": 101.0
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.18234112500067567,
+            "requests_per_second": 548.422633674271,
+            "p50_ms": 1.768499998433981,
+            "p95_ms": 2.0935829961672425,
+            "p99_ms": 2.3018749998300336,
+            "peak_rss_mib": 100.875
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.17789041699870722,
+            "requests_per_second": 562.1438281339614,
+            "p50_ms": 1.7545840019010939,
+            "p95_ms": 1.9493750005494803,
+            "p99_ms": 2.0504159983829595,
+            "peak_rss_mib": 101.015625
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.17913516699627507,
+            "requests_per_second": 558.2376798302222,
+            "p50_ms": 1.7579170016688295,
+            "p95_ms": 1.9796250053332187,
+            "p99_ms": 2.066332999675069,
+            "peak_rss_mib": 101.015625
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.17871904200001154,
+            "requests_per_second": 559.537466634325,
+            "p50_ms": 1.7597920013940893,
+            "p95_ms": 1.9761250005103648,
+            "p99_ms": 2.0058750014868565,
+            "peak_rss_mib": 100.984375
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.19275583300623111,
+            "requests_per_second": 518.7910448176547,
+            "p50_ms": 1.8619579932419583,
+            "p95_ms": 2.250958001241088,
+            "p99_ms": 2.317375001439359,
+            "peak_rss_mib": 100.890625
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.17869612500362564,
+            "requests_per_second": 559.6092248669133,
+            "p50_ms": 1.7587499969522469,
+            "p95_ms": 1.989875003346242,
+            "p99_ms": 2.1682499937014654,
+            "peak_rss_mib": 101.09375
+          },
+          {
+            "scenario": "versioned-routes",
+            "routes": 100,
+            "requests": 100,
+            "elapsed_seconds": 0.1813853330022539,
+            "requests_per_second": 551.3124922771865,
+            "p50_ms": 1.7655420015216805,
+            "p95_ms": 2.0368330006022006,
+            "p99_ms": 2.2328749982989393,
+            "peak_rss_mib": 100.875
+          }
+        ]
+      },
+      "median_of_run_metrics": {
+        "before": {
+          "p50_ms": 27.19227099805721,
+          "p95_ms": 33.89933300059056,
+          "p99_ms": 40.15289649760234,
+          "requests_per_second": 34.9526134772019,
+          "peak_rss_mib": 100.984375
+        },
+        "after": {
+          "p50_ms": 1.7642295024415944,
+          "p95_ms": 2.0652079983847216,
+          "p99_ms": 2.231520997156622,
+          "requests_per_second": 549.9725574451816,
+          "peak_rss_mib": 100.984375
+        }
+      },
+      "hyperfine": {
+        "before": {
+          "results": [
+            {
+              "command": "uv run --extra dev python scripts/benchmark_gateway.py --scenario versioned-routes --requests 100 --jsonl /private/tmp/apim-routing-before.jsonl",
+              "mean": 4.2746867467400005,
+              "stddev": 0.4421202099859831,
+              "median": 4.11617244294,
+              "user": 3.979718979999999,
+              "system": 0.10614735999999998,
+              "min": 3.89284965094,
+              "max": 5.16790240094,
+              "times": [
+                5.16790240094,
+                4.083165650940001,
+                4.101069567940001,
+                4.13127531794,
+                5.0011545259400005,
+                4.03766290094,
+                4.13220406694,
+                3.92259823394,
+                4.276985150940001,
+                3.89284965094
+              ],
+              "memory_usage_byte": [
+                105938944,
+                105938944,
+                105938944,
+                106037248,
+                106037248,
+                106037248,
+                106037248,
+                106037248,
+                106037248,
+                106053632
+              ],
+              "exit_codes": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        "after": {
+          "results": [
+            {
+              "command": "uv run --extra dev python scripts/benchmark_gateway.py --scenario versioned-routes --requests 100 --jsonl /private/tmp/apim-routing-after.jsonl",
+              "mean": 0.8682877574599999,
+              "stddev": 0.029441533690228026,
+              "median": 0.87392449076,
+              "user": 0.7858893,
+              "system": 0.060989239999999986,
+              "min": 0.83306486526,
+              "max": 0.91882007426,
+              "times": [
+                0.91882007426,
+                0.87103090726,
+                0.89803407426,
+                0.87681807426,
+                0.8338484072600001,
+                0.87694203226,
+                0.83306486526,
+                0.8879541992600001,
+                0.8513570742600001,
+                0.83500786626
+              ],
+              "memory_usage_byte": [
+                106004480,
+                106004480,
+                106004480,
+                106004480,
+                106004480,
+                106004480,
+                106004480,
+                106004480,
+                106020864,
+                106020864
+              ],
+              "exit_codes": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
