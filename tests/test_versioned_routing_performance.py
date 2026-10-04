@@ -87,6 +87,22 @@ def test_version_selection_cache_does_not_cross_forwarded_host_groups():
     assert result is not None and result.route.name == "direct-v2"
 
 
+def test_selected_operation_match_is_reused_with_version_selection(monkeypatch):
+    routes = [_route(f"{v}-{index}", v) for v in ("v1", "v2") for index in range(20)]
+    cfg = _config(ApiVersioningScheme.Header, routes)
+    calls = []
+    original = RouteConfig.match
+
+    def tracked(route, **kwargs):
+        calls.append(route.name)
+        return original(route, **kwargs)
+
+    monkeypatch.setattr(RouteConfig, "match", tracked)
+    result = proxy.resolve_route(cfg, _request())
+    assert result is not None and result.route.name == "v2-0"
+    assert len(calls) == 21  # Twenty v2 candidates, then the selected route once.
+
+
 def test_segment_version_selection_cache_keeps_distinct_api_prefixes():
     cfg = _config(
         ApiVersioningScheme.Segment,

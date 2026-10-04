@@ -285,6 +285,21 @@ def _resolve_versioned_route(
     )
 
 
+def _resolve_versioned_candidate(
+    config: GatewayConfig,
+    request: Request,
+    *,
+    route: RouteConfig,
+    path: str,
+    request_hosts: list[str],
+) -> tuple[RouteMatch, ResolvedRoute] | None:
+    resolved = _resolve_versioned_route(config, request, route=route, path=path, request_hosts=request_hosts)
+    if resolved is None:
+        return None
+    match = resolved.route.match(method=request.method, path=resolved.upstream_path, query=request.query_params)
+    return (match, resolved) if match is not None else None
+
+
 def _resolve_route_candidate(
     config: GatewayConfig,
     request: Request,
@@ -292,7 +307,7 @@ def _resolve_route_candidate(
     route: RouteConfig,
     path: str,
     request_hosts: list[str],
-    version_cache: dict[tuple[str, str], ResolvedRoute | None],
+    version_cache: dict[tuple[str, str], tuple[RouteMatch, ResolvedRoute] | None],
 ) -> tuple[RouteMatch, ResolvedRoute] | None:
     if not _route_matches_host(route, request_hosts) or not _route_protocol_allowed(route, request):
         return None
@@ -316,22 +331,14 @@ def _resolve_route_candidate(
     # segment versioning uses it to construct the upstream path.
     version_key = (route.api_version_set, route.api_path_prefix or route.path_prefix)
     if version_key not in version_cache:
-        version_cache[version_key] = _resolve_versioned_route(
+        version_cache[version_key] = _resolve_versioned_candidate(
             config,
             request,
             route=route,
             path=path,
             request_hosts=request_hosts,
         )
-    resolved = version_cache[version_key]
-    if resolved is None:
-        return None
-    match = resolved.route.match(
-        method=request.method,
-        path=resolved.upstream_path,
-        query=request.query_params,
-    )
-    return (match, resolved) if match is not None else None
+    return version_cache[version_key]
 
 
 def _api_matches_revision_version(
@@ -402,7 +409,7 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
         # Both successful and missing selections are request-local. Host
         # fallback must rescan with its own host group, never a cached result
         # from a different forwarded or direct host.
-        version_cache: dict[tuple[str, str], ResolvedRoute | None] = {}
+        version_cache: dict[tuple[str, str], tuple[RouteMatch, ResolvedRoute] | None] = {}
         candidates: list[tuple[RouteMatch, int, ResolvedRoute]] = []
         for index, route in enumerate(config.routes):
             candidate = _resolve_route_candidate(
