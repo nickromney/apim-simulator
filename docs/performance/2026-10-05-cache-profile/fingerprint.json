@@ -1,0 +1,19 @@
+{
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "hardware": "Apple M4, Mac16,10, 10 logical CPUs, 16 GiB RAM",
+  "source_sha": "3adc88e47c3d5f788179defef5564ac25b6d0769",
+  "python": "Python 3.14.8",
+  "command_template": "uv run --frozen --offline --extra dev python scripts/benchmark_cache_modes.py --cache-mode MODE --scenario SCENARIO --requests 1000 --routes 100 [--varying-paths]",
+  "process_runs_per_condition": 13,
+  "discarded_process_warmups": 3,
+  "measured_process_runs": 10,
+  "internal_request_warmups_per_process": 20,
+  "source_sha_note": "Base commit; measurement-only wrapper and new proof tests are added in this PR.",
+  "source_sha256": {
+    "scripts/benchmark_gateway.py": "e3936e9dc78f91fd3b4b74899d6587b93d4c98b3b1da5c48675310f77618c507",
+    "scripts/benchmark_cache_modes.py": "3e88365c505ffb42bf0a9d0080919c7556abc24184e787dbebd6681111b5cff7",
+    "app/config.py": "83de50af315d17993099f91d9e04c0dd1cc55750411362fa0ff138ba80c09c86",
+    "app/apim_expr.py": "e4a9acf3566d9c88e1fbb7a97b6bd137d2fb21b6f0ca5b3dab2ef0275d9feb75"
+  }
+}
