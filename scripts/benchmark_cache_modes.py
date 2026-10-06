@@ -8,7 +8,9 @@ unchanged. No Azure or remote backend requests are made.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import tracemalloc
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -38,10 +40,53 @@ def cache_mode(mode):
             helper.cache_clear()
 
 
+@contextmanager
+def allocation_profile(report):
+    if report is None:
+        yield
+        return
+    tracemalloc.start()
+    try:
+        yield
+        current, peak = tracemalloc.get_traced_memory()
+        rows = []
+        for entry in tracemalloc.take_snapshot().statistics("lineno"):
+            frame = entry.traceback[0]
+            filename = Path(frame.filename)
+            if filename.is_relative_to(ROOT / "app"):
+                rows.append(
+                    {
+                        "file": filename.relative_to(ROOT).as_posix(),
+                        "line": frame.lineno,
+                        "retained_bytes": entry.size,
+                        "retained_blocks": entry.count,
+                    }
+                )
+        report.write_text(
+            json.dumps(
+                {
+                    "traced_current_bytes": current,
+                    "traced_peak_bytes": peak,
+                    "app_retained_at_workload_end": rows,
+                    "scope": "Python allocations after imports through app construction/request loop/context cleanup; peak is not retained cache size",
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+    finally:
+        tracemalloc.stop()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, add_help=False)
     parser.add_argument("--cache-mode", choices=["cached", "uncached"], default="cached")
     parser.add_argument("--varying-paths", action="store_true")
+    parser.add_argument(
+        "--allocation-report",
+        type=Path,
+        help="Separate tracemalloc run; excludes imports, includes app construction and gateway requests",
+    )
     options, remaining = parser.parse_known_args()
     import httpx
 
@@ -61,7 +106,8 @@ def main():
         return await original_request(client, method, url, *args, **kwargs)
 
     async def measure(*args, **kwargs):
-        result = await original_measure(*args, **kwargs)
+        with allocation_profile(options.allocation_report):
+            result = await original_measure(*args, **kwargs)
         if options.varying_paths:
             assert counter == result["requests"] + 20, "varying URL workload did not run for every request"
         return {

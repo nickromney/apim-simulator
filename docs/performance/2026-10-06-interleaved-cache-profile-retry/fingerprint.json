@@ -1,0 +1,26 @@
+{
+  "utc": "2026-10-06T11:36:59.357326+00:00",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "source_sha": "f9185dc70fe4e53162ebbff0d23474db5adcac4a",
+  "logical_cpus": 10,
+  "hardware": [
+    "Mac16,10",
+    "10",
+    "10",
+    "17179869184"
+  ],
+  "filesystem": "/",
+  "power": "Now drawing from 'AC Power'",
+  "isolation": "serial local processes; no affinity, power or OS tuning; numeric boundary host CPU samples",
+  "source_sha256": {
+    "scripts/collect_cache_profiles.py": "4b8988f56a5047e4e202434ed2cbdbf37bc3b7fed149e61ade5fa451ef55c2fe",
+    "scripts/profile_cache_modes.py": "dbe2bac2ce2feb93d68b06c9643f42554af96a3028e2401a52c7200f21eb7902",
+    "scripts/benchmark_cache_modes.py": "5ead529ebeee15531622979832e3f3de9ff6a7bd7212c9ca923ea934de7ff6a6",
+    "scripts/benchmark_gateway.py": "e3936e9dc78f91fd3b4b74899d6587b93d4c98b3b1da5c48675310f77618c507",
+    "app/config.py": "83de50af315d17993099f91d9e04c0dd1cc55750411362fa0ff138ba80c09c86",
+    "app/apim_expr.py": "e4a9acf3566d9c88e1fbb7a97b6bd137d2fb21b6f0ca5b3dab2ef0275d9feb75",
+    "app/proxy.py": "ab9ae516c28d32d5425dafb1e3a5807919048eacc8a9f09b1c284780d242dc9a",
+    "uv.lock": "4d31c3e4814139e937d19d5abd35f91c5e49d810b66984a34eb5c37479a8d79f"
+  }
+}

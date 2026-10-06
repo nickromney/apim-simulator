@@ -1,0 +1,2110 @@
+{
+  "scope": "cProfile measured request loop after20 internal warmups; cumulative parents overlap; coroutine resumptions affect counts",
+  "host_before": {
+    "utc": "2026-10-06T11:40:32.870242+00:00",
+    "load": [
+      9.02587890625,
+      19.62646484375,
+      32.08203125
+    ],
+    "cpu_user_percent": 45.8,
+    "cpu_system_percent": 29.1,
+    "cpu_idle_percent": 25.8
+  },
+  "host_after": {
+    "utc": "2026-10-06T11:40:44.711428+00:00",
+    "load": [
+      57.01318359375,
+      29.892578125,
+      35.59912109375
+    ],
+    "cpu_user_percent": 35.74,
+    "cpu_system_percent": 28.14,
+    "cpu_idle_percent": 36.11
+  },
+  "all_source_functions": [
+    {
+      "file": "app/main.py",
+      "line": 448,
+      "function": "gateway_proxy",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.004628874000000001,
+      "cumulative_seconds": 1.487340893
+    },
+    {
+      "file": "app/config.py",
+      "line": 618,
+      "function": "_validate_backend_shape",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00035207200000000004,
+      "cumulative_seconds": 0.000452239
+    },
+    {
+      "file": "app/main.py",
+      "line": 602,
+      "function": "__call__",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.002447868,
+      "cumulative_seconds": 2.2796046850000002
+    },
+    {
+      "file": "app/main.py",
+      "line": 146,
+      "function": "_request_client_ip",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00027028800000000004,
+      "cumulative_seconds": 0.0009668890000000001
+    },
+    {
+      "file": "app/config.py",
+      "line": 639,
+      "function": "_normalize_path",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00039096400000000005,
+      "cumulative_seconds": 0.0005688500000000001
+    },
+    {
+      "file": "app/main.py",
+      "line": 510,
+      "function": "provider",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00038563100000000005,
+      "cumulative_seconds": 0.000510715
+    },
+    {
+      "file": "app/config.py",
+      "line": 867,
+      "function": "build_upstream_url",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00048496000000000005,
+      "cumulative_seconds": 0.003929824
+    },
+    {
+      "file": "app/main.py",
+      "line": 155,
+      "function": "_request_observation_attrs",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001682789,
+      "cumulative_seconds": 0.0060908460000000005
+    },
+    {
+      "file": "app/cors_preflight.py",
+      "line": 20,
+      "function": "_is_preflight",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000253354,
+      "cumulative_seconds": 0.0005815670000000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 69,
+      "function": "_stored_key",
+      "primitive_calls": 79000,
+      "calls": 79000,
+      "self_seconds": 0.033807841000000005,
+      "cumulative_seconds": 0.10548307800000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 97,
+      "function": "get_list",
+      "primitive_calls": 28000,
+      "calls": 28000,
+      "self_seconds": 0.006700107,
+      "cumulative_seconds": 0.046823489
+    },
+    {
+      "file": "app/policy.py",
+      "line": 64,
+      "function": "__init__",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.005983825000000001,
+      "cumulative_seconds": 0.051879902000000006
+    },
+    {
+      "file": "app/config.py",
+      "line": 778,
+      "function": "<genexpr>",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.0006119750000000001,
+      "cumulative_seconds": 0.0008350930000000001
+    },
+    {
+      "file": "app/config.py",
+      "line": 794,
+      "function": "_remove_path_prefix",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0010721740000000002,
+      "cumulative_seconds": 0.002044625
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 56,
+      "function": "_prune_buckets",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00042583000000000003,
+      "cumulative_seconds": 0.00042583000000000003
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 53,
+      "function": "_certificate_headers",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0016941,
+      "cumulative_seconds": 0.003306995
+    },
+    {
+      "file": "app/policy.py",
+      "line": 73,
+      "function": "__getitem__",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00035036,
+      "cumulative_seconds": 0.002005715
+    },
+    {
+      "file": "app/policy.py",
+      "line": 112,
+      "function": "as_header_pairs",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.005460366,
+      "cumulative_seconds": 0.009021872
+    },
+    {
+      "file": "app/security.py",
+      "line": 387,
+      "function": "authenticate_request",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0006838040000000001,
+      "cumulative_seconds": 0.017711598000000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 106,
+      "function": "as_dict_lists",
+      "primitive_calls": 23000,
+      "calls": 23000,
+      "self_seconds": 0.015874191,
+      "cumulative_seconds": 0.017664581000000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 109,
+      "function": "as_pairs",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00039680000000000005,
+      "cumulative_seconds": 0.00046557900000000004
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 36,
+      "function": "<genexpr>",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000126115,
+      "cumulative_seconds": 0.000126115
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6593,
+      "function": "finalize_deferred_actions",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0005686700000000001,
+      "cumulative_seconds": 0.001162908
+    },
+    {
+      "file": "app/policy.py",
+      "line": 375,
+      "function": "_sync_expression_header",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.001002639,
+      "cumulative_seconds": 0.0075041560000000005
+    },
+    {
+      "file": "app/policy.py",
+      "line": 1289,
+      "function": "apply_pending_response_headers",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000289977,
+      "cumulative_seconds": 0.000480145
+    },
+    {
+      "file": "app/main.py",
+      "line": 134,
+      "function": "_request_route_label",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.0006432370000000001,
+      "cumulative_seconds": 0.002203332
+    },
+    {
+      "file": "app/policy.py",
+      "line": 79,
+      "function": "__setitem__",
+      "primitive_calls": 50000,
+      "calls": 50000,
+      "self_seconds": 0.024270244,
+      "cumulative_seconds": 0.09131412300000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 4903,
+      "function": "evaluate_policy_value",
+      "primitive_calls": 13000,
+      "calls": 13000,
+      "self_seconds": 0.011614571,
+      "cumulative_seconds": 0.39375703
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6467,
+      "function": "_set_policy_execution_context",
+      "primitive_calls": 10000,
+      "calls": 10000,
+      "self_seconds": 0.006295955000000001,
+      "cumulative_seconds": 0.020540697
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6556,
+      "function": "apply_backend_async",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000637816,
+      "cumulative_seconds": 0.013921929000000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 155,
+      "function": "__post_init__",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.0008952140000000001,
+      "cumulative_seconds": 0.005198872
+    },
+    {
+      "file": "app/policy.py",
+      "line": 904,
+      "function": "apply_async",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001272415,
+      "cumulative_seconds": 0.09002090600000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 1297,
+      "function": "_policy_bool",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.00026539900000000004,
+      "cumulative_seconds": 0.00026539900000000004
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 27,
+      "function": "__getitem__",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.07009132500000001,
+      "cumulative_seconds": 0.072560764
+    },
+    {
+      "file": "app/policy.py",
+      "line": 71,
+      "function": "<genexpr>",
+      "primitive_calls": 114000,
+      "calls": 114000,
+      "self_seconds": 0.034392868,
+      "cumulative_seconds": 0.054219901
+    },
+    {
+      "file": "app/main.py",
+      "line": 318,
+      "function": "_install_request_state",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001524814,
+      "cumulative_seconds": 0.006051758
+    },
+    {
+      "file": "app/security.py",
+      "line": 234,
+      "function": "get_subscription_identity_optional",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00053149,
+      "cumulative_seconds": 0.005025777
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 33,
+      "function": "peer_in_cidrs",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00096299,
+      "cumulative_seconds": 0.008591597000000001
+    },
+    {
+      "file": "app/security.py",
+      "line": 172,
+      "function": "_subscription_header_names",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.000499182,
+      "cumulative_seconds": 0.000499182
+    },
+    {
+      "file": "app/security.py",
+      "line": 178,
+      "function": "_subscription_query_param_names",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.0006843120000000001,
+      "cumulative_seconds": 0.0006843120000000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 4849,
+      "function": "_stringify_policy_value",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.0015759970000000002,
+      "cumulative_seconds": 0.0020966680000000003
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6454,
+      "function": "_apply_steps_async",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000534645,
+      "cumulative_seconds": 0.054052111
+    },
+    {
+      "file": "app/policy.py",
+      "line": 364,
+      "function": "_protected_header_action",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.0009295670000000001,
+      "cumulative_seconds": 0.0026675790000000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 103,
+      "function": "set_list",
+      "primitive_calls": 23000,
+      "calls": 23000,
+      "self_seconds": 0.004125099,
+      "cumulative_seconds": 0.050124295000000006
+    },
+    {
+      "file": "app/policy.py",
+      "line": 161,
+      "function": "in_outbound",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.001539233,
+      "cumulative_seconds": 0.001539233
+    },
+    {
+      "file": "app/policy.py",
+      "line": 135,
+      "function": "copy",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.0022704210000000003,
+      "cumulative_seconds": 0.039165757
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 429,
+      "function": "<lambda>",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00019894400000000003,
+      "cumulative_seconds": 0.00019894400000000003
+    },
+    {
+      "file": "app/policy.py",
+      "line": 307,
+      "function": "__call__",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0010276250000000001,
+      "cumulative_seconds": 0.034607619
+    },
+    {
+      "file": "app/policy.py",
+      "line": 395,
+      "function": "<genexpr>",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.0007620190000000001,
+      "cumulative_seconds": 0.14853638200000002
+    },
+    {
+      "file": "app/main.py",
+      "line": 691,
+      "function": "<lambda>",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000378016,
+      "cumulative_seconds": 0.0005106430000000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 94,
+      "function": "__len__",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000217635,
+      "cumulative_seconds": 0.00031817300000000005
+    },
+    {
+      "file": "app/policy.py",
+      "line": 130,
+      "function": "<genexpr>",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.000213765,
+      "cumulative_seconds": 0.000213765
+    },
+    {
+      "file": "app/policy.py",
+      "line": 336,
+      "function": "apply_async",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.0027099050000000003,
+      "cumulative_seconds": 0.44220354700000003
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 52,
+      "function": "_normalize_host",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.0015615020000000002,
+      "cumulative_seconds": 0.0025828830000000002
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 155,
+      "function": "_route_protocol_allowed",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00016207800000000002,
+      "cumulative_seconds": 0.00016207800000000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 4879,
+      "function": "_record_step",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.00036683800000000003,
+      "cumulative_seconds": 0.00036683800000000003
+    },
+    {
+      "file": "app/policy.py",
+      "line": 4885,
+      "function": "_record_variable_write",
+      "primitive_calls": 6000,
+      "calls": 6000,
+      "self_seconds": 0.0005724220000000001,
+      "cumulative_seconds": 0.0005724220000000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6476,
+      "function": "_replace_base_steps",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.0036610740000000003,
+      "cumulative_seconds": 0.0059793400000000005
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6538,
+      "function": "outbound_reads_response_body",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000874671,
+      "cumulative_seconds": 0.0077471300000000005
+    },
+    {
+      "file": "app/policy.py",
+      "line": 357,
+      "function": "_render_exists_action",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.000995045,
+      "cumulative_seconds": 0.0039428150000000006
+    },
+    {
+      "file": "app/policy.py",
+      "line": 567,
+      "function": "apply",
+      "primitive_calls": 6000,
+      "calls": 6000,
+      "self_seconds": 0.0030211810000000004,
+      "cumulative_seconds": 0.24627568000000002
+    },
+    {
+      "file": "app/security.py",
+      "line": 161,
+      "function": "_subscription_bypassed",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.00069576,
+      "cumulative_seconds": 0.00069576
+    },
+    {
+      "file": "app/policy.py",
+      "line": 1270,
+      "function": "_response_header_target",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00011409300000000001,
+      "cumulative_seconds": 0.00011409300000000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 362,
+      "function": "<genexpr>",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.0006001170000000001,
+      "cumulative_seconds": 0.0007370850000000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 669,
+      "function": "_require_buffering_for_outbound",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00029942900000000004,
+      "cumulative_seconds": 0.008046559
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6502,
+      "function": "<genexpr>",
+      "primitive_calls": 10000,
+      "calls": 10000,
+      "self_seconds": 0.001790066,
+      "cumulative_seconds": 0.002302909
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6547,
+      "function": "apply_inbound_async",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00048672200000000003,
+      "cumulative_seconds": 0.36284877800000004
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6570,
+      "function": "apply_outbound_async",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00041703400000000005,
+      "cumulative_seconds": 0.14535867400000002
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 88,
+      "function": "_request_host_candidate_groups",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002262753,
+      "cumulative_seconds": 0.026423087
+    },
+    {
+      "file": "app/security.py",
+      "line": 152,
+      "function": "_default_issuer_audience",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000261048,
+      "cumulative_seconds": 0.000261048
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6516,
+      "function": "<genexpr>",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.0008735520000000001,
+      "cumulative_seconds": 0.0008735520000000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6544,
+      "function": "<genexpr>",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.000502323,
+      "cumulative_seconds": 0.003644991
+    },
+    {
+      "file": "app/policy.py",
+      "line": 4910,
+      "function": "render_policy_value",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.0024512310000000003,
+      "cumulative_seconds": 0.155622852
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 425,
+      "function": "_as_value_lists",
+      "primitive_calls": 27000,
+      "calls": 27000,
+      "self_seconds": 0.008872126000000001,
+      "cumulative_seconds": 0.026489093000000002
+    },
+    {
+      "file": "app/security.py",
+      "line": 284,
+      "function": "_subscription_scope_optional",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00038162000000000005,
+      "cumulative_seconds": 0.003401701
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 65,
+      "function": "_read",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00013329500000000002,
+      "cumulative_seconds": 0.00013329500000000002
+    },
+    {
+      "file": "app/named_values.py",
+      "line": 173,
+      "function": "__call__",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.002673852,
+      "cumulative_seconds": 2.2769106370000003
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 76,
+      "function": "_expand_host_candidates",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.0018624440000000002,
+      "cumulative_seconds": 0.005332944
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 1055,
+      "function": "is_apim_expression",
+      "primitive_calls": 13000,
+      "calls": 13000,
+      "self_seconds": 0.004304772,
+      "cumulative_seconds": 0.0069976840000000005
+    },
+    {
+      "file": "app/security.py",
+      "line": 299,
+      "function": "_anonymous_context",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0023716970000000003,
+      "cumulative_seconds": 0.017027794000000002
+    },
+    {
+      "file": "app/security.py",
+      "line": 184,
+      "function": "_get_subscription_key_optional",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.002984722,
+      "cumulative_seconds": 0.010222416
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 163,
+      "function": "_enforce_non_product_scope",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000437665,
+      "cumulative_seconds": 0.000437665
+    },
+    {
+      "file": "app/named_values.py",
+      "line": 189,
+      "function": "named_values_are_dynamic",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0007529800000000001,
+      "cumulative_seconds": 0.000982718
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 1040,
+      "function": "evaluate_apim_expression",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.007623479000000001,
+      "cumulative_seconds": 0.167454198
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 22,
+      "function": "__init__",
+      "primitive_calls": 45000,
+      "calls": 45000,
+      "self_seconds": 0.047337653,
+      "cumulative_seconds": 0.050328372
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 42,
+      "function": "GetValueOrDefault",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.001923971,
+      "cumulative_seconds": 0.009536191000000001
+    },
+    {
+      "file": "app/named_values.py",
+      "line": 190,
+      "function": "<genexpr>",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00011339000000000001,
+      "cumulative_seconds": 0.00011339000000000001
+    },
+    {
+      "file": "app/policy_errors.py",
+      "line": 114,
+      "function": "response_last_error",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00017405,
+      "cumulative_seconds": 0.00017405
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 459,
+      "function": "_add_simulator_response_headers",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000268282,
+      "cumulative_seconds": 0.000268282
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 60,
+      "function": "__init__",
+      "primitive_calls": 10000,
+      "calls": 10000,
+      "self_seconds": 0.0009493720000000001,
+      "cumulative_seconds": 0.0009493720000000001
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 36,
+      "function": "get",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.0010005250000000002,
+      "cumulative_seconds": 0.006565388
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 45,
+      "function": "<genexpr>",
+      "primitive_calls": 6000,
+      "calls": 6000,
+      "self_seconds": 0.000683649,
+      "cumulative_seconds": 0.000683649
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 260,
+      "function": "headers_get",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.000517672,
+      "cumulative_seconds": 0.007740268000000001
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 263,
+      "function": "query_get",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000231169,
+      "cumulative_seconds": 0.002544764
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 331,
+      "function": "variables_get",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000243202,
+      "cumulative_seconds": 0.001566179
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 823,
+      "function": "_serve_cached_exchange",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 9.7936e-05,
+      "cumulative_seconds": 9.7936e-05
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 85,
+      "function": "AsString",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00043433800000000004,
+      "cumulative_seconds": 0.0007908920000000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1211,
+      "function": "is_pool",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00013404900000000002,
+      "cumulative_seconds": 0.00013404900000000002
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 121,
+      "function": "_route_matches_host",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0003772,
+      "cumulative_seconds": 0.0003772
+    },
+    {
+      "file": "app/security.py",
+      "line": 358,
+      "function": "route_has_open_product",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0014244700000000002,
+      "cumulative_seconds": 0.001529954
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1076,
+      "function": "_subscription_context",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000154456,
+      "cumulative_seconds": 0.000154456
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1324,
+      "function": "_record_final_pool_result",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000385205,
+      "cumulative_seconds": 0.000519254
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1344,
+      "function": "_backend_tls_client",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002355891,
+      "cumulative_seconds": 0.009578581000000001
+    },
+    {
+      "file": "app/security.py",
+      "line": 168,
+      "function": "subscription_bypassed",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00021283800000000002,
+      "cumulative_seconds": 0.000356525
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 1048,
+      "function": "evaluate_apim_condition",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00035139400000000004,
+      "cumulative_seconds": 0.009140598
+    },
+    {
+      "file": "app/policy_errors.py",
+      "line": 46,
+      "function": "element_name",
+      "primitive_calls": 10000,
+      "calls": 10000,
+      "self_seconds": 0.004956653,
+      "cumulative_seconds": 0.012247965000000001
+    },
+    {
+      "file": "app/named_values.py",
+      "line": 120,
+      "function": "named_value_resolution_scope",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.0005677130000000001,
+      "cumulative_seconds": 0.001071134
+    },
+    {
+      "file": "app/security.py",
+      "line": 368,
+      "function": "<genexpr>",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00010548400000000001,
+      "cumulative_seconds": 0.00010548400000000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 108,
+      "function": "allowed_products_for_route",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.00030516900000000005,
+      "cumulative_seconds": 0.00030516900000000005
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 60,
+      "function": "_strip_port",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.000513614,
+      "cumulative_seconds": 0.000722527
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 193,
+      "function": "_reject_key_scoped_elsewhere",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00012352900000000002,
+      "cumulative_seconds": 0.00012352900000000002
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 923,
+      "function": "_doc_for",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.001238367,
+      "cumulative_seconds": 0.0021327010000000003
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 910,
+      "function": "_policy_document_stack",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002598705,
+      "cumulative_seconds": 0.017121811
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1571,
+      "function": "read",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0022098630000000003,
+      "cumulative_seconds": 0.00982268
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1698,
+      "function": "_record_final_reason",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001255939,
+      "cumulative_seconds": 0.0039929710000000005
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2194,
+      "function": "_record_selected_backend",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000102658,
+      "cumulative_seconds": 0.000102658
+    },
+    {
+      "file": "app/security.py",
+      "line": 251,
+      "function": "get_subscription_products_optional",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000400489,
+      "cumulative_seconds": 0.0036606100000000003
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1582,
+      "function": "as_trace_fields",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000228618,
+      "cumulative_seconds": 0.000228618
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1069,
+      "function": "_client_ip",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000491021,
+      "cumulative_seconds": 0.002017278
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1124,
+      "function": "_build_policy_upstream_url",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000613102,
+      "cumulative_seconds": 0.004640323
+    },
+    {
+      "file": "app/telemetry.py",
+      "line": 126,
+      "function": "set_correlation_id",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000300387,
+      "cumulative_seconds": 0.000615091
+    },
+    {
+      "file": "app/telemetry.py",
+      "line": 130,
+      "function": "reset_correlation_id",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000254294,
+      "cumulative_seconds": 0.000465202
+    },
+    {
+      "file": "app/telemetry.py",
+      "line": 134,
+      "function": "get_correlation_id",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000257589,
+      "cumulative_seconds": 0.000447795
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 140,
+      "function": "observed_send",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.0012146000000000001,
+      "cumulative_seconds": 0.005105839
+    },
+    {
+      "file": "app/security_governance.py",
+      "line": 150,
+      "function": "enforce_backend_transport",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.0008034660000000001,
+      "cumulative_seconds": 0.0008034660000000001
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 34,
+      "function": "record_event",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000163169,
+      "cumulative_seconds": 0.000163169
+    },
+    {
+      "file": "app/policy.py",
+      "line": 392,
+      "function": "apply",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.015907961,
+      "cumulative_seconds": 0.18834868600000002
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 89,
+      "function": "record",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.005952796000000001,
+      "cumulative_seconds": 0.024969256000000002
+    },
+    {
+      "file": "app/main.py",
+      "line": 466,
+      "function": "observe_requests",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.005979858,
+      "cumulative_seconds": 0.112118623
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1295,
+      "function": "_retry_response",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00039975700000000004,
+      "cumulative_seconds": 0.00039975700000000004
+    },
+    {
+      "file": "app/policy.py",
+      "line": 4616,
+      "function": "apply",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00261377,
+      "cumulative_seconds": 0.0048692760000000005
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6526,
+      "function": "_reads_response_body",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002853514,
+      "cumulative_seconds": 0.0031426680000000004
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 433,
+      "function": "build_expression_context",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.059115406,
+      "cumulative_seconds": 0.240856856
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1592,
+      "function": "_build_policy_request",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.020225622000000002,
+      "cumulative_seconds": 0.10482914600000001
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 364,
+      "function": "_select_api_revision",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0005251,
+      "cumulative_seconds": 0.0027275510000000004
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 397,
+      "function": "_normalize_request",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.035468779,
+      "cumulative_seconds": 0.09288574000000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 218,
+      "function": "enforce_product_grant",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000991095,
+      "cumulative_seconds": 0.0016841920000000002
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 356,
+      "function": "_response_with_headers",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0036263980000000003,
+      "cumulative_seconds": 0.011771115
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 523,
+      "function": "_read_upstream_response",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0046815780000000005,
+      "cumulative_seconds": 0.015845789000000002
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 579,
+      "function": "_handle_backend_error_status",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000164632,
+      "cumulative_seconds": 0.000164632
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1130,
+      "function": "_choose_backend",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001806089,
+      "cumulative_seconds": 0.002360919
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1360,
+      "function": "_send_upstream_with_retries",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.009744263000000001,
+      "cumulative_seconds": 0.360125285
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1923,
+      "function": "_guarded_outbound",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0016764890000000002,
+      "cumulative_seconds": 0.156801083
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 686,
+      "function": "_apply_outbound_policies",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002100236,
+      "cumulative_seconds": 0.151669625
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1827,
+      "function": "_last_error_for_response",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001302641,
+      "cumulative_seconds": 0.001990979
+    },
+    {
+      "file": "app/effective_policy.py",
+      "line": 150,
+      "function": "stacked_policy_scopes",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0010764210000000001,
+      "cumulative_seconds": 0.0023907530000000002
+    },
+    {
+      "file": "app/debug_credentials.py",
+      "line": 55,
+      "function": "authorize_debug",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000491074,
+      "cumulative_seconds": 0.002088627
+    },
+    {
+      "file": "app/security_ingress.py",
+      "line": 48,
+      "function": "__call__",
+      "primitive_calls": 5000,
+      "calls": 5000,
+      "self_seconds": 0.0038382390000000002,
+      "cumulative_seconds": 0.18309981
+    },
+    {
+      "file": "app/config.py",
+      "line": 836,
+      "function": "match",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0010907550000000001,
+      "cumulative_seconds": 0.0061496730000000005
+    },
+    {
+      "file": "app/certificate_security.py",
+      "line": 224,
+      "function": "client_for",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0007279910000000001,
+      "cumulative_seconds": 0.000938208
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2249,
+      "function": "execute_gateway_request",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.028670677000000002,
+      "cumulative_seconds": 1.4818019640000002
+    },
+    {
+      "file": "app/config.py",
+      "line": 881,
+      "function": "_build_upstream_url",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001123178,
+      "cumulative_seconds": 0.003444864
+    },
+    {
+      "file": "app/config.py",
+      "line": 773,
+      "function": "_match_path_prefix",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.003100083,
+      "cumulative_seconds": 0.0047288040000000005
+    },
+    {
+      "file": "app/main.py",
+      "line": 178,
+      "function": "_access_log_fields",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002964374,
+      "cumulative_seconds": 0.010078292
+    },
+    {
+      "file": "app/config.py",
+      "line": 603,
+      "function": "_map_arm_pool",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000689647,
+      "cumulative_seconds": 0.000973352
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 84,
+      "function": "private_access_allowed",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0009035860000000001,
+      "cumulative_seconds": 0.001016306
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 100,
+      "function": "__call__",
+      "primitive_calls": 5000,
+      "calls": 5000,
+      "self_seconds": 0.0027885400000000004,
+      "cumulative_seconds": 0.21911221800000003
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2203,
+      "function": "_initial_upstream_headers",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.015604857000000001,
+      "cumulative_seconds": 0.086148029
+    },
+    {
+      "file": "app/certificate_security.py",
+      "line": 347,
+      "function": "selected_backend_certificate",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000387946,
+      "cumulative_seconds": 0.0005547470000000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 1382,
+      "function": "_policy_float",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 9.668e-05,
+      "cumulative_seconds": 9.668e-05
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 61,
+      "function": "sanitize_forwarding",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.009334221,
+      "cumulative_seconds": 0.023793637000000003
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 65,
+      "function": "evaluate",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0009712330000000001,
+      "cumulative_seconds": 0.002011564
+    },
+    {
+      "file": "app/cors_preflight.py",
+      "line": 46,
+      "function": "answer_preflight",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00032848800000000004,
+      "cumulative_seconds": 0.0009100550000000001
+    },
+    {
+      "file": "app/main.py",
+      "line": 167,
+      "function": "_record_request_observation",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0017060500000000002,
+      "cumulative_seconds": 0.008990315
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6487,
+      "function": "_effective_section_steps",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.0063675680000000005,
+      "cumulative_seconds": 0.015776553000000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6509,
+      "function": "_apply_section_async",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.007802957,
+      "cumulative_seconds": 0.520473278
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2234,
+      "function": "_local_response",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000848938,
+      "cumulative_seconds": 0.0010180060000000001
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 931,
+      "function": "_evaluate_expression",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.051950932000000005,
+      "cumulative_seconds": 0.14630605900000002
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 487,
+      "function": "_strip_outer_expression",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.0075038100000000005,
+      "cumulative_seconds": 0.011853849000000001
+    },
+    {
+      "file": "app/security.py",
+      "line": 532,
+      "function": "validate_client_certificate",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0008152620000000001,
+      "cumulative_seconds": 0.0020775330000000003
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 444,
+      "function": "build_upstream_headers",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0045315040000000004,
+      "cumulative_seconds": 0.013798318
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 399,
+      "function": "resolve_route",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002307725,
+      "cumulative_seconds": 0.043012239
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 303,
+      "function": "_resolve_route_candidate",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0025023520000000002,
+      "cumulative_seconds": 0.010792937
+    },
+    {
+      "file": "app/security.py",
+      "line": 441,
+      "function": "extract_request_certificate",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0007889310000000001,
+      "cumulative_seconds": 0.0012622710000000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 261,
+      "function": "enforce_route_authz",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000190566,
+      "cumulative_seconds": 0.000190566
+    },
+    {
+      "file": "app/effective_policy.py",
+      "line": 126,
+      "function": "_route_policy_scopes",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000989475,
+      "cumulative_seconds": 0.00116784
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 865,
+      "function": "_admit_request",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0049444960000000005,
+      "cumulative_seconds": 0.074815429
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1500,
+      "function": "_uncached_response",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0007597470000000001,
+      "cumulative_seconds": 0.016523833
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2122,
+      "function": "_short_circuit_policy_stages",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001289339,
+      "cumulative_seconds": 0.378906128
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 732,
+      "function": "_run_outbound_stage",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000795653,
+      "cumulative_seconds": 0.152465278
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 760,
+      "function": "_enforce_authz_with_policy_claims",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0005540930000000001,
+      "cumulative_seconds": 0.0009149780000000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 941,
+      "function": "_read_body_within_limit",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.004330296,
+      "cumulative_seconds": 0.17118206200000002
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1091,
+      "function": "_gateway_cache_key",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.000139617,
+      "cumulative_seconds": 0.000139617
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1482,
+      "function": "read",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001985855,
+      "cumulative_seconds": 0.0051822710000000004
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1885,
+      "function": "_guarded_stage",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.0008460820000000001,
+      "cumulative_seconds": 0.377616789
+    },
+    {
+      "file": "app/telemetry.py",
+      "line": 328,
+      "function": "set_current_span_attributes",
+      "primitive_calls": 4000,
+      "calls": 4000,
+      "self_seconds": 0.002137879,
+      "cumulative_seconds": 0.008290675
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 156,
+      "function": "_record_request",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002336234,
+      "cumulative_seconds": 0.004347567
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 134,
+      "function": "__call__",
+      "primitive_calls": 5000,
+      "calls": 5000,
+      "self_seconds": 0.002741789,
+      "cumulative_seconds": 0.191003092
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 119,
+      "function": "security_actor",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0007163400000000001,
+      "cumulative_seconds": 0.001040256
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 54,
+      "function": "handle_async_request",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0011670860000000001,
+      "cumulative_seconds": 0.049039990000000006
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 18,
+      "function": "_destination",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.002390669,
+      "cumulative_seconds": 0.0054899860000000005
+    }
+  ],
+  "ranked_self": [
+    {
+      "file": "app/apim_expr.py",
+      "line": 27,
+      "function": "__getitem__",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.07009132500000001,
+      "cumulative_seconds": 0.072560764
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 433,
+      "function": "build_expression_context",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.059115406,
+      "cumulative_seconds": 0.240856856
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 931,
+      "function": "_evaluate_expression",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.051950932000000005,
+      "cumulative_seconds": 0.14630605900000002
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 22,
+      "function": "__init__",
+      "primitive_calls": 45000,
+      "calls": 45000,
+      "self_seconds": 0.047337653,
+      "cumulative_seconds": 0.050328372
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 397,
+      "function": "_normalize_request",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.035468779,
+      "cumulative_seconds": 0.09288574000000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 71,
+      "function": "<genexpr>",
+      "primitive_calls": 114000,
+      "calls": 114000,
+      "self_seconds": 0.034392868,
+      "cumulative_seconds": 0.054219901
+    },
+    {
+      "file": "app/policy.py",
+      "line": 69,
+      "function": "_stored_key",
+      "primitive_calls": 79000,
+      "calls": 79000,
+      "self_seconds": 0.033807841000000005,
+      "cumulative_seconds": 0.10548307800000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2249,
+      "function": "execute_gateway_request",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.028670677000000002,
+      "cumulative_seconds": 1.4818019640000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 79,
+      "function": "__setitem__",
+      "primitive_calls": 50000,
+      "calls": 50000,
+      "self_seconds": 0.024270244,
+      "cumulative_seconds": 0.09131412300000001
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1592,
+      "function": "_build_policy_request",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.020225622000000002,
+      "cumulative_seconds": 0.10482914600000001
+    },
+    {
+      "file": "app/policy.py",
+      "line": 392,
+      "function": "apply",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.015907961,
+      "cumulative_seconds": 0.18834868600000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 106,
+      "function": "as_dict_lists",
+      "primitive_calls": 23000,
+      "calls": 23000,
+      "self_seconds": 0.015874191,
+      "cumulative_seconds": 0.017664581000000002
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2203,
+      "function": "_initial_upstream_headers",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.015604857000000001,
+      "cumulative_seconds": 0.086148029
+    },
+    {
+      "file": "app/policy.py",
+      "line": 4903,
+      "function": "evaluate_policy_value",
+      "primitive_calls": 13000,
+      "calls": 13000,
+      "self_seconds": 0.011614571,
+      "cumulative_seconds": 0.39375703
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1360,
+      "function": "_send_upstream_with_retries",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.009744263000000001,
+      "cumulative_seconds": 0.360125285
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 61,
+      "function": "sanitize_forwarding",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.009334221,
+      "cumulative_seconds": 0.023793637000000003
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 425,
+      "function": "_as_value_lists",
+      "primitive_calls": 27000,
+      "calls": 27000,
+      "self_seconds": 0.008872126000000001,
+      "cumulative_seconds": 0.026489093000000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6509,
+      "function": "_apply_section_async",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.007802957,
+      "cumulative_seconds": 0.520473278
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 1040,
+      "function": "evaluate_apim_expression",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.007623479000000001,
+      "cumulative_seconds": 0.167454198
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 487,
+      "function": "_strip_outer_expression",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.0075038100000000005,
+      "cumulative_seconds": 0.011853849000000001
+    }
+  ],
+  "ranked_cumulative": [
+    {
+      "file": "app/main.py",
+      "line": 602,
+      "function": "__call__",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.002447868,
+      "cumulative_seconds": 2.2796046850000002
+    },
+    {
+      "file": "app/named_values.py",
+      "line": 173,
+      "function": "__call__",
+      "primitive_calls": 7000,
+      "calls": 7000,
+      "self_seconds": 0.002673852,
+      "cumulative_seconds": 2.2769106370000003
+    },
+    {
+      "file": "app/main.py",
+      "line": 448,
+      "function": "gateway_proxy",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.004628874000000001,
+      "cumulative_seconds": 1.487340893
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2249,
+      "function": "execute_gateway_request",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.028670677000000002,
+      "cumulative_seconds": 1.4818019640000002
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6509,
+      "function": "_apply_section_async",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.007802957,
+      "cumulative_seconds": 0.520473278
+    },
+    {
+      "file": "app/policy.py",
+      "line": 336,
+      "function": "apply_async",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.0027099050000000003,
+      "cumulative_seconds": 0.44220354700000003
+    },
+    {
+      "file": "app/policy.py",
+      "line": 4903,
+      "function": "evaluate_policy_value",
+      "primitive_calls": 13000,
+      "calls": 13000,
+      "self_seconds": 0.011614571,
+      "cumulative_seconds": 0.39375703
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2122,
+      "function": "_short_circuit_policy_stages",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.001289339,
+      "cumulative_seconds": 0.378906128
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1885,
+      "function": "_guarded_stage",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.0008460820000000001,
+      "cumulative_seconds": 0.377616789
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6547,
+      "function": "apply_inbound_async",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.00048672200000000003,
+      "cumulative_seconds": 0.36284877800000004
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1360,
+      "function": "_send_upstream_with_retries",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.009744263000000001,
+      "cumulative_seconds": 0.360125285
+    },
+    {
+      "file": "app/policy.py",
+      "line": 567,
+      "function": "apply",
+      "primitive_calls": 6000,
+      "calls": 6000,
+      "self_seconds": 0.0030211810000000004,
+      "cumulative_seconds": 0.24627568000000002
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 433,
+      "function": "build_expression_context",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.059115406,
+      "cumulative_seconds": 0.240856856
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 100,
+      "function": "__call__",
+      "primitive_calls": 5000,
+      "calls": 5000,
+      "self_seconds": 0.0027885400000000004,
+      "cumulative_seconds": 0.21911221800000003
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 134,
+      "function": "__call__",
+      "primitive_calls": 5000,
+      "calls": 5000,
+      "self_seconds": 0.002741789,
+      "cumulative_seconds": 0.191003092
+    },
+    {
+      "file": "app/policy.py",
+      "line": 392,
+      "function": "apply",
+      "primitive_calls": 2000,
+      "calls": 2000,
+      "self_seconds": 0.015907961,
+      "cumulative_seconds": 0.18834868600000002
+    },
+    {
+      "file": "app/security_ingress.py",
+      "line": 48,
+      "function": "__call__",
+      "primitive_calls": 5000,
+      "calls": 5000,
+      "self_seconds": 0.0038382390000000002,
+      "cumulative_seconds": 0.18309981
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 941,
+      "function": "_read_body_within_limit",
+      "primitive_calls": 3000,
+      "calls": 3000,
+      "self_seconds": 0.004330296,
+      "cumulative_seconds": 0.17118206200000002
+    },
+    {
+      "file": "app/apim_expr.py",
+      "line": 1040,
+      "function": "evaluate_apim_expression",
+      "primitive_calls": 9000,
+      "calls": 9000,
+      "self_seconds": 0.007623479000000001,
+      "cumulative_seconds": 0.167454198
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1923,
+      "function": "_guarded_outbound",
+      "primitive_calls": 1000,
+      "calls": 1000,
+      "self_seconds": 0.0016764890000000002,
+      "cumulative_seconds": 0.156801083
+    }
+  ]
+}
