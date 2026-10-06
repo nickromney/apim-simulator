@@ -1,5 +1,7 @@
 # Local emulator design notes
 
+The [agent operating model](AGENT-SYSTEM.md) connects these lifecycle and fidelity principles to authored state, effective state, execution, and evidence.
+
 **Reviewed 2026-10-03.** This is a design comparison for the local APIM
 Simulator, based on Microsoft's [Azure Service Bus emulator overview](https://learn.microsoft.com/en-us/azure/service-bus-messaging/overview-emulator)
 (last updated 2026-09-19) and [Azurite local development guide](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite)

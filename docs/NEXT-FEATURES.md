@@ -1,5 +1,7 @@
 # Next Features
 
+Apply the [agent operating model](AGENT-SYSTEM.md) to every roadmap item: identify its contract and owning abstraction, expose authored and effective state through shared management behavior, make action effects inspectable, and attach focused outcome evidence. The completed [agent system plan](AGENT-SYSTEM-PLAN.md) establishes this operating foundation.
+
 This file tracks open areas that would materially expand the simulator. It is not an acceptance log for work that has already shipped.
 
 Feature status and evidence boundaries live in

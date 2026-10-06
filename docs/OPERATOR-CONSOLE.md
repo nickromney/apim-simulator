@@ -1,5 +1,7 @@
 # Operator Console
 
+For scripted operation, the [agent operating model](AGENT-SYSTEM.md) documents CLI discovery, offline request previews, and effective-policy inspection over the same management API.
+
 The browser UI uses a compact Azure APIM-inspired layout with separate API and operation navigation and **Design**, **Settings**, and **Test** tabs. It provides a focused workflow for managing APIs in the local APIM simulator. It is intended for simulator operations and authoring; it does not reproduce the full Azure portal.
 
 ## Connect
