@@ -1,0 +1,14 @@
+{
+  "scenario": "versioned-routes",
+  "routes": 100,
+  "requests": 1000,
+  "elapsed_seconds": 6.541596041000048,
+  "requests_per_second": 152.8678924428242,
+  "p50_ms": 6.338916999993671,
+  "p95_ms": 7.411332999936349,
+  "p99_ms": 10.797791000186407,
+  "peak_rss_mib": 106.421875,
+  "cache_mode": "uncached",
+  "varying_paths": true,
+  "app_root": "/Users/nickromney/Developer/personal/multi-review/prs/2026-10-06/remaining/apim-simulator"
+}

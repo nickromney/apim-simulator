@@ -1,0 +1,2017 @@
+{
+  "traced_current_bytes": 8353987,
+  "traced_peak_bytes": 8584801,
+  "app_retained_at_workload_end": [
+    {
+      "file": "app/local_monitoring.py",
+      "line": 91,
+      "retained_bytes": 277440,
+      "retained_blocks": 2040
+    },
+    {
+      "file": "app/config.py",
+      "line": 649,
+      "retained_bytes": 218281,
+      "retained_blocks": 4044
+    },
+    {
+      "file": "app/config.py",
+      "line": 860,
+      "retained_bytes": 159096,
+      "retained_blocks": 2038
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 93,
+      "retained_bytes": 87560,
+      "retained_blocks": 1282
+    },
+    {
+      "file": "app/config.py",
+      "line": 775,
+      "retained_bytes": 80456,
+      "retained_blocks": 974
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 97,
+      "retained_bytes": 24456,
+      "retained_blocks": 1019
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 92,
+      "retained_bytes": 24432,
+      "retained_blocks": 1018
+    },
+    {
+      "file": "app/network_security.py",
+      "line": 80,
+      "retained_bytes": 16832,
+      "retained_blocks": 263
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 426,
+      "retained_bytes": 12816,
+      "retained_blocks": 178
+    },
+    {
+      "file": "app/config.py",
+      "line": 1105,
+      "retained_bytes": 9600,
+      "retained_blocks": 100
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 107,
+      "retained_bytes": 8448,
+      "retained_blocks": 16
+    },
+    {
+      "file": "app/config.py",
+      "line": 1106,
+      "retained_bytes": 6280,
+      "retained_blocks": 100
+    },
+    {
+      "file": "app/config.py",
+      "line": 1099,
+      "retained_bytes": 6080,
+      "retained_blocks": 100
+    },
+    {
+      "file": "app/config.py",
+      "line": 1074,
+      "retained_bytes": 5280,
+      "retained_blocks": 100
+    },
+    {
+      "file": "app/config.py",
+      "line": 656,
+      "retained_bytes": 4208,
+      "retained_blocks": 72
+    },
+    {
+      "file": "app/policy.py",
+      "line": 83,
+      "retained_bytes": 3696,
+      "retained_blocks": 63
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 49,
+      "retained_bytes": 3328,
+      "retained_blocks": 10
+    },
+    {
+      "file": "app/config.py",
+      "line": 608,
+      "retained_bytes": 3000,
+      "retained_blocks": 25
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 367,
+      "retained_bytes": 2961,
+      "retained_blocks": 63
+    },
+    {
+      "file": "app/config.py",
+      "line": 750,
+      "retained_bytes": 2800,
+      "retained_blocks": 50
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 89,
+      "retained_bytes": 2536,
+      "retained_blocks": 11
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 69,
+      "retained_bytes": 2272,
+      "retained_blocks": 8
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 113,
+      "retained_bytes": 2104,
+      "retained_blocks": 7
+    },
+    {
+      "file": "app/named_values.py",
+      "line": 122,
+      "retained_bytes": 960,
+      "retained_blocks": 15
+    },
+    {
+      "file": "app/config.py",
+      "line": 974,
+      "retained_bytes": 896,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 714,
+      "retained_bytes": 777,
+      "retained_blocks": 6
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 54,
+      "retained_bytes": 760,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 46,
+      "retained_bytes": 760,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 45,
+      "retained_bytes": 760,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 44,
+      "retained_bytes": 760,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 43,
+      "retained_bytes": 760,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/policy.py",
+      "line": 101,
+      "retained_bytes": 728,
+      "retained_blocks": 13
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 91,
+      "retained_bytes": 664,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/policy.py",
+      "line": 107,
+      "retained_bytes": 616,
+      "retained_blocks": 11
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1077,
+      "retained_bytes": 583,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 993,
+      "retained_bytes": 581,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/graphql_resolvers.py",
+      "line": 221,
+      "retained_bytes": 580,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/version_workflow.py",
+      "line": 111,
+      "retained_bytes": 576,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/policy_transforms.py",
+      "line": 152,
+      "retained_bytes": 574,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/graphql_resolvers.py",
+      "line": 264,
+      "retained_bytes": 574,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 178,
+      "retained_bytes": 573,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1047,
+      "retained_bytes": 573,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 193,
+      "retained_bytes": 571,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/graphql_resolvers.py",
+      "line": 253,
+      "retained_bytes": 571,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 214,
+      "retained_bytes": 568,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 203,
+      "retained_bytes": 568,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 198,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1256,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1249,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1224,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1212,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1180,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1172,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1054,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1040,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 982,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 970,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 958,
+      "retained_bytes": 566,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 166,
+      "retained_bytes": 565,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 162,
+      "retained_bytes": 565,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/openapi_export.py",
+      "line": 207,
+      "retained_bytes": 565,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/graphql_resolvers.py",
+      "line": 236,
+      "retained_bytes": 565,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 157,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1366,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1120,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1112,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 864,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 672,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 184,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 155,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_api_center.py",
+      "line": 94,
+      "retained_bytes": 562,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 737,
+      "retained_bytes": 561,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 168,
+      "retained_bytes": 561,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_api_center.py",
+      "line": 75,
+      "retained_bytes": 561,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/graphql_resolvers.py",
+      "line": 229,
+      "retained_bytes": 561,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 897,
+      "retained_bytes": 560,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 151,
+      "retained_bytes": 559,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 142,
+      "retained_bytes": 559,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1330,
+      "retained_bytes": 559,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 857,
+      "retained_bytes": 559,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 662,
+      "retained_bytes": 559,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/security_governance.py",
+      "line": 223,
+      "retained_bytes": 558,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 188,
+      "retained_bytes": 558,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 689,
+      "retained_bytes": 558,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 679,
+      "retained_bytes": 558,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 163,
+      "retained_bytes": 558,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/security_recovery.py",
+      "line": 28,
+      "retained_bytes": 557,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1033,
+      "retained_bytes": 557,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 890,
+      "retained_bytes": 557,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 543,
+      "retained_bytes": 557,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 533,
+      "retained_bytes": 557,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_api_center.py",
+      "line": 126,
+      "retained_bytes": 557,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1323,
+      "retained_bytes": 556,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1063,
+      "retained_bytes": 556,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 831,
+      "retained_bytes": 556,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 823,
+      "retained_bytes": 556,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 582,
+      "retained_bytes": 556,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 572,
+      "retained_bytes": 556,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 150,
+      "retained_bytes": 556,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/messaging_management.py",
+      "line": 25,
+      "retained_bytes": 555,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/messaging_management.py",
+      "line": 17,
+      "retained_bytes": 555,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_api_center.py",
+      "line": 84,
+      "retained_bytes": 555,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1352,
+      "retained_bytes": 554,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1344,
+      "retained_bytes": 554,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1291,
+      "retained_bytes": 553,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1283,
+      "retained_bytes": 553,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 145,
+      "retained_bytes": 553,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1070,
+      "retained_bytes": 552,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 925,
+      "retained_bytes": 552,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 917,
+      "retained_bytes": 552,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 619,
+      "retained_bytes": 552,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_api_center.py",
+      "line": 118,
+      "retained_bytes": 552,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1027,
+      "retained_bytes": 551,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_api_center.py",
+      "line": 108,
+      "retained_bytes": 551,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 140,
+      "retained_bytes": 550,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 612,
+      "retained_bytes": 549,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 177,
+      "retained_bytes": 549,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/debug_credentials.py",
+      "line": 94,
+      "retained_bytes": 549,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 479,
+      "retained_bytes": 548,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 471,
+      "retained_bytes": 548,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 455,
+      "retained_bytes": 548,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1691,
+      "retained_bytes": 544,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/debug_credentials.py",
+      "line": 104,
+      "retained_bytes": 543,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1408,
+      "retained_bytes": 520,
+      "retained_blocks": 13
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1231,
+      "retained_bytes": 509,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1194,
+      "retained_bytes": 509,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1127,
+      "retained_bytes": 509,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 939,
+      "retained_bytes": 509,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1156,
+      "retained_bytes": 508,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 428,
+      "retained_bytes": 508,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1240,
+      "retained_bytes": 507,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1203,
+      "retained_bytes": 507,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1136,
+      "retained_bytes": 507,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 948,
+      "retained_bytes": 507,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1165,
+      "retained_bytes": 506,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1099,
+      "retained_bytes": 505,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 838,
+      "retained_bytes": 505,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 640,
+      "retained_bytes": 505,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1143,
+      "retained_bytes": 504,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 207,
+      "retained_bytes": 503,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/security_governance.py",
+      "line": 231,
+      "retained_bytes": 503,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1105,
+      "retained_bytes": 503,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 871,
+      "retained_bytes": 503,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 848,
+      "retained_bytes": 503,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 650,
+      "retained_bytes": 503,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 429,
+      "retained_bytes": 503,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 423,
+      "retained_bytes": 503,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1304,
+      "retained_bytes": 502,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1149,
+      "retained_bytes": 502,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 408,
+      "retained_bytes": 502,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 881,
+      "retained_bytes": 501,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 761,
+      "retained_bytes": 501,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 754,
+      "retained_bytes": 501,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 496,
+      "retained_bytes": 501,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/security_recovery.py",
+      "line": 19,
+      "retained_bytes": 500,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/security_governance.py",
+      "line": 217,
+      "retained_bytes": 500,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1314,
+      "retained_bytes": 500,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 516,
+      "retained_bytes": 500,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 449,
+      "retained_bytes": 500,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 810,
+      "retained_bytes": 499,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 633,
+      "retained_bytes": 499,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 555,
+      "retained_bytes": 499,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 710,
+      "retained_bytes": 498,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 526,
+      "retained_bytes": 498,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 506,
+      "retained_bytes": 498,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 383,
+      "retained_bytes": 498,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1298,
+      "retained_bytes": 497,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 816,
+      "retained_bytes": 497,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 565,
+      "retained_bytes": 497,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 486,
+      "retained_bytes": 497,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 421,
+      "retained_bytes": 497,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/graphql_resolvers.py",
+      "line": 206,
+      "retained_bytes": 497,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1270,
+      "retained_bytes": 496,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 707,
+      "retained_bytes": 496,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 626,
+      "retained_bytes": 496,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1337,
+      "retained_bytes": 495,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 904,
+      "retained_bytes": 495,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 594,
+      "retained_bytes": 495,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1276,
+      "retained_bytes": 494,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 402,
+      "retained_bytes": 494,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 349,
+      "retained_bytes": 494,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/graphql_resolvers.py",
+      "line": 214,
+      "retained_bytes": 494,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 910,
+      "retained_bytes": 493,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 603,
+      "retained_bytes": 493,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 376,
+      "retained_bytes": 492,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 442,
+      "retained_bytes": 491,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 372,
+      "retained_bytes": 491,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 448,
+      "retained_bytes": 489,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1703,
+      "retained_bytes": 488,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1444,
+      "retained_bytes": 480,
+      "retained_blocks": 20
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 90,
+      "retained_bytes": 471,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/main.py",
+      "line": 467,
+      "retained_bytes": 445,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1019,
+      "retained_bytes": 443,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1023,
+      "retained_bytes": 435,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/main.py",
+      "line": 660,
+      "retained_bytes": 435,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/main.py",
+      "line": 657,
+      "retained_bytes": 426,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 54,
+      "retained_bytes": 426,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 74,
+      "retained_bytes": 424,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/main.py",
+      "line": 544,
+      "retained_bytes": 423,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 70,
+      "retained_bytes": 418,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 85,
+      "retained_bytes": 415,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 50,
+      "retained_bytes": 414,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 65,
+      "retained_bytes": 412,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2380,
+      "retained_bytes": 360,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2308,
+      "retained_bytes": 360,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 49,
+      "retained_bytes": 336,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_ingress.py",
+      "line": 44,
+      "retained_bytes": 328,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6420,
+      "retained_bytes": 328,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 5920,
+      "retained_bytes": 328,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 663,
+      "retained_bytes": 328,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 514,
+      "retained_bytes": 328,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 340,
+      "retained_bytes": 328,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_settings.py",
+      "line": 39,
+      "retained_bytes": 320,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 675,
+      "retained_bytes": 320,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 553,
+      "retained_bytes": 320,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_settings.py",
+      "line": 40,
+      "retained_bytes": 312,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_settings.py",
+      "line": 41,
+      "retained_bytes": 296,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_settings.py",
+      "line": 42,
+      "retained_bytes": 288,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1625,
+      "retained_bytes": 280,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/version_workflow.py",
+      "line": 108,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_recovery.py",
+      "line": 16,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 195,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_governance.py",
+      "line": 214,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 140,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy_transforms.py",
+      "line": 149,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/openapi_export.py",
+      "line": 204,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/messaging_management.py",
+      "line": 14,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1395,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1363,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1267,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1191,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1096,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 1017,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 936,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 807,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 705,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 439,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/management_api.py",
+      "line": 405,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 446,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 346,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 137,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/local_api_center.py",
+      "line": 72,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/graphql_resolvers.py",
+      "line": 204,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/debug_credentials.py",
+      "line": 91,
+      "retained_bytes": 264,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 65,
+      "retained_bytes": 256,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2522,
+      "retained_bytes": 256,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 898,
+      "retained_bytes": 240,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/main.py",
+      "line": 510,
+      "retained_bytes": 224,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6425,
+      "retained_bytes": 216,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 339,
+      "retained_bytes": 216,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 47,
+      "retained_bytes": 216,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/certificate_security.py",
+      "line": 222,
+      "retained_bytes": 216,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/certificate_security.py",
+      "line": 221,
+      "retained_bytes": 216,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 701,
+      "retained_bytes": 200,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/main.py",
+      "line": 666,
+      "retained_bytes": 200,
+      "retained_blocks": 5
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 111,
+      "retained_bytes": 192,
+      "retained_blocks": 6
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6414,
+      "retained_bytes": 168,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/main.py",
+      "line": 691,
+      "retained_bytes": 168,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 95,
+      "retained_bytes": 168,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 33,
+      "retained_bytes": 168,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/egress_security.py",
+      "line": 18,
+      "retained_bytes": 168,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 700,
+      "retained_bytes": 160,
+      "retained_blocks": 4
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 931,
+      "retained_bytes": 160,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2294,
+      "retained_bytes": 136,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 359,
+      "retained_bytes": 128,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/main.py",
+      "line": 699,
+      "retained_bytes": 120,
+      "retained_blocks": 3
+    },
+    {
+      "file": "app/main.py",
+      "line": 620,
+      "retained_bytes": 120,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/config.py",
+      "line": 968,
+      "retained_bytes": 98,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/main.py",
+      "line": 702,
+      "retained_bytes": 80,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/main.py",
+      "line": 698,
+      "retained_bytes": 80,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/main.py",
+      "line": 697,
+      "retained_bytes": 80,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/main.py",
+      "line": 696,
+      "retained_bytes": 80,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 109,
+      "retained_bytes": 76,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/main.py",
+      "line": 619,
+      "retained_bytes": 64,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/main.py",
+      "line": 618,
+      "retained_bytes": 64,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/security_ingress.py",
+      "line": 46,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 2316,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1662,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1655,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1636,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 926,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 366,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6505,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 132,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 66,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 554,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 523,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 341,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 338,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 337,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 336,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 335,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 334,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 333,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 332,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 331,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 330,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 226,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 179,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 53,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/certificate_security.py",
+      "line": 220,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/certificate_security.py",
+      "line": 217,
+      "retained_bytes": 64,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_monitoring.py",
+      "line": 21,
+      "retained_bytes": 56,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1083,
+      "retained_bytes": 56,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6122,
+      "retained_bytes": 56,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 136,
+      "retained_bytes": 56,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 127,
+      "retained_bytes": 56,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 71,
+      "retained_bytes": 56,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 966,
+      "retained_bytes": 56,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 774,
+      "retained_bytes": 56,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/proxy.py",
+      "line": 166,
+      "retained_bytes": 48,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 843,
+      "retained_bytes": 48,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 780,
+      "retained_bytes": 48,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/request_pipeline.py",
+      "line": 1397,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 709,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 708,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 703,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 695,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 693,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 684,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 545,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/main.py",
+      "line": 543,
+      "retained_bytes": 40,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 1158,
+      "retained_bytes": 32,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/security_settings.py",
+      "line": 52,
+      "retained_bytes": 32,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_settings.py",
+      "line": 38,
+      "retained_bytes": 32,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/policy.py",
+      "line": 6147,
+      "retained_bytes": 32,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 108,
+      "retained_bytes": 32,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 935,
+      "retained_bytes": 32,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/local_monitoring.py",
+      "line": 110,
+      "retained_bytes": 24,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/portal_customization.py",
+      "line": 90,
+      "retained_bytes": 16,
+      "retained_blocks": 2
+    },
+    {
+      "file": "app/control_plane.py",
+      "line": 41,
+      "retained_bytes": 16,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/security_settings.py",
+      "line": 63,
+      "retained_bytes": 8,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 903,
+      "retained_bytes": 8,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 181,
+      "retained_bytes": 8,
+      "retained_blocks": 1
+    },
+    {
+      "file": "app/config.py",
+      "line": 180,
+      "retained_bytes": 8,
+      "retained_blocks": 1
+    }
+  ],
+  "scope": "Python allocations after imports through app construction/request loop/context cleanup; peak is not retained cache size"
+}

@@ -1,0 +1,61 @@
+{
+  "samples": [
+    {
+      "utc": "2026-10-06T11:36:05.662656+00:00",
+      "load": [
+        4.6796875,
+        37.4169921875,
+        41.39697265625
+      ],
+      "cpu_user_percent": 12.39,
+      "cpu_system_percent": 6.29,
+      "cpu_idle_percent": 81.31
+    },
+    {
+      "utc": "2026-10-06T11:36:07.002574+00:00",
+      "load": [
+        4.46484375,
+        36.82861328125,
+        41.166015625
+      ],
+      "cpu_user_percent": 17.12,
+      "cpu_system_percent": 10.37,
+      "cpu_idle_percent": 72.5
+    },
+    {
+      "utc": "2026-10-06T11:36:08.362072+00:00",
+      "load": [
+        4.46484375,
+        36.82861328125,
+        41.166015625
+      ],
+      "cpu_user_percent": 8.15,
+      "cpu_system_percent": 7.51,
+      "cpu_idle_percent": 84.32
+    },
+    {
+      "utc": "2026-10-06T11:36:09.706579+00:00",
+      "load": [
+        4.46484375,
+        36.82861328125,
+        41.166015625
+      ],
+      "cpu_user_percent": 17.2,
+      "cpu_system_percent": 12.18,
+      "cpu_idle_percent": 70.79
+    },
+    {
+      "utc": "2026-10-06T11:36:11.076672+00:00",
+      "load": [
+        4.82763671875,
+        36.3662109375,
+        40.9775390625
+      ],
+      "cpu_user_percent": 10.65,
+      "cpu_system_percent": 7.87,
+      "cpu_idle_percent": 81.46
+    }
+  ],
+  "idle_gate_passed": false,
+  "allow_shared_host": false
+}
