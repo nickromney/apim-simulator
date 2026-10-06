@@ -1,5 +1,7 @@
 # Scope
 
+The [agent operating model](AGENT-SYSTEM.md) maps this scope to code ownership and the local control/verification loop.
+
 This is an unofficial, independent community project. It is not affiliated with,
 endorsed by, or supported by Microsoft. The default local examples need no Azure
 account or cloud resources. Azure comparison runs are separately opt-in.

@@ -1,5 +1,7 @@
 # Local APIM Simulator
 
+For agent-driven development and operation, start with the [system operating model](docs/AGENT-SYSTEM.md) and its [implementation plan](docs/AGENT-SYSTEM-PLAN.md).
+
 An independent, community-built simulator for testing Azure API Management (APIM) workflows quickly and cheaply on your own machine.
 
 **Unofficial project. Not affiliated with, endorsed by, or supported by Microsoft.** Azure and Azure API Management are Microsoft product names. This repository implements a documented subset of APIM behaviour; it is not Microsoft's APIM service or self-hosted gateway.
@@ -413,6 +415,20 @@ uv run apimsim --tenant-key local-dev-tenant-key set-policy api weather --file p
 uv run apimsim --tenant-key local-dev-tenant-key delete-api weather --yes
 ```
 
+Inspect commands and proposed requests without contacting the gateway:
+
+```bash
+uv run apimsim commands
+uv run apimsim --tenant-key local-dev-tenant-key inspect
+uv run apimsim --dry-run set-policy api weather --file policy.xml
+uv run apimsim --tenant-key local-dev-tenant-key policy --effective api weather
+```
+
+`inspect` collects bounded read-only metadata and preserves partial failures in
+a non-atomic JSON report. Preview includes the supplied body; keep sensitive payloads in local artifacts.
+It checks request construction, while the gateway validates authorization and
+policy semantics. Replay can cause backend and runtime side effects. See the
+[agent operating model](docs/AGENT-SYSTEM.md) for the complete verification loop.
 Run `uv run apimsim --help` for the full command list.
 
 ### Developer portal and Scalar API client

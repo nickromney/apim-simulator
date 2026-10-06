@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+- For system design or agent-operated workflows, read [the operating model](docs/AGENT-SYSTEM.md); it maps authorities, state, control, and verification.
+
 Use this file for durable, concise guidance for coding agents in this repository.
 
 - Treat tutorial outcomes as local simulation requirements; use local UI/API clients such as Bruno without emulating Azure CLI or writing editor extensions.

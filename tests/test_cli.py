@@ -463,3 +463,149 @@ def test_missing_command_is_an_argparse_error(capsys: pytest.CaptureFixture[str]
         main([])
 
     assert exc_info.value.code == 2
+
+
+def test_offline_discovery_and_preview_never_contact_server(capsys: pytest.CaptureFixture[str]) -> None:
+    def reject_request(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"offline command sent {request.method} {request.url}")
+
+    transport = httpx.MockTransport(reject_request)
+    assert main(["commands"], transport=transport) == 0
+    catalog = json.loads(capsys.readouterr().out)
+    assert catalog["schema_version"] == 1
+    assert catalog["commands"]["replay"]["effect"] == "execute"
+    assert catalog["commands"]["delete-api"]["requires_confirmation"] is True
+    assert main(["--tenant-key", "secret-test-key", "--dry-run", "delete-api", "weather"], transport=transport) == 0
+    output = capsys.readouterr().out
+    assert "secret-test-key" not in output
+    plan = json.loads(output)
+    assert plan["base_url"] == "http://localhost:8000"
+    assert plan["method"] == "DELETE"
+    assert plan["path"] == "/apim/management/apis/weather"
+    assert plan["requires_confirmation"] is True
+
+
+def test_preview_matches_execution_request(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    payload = {"name": "Weather", "path": "weather"}
+    source = tmp_path / "api.json"
+    source.write_text(json.dumps(payload))
+    args = ["put-api", "weather", "--file", str(source)]
+    assert main(["--dry-run", *args]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    assert main(args, transport=httpx.MockTransport(handler)) == 0
+    request = requests[0]
+    assert request.method == plan["method"]
+    assert request.url.path == plan["path"]
+    assert json.loads(request.content) == plan["body"] == payload
+
+
+def test_preview_reports_missing_payload_file(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    assert main(["--dry-run", "put-api", "weather", "--file", str(tmp_path / "missing.json")]) == 1
+    assert "could not read" in capsys.readouterr().err
+
+
+def test_effective_policy_cli_uses_product_context(capsys: pytest.CaptureFixture[str]) -> None:
+    app = _build_app(_management_config())
+    with TestClient(app):
+        assert (
+            main(
+                [
+                    "--base-url",
+                    BASE_URL,
+                    "--tenant-key",
+                    TENANT_KEY,
+                    "policy",
+                    "--effective",
+                    "--product-id",
+                    "starter",
+                    "api",
+                    "weather",
+                ],
+                transport=httpx.ASGITransport(app=app),
+            )
+            == 0
+        )
+    result = json.loads(capsys.readouterr().out)
+    assert result["effective"] is True
+    assert result["product_id"] == "starter"
+    assert "<policies>" in result["xml"]
+
+
+@pytest.mark.parametrize("preview", [[], ["--dry-run"]])
+def test_product_context_requires_effective_policy(preview: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    assert main([*preview, "policy", "--product-id", "starter", "api", "weather"]) == 1
+    assert "--product-id requires --effective" in capsys.readouterr().err
+
+
+def test_preview_omits_url_credentials(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--base-url", "http://operator:password@localhost:8000", "--dry-run", "status"]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["base_url"] == "http://localhost:8000"
+
+
+def test_inspect_collects_metadata_from_application(capsys: pytest.CaptureFixture[str]) -> None:
+    app = _build_app(_management_config())
+    with TestClient(app):
+        assert (
+            main(
+                ["--base-url", BASE_URL, "--tenant-key", TENANT_KEY, "inspect"], transport=httpx.ASGITransport(app=app)
+            )
+            == 0
+        )
+    report = json.loads(capsys.readouterr().out)
+    assert report["schema_version"] == 1
+    assert report["atomic"] is False
+    assert report["complete"] is True
+    assert report["observations"]["apis"]["body"][0]["id"] == "weather"
+    assert set(report["observations"]) == {"health", "status", "service", "apis", "products"}
+
+
+def test_inspect_preserves_denied_access_without_hiding_health(capsys: pytest.CaptureFixture[str]) -> None:
+    app = _build_app(_management_config())
+    with TestClient(app):
+        assert (
+            main(
+                ["--base-url", BASE_URL, "--tenant-key", "invalid-key", "inspect"],
+                transport=httpx.ASGITransport(app=app),
+            )
+            == 1
+        )
+    report = json.loads(capsys.readouterr().out)
+    assert report["complete"] is False
+    assert report["observations"]["health"]["status_code"] == 200
+    assert report["observations"]["apis"]["status_code"] == 403
+
+
+def test_inspect_preserves_transport_and_non_json_failures(capsys: pytest.CaptureFixture[str]) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/status"):
+            raise httpx.ConnectError("secret-test-key", request=request)
+        if request.url.path.endswith("/service"):
+            return httpx.Response(502, text="backend unavailable")
+        return httpx.Response(200, json={"ok": True})
+
+    assert main(["--tenant-key", "secret-test-key", "inspect"], transport=httpx.MockTransport(handler)) == 1
+    output = capsys.readouterr().out
+    assert "secret-test-key" not in output
+    report = json.loads(output)
+    assert report["complete"] is False
+    assert report["observations"]["status"]["error"] == "transport_error"
+    assert report["observations"]["service"]["body"] == "backend unavailable"
+    assert report["observations"]["products"]["status_code"] == 200
+
+
+def test_inspect_preview_is_offline(capsys: pytest.CaptureFixture[str]) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        pytest.fail("preview contacted server")
+
+    assert main(["--dry-run", "inspect"], transport=httpx.MockTransport(handler)) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["atomic"] is False
+    assert len(plan["requests"]) == 5
+    assert all(request["method"] == "GET" for request in plan["requests"])

@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -42,8 +43,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Request timeout in seconds (default {DEFAULT_TIMEOUT}).",
     )
 
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print the request plan without sending HTTP (before the command)."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    subparsers.add_parser("inspect", help="Collect bounded read-only metadata, preserving partial failures as JSON.")
+    subparsers.add_parser("commands", help="Describe CLI command effects as JSON without contacting the gateway.")
     subparsers.add_parser("status", help="Show management status (counts, gateway policy scope).")
     subparsers.add_parser("summary", help="Show management summary (routes, gateway policy scope).")
     subparsers.add_parser("service", help="Show service metadata.")
@@ -89,6 +95,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     policy_parser = subparsers.add_parser(
         "policy", help="Show the policy XML for a scope, e.g. `policy api weather` or `policy gateway gateway`."
+    )
+    policy_parser.add_argument(
+        "--effective", action="store_true", help="Inspect composed policy including inheritance and fragments."
+    )
+    policy_parser.add_argument(
+        "--product-id", help="Product context for effective policy inspection (requires --effective)."
     )
     policy_parser.add_argument("scope_type", help="Policy scope type: gateway, api, operation, product, or route.")
     policy_parser.add_argument("scope_name", help="Scope name, e.g. an api id or api:operation for operation scope.")
@@ -163,8 +175,9 @@ async def _request(
     *,
     tenant_key: str | None,
     json_body: dict[str, Any] | None = None,
+    params: dict[str, str] | None = None,
 ) -> httpx.Response:
-    return await client.request(method, path, headers=_headers(tenant_key), json=json_body)
+    return await client.request(method, path, headers=_headers(tenant_key), json=json_body, params=params)
 
 
 def _import_openapi_body(args: argparse.Namespace) -> dict[str, Any]:
@@ -226,6 +239,12 @@ class _Command:
     body: Callable[[argparse.Namespace], Any] | None = None
     confirm: str | None = None
 
+    @property
+    def effect(self) -> str:
+        if self.method == "GET":
+            return "read"
+        return "execute" if self.path == "/apim/management/replay" else "write"
+
 
 _COMMANDS: dict[str, _Command] = {
     "status": _Command("GET", "/apim/management/status"),
@@ -250,22 +269,85 @@ _COMMANDS: dict[str, _Command] = {
 }
 
 
+_INSPECTIONS = {
+    "health": "/apim/health",
+    "status": "/apim/management/status",
+    "service": "/apim/management/service",
+    "apis": "/apim/management/apis",
+    "products": "/apim/management/products",
+}
+
+
+def _inspection_plan() -> dict[str, Any]:
+    return {
+        "effect": "read",
+        "atomic": False,
+        "requires_confirmation": False,
+        "requests": [{"name": name, "method": "GET", "path": path} for name, path in _INSPECTIONS.items()],
+    }
+
+
+async def _inspect(args: argparse.Namespace, client: httpx.AsyncClient) -> int:
+    observations = {}
+    complete = True
+    for name, path in _INSPECTIONS.items():
+        try:
+            response = await _request(client, "GET", path, tenant_key=args.tenant_key if name != "health" else None)
+            try:
+                body = response.json()
+            except ValueError:
+                body = response.text
+            observations[name] = {"path": path, "status_code": response.status_code, "body": body}
+            complete = complete and response.is_success
+        except httpx.HTTPError:
+            observations[name] = {"path": path, "error": "transport_error"}
+            complete = False
+    print(
+        json.dumps({"schema_version": 1, "atomic": False, "complete": complete, "observations": observations}, indent=2)
+    )
+    return 0 if complete else 1
+
+
+def _request_plan(args: argparse.Namespace) -> dict[str, Any]:
+    base_url = str(httpx.URL(args.base_url).copy_with(username=None, password=None))
+    if args.command == "inspect":
+        return {"schema_version": 1, "command": "inspect", "base_url": base_url, **_inspection_plan()}
+    command = _COMMANDS[args.command]
+    fields = {key: quote(str(value), safe="") for key, value in vars(args).items()}
+    params = {}
+    if args.command == "policy":
+        if args.product_id and not args.effective:
+            raise CliUsageError("--product-id requires --effective")
+        if args.effective:
+            params["effective"] = "true"
+        if args.product_id:
+            params["product_id"] = args.product_id
+    return {
+        "schema_version": 1,
+        "command": args.command,
+        "base_url": base_url,
+        "method": command.method,
+        "path": command.path.format(**fields),
+        "params": params,
+        "body": command.body(args) if command.body is not None else None,
+        "effect": command.effect,
+        "requires_confirmation": command.confirm is not None,
+    }
+
+
 async def _dispatch(args: argparse.Namespace, client: httpx.AsyncClient) -> httpx.Response:
-    """Turn the parsed command line into one management-plane call."""
-    command = _COMMANDS.get(args.command)
-    if command is None:  # pragma: no cover - argparse enforces valid choices
-        raise SystemExit(f"error: unknown command {args.command!r}")
-
-    fields = vars(args)
+    """Execute the same request described by the offline plan."""
+    command = _COMMANDS[args.command]
     if command.confirm is not None and not args.yes:
-        raise CliUsageError(f"refusing to delete {command.confirm.format(**fields)} without --yes")
-
+        raise CliUsageError(f"refusing to delete {command.confirm.format(**vars(args))} without --yes")
+    plan = _request_plan(args)
     return await _request(
         client,
-        command.method,
-        command.path.format(**fields),
+        plan["method"],
+        plan["path"],
         tenant_key=args.tenant_key,
-        json_body=command.body(args) if command.body is not None else None,
+        json_body=plan["body"],
+        params=plan["params"],
     )
 
 
@@ -284,6 +366,8 @@ async def _run(
     transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None,
 ) -> int:
     async with httpx.AsyncClient(base_url=args.base_url, timeout=args.timeout, transport=transport) as client:
+        if args.command == "inspect":
+            return await _inspect(args, client)
         try:
             response = await _dispatch(args, client)
         except CliUsageError as exc:
@@ -308,6 +392,33 @@ def main(
 ) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.command == "commands":
+        print(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "commands": {
+                        name: {
+                            "method": command.method,
+                            "path_template": command.path,
+                            "effect": command.effect,
+                            "requires_confirmation": command.confirm is not None,
+                        }
+                        for name, command in _COMMANDS.items()
+                    }
+                    | {"inspect": _inspection_plan()},
+                },
+                indent=2,
+            )
+        )
+        return 0
+    if args.dry_run:
+        try:
+            print(json.dumps(_request_plan(args), indent=2))
+        except CliUsageError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        return 0
     return asyncio.run(_run(args, transport))
 
 
