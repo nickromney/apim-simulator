@@ -38,3 +38,10 @@ regexes = [
   '''(?i)\bAPIM_EDGE_(?:ROOT_)?HOST\b''',
   '''(?i)\bAPIM_EDGE_WILDCARD_HOST\b''',
 ]
+
+[[allowlists]]
+description = "Source SHA-256 for app/apim_expr.py in benchmark fingerprints"
+regexTarget = "line"
+regexes = [
+  '''^\s*"app/apim_expr\.py": "[a-f0-9]{64}",?\s*$''',
+]

@@ -70,3 +70,19 @@ checkout was read only; no cloud resources or pairing stacks were started.
 
 Follow-up checks: 25 CLI tests passed, including the four inspection regressions;
 Python formatting/lint, Markdown validation and diff checks passed.
+
+## PR validation — 2026-10-06
+
+The initial pre-push history scan flagged seven existing benchmark source
+checksums across reachable histories (14 findings). The new feature commit
+scanned clean. Verified the `app/apim_expr.py` checksum against historical
+source and added a narrowly anchored allowlist for that source SHA-256 field.
+The full history scan then passed with no findings.
+
+Ran all remaining `make local-ci` constituents with local socket access:
+repository lint, `test-python` (1,210 passed, one integration skip, 87%
+branch-enabled coverage), sample compatibility and Terraform compatibility
+report, all three frontend checks, and Compose configuration CI. All passed.
+This supersedes the earlier pass's skipped frontend/configuration checks;
+runtime Docker smoke and live Azure comparison remain unrun. The push hook's
+in-progress guard avoids duplicating these completed local CI checks.
