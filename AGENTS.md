@@ -15,6 +15,7 @@ Use this file for durable, concise guidance for coding agents in this repository
 - When patching `app/policy.py`, include its containing policy/helper context; repeated `PolicyRequest` constructors have different variable-sharing semantics.
 - Keep example XML in Microsoft's documented element order; the local parser can accept orders Azure rejects.
 - Verify Docker smoke through published localhost ports; in-container checks can miss inaccessible host ports.
+- To prove gateway, policy or management behaviour on a running stack, use `skills/verify-apim-simulator/SKILL.md` (slot-7 compose project, recorded requests, `--execute` interface; `make verify` runs the full proven cycle).
 - Public examples, reports, and docs must use placeholders or environment inputs for real deployment identifiers, including storage accounts, subscriptions, resource names, endpoints, and private IPs.
 - Add confirmed project-specific commands, conventions, and constraints here when they become durable.
 
