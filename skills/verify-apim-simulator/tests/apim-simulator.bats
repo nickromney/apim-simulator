@@ -128,3 +128,174 @@ write_state() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"unexpected argument: extra"* ]]
 }
+
+# A live docker and curl for the read-only and cleanup paths. docker records every call in
+# docker.log; the FAKE_* variables choose each answer. Nothing reaches a real daemon or gateway.
+write_live_stubs() {
+  local live="$BATS_TEST_TMPDIR/live"
+  mkdir -p "$live"
+  cat > "$live/docker" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$BATS_TEST_TMPDIR/docker.log"
+case "$*" in
+  *"ps --status running"*) [ -n "${FAKE_PS_EXIT-}" ] && exit "$FAKE_PS_EXIT"; printf '%s\n' "${FAKE_SERVICES-apim-simulator}"; exit 0 ;;
+  "ps --filter"*) printf '%s\n' "${FAKE_OWNER-}"; exit 0 ;;
+  *" logs "*) exit "${FAKE_LOGS_EXIT:-0}" ;;
+  *" down "*) exit "${FAKE_DOWN_EXIT:-0}" ;;
+esac
+exit 0
+STUB
+  cat > "$live/curl" <<'STUB'
+#!/bin/bash
+[ -n "${FAKE_CURL_EXIT-}" ] && exit "$FAKE_CURL_EXIT"
+prev=""
+for a in "$@"; do
+  case "$prev" in
+    -o) printf 'hello, verify\n' > "$a" ;;
+    -D) printf 'x-hello-policy: applied\n' > "$a" ;;
+  esac
+  prev="$a"
+done
+case " $* " in
+  *" -w "*) printf '%s' "${FAKE_HTTP-200}" ;;
+  *) printf '%s\n' "${FAKE_HEALTH-healthy}" ;;
+esac
+STUB
+  chmod +x "$live/docker" "$live/curl"
+  export PATH="$live:$PATH"
+}
+
+@test "doctor passes when our project's gateway owns the port and answers health" {
+  write_state hello-subscription
+  mkdir -p "$VERIFY_EVIDENCE_ROOT/app-run/evidence"
+  printf 'abc123\n' > "$VERIFY_EVIDENCE_ROOT/app-run/evidence/revision.txt"
+  write_live_stubs
+  run env FAKE_OWNER=apim-simulator-hello-s7-apim-simulator-1 FAKE_HEALTH=healthy "$BASH32" "$SCRIPT" --execute doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK services=apim-simulator, health=healthy"* ]]
+  [[ "$output" == *"revision abc123 (now "* ]]
+}
+
+@test "doctor fails when our apim-simulator service is not running, including when ps errors" {
+  # Equivalent mutants: "return N" after vk_fail in cmd_doctor, cmd_cleanup and record_request is unreachable under set -e (vk_fail returns 1 and exits first), so the status is the same for return 0 and return 1.
+  write_state hello-subscription
+  write_live_stubs
+  run env FAKE_SERVICES=other-service "$BASH32" "$SCRIPT" --execute doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: apim-simulator not running in apim-simulator-hello-s7"* ]]
+  run env FAKE_PS_EXIT=1 "$BASH32" "$SCRIPT" --execute doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: apim-simulator not running in apim-simulator-hello-s7"* ]]
+}
+
+@test "doctor fails when another container publishes the port" {
+  write_state hello-subscription
+  write_live_stubs
+  run env FAKE_OWNER=intruder-1 "$BASH32" "$SCRIPT" --execute doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: port 8700 published by 'intruder-1'"* ]]
+  [[ "$output" != *"OK services="* ]]
+}
+
+@test "doctor fails when nothing publishes the port" {
+  write_state hello-subscription
+  write_live_stubs
+  run env FAKE_OWNER= "$BASH32" "$SCRIPT" --execute doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: port 8700 published by 'nothing'"* ]]
+}
+
+@test "doctor fails when /apim/health cannot be reached" {
+  write_state hello-subscription
+  write_live_stubs
+  run env FAKE_OWNER=apim-simulator-hello-s7-apim-simulator-1 FAKE_CURL_EXIT=7 "$BASH32" "$SCRIPT" --execute doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: /apim/health unreachable"* ]]
+}
+
+@test "request records one exchange with its status and evidence files" {
+  write_live_stubs
+  run "$BASH32" "$SCRIPT" --execute request GET /api/health
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=200"* ]]
+  local out
+  out="$(ls -d "$VERIFY_EVIDENCE_ROOT"/app-run/evidence/*-request)"
+  [ "$(cat "$out/status.txt")" = 200 ]
+  [ "$(head -1 "$out/request.txt")" = "GET http://127.0.0.1:8700/api/health" ]
+  [ -f "$out/response-headers.txt" ]
+}
+
+@test "request with a method but no path is rejected with exit 2 and records nothing" {
+  write_live_stubs
+  run "$BASH32" "$SCRIPT" --execute request GET
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"request needs <METHOD> <path>"* ]]
+  [ ! -e "$VERIFY_EVIDENCE_ROOT/app-run/evidence" ]
+}
+
+@test "request reports a failed curl instead of a status" {
+  write_live_stubs
+  run env FAKE_CURL_EXIT=7 "$BASH32" "$SCRIPT" --execute request GET /api/health
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: request failed: GET http://127.0.0.1:8700/api/health"* ]]
+  [[ "$output" != *"status="* ]]
+}
+
+@test "cleanup downs only our project, keeps evidence and removes the run's state" {
+  write_state hello-subscription
+  mkdir -p "$VERIFY_EVIDENCE_ROOT/app-run/evidence"
+  write_live_stubs
+  run "$BASH32" "$SCRIPT" --execute cleanup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stopped run=app-run project=apim-simulator-hello-s7"* ]]
+  grep -qx "compose -p apim-simulator-hello-s7 down --remove-orphans" "$BATS_TEST_TMPDIR/docker.log"
+  [ -f "$VERIFY_EVIDENCE_ROOT/app-run/evidence/compose.log" ]
+  [ ! -e "$VERIFY_BASE_DIR/app-run/state" ]
+}
+
+@test "cleanup still runs compose down when compose logs fails" {
+  write_state gateway
+  mkdir -p "$VERIFY_EVIDENCE_ROOT/app-run/evidence"
+  write_live_stubs
+  run env FAKE_LOGS_EXIT=1 "$BASH32" "$SCRIPT" --execute cleanup
+  [ "$status" -eq 0 ]
+  grep -qx "compose -p apim-simulator-core-s7 down --remove-orphans" "$BATS_TEST_TMPDIR/docker.log"
+  [ ! -e "$VERIFY_BASE_DIR/app-run/state" ]
+}
+
+@test "cleanup reports a failed compose down instead of claiming it stopped" {
+  write_state hello-subscription
+  mkdir -p "$VERIFY_EVIDENCE_ROOT/app-run/evidence"
+  write_live_stubs
+  run env FAKE_DOWN_EXIT=1 "$BASH32" "$SCRIPT" --execute cleanup
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"stopped run=app-run"* ]]
+}
+
+@test "cleanup without launched state never calls docker" {
+  write_live_stubs
+  run "$BASH32" "$SCRIPT" --execute cleanup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stopped run=app-run project=apim-simulator-hello-s7"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/docker.log" ]
+}
+
+@test "the project name follows the stack: hello stacks share one name, gateway has its own" {
+  write_state hello 4
+  run "$BASH32" "$SCRIPT" --dry-run cleanup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"docker compose -p apim-simulator-hello-s4 logs"* ]]
+  write_state gateway 4
+  run "$BASH32" "$SCRIPT" --dry-run cleanup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"docker compose -p apim-simulator-core-s4 logs"* ]]
+}
+
+@test "smoke and cleanup reject extra arguments with exit 2" {
+  run "$BASH32" "$SCRIPT" --dry-run cleanup extra
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unexpected argument: extra"* ]]
+  run "$BASH32" "$SCRIPT" --dry-run smoke extra
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unexpected argument: extra"* ]]
+}
