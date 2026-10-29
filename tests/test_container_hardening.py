@@ -15,7 +15,10 @@ pytestmark = pytest.mark.repo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-NODE_SECURITY_FLOOR_CHECKERS = (REPO_ROOT / "examples/todo-app/frontend-astro/scripts/check-node-security-floor.mjs",)
+NODE_SECURITY_FLOOR_CHECKERS = (
+    REPO_ROOT / "examples/todo-app/frontend-astro/scripts/check-node-security-floor.mjs",
+    REPO_ROOT / "ui/scripts/check-node-security-floor.mjs",
+)
 
 
 def _assert_node_security_floor_policy(checker: Path) -> None:
@@ -357,6 +360,22 @@ def test_ui_is_built_as_a_static_hardened_container() -> None:
     ).stdout
     assert "-f compose.ui.yml" in default and "up --build -d" in default
     assert "-f compose.ui.yml" not in gateway and "up --build -d" in gateway
+
+
+def test_ui_builder_enforces_stable_node_floor() -> None:
+    ui_dockerfile = (REPO_ROOT / "ui/Dockerfile").read_text()
+    compose = _service("compose.ui.yml", "ui")
+
+    assert f"ARG UI_BUILD_IMAGE={PINNED_NODE_BUILDER}" in ui_dockerfile
+    assert "COPY scripts/check-node-security-floor.mjs ./scripts/check-node-security-floor.mjs" in ui_dockerfile
+    assert compose["build"]["args"]["UI_BUILD_IMAGE"] == f"${{UI_BUILD_IMAGE:-{PINNED_NODE_BUILDER}}}"
+    gate = 'RUN ["node", "scripts/check-node-security-floor.mjs"]'
+    assert gate in ui_dockerfile
+    assert ui_dockerfile.index(gate) < ui_dockerfile.index('["npm", "ci"]')
+    assert ui_dockerfile.index("FROM ${NGINX_RUNTIME_IMAGE}") > ui_dockerfile.index('["npm", "run", "build"]')
+    ui_checker = NODE_SECURITY_FLOOR_CHECKERS[1]
+    assert ui_checker.read_text() == NODE_SECURITY_FLOOR_CHECKERS[0].read_text()
+    _assert_node_security_floor_policy(ui_checker)
 
 
 def test_private_smoke_runner_is_non_root_and_read_only() -> None:
