@@ -240,6 +240,12 @@ def test_ci_runs_frontend_checks() -> None:
     run_checks = next(step for step in ui_job["steps"] if step["name"] == "Run frontend checks")
     assert run_checks["run"] == "make frontend-check"
 
+    floor = _workflow_step_by_name(ui_job, "Check resolved Node security floor")
+    assert floor["run"] == "node ui/scripts/check-node-security-floor.mjs"
+    assert "if" not in floor and floor.get("continue-on-error", False) is False
+    assert ui_job["steps"].index(setup_node) < ui_job["steps"].index(floor) < ui_job["steps"].index(run_checks)
+    _assert_node_security_floor_policy(NODE_SECURITY_FLOOR_CHECKERS[1])
+
 
 def test_ci_installs_mkcert_before_tls_sensitive_steps() -> None:
     ci = _load_yaml(".github/workflows/ci.yml")
