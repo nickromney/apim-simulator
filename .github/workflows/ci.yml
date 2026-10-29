@@ -152,6 +152,9 @@ jobs:
             ui/package-lock.json
             examples/todo-app/frontend-astro/package-lock.json
 
+      - name: Check resolved Node security floor
+        run: node ui/scripts/check-node-security-floor.mjs
+
       - name: Run frontend checks
         run: make frontend-check
 
