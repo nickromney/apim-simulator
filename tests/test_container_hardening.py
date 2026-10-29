@@ -14,7 +14,40 @@ import yaml
 pytestmark = pytest.mark.repo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+NODE_SECURITY_FLOOR_CHECKERS = (REPO_ROOT / "examples/todo-app/frontend-astro/scripts/check-node-security-floor.mjs",)
+
+
+def _assert_node_security_floor_policy(checker: Path) -> None:
+    def check(version: str | None = None) -> subprocess.CompletedProcess[str]:
+        command = ["node", str(checker)]
+        if version is not None:
+            command.append(version)
+        return subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+
+    current = check()
+    assert current.returncode == 0, current.stderr
+
+    for version in ("22.23.4", "24.22.1", "26.12.1", "22.99.0", "24.99.0", "26.99.0"):
+        result = check(version)
+        assert result.returncode == 0, f"{version} should satisfy the stable Node floor: {result.stderr}"
+
+    for version in (
+        "22.23.3",
+        "24.22.0",
+        "26.12.0",
+        "23.0.0",
+        "22.23.4-rc.1",
+        "24.22.1-rc.1",
+        "26.12.1-rc.1",
+        "22.023.4",
+    ):
+        result = check(version)
+        assert result.returncode != 0, f"{version} should fail the stable Node floor check"
+
+
 PINNED_LGTM_IMAGE = "grafana/otel-lgtm:0.24.0@sha256:a7fbde2893d86ae4807701bc482736243e584eb90b5faa273d291ffff2a1374f"
+PINNED_NODE_BUILDER = "node:22.23.4-alpine3.24@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914"
 PINNED_ACTION_REFS = {
     "actions/checkout": "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
     "actions/setup-python": "a309ff8b426b58ec0e2a45f0f869d46889d02405",
@@ -292,6 +325,22 @@ def test_todo_frontend_supports_runtime_image_override() -> None:
     contents = (REPO_ROOT / "examples/todo-app/frontend-astro/Dockerfile").read_text()
     assert "ARG NGINX_RUNTIME_IMAGE" in contents
     assert "runtime-config-entrypoint" in contents
+
+
+def test_todo_astro_builder_enforces_stable_node_floor() -> None:
+    contents = (REPO_ROOT / "examples/todo-app/frontend-astro/Dockerfile").read_text()
+    compose = _service("compose.todo.yml", "todo-frontend")
+    assert f"ARG TODO_FRONTEND_BUILD_IMAGE={PINNED_NODE_BUILDER}" in contents
+    assert "FROM ${TODO_FRONTEND_BUILD_IMAGE} AS builder" in contents
+    assert "COPY scripts/check-node-security-floor.mjs ./scripts/check-node-security-floor.mjs" in contents
+    assert compose["build"]["args"]["TODO_FRONTEND_BUILD_IMAGE"] == (
+        f"${{TODO_FRONTEND_BUILD_IMAGE:-{PINNED_NODE_BUILDER}}}"
+    )
+    gate = 'RUN ["node", "scripts/check-node-security-floor.mjs"]'
+    assert gate in contents
+    assert contents.index(gate) < contents.index("RUN npm ci")
+    assert contents.index("FROM ${NGINX_RUNTIME_IMAGE}") > contents.index("RUN npm run build")
+    _assert_node_security_floor_policy(NODE_SECURITY_FLOOR_CHECKERS[0])
 
 
 def test_ui_is_built_as_a_static_hardened_container() -> None:
