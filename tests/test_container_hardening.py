@@ -429,7 +429,7 @@ def test_management_enabled_stacks_copy_seed_config_to_tmp() -> None:
 
 def test_mcp_build_and_smokes_use_repo_locked_dependency_flow() -> None:
     pyproject = _load_toml("pyproject.toml")
-    assert pyproject["project"]["optional-dependencies"]["mcp"] == ["mcp==1.26.0"]
+    assert pyproject["project"]["optional-dependencies"]["mcp"] == ["mcp==1.30.0"]
 
     mcp_service = _service("compose.mcp.yml", "mcp-server")
     assert mcp_service["build"]["context"] == "."
@@ -443,7 +443,7 @@ def test_mcp_build_and_smokes_use_repo_locked_dependency_flow() -> None:
 
     private_smoke_runner = (REPO_ROOT / "scripts" / "run_smoke_private.py").read_text()
     assert 'PINNED_HTTPX = "httpx==0.28.1"' in private_smoke_runner
-    assert 'PINNED_MCP = "mcp==1.26.0"' in private_smoke_runner
+    assert 'PINNED_MCP = "mcp==1.30.0"' in private_smoke_runner
     assert "repo_root = Path(__file__).resolve().parent.parent" in private_smoke_runner
     assert 'env["PYTHONPATH"] = (' in private_smoke_runner
     assert "repo_root}{os.pathsep}{site_packages_path}" in private_smoke_runner
