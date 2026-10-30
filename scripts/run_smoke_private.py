@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 PINNED_HTTPX = "httpx==0.28.1"
-PINNED_MCP = "mcp==1.26.0"
+PINNED_MCP = "mcp==1.30.0"
 
 
 def main() -> None:
