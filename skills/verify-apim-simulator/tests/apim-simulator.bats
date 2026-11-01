@@ -115,12 +115,32 @@ write_state() {
   assert_untouched
 }
 
+@test "cli preserves a failed command's exit code" {
+  write_state gateway
+  run "$BASH32" "$SCRIPT" --execute cli status
+  [ "$status" -eq 99 ]
+  [[ "$output" == *"exit=99 evidence:"* ]]
+  local out
+  out="$(ls -d "$VERIFY_EVIDENCE_ROOT"/app-run/evidence/*-cli)"
+  [ "$(cat "$out/exit-code.txt")" = 99 ]
+}
+
 @test "smoke refuses the gateway stack, which has no repo smoke, before touching uv" {
   write_state gateway
   run "$BASH32" "$SCRIPT" --execute smoke
   [ "$status" -eq 2 ]
   [[ "$output" == *"no repo smoke for stack gateway"* ]]
   assert_untouched
+}
+
+@test "smoke preserves the script's exit code" {
+  write_state hello-subscription
+  run "$BASH32" "$SCRIPT" --execute smoke
+  [ "$status" -eq 99 ]
+  [[ "$output" == *"exit=99 evidence:"* ]]
+  local out
+  out="$(ls -d "$VERIFY_EVIDENCE_ROOT"/app-run/evidence/*-smoke)"
+  [ "$(cat "$out/exit-code.txt")" = 99 ]
 }
 
 @test "unexpected arguments to doctor are rejected with exit 2" {

@@ -198,6 +198,7 @@ cmd_smoke() {
   run_smoke
   cat "$SMOKE_OUT/stdout.txt" "$SMOKE_OUT/stderr.txt"
   vk_say "exit=$SMOKE_EXIT evidence: $SMOKE_OUT"
+  return "$SMOKE_EXIT"
 }
 
 cmd_cli() {
@@ -212,6 +213,7 @@ cmd_cli() {
   set -e
   echo "$rc" > "$out/exit-code.txt"
   cat "$out/stdout.txt" "$out/stderr.txt"; vk_say "exit=$rc evidence: $out"
+  return "$rc"
 }
 
 cmd_cleanup() {
