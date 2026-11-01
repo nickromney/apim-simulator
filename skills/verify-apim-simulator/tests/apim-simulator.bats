@@ -25,6 +25,14 @@ assert_no_writes() {
   [ ! -e "$VERIFY_EVIDENCE_ROOT" ] || { echo "wrote $VERIFY_EVIDENCE_ROOT"; return 1; }
 }
 
+# An --execute launch claims its run before control.sh runs (verify-kit >= 1.3.0), so a refusal may
+# leave the kit's empty claim and evidence roots, but no run state, evidence or unreleased claim.
+assert_no_run_writes() {
+  local extra
+  extra="$(find "$VERIFY_BASE_DIR" "$VERIFY_EVIDENCE_ROOT" -mindepth 1 ! -path "$VERIFY_BASE_DIR/.verify-kit-owners" 2>/dev/null)"
+  [ -z "$extra" ] || { echo "wrote $extra"; return 1; }
+}
+
 assert_untouched() {
   local tool
   for tool in docker make uv; do
@@ -43,7 +51,7 @@ write_state() {
   run env VERIFY_SLOT=0 "$BASH32" "$SCRIPT" --execute launch
   [ "$status" -eq 1 ]
   [[ "$output" == *"slot 0 is the user's default stack"* ]]
-  assert_no_writes
+  assert_no_run_writes
   assert_untouched
 }
 
@@ -66,7 +74,7 @@ write_state() {
   run "$BASH32" "$SCRIPT" --execute launch bogus
   [ "$status" -eq 2 ]
   [[ "$output" == *"unknown stack bogus"* ]]
-  assert_no_writes
+  assert_no_run_writes
   assert_untouched
 }
 
