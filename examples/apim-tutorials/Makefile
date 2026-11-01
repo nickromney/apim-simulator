@@ -2,7 +2,7 @@ ROOT_DIR := $(abspath ../..)
 APIM_BASE ?= http://localhost:8000
 APIM_TENANT_KEY ?= local-dev-tenant-key
 APIM_UPSTREAM_BASE_URL ?= http://mock-backend:8080/api
-BRUNO_VERSION ?= 4.2.0
+BRUNO_VERSION ?= 4.3.0
 
 .PHONY: help smoke bruno
 help:
