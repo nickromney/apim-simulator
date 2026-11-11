@@ -143,6 +143,7 @@ EXPECTED_ROUTES = {
     ("POST", "/apim/admin/subscriptions/{subscription_id}/rotate"),
     ("POST", "/apim/management/apis/{api_id}/import"),
     ("POST", "/apim/management/import/tofu-show"),
+    ("POST", "/apim/management/policies/api/{scope_name:path}"),
     ("POST", "/apim/management/replay"),
     ("POST", "/apim/management/subscriptions"),
     ("POST", "/apim/management/subscriptions/{subscription_id}/rotate"),

@@ -705,3 +705,40 @@ def test_misplaced_credential_option_does_not_echo_secret(
     error = capsys.readouterr().err
     assert "credential options must precede the command" in error
     assert "sensitive-token" not in error
+
+
+def test_policy_plan_and_guarded_apply(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    source = tmp_path / "policy.xml"
+    source.write_text("<policies />", encoding="utf-8")
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"etag": '"v1"', "diff": "change"})
+        return httpx.Response(412, json={"detail": "policy changed"})
+
+    transport = httpx.MockTransport(handler)
+    args = ["weather", "--file", str(source)]
+    assert main(["--bearer-token", "token", "plan-policy", *args], transport=transport) == 0
+    assert json.loads(capsys.readouterr().out)["etag"] == '"v1"'
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/apim/management/policies/api/weather"
+    assert requests[0].headers["authorization"] == "Bearer token"
+    assert json.loads(requests[0].content) == {"xml": "<policies />"}
+    apply = ["apply-policy", *args, "--if-match", '"v1"']
+    assert main(["--dry-run", *apply], transport=transport) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["headers"] == {"If-Match": '"v1"'}
+    assert main(apply, transport=transport) == 1
+    assert "412 policy changed" in capsys.readouterr().err
+    assert requests[1].headers["if-match"] == plan["headers"]["If-Match"]
+
+
+@pytest.mark.parametrize("etag", ["*", 'W/"v1"', "v1", '"a", "b"', '"a\nb"'])
+def test_apply_policy_rejects_non_specific_etag(etag: str, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    source = tmp_path / "policy.xml"
+    source.write_text("<policies />", encoding="utf-8")
+    for preview in ([], ["--dry-run"]):
+        assert main([*preview, "apply-policy", "weather", "--file", str(source), "--if-match", etag]) == 1
+        assert "specific strong quoted ETag" in capsys.readouterr().err

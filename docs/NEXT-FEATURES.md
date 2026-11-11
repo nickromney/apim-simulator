@@ -44,8 +44,7 @@ Expand low-risk local CRUD and operator-console workflows where they make the si
 - better editing flows for descriptive resources
 - stronger persistence ergonomics for config-authored resources
 - clearer management summaries for large imported configs
-- explicit concurrent-edit conflict handling (atomic save failure preservation
-  is implemented; ETags and multi-writer coordination remain outside scope)
+- conditional writes beyond [API-level policies](FIDELITY-CONTRACTS.md#api-policy-planning-and-conditional-apply)
 
 ### Runtime revision fidelity
 

@@ -335,7 +335,7 @@ gateway pipeline. Trace summaries expose policy steps, routing, selected
 backend, cache/throttle actions, and forwarded-header fields where enabled.
 
 **Errors and exclusions.** ARM authentication, asynchronous ARM operation
-semantics, ETags/concurrency, Azure RBAC, Application Insights ingestion, and
+semantics, Azure RBAC, Application Insights ingestion, and
 full diagnostic logger routing are unsupported. OTEL/Grafana and local traces
 are the observability implementation; simulator-only response/correlation
 headers are opt-in adaptations.
@@ -344,6 +344,31 @@ headers are opt-in adaptations.
 [APIM tracing](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-api-inspect),
 `docs/APIM-SDK-SURFACE-GUIDE.md`, and the management/trace owner tests in
 `contract_matrix.yml`. Confidence: `adapted`.
+
+## API policy planning and conditional apply
+
+**Contract.** Plan an API-level policy change against the running gateway. The
+plan validates the proposed XML against the current configuration and returns a
+unified diff and the current authored policy's ETag without saving the change.
+
+**Inputs and result.** Send `{"xml": "..."}` to
+`POST /apim/management/policies/api/{api_id}` with API read access. An authored
+GET and a successful PUT on the same path return an `ETag` header. Apply the
+reviewed XML with API write access and the plan's ETag in `If-Match`. If the tag
+differs from the current one, the gateway returns HTTP 412 and keeps the stored
+policy. `apply-policy` requires a specific ETag. Existing policy PUT requests
+can omit the header.
+
+**Scope.** The conditional check and write run together in one gateway process.
+The tag identifies the API and its authored XML. Effective policy and its
+inherited inputs can change independently. Use the
+[CLI workflow](../README.md#review-and-apply-an-api-policy) to review and verify
+the change.
+
+**Evidence.** [Get an API policy](https://learn.microsoft.com/en-us/rest/api/apimanagement/api-policy/get?view=rest-apimanagement-2024-05-01),
+[Update an API policy](https://learn.microsoft.com/en-us/rest/api/apimanagement/api-policy/create-or-update?view=rest-apimanagement-2024-05-01),
+and [APIOps workflow](https://learn.microsoft.com/en-us/azure/architecture/example-scenario/devops/automated-api-deployments-apiops).
+See [policy change tests](../tests/test_api_policy_changes.py). Confidence: `adapted`.
 
 ## Local tutorial services
 
