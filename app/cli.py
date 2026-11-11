@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -127,6 +128,18 @@ def _build_parser() -> argparse.ArgumentParser:
     policy_body_group.add_argument("--file", help="Path to a file containing the policy XML.")
     policy_body_group.add_argument("--xml", help="Policy XML as a literal string.")
 
+    for name, help_text in (
+        ("plan-policy", "Validate and preview an API policy against current server state."),
+        ("apply-policy", "Replace an API policy only if its ETag still matches."),
+    ):
+        policy_command_parser = subparsers.add_parser(name, help=help_text)
+        policy_command_parser.add_argument("api_id")
+        policy_command_parser.add_argument("--file", required=True, help="Path to a file containing the policy XML.")
+        if name == "apply-policy":
+            policy_command_parser.add_argument(
+                "--if-match", required=True, help="Specific strong ETag from plan-policy."
+            )
+
     subparsers.add_parser("traces", help="List recent traces.")
     trace_parser = subparsers.add_parser("trace", help="Show one trace (public endpoint, no tenant key required).")
     trace_parser.add_argument("trace_id")
@@ -192,8 +205,11 @@ async def _request(
     bearer_token: str | None,
     json_body: dict[str, Any] | None = None,
     params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
-    return await client.request(method, path, headers=_headers(tenant_key, bearer_token), json=json_body, params=params)
+    return await client.request(
+        method, path, headers={**_headers(tenant_key, bearer_token), **(headers or {})}, json=json_body, params=params
+    )
 
 
 def _import_openapi_body(args: argparse.Namespace) -> dict[str, Any]:
@@ -254,10 +270,12 @@ class _Command:
     path: str
     body: Callable[[argparse.Namespace], Any] | None = None
     confirm: str | None = None
+    read_only: bool = False
+    requires_etag: bool = False
 
     @property
     def effect(self) -> str:
-        if self.method == "GET":
+        if self.method == "GET" or self.read_only:
             return "read"
         return "execute" if self.path == "/apim/management/replay" else "write"
 
@@ -279,6 +297,10 @@ _COMMANDS: dict[str, _Command] = {
     "subscriptions": _Command("GET", "/apim/management/subscriptions"),
     "policy": _Command("GET", "/apim/management/policies/{scope_type}/{scope_name}"),
     "set-policy": _Command("PUT", "/apim/management/policies/{scope_type}/{scope_name}", body=_set_policy_body),
+    "plan-policy": _Command("POST", "/apim/management/policies/api/{api_id}", body=_set_policy_body, read_only=True),
+    "apply-policy": _Command(
+        "PUT", "/apim/management/policies/api/{api_id}", body=_set_policy_body, requires_etag=True
+    ),
     "traces": _Command("GET", "/apim/management/traces"),
     "trace": _Command("GET", "/apim/trace/{trace_id}"),
     "replay": _Command("POST", "/apim/management/replay", body=_replay_body),
@@ -332,6 +354,14 @@ async def _inspect(args: argparse.Namespace, client: httpx.AsyncClient) -> int:
     return 0 if complete else 1
 
 
+def _plan_headers(command: _Command, args: argparse.Namespace) -> dict[str, str]:
+    if not command.requires_etag:
+        return {}
+    if not re.fullmatch(r'"[\x21\x23-\x7e]*"', args.if_match):
+        raise CliUsageError("--if-match must be a specific strong quoted ETag")
+    return {"If-Match": args.if_match}
+
+
 def _request_plan(args: argparse.Namespace) -> dict[str, Any]:
     base_url = str(httpx.URL(args.base_url).copy_with(username=None, password=None))
     if args.command == "inspect":
@@ -346,7 +376,8 @@ def _request_plan(args: argparse.Namespace) -> dict[str, Any]:
             params["effective"] = "true"
         if args.product_id:
             params["product_id"] = args.product_id
-    return {
+    headers = _plan_headers(command, args)
+    plan = {
         "schema_version": 1,
         "command": args.command,
         "base_url": base_url,
@@ -357,6 +388,9 @@ def _request_plan(args: argparse.Namespace) -> dict[str, Any]:
         "effect": command.effect,
         "requires_confirmation": command.confirm is not None,
     }
+    if headers:
+        plan["headers"] = headers
+    return plan
 
 
 async def _dispatch(args: argparse.Namespace, client: httpx.AsyncClient) -> httpx.Response:
@@ -373,6 +407,7 @@ async def _dispatch(args: argparse.Namespace, client: httpx.AsyncClient) -> http
         bearer_token=args.bearer_token,
         json_body=plan["body"],
         params=plan["params"],
+        headers=plan.get("headers"),
     )
 
 
@@ -448,6 +483,7 @@ def main(
                             "path_template": command.path,
                             "effect": command.effect,
                             "requires_confirmation": command.confirm is not None,
+                            **({"required_headers": ["If-Match"]} if command.requires_etag else {}),
                         }
                         for name, command in _COMMANDS.items()
                     }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import logging
 import os
@@ -577,10 +578,56 @@ class ManagementService:
         if hasattr(target, "policies_xml_documents"):
             target.policies_xml_documents = []
 
-    def put_policy(self, cfg: GatewayConfig, scope_type: str, scope_name: str, xml: str) -> GatewayConfig:
+    def policy_etag(self, scope_name: str, target: Any) -> str:
+        xml = target.policies_xml or None
+        digest = hashlib.sha256()
+        digest.update(scope_name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(b"\x01" if xml is not None else b"\x00")
+        if xml is not None:
+            digest.update(xml.encode("utf-8"))
+        return f'"{digest.hexdigest()}"'
+
+    def plan_api_policy(self, cfg: GatewayConfig, scope_name: str, xml: str) -> dict[str, str]:
+        target = self._api_scope(cfg, scope_name)
         cleaned = xml.strip() or EMPTY_POLICY_XML
         self.validate_policy_xml(cfg, cleaned)
+        staged = cfg.model_copy(deep=True)
+        self.set_policy_xml(self._api_scope(staged, scope_name), cleaned)
+        try:
+            validate_policy_config(staged)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid config update: {exc}") from exc
+        current = target.policies_xml or None
+        diff = "\n".join(
+            difflib.unified_diff(
+                current.split("\n") if current is not None else [],
+                cleaned.split("\n"),
+                fromfile="current",
+                tofile="proposed",
+                lineterm="",
+            )
+        )
+        return {
+            "scope_type": "api",
+            "scope_name": scope_name,
+            "etag": self.policy_etag(scope_name, target),
+            "diff": diff,
+        }
+
+    def put_policy(
+        self, cfg: GatewayConfig, scope_type: str, scope_name: str, xml: str, *, if_match: str | None = None
+    ) -> GatewayConfig:
+        cleaned = xml.strip() or EMPTY_POLICY_XML
         target = self.policy_scope_target(cfg, scope_type, scope_name)
+        if (
+            scope_type.lower() == "api"
+            and if_match is not None
+            and if_match != "*"
+            and if_match != self.policy_etag(scope_name, target)
+        ):
+            raise HTTPException(status_code=412, detail="The policy changed. Plan the change again before applying.")
+        self.validate_policy_xml(cfg, cleaned)
         self.set_policy_xml(target, cleaned)
         return self.persist_or_apply_config(cfg)
 

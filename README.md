@@ -429,6 +429,33 @@ policy semantics. Replay can cause backend and runtime side effects. See the
 [agent operating model](docs/AGENT-SYSTEM.md) for the complete verification loop.
 Run `uv run apimsim --help` for the full command list.
 
+#### Review and apply an API policy
+
+[Practice APIOps locally](docs/APIOPS.md) follows the Microsoft Learn APIOps
+workflow with two local gateways. Extract a policy, review it in Git, preview
+and publish the approved commit, then verify and roll back the change.
+
+Connect to a running gateway and choose an existing API. Save your proposed XML
+in `policy.xml`. An API reader can plan the change. Use a contributor credential
+for that API when you apply it.
+
+```bash
+uv run apimsim plan-policy orders --file policy.xml
+```
+
+The gateway validates the XML and returns a unified `diff` against the current
+authored policy. Review the diff and set `POLICY_ETAG` to the returned `etag`
+value, including its double quotes. Apply the same reviewed file.
+
+```bash
+uv run apimsim apply-policy orders --file policy.xml --if-match "$POLICY_ETAG"
+uv run apimsim policy api orders
+```
+
+If someone changed the policy after you planned it, apply returns HTTP 412 and
+preserves their edit. Run `plan-policy` again and review the new diff before
+retrying. After a successful apply, call the API to verify the behavior.
+
 #### Give an agent access to selected APIs
 
 Enable `control_plane.enabled` in your gateway configuration and set

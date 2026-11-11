@@ -718,7 +718,12 @@ def _build_policy_router(*, require_management_plane: Callable[[], ManagementSer
 
     @router.get("/apim/management/policies/{scope_type}/{scope_name:path}")
     async def management_get_policy(
-        scope_type: str, scope_name: str, request: Request, effective: bool = False, product_id: str | None = None
+        scope_type: str,
+        scope_name: str,
+        request: Request,
+        response: Response,
+        effective: bool = False,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         require_tenant_access(request)
         cfg: GatewayConfig = request.app.state.gateway_config
@@ -733,27 +738,42 @@ def _build_policy_router(*, require_management_plane: Callable[[], ManagementSer
                     cfg, scope_type=scope_type, scope_name=scope_name, target=target, product_id=product_id
                 ),
             }
+        if scope_type.lower() == "api":
+            response.headers["ETag"] = require_management_plane().policy_etag(scope_name, target)
         return {
             "scope_type": scope_type,
             "scope_name": scope_name,
             "xml": _policy_xml_for_target(target),
         }
 
+    @router.post("/apim/management/policies/api/{scope_name:path}")
+    async def management_plan_api_policy(
+        scope_name: str, request: Request, response: Response, body: PolicyUpdate
+    ) -> dict[str, str]:
+        require_tenant_access(request, permission="read", api_id=scope_name)
+        plan = require_management_plane().plan_api_policy(request.app.state.gateway_config, scope_name, body.xml)
+        response.headers["ETag"] = plan["etag"]
+        return plan
+
     @router.put("/apim/management/policies/{scope_type}/{scope_name:path}")
     async def management_put_policy(
         scope_type: str,
         scope_name: str,
         request: Request,
+        response: Response,
         body: PolicyUpdate,
     ) -> dict[str, Any]:
         require_tenant_access(request)
         cfg = _config_for_management_write(request)
         manager = require_management_plane()
-        updated = manager.put_policy(cfg, scope_type, scope_name, body.xml)
+        updated = manager.put_policy(cfg, scope_type, scope_name, body.xml, if_match=request.headers.get("if-match"))
+        target = manager.policy_scope_target(updated, scope_type, scope_name)
+        if scope_type.lower() == "api":
+            response.headers["ETag"] = manager.policy_etag(scope_name, target)
         return {
             "scope_type": scope_type,
             "scope_name": scope_name,
-            "xml": manager.policy_xml_for_target(manager.policy_scope_target(updated, scope_type, scope_name)),
+            "xml": manager.policy_xml_for_target(target),
         }
 
     @router.get("/apim/management/traces")

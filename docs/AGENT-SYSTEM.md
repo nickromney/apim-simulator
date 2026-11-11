@@ -42,9 +42,9 @@ claims, and local tests do not establish live Azure parity.
    For initial cross-resource orientation, `inspect` collects five metadata GETs
    in one report. Check `complete` and each observation before drawing conclusions;
    `atomic: false` means the reads can see different instants or workers.
-4. Inspect effective policy for the relevant scope and product. Capture the
-   authored resource before replacement. Preview the intended CLI request with
-   `--dry-run`; compare its target, payload, and effect with the intended change.
+4. Inspect effective policy for the relevant scope and product. For an API-level
+   policy, use `plan-policy` to validate the proposed XML and review the live diff.
+   Capture the authored resource before replacement for other scopes.
 5. Apply one bounded change. Read back the changed resource. Verify a positive
    case and the relevant negative or boundary case; inspect the returned trace
    when causality is uncertain. Replay can invoke backend side effects and
@@ -56,11 +56,10 @@ claims, and local tests do not establish live Azure parity.
    in local temporary artifacts rather than committed evidence.
 
 Completion requires the expected result, applicable focused checks, a reviewed
-diff, and an explicit statement of skipped verification. Preview checks local
-argument/file construction only; it does not validate server state, policy XML,
-authorization, concurrency, or Azure compatibility. A preview is not a lock:
-re-read state before replacing a resource when another writer may have edited it.
-ETags and multi-writer coordination remain outside the current contract.
+diff, and an explicit statement of skipped verification. The CLI's offline
+`--dry-run` checks request construction. For API-level policies, pass the ETag
+from `plan-policy` to `apply-policy` to guard the write on one gateway process.
+Replan and review after HTTP 412. [Review and apply an API policy](../README.md#review-and-apply-an-api-policy)
 
 ## Machine interface
 
@@ -76,8 +75,8 @@ uv run apimsim inspect
 uv run apimsim apis
 uv run apimsim api weather
 uv run apimsim policy --effective --product-id starter api weather
-uv run apimsim --dry-run set-policy api weather --file policy.xml
-uv run apimsim set-policy api weather --file policy.xml
+uv run apimsim plan-policy weather --file policy.xml
+uv run apimsim apply-policy weather --file policy.xml --if-match "$POLICY_ETAG"
 ```
 
 `commands` is offline, versioned JSON describing implemented CLI verbs, HTTP
