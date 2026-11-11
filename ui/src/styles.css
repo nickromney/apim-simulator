@@ -2036,6 +2036,7 @@ button.policy-stage-card {
 .workspace-grid {
   grid-template-columns: minmax(27rem, 0.9fr) minmax(38rem, 2fr);
 }
+.workspace-grid.app-page-products,
 .workspace-grid.app-page-subscriptions,
 .workspace-grid.app-page-traces {
   grid-template-columns: minmax(0, 1fr);
@@ -2045,6 +2046,28 @@ button.policy-stage-card {
 }
 .workspace-grid[hidden] {
   display: none;
+}
+.mock-response-editor {
+  border-top: 1px solid var(--line);
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+}
+.mock-response-editor fieldset {
+  display: grid;
+  gap: 0.75rem;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.mock-response-editor label {
+  display: grid;
+  gap: 0.4rem;
+}
+.mock-response-editor textarea {
+  min-height: 8rem;
+}
+.mock-response-editor button {
+  margin-right: 0.5rem;
 }
 .search-field input {
   border-radius: 2px;

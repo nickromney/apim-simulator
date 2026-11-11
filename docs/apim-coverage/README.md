@@ -1,5 +1,8 @@
 # Full APIM documentation assessment, 2026-10-03
 
+The [Get Started validation records](get-started-2026-10-02/PROGRESS.md)
+document the earlier tutorial coverage assessment.
+
 The [Microsoft APIM documentation tree](https://learn.microsoft.com/en-us/azure/api-management/)
 contains 320 table-of-contents entries in the retrieved snapshot. Every entry is
 assessed in [the inventory](inventory-2026-10-03.jsonl), including repeated links

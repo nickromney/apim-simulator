@@ -8,6 +8,7 @@ setup() {
   export TEST_BIN="$BATS_TEST_TMPDIR/bin"
   export STATE_DIR="$BATS_TEST_TMPDIR/state"
   export CALL_LOG="$BATS_TEST_TMPDIR/calls.log"
+  export APIM_EXPORT_DIR="$BATS_TEST_TMPDIR/exports"
   mkdir -p "$TEST_BIN" "$STATE_DIR"
 
   export APIM_BASE="http://localhost:8000"
@@ -392,7 +393,16 @@ PY
     ;;
   "http://localhost:8000/apim/portal/editor/draft")
     if [[ "$method" == "PUT" ]]; then
-      printf '%s' "$data" >"$STATE_DIR/portal-draft.json"
+      PORTAL_DATA="$data" python3 - "$STATE_DIR/portal-draft.json" <<'PYCODE'
+import json
+import os
+import sys
+site = json.loads(os.environ["PORTAL_DATA"])
+for key, value in {"body_font": "system", "heading_font": "system", "button_style": "filled", "button_radius": "square"}.items():
+    site.setdefault(key, value)
+with open(sys.argv[1], "w") as target:
+    json.dump(site, target)
+PYCODE
     fi
     response_body="{\"site\":$(cat "$STATE_DIR/portal-draft.json"),\"publication\":1}"
     ;;
@@ -404,7 +414,7 @@ PY
     response_body="{\"site\":$(cat "$STATE_DIR/portal-published.json"),\"publication\":1}"
     ;;
   "http://localhost:8000/apim/portal/editor/preview")
-    response_body='<!doctype html><h1>Welcome developers</h1><style>:root{--accent:#663399}</style>'
+    response_body='<!doctype html><h1>Welcome developers</h1><style>:root{--accent:#663399;--portal-body-font:Georgia;--portal-heading-font:ui-monospace;--portal-button-radius:999px;--portal-button-bg:transparent}</style>'
     ;;
   "http://localhost:8000/apim/portal/content")
     response_body="{\"site\":$(cat "$STATE_DIR/portal-published.json"),\"publication\":1}"
@@ -432,7 +442,7 @@ PY
     fi
     ;;
   "http://localhost:8000/apim/portal")
-    response_body='<!doctype html><title>APIM portal</title>'
+    response_body='<!doctype html><title>APIM portal</title><style>:root{--portal-body-font:Georgia;--portal-heading-font:ui-monospace;--portal-button-radius:999px;--portal-button-bg:transparent}</style>'
     ;;
   "http://localhost:8000/apim/portal/catalog")
     response_body='{"products":[{"id":"portal-premium","approval_required":true,"apis":[{"id":"portal-hello"}]},{"id":"version-tutorial-product","apis":[{"id":"path-versioned-original"},{"id":"path-versioned-v2"}]}]}'
@@ -687,6 +697,10 @@ EOF
   [[ "$output" == *'"status": "ok"'* ]]
   [[ "$output" == *'"site_title": "Tutorial Developer Portal"'* ]]
   [[ "$output" == *'"theme": "dark"'* ]]
+  [[ "$output" == *'"body_font": "serif"'* ]]
+  [[ "$output" == *'"heading_font": "monospace"'* ]]
+  [[ "$output" == *'"button_style": "outline"'* ]]
+  [[ "$output" == *'"button_radius": "pill"'* ]]
   [[ "$output" == *'"page": "getting-started"'* ]]
 }
 
@@ -714,4 +728,25 @@ EOF
   [[ "$output" == *"Verifying exported inventory inputs"* ]]
   [[ "$output" == *'"api_version_sets": 1'* ]]
   [[ "$output" == *'"paths": ['* ]]
+}
+
+@test "tutorial11 verification detects inventory drift and missing exports" {
+  run "$TUTORIAL_DIR/tutorial11.sh" --setup
+  [ "$status" -eq 0 ]
+  python3 - "$APIM_EXPORT_DIR/apis.json" <<'PYCODE'
+import json
+import sys
+path = sys.argv[1]
+with open(path) as source:
+    data = json.load(source)
+data[0]["path"] = "changed"
+with open(path, "w") as target:
+    json.dump(data, target)
+PYCODE
+  run "$TUTORIAL_DIR/tutorial11.sh" --verify
+  [ "$status" -ne 0 ]
+  rm "$APIM_EXPORT_DIR/apis.json"
+  run "$TUTORIAL_DIR/tutorial11.sh" --verify
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"run tutorial11.sh --setup first"* ]]
 }

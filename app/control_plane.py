@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any, Literal
-from urllib.parse import unquote
 
 import jwt
 from fastapi import HTTPException, Request
@@ -116,7 +115,7 @@ def _require_administrator_claims(claims: dict[str, Any], actor: ManagementActor
 
 
 def request_permission(request: Request) -> Permission:
-    path = request.url.path.lower()
+    path = request.scope["path"].lower()
     read = request.method in {"GET", "HEAD"}
     if path == "/apim/portal/editor" or path.startswith("/apim/portal/editor/"):
         return "content-read" if read else "content-write"
@@ -149,13 +148,18 @@ def _is_sensitive_resource(path: str) -> bool:
 
 
 def request_api_id(request: Request) -> str | None:
-    parts = [unquote(part) for part in request.url.path.split("/") if part]
+    # The router consumes the decoded ASGI path. URL parsing can reinterpret
+    # characters such as ? and # in an API ID as URL delimiters.
+    path = request.scope["path"]
+    parts = path.split("/")[1:]
     if parts[:3] == ["apim", "management", "apis"] and len(parts) > 3:
-        return parts[3].split(";rev=", 1)[0]
-    if parts[:4] == ["apim", "management", "policies", "api"] and len(parts) > 4:
-        return parts[4].split(";rev=", 1)[0]
-    if parts[:4] == ["apim", "management", "policies", "operation"] and len(parts) > 4:
-        return parts[4].split(";rev=", 1)[0]
+        return parts[3]
+    api_prefix = "/apim/management/policies/api/"
+    operation_prefix = "/apim/management/policies/operation/"
+    if path.startswith(api_prefix):
+        return path[len(api_prefix) :]
+    if path.startswith(operation_prefix):
+        return path[len(operation_prefix) :].partition(":")[0]
     return None
 
 
@@ -173,22 +177,35 @@ def _grant_matches(grant: ScopedGrant, api_id: str, config: ControlPlaneConfig) 
     return (not grant.api_ids or api_id in grant.api_ids) and (workspace_ids is None or api_id in workspace_ids)
 
 
+def api_visible_in_collection(grants: tuple[ScopedGrant, ...] | None, api_id: str, config: ControlPlaneConfig) -> bool:
+    return grants is None or any(_grant_matches(grant, api_id, config) for grant in grants)
+
+
 def authorize_operator(
     request: Request,
     config: ControlPlaneConfig,
     *,
     permission: Permission | None = None,
     api_id: str | None = None,
-) -> None:
+    api_collection: bool = False,
+    global_only: bool = False,
+) -> tuple[ScopedGrant, ...] | None:
     claims = decode_identity(request, config)
     actor = _actor(claims)
     _require_administrator_claims(claims, actor, config)
     request.state.management_actor = actor.audit_record()
     required = permission or request_permission(request)
-    target = api_id or request_api_id(request)
-    global_allowed = any(required in _ROLE_PERMISSIONS.get(role, set()) for role in actor.roles)
-    scoped_allowed = target and any(
-        _grant_matches(grant, target, config) and required in _ROLE_PERMISSIONS[grant.role] for grant in actor.grants
-    )
-    if not global_allowed and not scoped_allowed:
+    if any(required in _ROLE_PERMISSIONS.get(role, set()) for role in actor.roles):
+        return None
+    if global_only:
         raise HTTPException(status_code=403, detail="Operator does not have permission for this resource")
+
+    grants = tuple(grant for grant in actor.grants if required in _ROLE_PERMISSIONS[grant.role])
+    if api_collection and required == "read":
+        if grants:
+            return grants
+    else:
+        target = api_id or request_api_id(request)
+        if target and any(_grant_matches(grant, target, config) for grant in grants):
+            return None
+    raise HTTPException(status_code=403, detail="Operator does not have permission for this resource")

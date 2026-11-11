@@ -1,0 +1,28 @@
+.products-panel {
+  max-width: 60rem;
+}
+.products-panel fieldset {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.products-panel label {
+  display: block;
+  margin: 0.5rem 0;
+}
+.products-panel input:not([type="checkbox"]),
+.products-panel select,
+.products-panel textarea {
+  display: block;
+  width: 100%;
+  max-width: 40rem;
+}
+.products-panel button {
+  margin: 0.5rem 0.5rem 0.5rem 0;
+}
+.products-panel input[type="checkbox"] {
+  width: auto;
+  margin-right: 0.4rem;
+}

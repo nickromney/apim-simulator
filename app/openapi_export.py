@@ -96,7 +96,7 @@ def _media(representation: OperationRepresentationConfig, schemas: dict[str, Any
         }
     if representation.examples:
         payload["examples"] = {
-            example.name: example.model_dump(mode="json", exclude={"name"}, exclude_none=True)
+            example.name: example.model_dump(mode="json", exclude={"name", "value_format"}, exclude_none=True)
             for example in representation.examples
         }
         for example in payload["examples"].values():

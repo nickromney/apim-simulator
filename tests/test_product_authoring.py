@@ -174,3 +174,30 @@ def test_conflicting_open_product_write_preserves_runtime_and_disk(write_target,
         assert "at most one open product" in response.json()["detail"]
         assert client.app.state.gateway_config.model_dump(mode="json") == before
         assert path.read_text() == original
+
+
+def test_product_api_links_preserve_unrelated_api_fields() -> None:
+    from app.management_service import ManagementService
+
+    policy = '<policies><inbound><set-header name="X-Secret" exists-action="override"><value>private-value</value></set-header></inbound></policies>'
+    cfg = _config(
+        products={"starter": ProductConfig(name="Starter")},
+        apis={
+            "sample": ApiConfig(
+                name="sample", path="sample", upstream_base_url="http://private-value.test", policies_xml=policy
+            )
+        },
+    )
+    service = ManagementService.__new__(ManagementService)
+    service.require_api_authoring_mode = lambda _cfg: None
+    service.persist_or_apply_config = lambda staged: staged
+    before = cfg.apis["sample"].model_dump(exclude={"products"})
+    service.link_product_api(cfg, "starter", "sample")
+    service.link_product_api(cfg, "starter", "sample")
+    assert cfg.apis["sample"].products == ["starter"]
+    assert cfg.apis["sample"].model_dump(exclude={"products"}) == before
+    service.unlink_product_api(cfg, "starter", "sample")
+    assert cfg.apis["sample"].products == []
+    assert cfg.apis["sample"].model_dump(exclude={"products"}) == before
+    with pytest.raises(Exception, match="Product API link not found"):
+        service.unlink_product_api(cfg, "starter", "sample")

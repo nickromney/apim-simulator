@@ -1,4 +1,7 @@
 import { type FormEvent, startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { ApiVersionsPanel } from "./ApiVersionsPanel";
+import MockResponseEditor from "./MockResponseEditor";
+import ProductsPanel from "./ProductsPanel";
 
 type PolicyScope = { scope_type: string; scope_name: string };
 type Example = { name: string; summary?: string | null; description?: string | null; value?: unknown };
@@ -131,8 +134,8 @@ type ReplayResult = {
   trace_id: string | null;
   trace: TraceItem | null;
 };
-type WorkflowTab = "policy" | "details" | "test" | "revisions" | "changelog";
-type ManagementArea = "apis" | "subscriptions" | "traces";
+type WorkflowTab = "policy" | "details" | "test" | "versions" | "revisions" | "changelog";
+type ManagementArea = "apis" | "products" | "subscriptions" | "traces";
 type AuthenticationMode = "operator-token" | "local-tenant";
 type ApiRevisionRecord = {
   id: string;
@@ -375,6 +378,10 @@ function App() {
   });
   const [apiDirty, setApiDirty] = useState(false);
   const [operationDirty, setOperationDirty] = useState(false);
+  const [productDirty, setProductDirty] = useState(false);
+  const [versionDirty, setVersionDirty] = useState(false);
+  const [responseDirty, setResponseDirty] = useState(false);
+  const [authoringReset, setAuthoringReset] = useState(0);
   const [isNewApi, setIsNewApi] = useState(false);
   const [apiCreationMode, setApiCreationMode] = useState<"choose" | "http" | "openapi">("choose");
   const [openApiUrl, setOpenApiUrl] = useState("");
@@ -414,7 +421,16 @@ function App() {
   );
   const selectedTrace = traces.find((trace) => trace.trace_id === selectedTraceId) ?? traces[0] ?? null;
   const hasUnsaved =
-    policyDirty || apiDirty || operationDirty || importDirty || revisionDirty || newRevisionDirty || releaseDirty;
+    policyDirty ||
+    apiDirty ||
+    operationDirty ||
+    importDirty ||
+    revisionDirty ||
+    newRevisionDirty ||
+    releaseDirty ||
+    productDirty ||
+    versionDirty ||
+    responseDirty;
   const revisionsBusy = revisionLoading || releaseLoading || busy;
   const filteredApis = (summary?.apis ?? []).filter((api) => {
     const query = search.trim().toLowerCase();
@@ -561,7 +577,7 @@ function App() {
 
   function discardUnsaved(): boolean {
     if (!hasUnsaved) return true;
-    if (!window.confirm("Discard unsaved API, operation, import, policy, revision, or release edits?")) return false;
+    if (!window.confirm("Discard unsaved changes?")) return false;
     setApiDirty(false);
     setOperationDirty(false);
     setPolicyDirty(false);
@@ -571,7 +587,25 @@ function App() {
     setRevisionChangelogNotes("");
     setReleaseDirty(false);
     setNewRevisionDirty(false);
+    setProductDirty(false);
+    setVersionDirty(false);
+    setResponseDirty(false);
+    setAuthoringReset((value) => value + 1);
     return true;
+  }
+
+  function changeConnection(change: () => void) {
+    if (!discardUnsaved()) return;
+    dashboardRequest.current += 1;
+    scopeRequest.current += 1;
+    revisionRequest.current += 1;
+    releaseRequest.current += 1;
+    setSummary(null);
+    setTraces([]);
+    setReplayResult(null);
+    setAuthoringReset((value) => value + 1);
+    setStatusMessage("Connect to load this gateway's resources.");
+    change();
   }
 
   function setApiForm(api: ApiSummary) {
@@ -659,6 +693,7 @@ function App() {
     preferredApiId?: string,
     allowDirty = false,
     preferredOperationId?: string,
+    raiseOnFailure = false,
   ) {
     const resetAuthoring = hasUnsaved;
     if (resetAuthoring && !allowDirty && !discardUnsaved()) return;
@@ -731,6 +766,7 @@ function App() {
     } catch (error) {
       if (requestId === dashboardRequest.current)
         setStatusMessage(error instanceof Error ? error.message : "Unable to refresh the console.");
+      if (raiseOnFailure) throw error;
     } finally {
       if (requestId === dashboardRequest.current) setBusy(false);
     }
@@ -1545,6 +1581,7 @@ function App() {
         </div>
         <nav className="application-nav" aria-label="Applications">
           <a href={`${baseUrl.replace(/\/$/, "")}/apim/portal`}>Developer portal</a>
+          <a href={`${baseUrl.replace(/\/$/, "")}/apim/portal/editor`}>Edit developer portal</a>
           <span aria-current="page">Console</span>
           <label>
             Appearance{" "}
@@ -1561,15 +1598,26 @@ function App() {
         from Azure API Management.
       </p>
       <nav className="service-nav" aria-label="Management areas">
-        {(["apis", "subscriptions", "traces"] as const).map((area) => (
+        {(["apis", "products", "subscriptions", "traces"] as const).map((area) => (
           <button
             key={area}
             type="button"
             className={activeArea === area ? "active" : ""}
             aria-current={activeArea === area ? "page" : undefined}
-            onClick={() => setActiveArea(area)}
+            disabled={busy}
+            onClick={() => {
+              if (area === activeArea || !discardUnsaved()) return;
+              setActiveArea(area);
+              if (summary) void refreshDashboard(selectedScopeId, selectedApiId, true, selectedOperationId);
+            }}
           >
-            {area === "apis" ? "APIs" : area === "subscriptions" ? "Subscriptions" : "Request traces"}
+            {area === "apis"
+              ? "APIs"
+              : area === "products"
+                ? "Products"
+                : area === "subscriptions"
+                  ? "Subscriptions"
+                  : "Request traces"}
           </button>
         ))}
       </nav>
@@ -1591,11 +1639,19 @@ function App() {
           <div className="connection-url">
             <label>
               <span className="field-label">Gateway base URL</span>
-              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} disabled={busy} />
+              <input
+                value={baseUrl}
+                onChange={(event) => changeConnection(() => setBaseUrl(event.target.value))}
+                disabled={busy}
+              />
             </label>
             <label>
               <span className="field-label">API ID for scoped access (optional)</span>
-              <input value={scopedApiId} onChange={(event) => setScopedApiId(event.target.value)} disabled={busy} />
+              <input
+                value={scopedApiId}
+                onChange={(event) => changeConnection(() => setScopedApiId(event.target.value))}
+                disabled={busy}
+              />
             </label>
           </div>
           <div className="connection-key">
@@ -1605,11 +1661,9 @@ function App() {
                 value={authenticationMode}
                 disabled={busy}
                 onChange={(event) => {
-                  setAuthenticationMode(event.target.value as AuthenticationMode);
-                  setSummary(null);
-                  setTraces([]);
-                  setReplayResult(null);
-                  setStatusMessage("Enter your management credential and connect.");
+                  const mode = event.target.value;
+                  if (mode === "local-tenant" || mode === "operator-token")
+                    changeConnection(() => setAuthenticationMode(mode));
                 }}
               >
                 <option value="operator-token">Signed operator token</option>
@@ -1626,9 +1680,11 @@ function App() {
                 spellCheck={false}
                 value={authenticationMode === "operator-token" ? operatorToken : tenantKey}
                 onChange={(event) =>
-                  authenticationMode === "operator-token"
-                    ? setOperatorToken(event.target.value)
-                    : setTenantKey(event.target.value)
+                  changeConnection(() =>
+                    authenticationMode === "operator-token"
+                      ? setOperatorToken(event.target.value)
+                      : setTenantKey(event.target.value),
+                  )
                 }
                 disabled={busy}
               />
@@ -1691,7 +1747,10 @@ function App() {
                 >
                   <span>
                     <strong>{api.name}</strong>
-                    <small>/{api.path}</small>
+                    <small>
+                      /{api.path}
+                      {api.api_version_set ? ` · ${api.api_version ?? "Original"}` : ""}
+                    </small>
                   </span>
                   <span className="tree-count">{api.operations.length}</span>
                 </button>
@@ -1776,14 +1835,12 @@ function App() {
             ) : null}
           </div>
           <nav className="workflow-tabs" aria-label="API workflow">
-            {(["policy", "details", "test", "revisions", "changelog"] as const).map((tab) => (
+            {(["policy", "details", "test", "versions", "revisions", "changelog"] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
                 className={activeTab === tab ? "active" : ""}
-                disabled={
-                  (["revisions", "changelog"] as const).includes(tab as "revisions" | "changelog") && !selectedApi
-                }
+                disabled={busy || ((tab === "versions" || tab === "revisions" || tab === "changelog") && !selectedApi)}
                 onClick={() => {
                   if (!discardUnsaved()) return;
                   setActiveTab(tab);
@@ -1806,9 +1863,11 @@ function App() {
                     ? "Design"
                     : tab === "test"
                       ? "Test"
-                      : tab === "revisions"
-                        ? "Revisions"
-                        : "Changelog"}
+                      : tab === "versions"
+                        ? "Versions"
+                        : tab === "revisions"
+                          ? "Revisions"
+                          : "Changelog"}
               </button>
             ))}
           </nav>
@@ -2256,6 +2315,35 @@ function App() {
                 )}
               </div>
             )
+          ) : null}
+
+          {activeTab === "details" && selectedApi && selectedOperation ? (
+            <MockResponseEditor
+              key={`${selectedApi.id}:${selectedOperation.id}:${authoringReset}`}
+              request={apiFetch}
+              apiId={selectedApi.id}
+              operationId={selectedOperation.id}
+              disabled={busy || apiDirty || operationDirty || policyDirty || importDirty}
+              onChanged={() => refreshDashboard(selectedScopeId, selectedApi.id, true, selectedOperation.id, true)}
+              onDirtyChange={setResponseDirty}
+              onBusyChange={setBusy}
+            />
+          ) : null}
+
+          {activeTab === "versions" && selectedApi ? (
+            <ApiVersionsPanel
+              key={`${selectedApi.id}:${authoringReset}`}
+              request={apiFetch}
+              api={selectedApi}
+              versionSets={summary?.api_version_sets ?? []}
+              disabled={busy}
+              onCreated={async (apiId) => {
+                await refreshDashboard(undefined, apiId, true, undefined, true);
+                setActiveTab("versions");
+              }}
+              onDirtyChange={setVersionDirty}
+              onBusyChange={setBusy}
+            />
           ) : null}
 
           {activeTab === "revisions" ? (
@@ -2976,6 +3064,21 @@ function App() {
               </div>
               <ReplayOutput result={replayResult} onTrace={(traceId) => setSelectedTraceId(traceId)} />
             </div>
+          ) : null}
+        </section>
+
+        <section className="panel" hidden={activeArea !== "products"}>
+          {summary ? (
+            <ProductsPanel
+              key={authoringReset}
+              request={apiFetch}
+              products={summary.products}
+              apis={summary.apis}
+              disabled={busy}
+              onChanged={() => refreshDashboard(selectedScopeId, selectedApiId, true, selectedOperationId, true)}
+              onDirtyChange={setProductDirty}
+              onBusyChange={setBusy}
+            />
           ) : null}
         </section>
 

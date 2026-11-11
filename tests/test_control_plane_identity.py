@@ -95,7 +95,7 @@ def test_content_editor_only_edits_portal():
     denied(cfg, "/apim/reload", "POST", bearer=bearer)
 
 
-def test_workspace_and_api_grants_intersect_and_do_not_grant_global_inventory():
+def test_workspace_and_api_grants_intersect():
     cfg = config(workspace_apis={"team-a": ["orders", "inventory"], "team-b": ["payroll"]})
     bearer = token(apim_grants=[{"role": "contributor", "workspace_id": "team-a", "api_ids": ["orders", "payroll"]}])
     authorize(cfg, "/apim/management/apis/orders/operations/get", "PUT", bearer)

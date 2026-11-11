@@ -1,10 +1,10 @@
-# 6 - Debug Your APIs
+# 6 - Debug your APIs
 
-Source: [Tutorial: Debug your APIs](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-api-inspector)
+Microsoft Learn equivalent tutorial: [Tutorial: Debug your APIs](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-api-inspector)
 
-Simulator status: Adapted
+Request a trace and inspect the gateway response and policy steps.
 
-## Run It Locally
+## Request a trace
 
 From the repo root:
 
@@ -38,43 +38,23 @@ curl -sS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
   "$APIM_BASE/apim/management/traces"
 ```
 
-## What Mapped Cleanly
+The trace includes the response status, upstream URL, and policy execution steps.
 
-- Per-request policy execution detail
-- Backend selection and upstream URL inspection
-- Trace-first debugging workflow
+## Run the scripted exercise
 
-## Shortcut
-
-If you want the scripted shortcut instead of running the commands manually:
+To set up and verify the exercise with a script, run:
 
 ```bash
 ./docs/tutorials/apim-get-started/tutorial06.sh --setup
 ./docs/tutorials/apim-get-started/tutorial06.sh --verify
 ```
 
-Use `--setup` to have [`tutorial06.sh`](tutorial06.sh) perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
-
-Expected key `./docs/tutorials/apim-get-started/tutorial06.sh --verify` output:
-
-```text
-Verifying stored trace details
-$ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/traces"
-{
-  "matching_traces": 1
-}
-
-$ curl -sS "http://localhost:8000/apim/trace/<trace-id>"
-{
-  "correlation_id": "tutorial06-health",
-  "status": 200,
-  "upstream_url": "http://mock-backend:8080/api/health"
-}
-```
+Setup sends a traced health request. Verification checks the stored trace for
+an HTTP 200 response and the upstream URL `http://mock-backend:8080/api/health`.
 
 ## API-scoped debug credentials
 
-The local gateway also implements the tutorial's credential workflow:
+To request and retrieve a trace with an API-scoped debug credential:
 
 1. POST to `/apim/management/gateways/managed/listDebugCredentials` with the tenant
    header and `{"apiId":"tutorial-api","purposes":["tracing"],"credentialsExpireAfter":"PT1H"}`.
@@ -82,8 +62,7 @@ The local gateway also implements the tutorial's credential workflow:
 3. Read `Apim-Trace-Id`, then POST `{"traceId":"<returned-id>"}` to
    `/apim/management/gateways/managed/listTrace` with the tenant header.
 
-The script tests API scope, expiry, lookup, and identical response bodies with and
-without tracing. Wrong-API and expired credentials produce the documented debug
-response headers without changing the gateway result. Debug tokens are temporary,
+A credential for another API or an expired credential produces debug response headers
+without changing the gateway result. Debug tokens are temporary,
 in memory, bounded to one hour, and removed from forwarded backend headers.
 The existing `x-apim-trace` flow remains available for local compatibility.

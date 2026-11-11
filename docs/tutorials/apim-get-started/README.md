@@ -1,92 +1,75 @@
-# APIM Get-Started Tutorial Mirror
+# Get started with the APIM simulator
 
-This directory mirrors the 11-item [Azure API Management "Get started" tutorial sequence from Microsoft Learn](https://learn.microsoft.com/en-us/azure/api-management/), but mapped onto `apim-simulator`.
+Start a local gateway, import your first API, and send a request. Then use the
+tutorials to publish APIs, apply policies, and configure the developer portal.
 
-Source sequence, verified on 2026-10-02 from the API Management TOC:
+## Start the simulator
 
-1. Import your first API
-2. Create and publish a product
-3. Mock API responses
-4. Protect your API
-5. Monitor published APIs
-6. Debug your APIs
-7. Add revisions
-8. Add multiple versions
-9. Customise developer portal
-10. Manage APIs in Visual Studio Code
-11. Link to an API Center
-
-## Orient Yourself First
-
-If you are new to APIM, use the operator console before you start tutorial 1:
-
-```bash
-make up-ui
-```
-
-Then open `http://localhost:3007`, click `Load Local Demo`, and connect.
-
-That gives you a low-context view of the simulator’s current APIs, routes,
-policies, traces, and subscriptions before you begin modifying anything.
-
-## Common Setup
-
-Run the direct public stack from the repo root:
+Run this command from the repository root.
 
 ```bash
 make up
+```
+
+Open the operator console at <http://localhost:3007>, select **Load Local Demo**,
+and select **Connect**. Use the developer portal at
+<http://localhost:8000/apim/portal> to discover published APIs and try them with
+a subscription key. See the [Microsoft Learn quickstart](https://learn.microsoft.com/en-us/azure/api-management/get-started-create-service-instance).
+
+## Choose a tutorial
+
+| Tutorial | What you can do |
+| --- | --- |
+| [1. Import your first API](01-import-your-first-api.md) | Import Petstore and the tutorial API, then call the gateway. |
+| [2. Create and publish a product](02-create-and-publish-a-product.md) | Publish an API in the developer portal and request a subscription. |
+| [3. Mock API responses](03-mock-api-responses.md) | Save a response example and return it from the gateway without a backend. |
+| [4. Protect your API](04-protect-your-api.md) | Add a response header, apply a rate limit, and check when access resumes. |
+| [5. Monitor published APIs](05-monitor-published-apis.md) | Inspect local metrics, logs, traces, and alerts. |
+| [6. Debug your APIs](06-debug-your-apis.md) | Trace a request and inspect the policies and backend it used. |
+| [7. Add revisions](07-add-revisions.md) | Test a revision and make it current when it is ready. |
+| [8. Add multiple versions](08-add-multiple-versions.md) | Create a version and call it alongside the original API. |
+| [9. Customize the developer portal](09-customise-developer-portal.md) | Edit branding and pages, preview the draft, and publish it. |
+| [10. Work with your API using Bruno CLI](10-manage-apis-in-visual-studio-code.md) | Import, edit, test, and export an API with the Bruno collection. |
+| [11. Link to a local API Center](11-link-to-an-api-center.md) | Link a catalog and see source API changes appear in its inventory. |
+
+APIM workspaces are unsupported in the simulator. [Microsoft Learn workspace overview](https://learn.microsoft.com/en-us/azure/api-management/workspaces-overview)
+
+## Run the tutorials from the terminal
+
+Before running the tutorial scripts, [check Docker, curl, and uv](01-import-your-first-api.md#check-prerequisites).
+
+Set the gateway URL and demo tenant key for the terminal examples.
+
+```bash
 export APIM_BASE=http://localhost:8000
 export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
-These tutorials assume the API you import in step 1 uses:
+Use `--setup` to create a tutorial's resources and `--verify` to check the result.
+Use `--dry-run` to preview setup. The Bruno lesson reruns authoring requests
+during verification, and the debugging lesson issues temporary credentials.
 
-- API ID: `tutorial-api`
-- API path: `tutorial-api`
-- product ID: `tutorial-product`
-- subscription ID: `tutorial-sub`
-- subscription key: `tutorial-key`
+## Run all tutorials in a separate stack
 
-Each mirrored step also has a companion `tutorialNN.sh` script in this
-directory. Run `--setup` or `--execute` to apply a step. Run `--verify` to
-validate the existing tutorial state without restarting the stack. Run
-`--dry-run` to preview the setup path without side effects.
+Install `mkcert` and run `mkcert -install` for the monitoring tutorial. Use any
+unused positive stack slot. Each slot adds 100 times its number to the default
+host ports. For example, slots 2, 6, and 8 use gateway ports 8200, 8600, and 8800.
 
-Use [`./docs/tutorials/apim-get-started/tutorial-cleanup.sh`](tutorial-cleanup.sh)
-with `--dry-run` to preview or `--execute` to stop the tutorial compose stacks
-and remove orphaned containers.
-
-## Status Matrix
-
-| Step | Microsoft Learn | Simulator | Local guide |
-| --- | --- | --- | --- |
-| 1 | [Import your first API](https://learn.microsoft.com/en-us/azure/api-management/import-and-publish) | Supported | [01](./01-import-your-first-api.md) |
-| 2 | [Create and publish a product](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-add-products) | Supported | [02](./02-create-and-publish-a-product.md) |
-| 3 | [Mock API responses](https://learn.microsoft.com/en-us/azure/api-management/mock-api-responses) | Supported | [03](./03-mock-api-responses.md) |
-| 4 | [Protect your API](https://learn.microsoft.com/en-us/azure/api-management/transform-api) | Supported | [04](./04-protect-your-api.md) |
-| 5 | [Monitor published APIs](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-use-azure-monitor) | Adapted | [05](./05-monitor-published-apis.md) |
-| 6 | [Debug your APIs](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-api-inspector) | Adapted | [06](./06-debug-your-apis.md) |
-| 7 | [Add revisions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-revise-api) | Supported | [07](./07-add-revisions.md) |
-| 8 | [Add multiple versions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-publish-versions) | Supported | [08](./08-add-multiple-versions.md) |
-| 9 | [Customise developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize) | Adapted | [09](./09-customise-developer-portal.md) |
-| 10 | [Manage APIs in Visual Studio Code](https://learn.microsoft.com/en-us/azure/api-management/visual-studio-code-tutorial) | Adapted | [10](./10-manage-apis-in-visual-studio-code.md) |
-| 11 | [Link to an API Center](https://learn.microsoft.com/en-us/azure/api-management/tutorials/link-api-center) | Supported | [11](./11-link-to-an-api-center.md) |
-
-## Local equivalents
-
-All eleven tutorial outcomes have local workflows. Monitoring uses local metrics,
-logs and alert action-group events plus OTEL/Grafana; debug uses API-scoped
-credentials and trace lookup; portal customization uses draft, preview and publish;
-API Center uses a continuously synchronized local catalog. Tutorial 10 uses Bruno
-CLI for import, editing, policy authoring, testing and export.
-
-`Supported` denotes local API behavior; `Adapted` denotes a different local client
-or service implementing the tutorial outcome. Run every journey with:
+Replace `2` with your chosen slot.
 
 ```bash
-make -C examples/apim-tutorials smoke
+make ensure-certs
+env -u APIM_BASE STACK_SLOT=2 make -C examples/apim-tutorials smoke
 ```
 
-Tutorial 10's `--verify` repeats authoring requests through Bruno. Other verification
-commands inspect state, and tutorial 6 issues temporary credentials to test expiry.
-See [validation report](validation-2026-10-02.md).
+The command recreates the tutorial stack between lessons and removes it when
+the run finishes.
+
+## Stop the simulator
+
+Save any edits you want to keep before stopping the stack.
+[Save and restore your edits](../../LOCAL-LIFECYCLE.md#save-edits-before-stopping)
+
+Run `make down` to stop the default stack. If you ran an individual tutorial
+script with a different slot, use the same slot with
+[`tutorial-cleanup.sh --execute`](tutorial-cleanup.sh).

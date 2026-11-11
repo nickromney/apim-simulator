@@ -21,21 +21,34 @@ class CliUsageError(Exception):
     """A command-level validation failure (bad flags, unreadable files) reported as exit code 1."""
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        if message.startswith("unrecognized arguments:") and any(
+            option.startswith("--")
+            and len(option) > 2
+            and any(flag.startswith(option.split("=", 1)[0]) for flag in ("--tenant-key", "--bearer-token"))
+            for option in message.split()[2:]
+        ):
+            message = "credential options must precede the command"
+        super().error(message)
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="apimsim",
-        description="Thin HTTP client for the APIM simulator's tenant-key-protected management API.",
+        description="Thin HTTP client for the APIM simulator management API.",
     )
     parser.add_argument(
         "--base-url",
         default=os.environ.get("APIM_BASE_URL", DEFAULT_BASE_URL),
         help=f"Simulator base URL (env APIM_BASE_URL, default {DEFAULT_BASE_URL}).",
     )
-    parser.add_argument(
+    credentials = parser.add_mutually_exclusive_group()
+    credentials.add_argument(
         "--tenant-key",
-        default=os.environ.get("APIM_TENANT_KEY"),
         help="Tenant key sent as X-Apim-Tenant-Key (env APIM_TENANT_KEY).",
     )
+    credentials.add_argument("--bearer-token", help="Bearer token sent as Authorization (env APIM_BEARER_TOKEN).")
     parser.add_argument(
         "--timeout",
         type=float,
@@ -146,7 +159,9 @@ def _parse_kv_pairs(items: list[str], *, flag: str) -> dict[str, str]:
     return pairs
 
 
-def _headers(tenant_key: str | None) -> dict[str, str]:
+def _headers(tenant_key: str | None, bearer_token: str | None) -> dict[str, str]:
+    if bearer_token is not None:
+        return {"Authorization": f"Bearer {bearer_token}"}
     return {"X-Apim-Tenant-Key": tenant_key} if tenant_key else {}
 
 
@@ -174,10 +189,11 @@ async def _request(
     path: str,
     *,
     tenant_key: str | None,
+    bearer_token: str | None,
     json_body: dict[str, Any] | None = None,
     params: dict[str, str] | None = None,
 ) -> httpx.Response:
-    return await client.request(method, path, headers=_headers(tenant_key), json=json_body, params=params)
+    return await client.request(method, path, headers=_headers(tenant_key, bearer_token), json=json_body, params=params)
 
 
 def _import_openapi_body(args: argparse.Namespace) -> dict[str, Any]:
@@ -292,11 +308,19 @@ async def _inspect(args: argparse.Namespace, client: httpx.AsyncClient) -> int:
     complete = True
     for name, path in _INSPECTIONS.items():
         try:
-            response = await _request(client, "GET", path, tenant_key=args.tenant_key if name != "health" else None)
+            response = await _request(
+                client,
+                "GET",
+                path,
+                tenant_key=args.tenant_key if name != "health" else None,
+                bearer_token=args.bearer_token if name != "health" else None,
+            )
             try:
                 body = response.json()
             except ValueError:
                 body = response.text
+            if not response.is_success:
+                body = _redact_value(body, args)
             observations[name] = {"path": path, "status_code": response.status_code, "body": body}
             complete = complete and response.is_success
         except httpx.HTTPError:
@@ -346,16 +370,35 @@ async def _dispatch(args: argparse.Namespace, client: httpx.AsyncClient) -> http
         plan["method"],
         plan["path"],
         tenant_key=args.tenant_key,
+        bearer_token=args.bearer_token,
         json_body=plan["body"],
         params=plan["params"],
     )
 
 
-def _error_detail(response: httpx.Response) -> str:
+def _redact_credentials(value: str, args: argparse.Namespace) -> str:
+    for secret in (args.tenant_key, args.bearer_token):
+        if secret:
+            value = value.replace(secret, "[redacted]")
+    return value
+
+
+def _redact_value(value: Any, args: argparse.Namespace) -> Any:
+    if isinstance(value, str):
+        return _redact_credentials(value, args)
+    if isinstance(value, list):
+        return [_redact_value(item, args) for item in value]
+    if isinstance(value, dict):
+        return {_redact_credentials(key, args): _redact_value(item, args) for key, item in value.items()}
+    return value
+
+
+def _error_detail(response: httpx.Response, args: argparse.Namespace) -> str:
     try:
         payload = response.json()
     except ValueError:
         return response.text
+    payload = _redact_value(payload, args)
     if isinstance(payload, dict) and "detail" in payload:
         return str(payload["detail"])
     return json.dumps(payload)
@@ -374,11 +417,13 @@ async def _run(
             print(f"error: {exc}", file=sys.stderr)
             return 1
         except httpx.TransportError as exc:
-            print(f"error: could not reach {args.base_url}: {exc}", file=sys.stderr)
+            print(f"error: could not reach simulator: {_redact_credentials(str(exc), args)}", file=sys.stderr)
             return 2
 
     if response.status_code >= 400:
-        print(f"error: {response.status_code} {_error_detail(response)}", file=sys.stderr)
+        print(
+            f"error: {response.status_code} {_redact_credentials(_error_detail(response, args), args)}", file=sys.stderr
+        )
         return 1
 
     print(json.dumps(response.json(), indent=2))
@@ -419,6 +464,16 @@ def main(
             print(f"error: {exc}", file=sys.stderr)
             return 1
         return 0
+    if args.tenant_key is None and args.bearer_token is None:
+        args.tenant_key = os.environ.get("APIM_TENANT_KEY")
+        args.bearer_token = os.environ.get("APIM_BEARER_TOKEN")
+        if args.tenant_key is not None and args.bearer_token is not None:
+            parser.error("APIM_TENANT_KEY and APIM_BEARER_TOKEN cannot both be set")
+    if args.bearer_token is not None and (
+        not args.bearer_token or any(not 33 <= ord(char) <= 126 for char in args.bearer_token)
+    ):
+        print("error: bearer token must contain only visible ASCII characters", file=sys.stderr)
+        return 1
     return asyncio.run(_run(args, transport))
 
 

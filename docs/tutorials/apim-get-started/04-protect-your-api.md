@@ -1,10 +1,10 @@
-# 4 - Protect Your API
+# 4 - Protect your API
 
-Source: [Tutorial: Transform and protect your API](https://learn.microsoft.com/en-us/azure/api-management/transform-api)
+Microsoft Learn equivalent tutorial: [Tutorial: Transform and protect your API](https://learn.microsoft.com/en-us/azure/api-management/transform-api)
 
-Simulator status: Supported
+Add a response header and limit calls by subscription.
 
-## Run It Locally
+## Apply the policy
 
 From the repo root:
 
@@ -36,66 +36,19 @@ sleep 16
 curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/health"
 ```
 
-## What Mapped Cleanly
-
-- API-level policies
-- outbound header transforms
-- request throttling with `rate-limit-by-key`
-- Recovery after the 15-second rate-limit window renews
-
 The first three calls return `200` with `Custom: My custom value`. The fourth
 returns `429` with a `Retry-After` header. After 16 seconds, the same key succeeds
 again with the custom header. The scripted verification checks that complete
 sequence, including renewal; allow at least 16 seconds for `--verify`.
 
-## Shortcut
+## Run the scripted exercise
 
-If you want the scripted shortcut instead of running the commands manually:
+To set up and verify the exercise with a script, run:
 
 ```bash
 ./docs/tutorials/apim-get-started/tutorial04.sh --setup
 ./docs/tutorials/apim-get-started/tutorial04.sh --verify
 ```
 
-Use `--setup` to have [`tutorial04.sh`](tutorial04.sh) perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
-
-Expected key `./docs/tutorials/apim-get-started/tutorial04.sh --verify` output:
-
-```text
-Applying transform and rate-limit policy to 'tutorial-api'
-{
-  "contains_custom_header": true,
-  "contains_rate_limit": true,
-  "scope_name": "tutorial-api",
-  "scope_type": "api"
-}
-
-Verifying transform and throttling
-$ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/tutorial-api/health"
-{
-  "custom_header": "My custom value",
-  "path": "/api/health",
-  "status": "ok",
-  "status_code": 200
-}
-
-$ curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/tutorial-api/health"
-{
-  "body_status_code": 429,
-  "rate_limit_message": true,
-  "retry_after_present": true,
-  "status_code": 429
-}
-
-Waiting 16 seconds to verify the 15-second rate-limit renewal
-{
-  "custom_header": "My custom value",
-  "path": "/api/health",
-  "status": "ok",
-  "status_code": 200
-}
-```
-
-## Differences From Azure APIM
-
-- The simulator uses the XML policy editor directly rather than the Azure portal gallery UI.
+Use `--setup` to import the API and apply the policy. Use `--verify` to check
+the header and rate limit on the running stack.

@@ -1,10 +1,32 @@
-# 2 - Create And Publish A Product
+# 2 - Create and publish a product
 
-Source: [Tutorial: Create and publish a product](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-add-products)
+Microsoft Learn equivalent tutorial: [Tutorial: Create and publish a product](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-add-products)
 
-Simulator status: Supported
+Create a product, add an API, and request a subscription to call it.
 
-## Run It Locally
+## Use the operator console
+
+Start the stack with `make up` and [import `tutorial-api`](01-import-your-first-api.md).
+Open [the operator console](http://localhost:3007), choose **Load Local Demo**,
+and connect.
+
+1. Open **Products**, select **New product**, and enter `tutorial-product` as
+   the product ID and `Tutorial Product` as its name.
+2. Leave **Require subscription** selected. Optionally enter a description,
+   terms, a subscription limit, or require approval. Select **Published** and
+   save the product.
+3. Under **API association**, select `tutorial-api` and choose **Add API**.
+4. Open [the developer portal](http://localhost:8000/apim/portal) to discover
+   the published product and request a subscription. If approval is required,
+   approve the request in the operator console before using its key.
+
+A published subscription product with no group restrictions is visible to
+portal users. Group-restricted products retain their existing groups when edited;
+manage group links through the management API. Open products are visible only
+to administrators in this simulator. Publication controls portal discovery,
+while a valid subscription can access an unpublished product through the gateway.
+
+## Use the management API
 
 From the repo root:
 
@@ -13,16 +35,15 @@ export APIM_BASE=http://localhost:8000
 export APIM_TENANT_KEY=local-dev-tenant-key
 ```
 
-These commands assume `tutorial-api` already exists. If you have not imported
-it yet, run step 1 first or use `./docs/tutorials/apim-get-started/tutorial01.sh --setup`.
+Import `tutorial-api` before running these commands.
 
-Create the product:
+Create and publish the product.
 
 ```bash
 curl -sS -X PUT -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" \
   -H "Content-Type: application/json" \
   "$APIM_BASE/apim/management/products/tutorial-product" \
-  --data '{"name":"Tutorial Product","description":"Product used by the mirrored APIM tutorials.","require_subscription":true}'
+  --data '{"name":"Tutorial Product","state":"published","require_subscription":true}'
 ```
 
 Attach the imported API to the product:
@@ -50,85 +71,29 @@ curl -i "$APIM_BASE/tutorial-api/health"
 curl -i -H "Ocp-Apim-Subscription-Key: tutorial-key" "$APIM_BASE/tutorial-api/health"
 ```
 
-## What Mapped Cleanly
+The first request returns HTTP 401. The second returns HTTP 200 and
+`"status": "ok"`.
 
-- Product CRUD
-- Product-to-API association
-- Subscription-backed access
+## Run the setup script
 
-## Shortcut
-
-If you want the scripted shortcut instead of running the commands manually:
+To run setup and verify the results with the tutorial script:
 
 ```bash
 ./docs/tutorials/apim-get-started/tutorial02.sh --setup
 ./docs/tutorials/apim-get-started/tutorial02.sh --verify
 ```
 
-Use `--setup` to have [`tutorial02.sh`](tutorial02.sh) perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
+Use `--setup` to create the product and subscription. Use `--verify` to check the existing state without restarting the stack.
 
-Expected key `./docs/tutorials/apim-get-started/tutorial02.sh --verify` output:
-
-```text
-Creating product 'tutorial-product'
-{
-  "id": "tutorial-product",
-  "name": "Tutorial Product",
-  "require_subscription": true,
-  "subscription_count": 0
-}
-
-Creating subscription 'tutorial-sub'
-{
-  "id": "tutorial-sub",
-  "name": "tutorial-sub",
-  "primary_key": "tutorial-key",
-  "products": [
-    "tutorial-product"
-  ]
-}
-
-Verifying product and subscription metadata
-$ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/products/tutorial-product"
-{
-  "id": "tutorial-product",
-  "require_subscription": true,
-  "subscription_count": 1
-}
-
-$ curl -sS -H "X-Apim-Tenant-Key: local-dev-tenant-key" "http://localhost:8000/apim/management/subscriptions/tutorial-sub"
-{
-  "id": "tutorial-sub",
-  "primary_key": "tutorial-key",
-  "products": [
-    "tutorial-product"
-  ],
-  "state": "active"
-}
-
-Verifying subscription-backed access
-$ curl -i "http://localhost:8000/tutorial-api/health"
-{
-  "statusCode": 401,
-  "message": "Access denied due to missing subscription key. Make sure to include subscription key when making requests to an API."
-}
-
-$ curl -sS -H "Ocp-Apim-Subscription-Key: tutorial-key" "http://localhost:8000/tutorial-api/health"
-{
-  "path": "/api/health",
-  "status": "ok"
-}
-```
+Verification confirms the product appears in the catalog and has one active
+subscription.
 
 ## Publication, terms and limits
 
-Management-created products default to `not_published`. The gateway still accepts
-valid subscription keys; publication controls developer catalog discovery. Publish
-with a product PUT containing `state: "published"`. The script verifies that the
-unpublished product is hidden and the published product appears in the consumer
-catalog.
+Products you create through the management API default to `not_published`. To
+publish an existing product, set `state` to `published` with a product PUT.
 
-It also creates a separate signup product with legal terms and a subscription
-limit of one. A request without acceptance returns `400`; accepting the terms
-creates an active subscription; a second request returns `409`. Open products are
-visible only to administrators, and an API may belong to at most one open product.
+When you set product terms, the developer must accept them before requesting a
+subscription. A request without acceptance returns HTTP 400. A request that
+exceeds the product's per-developer subscription limit returns HTTP 409. An API
+can belong to one open product.

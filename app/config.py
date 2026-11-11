@@ -294,6 +294,7 @@ class OperationExampleConfig(BaseModel):
     description: str | None = None
     value: Any | None = None
     external_value: str | None = None
+    value_format: Literal["auto", "json"] = Field(default="auto", repr=False, exclude_if=lambda value: value == "auto")
 
 
 class OperationParameterConfig(BaseModel):

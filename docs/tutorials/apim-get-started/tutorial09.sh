@@ -37,9 +37,11 @@ verify_tutorial() {
 
   published_response="$(curl -fsS "$APIM_BASE/apim/portal/content")"
   json_expect_summary "$published_response" \
-    '{"site_title":"Tutorial Developer Portal","theme":"dark","accent_color":"#663399","page":"getting-started"}' \
+    '{"site_title":"Tutorial Developer Portal","theme":"dark","accent_color":"#663399","body_font":"serif","heading_font":"monospace","button_style":"outline","button_radius":"pill","page":"getting-started"}' \
     'site = data["site"]
-summary = {"site_title":site["site_title"], "theme":site["theme"], "accent_color":site["accent_color"], "page":next(p["slug"] for p in site["pages"] if p["slug"] == "getting-started")}'
+summary = {"page": next(p["slug"] for p in site["pages"] if p["slug"] == "getting-started")}
+for key in ("site_title", "theme", "accent_color", "body_font", "heading_font", "button_style", "button_radius"):
+    summary[key] = site[key]'
   image_url="$(PUBLISHED_RESPONSE="$published_response" tutorial_python - <<'PY'
 import json, os
 print(json.loads(os.environ["PUBLISHED_RESPONSE"])["site"]["logo_url"])
@@ -55,8 +57,12 @@ PY
   echo '$ curl -i "'"$APIM_BASE"'/apim/portal"'
   capture_http_request "$APIM_BASE/apim/portal"
   captured_expect_summary \
-    '{"status_code":200}' \
-    'summary = {"status_code": status}'
+    '{"status_code":200,"styles_visible":true}' \
+    'styles_visible = (
+    "--portal-body-font:Georgia" in body_text and "--portal-heading-font:ui-monospace" in body_text
+    and "--portal-button-radius:999px" in body_text and "--portal-button-bg:transparent" in body_text
+)
+summary = {"status_code": status, "styles_visible": styles_visible}'
 
   echo
   echo '$ curl -sS -H "X-Apim-Portal-User: '"$APIM_PORTAL_USER"'" "'"$APIM_BASE"'/apim/portal/catalog"'
@@ -191,7 +197,11 @@ draft_response="$(management_get "/apim/portal/editor/draft")"
 draft_payload="$(DRAFT_RESPONSE="$draft_response" IMAGE_URL="$image_url" tutorial_python - <<'PY'
 import json, os
 site = json.loads(os.environ["DRAFT_RESPONSE"])["site"]
-site.update(site_title="Tutorial Developer Portal", theme="dark", accent_color="#663399", logo_url=os.environ["IMAGE_URL"])
+site.update(
+    site_title="Tutorial Developer Portal", theme="dark", accent_color="#663399",
+    body_font="serif", heading_font="monospace", button_style="outline", button_radius="pill",
+    logo_url=os.environ["IMAGE_URL"],
+)
 site["pages"] = [{"slug":"home","title":"Welcome developers","content":"Discover our APIs and request access."},
                  {"slug":"getting-started","title":"Getting started","content":"Request access to a product, then try an API call."}]
 print(json.dumps(site))
@@ -200,10 +210,18 @@ PY
 management_put "/apim/portal/editor/draft" "$draft_payload" >/dev/null
 capture_http_request -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" "$APIM_BASE/apim/portal/editor/preview"
 captured_expect_summary '{"status_code":200,"draft_visible":true}' \
-  'summary = {"status_code":status,"draft_visible":"Welcome developers" in body_text and "--accent:#663399" in body_text}'
+  'draft_visible = (
+    "Welcome developers" in body_text and "--accent:#663399" in body_text
+    and "--portal-body-font:Georgia" in body_text and "--portal-heading-font:ui-monospace" in body_text
+    and "--portal-button-radius:999px" in body_text and "--portal-button-bg:transparent" in body_text
+)
+summary = {"status_code": status, "draft_visible": draft_visible}'
 published_before="$(curl -fsS "$APIM_BASE/apim/portal/content")"
 json_expect_summary "$published_before" '{"draft_private":true}' \
-  'summary = {"draft_private":data["site"]["site_title"] != "Tutorial Developer Portal"}'
+  'site = data["site"]
+summary = {"draft_private": site["site_title"] != "Tutorial Developer Portal"
+    and site["body_font"] == site["heading_font"] == "system"
+    and site["button_style"] == "filled" and site["button_radius"] == "square"}'
 echo "Publishing the saved draft"
 management_post "/apim/portal/editor/publish" '{}' >/dev/null
 image_status="$(curl -sS -o /dev/null -w '%{http_code}' "$APIM_BASE$image_url")"

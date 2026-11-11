@@ -316,8 +316,10 @@ metric backend behavior do not claim Azure identity.
 OTEL integration support development workflows. Resource IDs and JSON shapes
 are APIM-shaped projections, not ARM or SDK wire compatibility.
 
-**Inputs and defaults.** Management is available only when
-`tenant_access.enabled` is true. Writes synchronously update local config and
+**Inputs and defaults.** Management is available when `tenant_access.enabled`
+or `control_plane.enabled` is true. API discovery filters the API collection
+to the signed identity's API grants. Global readers and permitted legacy keys
+can read the full API collection. Writes synchronously update local config and
 reload the gateway. Trace lookup uses the local trace ID and optional trace
 headers. Logger and diagnostic resources preserve descriptive settings.
 
@@ -358,6 +360,18 @@ published content. The portal groups API versions and generates Segment, Header,
 or Query selectors. Product publication controls discovery; terms and limits apply
 to consumer signup. Management-created products default to unpublished.
 
+The operator console authors product publication and API membership, response
+examples and operation-level mock policies, and cloned API versions. The local
+response-example and mock-response editing endpoints update only their selected
+fields from staged configuration, preserving other metadata and policies.
+New JSON examples retain scalar string types through mocking and OpenAPI export;
+legacy raw JSON text examples retain their existing interpretation. These
+editing endpoints are local conveniences for the
+[mock response tutorial](https://learn.microsoft.com/en-us/azure/api-management/mock-api-responses).
+Conditional mock policies and a direct earlier `return-response` require XML
+editing in Design. Inherited policy behavior is checked through Test and effective
+policy inspection.
+
 API Center maintains a persisted one-way local catalog of all source APIs,
 including optional exported OpenAPI. Create/edit/delete operations synchronize
 immediately; unlink removes synchronized assets. One link is allowed per simulator.
@@ -365,7 +379,9 @@ immediately; unlink removes synchronized assets. One link is allowed per simulat
 Evidence: [local tutorial guides](tutorials/apim-get-started/README.md),
 `tests/test_debug_credentials.py`, `tests/test_local_monitoring.py`,
 `tests/test_portal_customization.py`, `tests/test_local_api_center.py`,
-`tests/test_product_authoring.py`, and `tests/test_version_workflow.py`.
+`tests/test_product_authoring.py`, `tests/test_operation_authoring.py`, and
+`tests/test_version_workflow.py`. The browser journey runs through
+`make smoke-authoring` against an existing local stack.
 
 ## Evidence maintenance rule
 

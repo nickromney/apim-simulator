@@ -45,8 +45,10 @@ from app.config import (
     TagConfig,
     UserConfig,
 )
+from app.control_plane import api_visible_in_collection
 from app.management_service import ManagementService
 from app.named_values import mask_secret_data
+from app.operation_authoring import build_operation_authoring_router
 from app.policy_inspection import inspect_effective_policy
 from app.portal import (
     create_portal_subscription,
@@ -440,9 +442,13 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
 
     @router.get("/apim/management/apis")
     async def list_apis(request: Request) -> list[dict[str, Any]]:
-        require_tenant_access(request)
+        grants = require_tenant_access(request, api_collection=True)
         cfg: GatewayConfig = request.app.state.gateway_config
-        return [_masked(cfg, project_api(cfg, api_id, api)) for api_id, api in cfg.apis.items()]
+        return [
+            _masked(cfg, project_api(cfg, api_id, api))
+            for api_id, api in cfg.apis.items()
+            if api_visible_in_collection(grants, api_id, cfg.control_plane)
+        ]
 
     @router.get("/apim/management/apis/{api_id}")
     async def get_api(api_id: str, request: Request) -> dict[str, Any]:
@@ -833,6 +839,20 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
         cfg = _config_for_management_write(request)
         updated = require_management_plane().delete_product(cfg, product_id)
         return {"deleted": True, "product_id": product_id, "remaining": len(updated.products)}
+
+    @router.put("/apim/management/products/{product_id}/apis/{api_id}")
+    async def link_product_api(product_id: str, api_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg = _config_for_management_write(request)
+        updated = require_management_plane().link_product_api(cfg, product_id, api_id)
+        return {"product_id": product_id, "api_id": api_id, "products": updated.apis[api_id].products}
+
+    @router.delete("/apim/management/products/{product_id}/apis/{api_id}")
+    async def unlink_product_api(product_id: str, api_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg = _config_for_management_write(request)
+        updated = require_management_plane().unlink_product_api(cfg, product_id, api_id)
+        return {"product_id": product_id, "api_id": api_id, "products": updated.apis[api_id].products}
 
     @router.get("/apim/management/products/{product_id}/groups")
     async def list_product_groups(product_id: str, request: Request) -> list[dict[str, Any]]:
@@ -1396,6 +1416,7 @@ def build_management_router(*, require_management_plane: Callable[[], Management
     for build in (
         _build_service_router,
         _build_apis_router,
+        build_operation_authoring_router,
         _build_policy_router,
         _build_products_router,
         _build_subscriptions_router,

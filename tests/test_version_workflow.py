@@ -76,6 +76,42 @@ def _client(config: GatewayConfig) -> TestClient:
     return TestClient(app)
 
 
+def test_signed_version_creation_requires_source_destination_and_version_set_access(monkeypatch) -> None:
+    from test_control_plane_identity import KEY, token
+
+    from app.control_plane import ControlPlaneConfig
+
+    monkeypatch.setenv("APIM_CONTROL_PLANE_SIGNING_KEY", KEY)
+    monkeypatch.delenv("APIM_CONFIG_PATH", raising=False)
+    cfg = _config()
+    cfg.control_plane = ControlPlaneConfig(enabled=True, allow_legacy_tenant_keys=False)
+    cfg.api_version_sets["existing"] = ApiVersionSetConfig(display_name="Existing", versioning_scheme="Segment")
+    payload = {"version_id": "hello-v2", "api_version": "v2", "version_set_id": "existing"}
+
+    def headers(ids: list[str]) -> dict[str, str]:
+        return {"Authorization": "Bearer " + token(apim_grants=[{"role": "contributor", "api_ids": ids}])}
+
+    with _client(cfg) as client:
+        path = "/apim/management/apis/hello/versions"
+        assert client.post(path, headers=headers(["hello"]), json=payload).status_code == 403
+        assert client.post(path, headers=headers(["hello-v2"]), json=payload).status_code == 403
+        assert (
+            client.post(
+                path, headers=headers(["hello", "hello-v2"]), json={**payload, "version_set_id": "new"}
+            ).status_code
+            == 403
+        )
+        assert "hello-v2" not in client.app.state.gateway_config.apis
+        assert "new" not in client.app.state.gateway_config.api_version_sets
+        assert client.post(path, headers=headers(["hello", "hello-v2"]), json=payload).status_code == 201
+
+    cfg = _config()
+    cfg.control_plane = ControlPlaneConfig(enabled=True, allow_legacy_tenant_keys=False)
+    with _client(cfg) as client:
+        global_headers = {"Authorization": "Bearer " + token(roles=["contributor"])}
+        assert client.post(path, headers=global_headers, json={**payload, "version_set_id": "new"}).status_code == 201
+
+
 @pytest.mark.parametrize(
     ("scheme", "settings", "version_url", "version_headers"),
     [

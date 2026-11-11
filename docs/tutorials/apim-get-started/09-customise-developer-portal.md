@@ -1,11 +1,10 @@
-# 9 - Customise Developer Portal
+# 9 - Customize the developer portal
 
-Source: [Tutorial: Access and customise the developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize)
+Microsoft Learn equivalent tutorial: [Tutorial: Access and customise the developer portal](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-developer-portal-customize)
 
-The local portal supports the tutorial's administrator, customization, preview,
-publication, and visitor workflows. Draft content and uploaded images remain
-private until publication. The editor uses forms for site settings, shared
-branding and navigation, editable pages, and a media library.
+Customize your developer portal's branding, pages, and images, then preview and
+publish your changes. Draft content and uploaded images remain private until
+you publish them.
 
 ## Start the local tutorial
 
@@ -20,25 +19,30 @@ export APIM_TENANT_KEY=local-dev-tenant-key
 
 Setup starts the local stack, publishes an approval-gated product, and creates
 its API. It then uploads a PNG, edits branding and pages, previews the draft,
-proves visitors cannot see the draft, and publishes it. Finally, it requests a
+checks that visitors cannot see the draft, and publishes it. Finally, it requests a
 subscription, checks that its pending key receives HTTP 401, approves it, and
 calls the API with the active key. `--verify` checks the published state and
 approved subscription without restarting the stack.
 
-The script publishes a baseline portal before editing so repeated runs still
-prove that draft changes and newly uploaded images remain unpublished.
+The script publishes a baseline portal before editing. This lets you check that
+new draft changes and uploaded images remain private until publication.
 
 ## Customize and publish in the browser
 
-1. Open [the portal editor](http://localhost:8000/apim/portal/editor), enter the
-   tenant key, and select **Open saved draft**. This corresponds to opening the
-   managed developer portal as its administrator.
+1. In [the operator console](http://localhost:3007), select **Edit developer
+   portal** in the top **Applications** navigation, next to **Developer portal**.
+   You can also open [the portal editor directly](http://localhost:8000/apim/portal/editor).
+   Enter the tenant key and select **Open saved draft**.
 2. In **Media library**, upload a PNG, JPEG, or WebP image. Each image can be up
    to 2 MiB; the library holds ten images. Choose it under **Saved images** and
    select **Use as logo** or **Use as background**. You can also enter an
    HTTP(S) image URL in the corresponding field.
 3. Change **Site title**, **Primary color**, **Background color**, and **Theme**.
-   Branding and navigation apply to the home page and other pages.
+   Choose system sans-serif, serif, or monospace for **Body font** and **Heading
+   font**. Choose filled or outline for **Button style**, and square, rounded,
+   or pill for **Button corners**. These styles apply to the simulator's portal
+   pages and buttons. Branding and navigation apply to the home page and other
+   pages.
 4. Under **Pages and navigation**, edit a page's heading and text. Enter a new
    address such as `getting-started` and select **Add page**. Pages become links
    in the shared navigation. Page text is escaped as plain text.
@@ -50,16 +54,13 @@ prove that draft changes and newly uploaded images remain unpublished.
 7. Select **Publish saved draft**, then refresh the visitor portal. Its title,
    colors, pages, and images now match the saved draft.
 
-The editor's data and publication endpoints require `X-Apim-Tenant-Key`.
-Visitors can read the published portal, its pages, and its media without that
-header. Draft and published snapshots persist in the simulator configuration
-and survive a restart.
+The default Docker stack clears portal changes when it stops. To keep your
+changes, see [Save edits and reset a stack](../../LOCAL-LIFECYCLE.md).
 
 ## Discover, subscribe, and try an API
 
 Open [the consumer portal](http://localhost:8000/apim/portal). Choose `demo-dev`
-as the acting user. The local identity selector corresponds to a configured
-developer; requests identify that user with the `X-Apim-Portal-User` header.
+as the acting user.
 
 Find **Portal Premium** in the catalog and request a subscription. Its approval
 setting creates a `submitted` subscription. In [the operator
@@ -85,7 +86,7 @@ visible only to the administrators group. Product terms must be accepted
 before subscribing, and each developer can request additional subscriptions
 up to the product's configured limit.
 
-## API equivalents
+## Use the portal API
 
 | Action | Local endpoint |
 | --- | --- |

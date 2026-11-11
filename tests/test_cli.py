@@ -609,3 +609,99 @@ def test_inspect_preview_is_offline(capsys: pytest.CaptureFixture[str]) -> None:
     assert plan["atomic"] is False
     assert len(plan["requests"]) == 5
     assert all(request["method"] == "GET" for request in plan["requests"])
+
+
+def test_bearer_token_sends_only_authorization_for_management_and_inspection(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("APIM_TENANT_KEY", "ambient-key")
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(handler)
+    assert main(["--bearer-token", "scoped-token", "status"], transport=transport) == 0
+    assert main(["--bearer-token", "scoped-token", "inspect"], transport=transport) == 0
+    assert requests[0].headers["authorization"] == "Bearer scoped-token"
+    assert "x-apim-tenant-key" not in requests[0].headers
+    assert "authorization" not in requests[1].headers
+    for request in requests[2:]:
+        assert request.headers["authorization"] == "Bearer scoped-token"
+        assert "x-apim-tenant-key" not in request.headers
+    assert "scoped-token" not in capsys.readouterr().out
+
+
+def test_bearer_environment_and_explicit_tenant_precedence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("APIM_BEARER_TOKEN", "environment-token")
+    monkeypatch.delenv("APIM_TENANT_KEY", raising=False)
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(403, json={"detail": "environment-token rejected"})
+
+    transport = httpx.MockTransport(handler)
+    assert main(["status"], transport=transport) == 1
+    assert requests[-1].headers["authorization"] == "Bearer environment-token"
+    assert "environment-token" not in capsys.readouterr().err
+    assert main(["--tenant-key", "explicit-key", "status"], transport=transport) == 1
+    assert requests[-1].headers["x-apim-tenant-key"] == "explicit-key"
+    assert "authorization" not in requests[-1].headers
+
+
+def test_conflicting_credentials_fail_without_disclosure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("APIM_TENANT_KEY", "secret-key")
+    monkeypatch.setenv("APIM_BEARER_TOKEN", "secret-token")
+    assert main(["--dry-run", "status"]) == 0
+    assert main(["commands"]) == 0
+    output = capsys.readouterr().out
+    assert "secret-key" not in output and "secret-token" not in output
+    with pytest.raises(SystemExit):
+        main(["status"])
+    assert "secret-key" not in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        main(["--tenant-key", "secret-key", "--bearer-token", "secret-token", "status"])
+    errors = capsys.readouterr().err
+    assert "secret-key" not in errors and "secret-token" not in errors
+    assert main(["--bearer-token", "secret-token", "--dry-run", "status"]) == 0
+    assert "secret-token" not in capsys.readouterr().out
+
+
+def test_inspect_redacts_escaped_credentials_in_error_body(capsys: pytest.CaptureFixture[str]) -> None:
+    secret = 'abc"def'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": [secret], secret: "denied"})
+
+    assert main(["--tenant-key", secret, "inspect"], transport=httpx.MockTransport(handler)) == 1
+    output = capsys.readouterr().out
+    assert secret not in output
+    assert json.loads(output)["observations"]["status"]["body"] == {"detail": ["[redacted]"], "[redacted]": "denied"}
+
+
+@pytest.mark.parametrize("token", ["tökén", "line\nbreak", ""])
+def test_invalid_bearer_token_fails_without_disclosure(token: str, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--bearer-token", token, "status"]) == 1
+    output = capsys.readouterr()
+    assert "visible ASCII" in output.err
+    if token:
+        assert token not in output.err
+
+
+@pytest.mark.parametrize("flag", ["--tenant-key", "--bearer-token", "--tenant-k", "--bearer-t"])
+@pytest.mark.parametrize("inline", [False, True])
+def test_misplaced_credential_option_does_not_echo_secret(
+    flag: str, inline: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = [f"{flag}=sensitive-token"] if inline else [flag, "sensitive-token"]
+    with pytest.raises(SystemExit):
+        main(["apis", *args])
+    error = capsys.readouterr().err
+    assert "credential options must precede the command" in error
+    assert "sensitive-token" not in error

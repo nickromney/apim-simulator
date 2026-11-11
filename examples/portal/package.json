@@ -4,8 +4,9 @@
   "version": "0.4.0",
   "type": "module",
   "scripts": {
-    "check": "node --check scalar-smoke.mjs && node --check ../../app/static/scalar/reference.js && node --test identity-state.test.mjs",
-    "smoke": "node scalar-smoke.mjs"
+    "check": "node --check scalar-smoke.mjs && node --check authoring-smoke.mjs && node --check ../../app/static/scalar/reference.js && node --test identity-state.test.mjs",
+    "smoke": "node scalar-smoke.mjs",
+    "smoke-authoring": "node authoring-smoke.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

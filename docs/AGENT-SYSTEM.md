@@ -65,12 +65,15 @@ ETags and multi-writer coordination remain outside the current contract.
 ## Machine interface
 
 Run from the repository with `uv run apimsim`. Global flags precede the verb.
-Credentials can come from `APIM_TENANT_KEY`; target from `APIM_BASE_URL`.
+Set `APIM_BASE_URL` to the gateway address. Use `APIM_BEARER_TOKEN` for a signed
+identity or `APIM_TENANT_KEY` for a stack that permits tenant keys.
+[Give an agent access to selected APIs](../README.md#give-an-agent-access-to-selected-apis)
 
 ```bash
 uv run apimsim commands
 uv run apimsim status
 uv run apimsim inspect
+uv run apimsim apis
 uv run apimsim api weather
 uv run apimsim policy --effective --product-id starter api weather
 uv run apimsim --dry-run set-policy api weather --file policy.xml
@@ -81,7 +84,7 @@ uv run apimsim set-policy api weather --file policy.xml
 paths, effects (`read`, `write`, `execute`), and deletion confirmation. It is
 CLI discovery, not a runtime capability or permission claim. `--dry-run` is
 offline JSON built by the execution planner, without sending HTTP or emitting
-the tenant credential or credentials embedded in the displayed base URL.
+the selected credential or credentials embedded in the displayed base URL.
 The preview identifies the base URL separately from the relative request path.
 It includes the supplied body verbatim, which may be
 sensitive. Deletion previews work without `--yes`; execution still requires it.
@@ -91,6 +94,8 @@ It continues after failed observations and exits 1 if any observation failed.
 It excludes subscription collections, policy content, and traces; returned
 metadata can still be sensitive. It is not a configuration export, permission
 inventory, inference readiness test, or transactional snapshot.
+For an API-scoped identity, use `apis` to list the permitted APIs. The broader
+`inspect` report can contain HTTP 403 results for service-wide observations.
 Server responses for individual commands retain their existing JSON shapes. Success exits 0, command
 or HTTP failure exits 1, and transport failure exits 2; argparse usage errors
 also exit 2. A successful replay command means the replay endpoint succeeded;

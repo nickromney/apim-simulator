@@ -251,8 +251,9 @@ PORTAL_HTML = r"""<!doctype html>
     --warn-soft: rgba(190, 93, 38, 0.2);
   }
   * { box-sizing: border-box; }
-  body { margin:0; font-family:"Segoe UI", SegoeUI, -apple-system, BlinkMacSystemFont, sans-serif; color:var(--ink); background:var(--bg); line-height:1.5; }
+  body { margin:0; font-family:var(--portal-body-font); color:var(--ink); background:var(--bg); line-height:1.5; }
   main { max-width:1200px; margin:auto; padding:2rem 1.5rem 4rem; }
+  h1, h2, h3 { font-family:var(--portal-heading-font); }
   h1 { font-size:1.8rem; letter-spacing:-.035em; margin:0; }
   .lede { color:var(--muted); margin:.5rem 0 2rem; max-width:70ch; }
   section { background:var(--panel); border:1px solid var(--line); border-radius:2px; padding:1.5rem; margin-bottom:1.25rem; }
@@ -260,7 +261,7 @@ PORTAL_HTML = r"""<!doctype html>
   label { display:flex; flex-direction:column; gap:.4rem; font-size:.85rem; color:var(--muted); min-width:0; }
   input, select, button { font:inherit; min-height:42px; padding:.55rem .75rem; border-radius:2px; border:1px solid var(--line); background:var(--panel); color:var(--ink); }
   input, select { width:100%; min-width:0; }
-  button { cursor:pointer; background:var(--accent); color:#fff; border-color:var(--accent); white-space:nowrap; }
+  button { cursor:pointer; background:var(--portal-button-bg,var(--accent)); color:var(--portal-button-ink,#fff); border-color:var(--accent); border-radius:var(--portal-button-radius); white-space:nowrap; }
   button.secondary { background:transparent; color:var(--accent); }
   button:disabled { opacity:.45; cursor:default; }
   :focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
@@ -294,7 +295,7 @@ PORTAL_HTML = r"""<!doctype html>
 html[data-theme="dark"] { color-scheme:dark; --bg:#111827; --panel:#1f2937; --ink:#f3f4f6; --muted:#c4cbd5; --line:#4b5563; --accent:#60a5fa; }
 html[data-theme="light"] { color-scheme:light; }
 html[data-theme="dark"] input,html[data-theme="dark"] select { background:var(--panel);color:var(--ink); }
-html[data-theme="dark"] button { color:#111827; }
+html[data-theme="dark"] button { color:var(--portal-button-ink,#111827); }
 .masthead { display:flex;align-items:center;gap:24px;flex-wrap:wrap;background:#087e78;color:white;padding:12px 18px;min-height:56px; }
 .masthead strong { font-size:16px;font-weight:600;line-height:20px;letter-spacing:0; }
 .masthead nav { display:flex;align-items:center;gap:16px;margin:0;flex-wrap:wrap; }
@@ -696,6 +697,14 @@ html[data-theme="dark"] button { color:#111827; }
 """
 
 
+PORTAL_FONTS = {
+    "system": '"Segoe UI", SegoeUI, -apple-system, BlinkMacSystemFont, sans-serif',
+    "serif": 'Georgia, Cambria, "Times New Roman", serif',
+    "monospace": "ui-monospace, SFMono-Regular, Consolas, monospace",
+}
+PORTAL_BUTTON_RADII = {"square": "2px", "rounded": "8px", "pill": "999px"}
+
+
 def _portal_image_url(site: PortalSite, url: str) -> str:
     """Inline this snapshot's uploads so private draft previews need no public asset."""
     media = next((item for item in site.media if url == "/apim/portal/media/" + item.id), None)
@@ -755,8 +764,13 @@ def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
             .replace(">", "%3E")
         )
         image = f"body{{background-image:url('{css_url}');background-size:cover}}"
+    outline = (
+        "--portal-button-bg:transparent;--portal-button-ink:var(--accent);" if site.button_style == "outline" else ""
+    )
     style = (
-        f"<style>:root{{color-scheme:{site.theme};--accent:{site.accent_color};--bg:{background};{dark}}}"
+        f"<style>:root{{color-scheme:{site.theme};--accent:{site.accent_color};--bg:{background};{dark}"
+        f"--portal-body-font:{PORTAL_FONTS[site.body_font]};--portal-heading-font:{PORTAL_FONTS[site.heading_font]};"
+        f"--portal-button-radius:{PORTAL_BUTTON_RADII[site.button_radius]};{outline}}}"
         f"nav{{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}}"
         f"nav a{{color:var(--accent)}}.masthead nav a{{color:white}}{image}</style>"
     )

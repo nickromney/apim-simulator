@@ -848,7 +848,9 @@ def _mock_response_sample(
     for example in representation.examples:
         if example.value is not None:
             return (
-                _encode_mock_response_example(example.value, content_type=resolved_content_type),
+                json.dumps(example.value).encode("utf-8")
+                if example.value_format == "json"
+                else _encode_mock_response_example(example.value, content_type=resolved_content_type),
                 resolved_content_type,
             )
     if runtime is not None:

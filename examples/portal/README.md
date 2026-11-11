@@ -51,3 +51,17 @@ APIM service. It has `GET /health` and `POST /ipv4/subnet-info`, a JSON request
 example, a referenced request schema, and 200 response descriptions. Both use
 the placeholder backend; this proves management/import comparison, not real
 backend connectivity. The original revision demo remains a separate API.
+
+## Author APIs in the console
+
+With the normal gateway and operator console running, run the browser check:
+
+```sh
+make smoke-authoring
+```
+
+From the repository root, use `make smoke-authoring STACK_SLOT=7` for an
+existing slot-7 stack. The check creates an API with a response example, enables
+mocking, publishes a product, approves a subscription, and creates a Path
+version. It cleans up its own resources on completion. Set `APIM_BASE_URL`,
+`OPERATOR_CONSOLE_BASE_URL`, and `APIM_TENANT_KEY` to target another local stack.

@@ -86,7 +86,7 @@ rows retain the older labels so the matrix remains easy to scan.
 | Require subscription | Yes | `azurerm_api_management_product.subscription_required` | Per-product toggle. When an API is in an open product, a key that can't be accepted is ignored and no key is needed; the request is served in the open product's context (a valid key still supplies the subscription context). The key header wins over the query parameter even when empty; an empty value counts as a missing key. See [subscriptions](https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions) |
 | Subscription bypass | Yes | - | Header conditions |
 | Approval required | Yes | `azurerm_api_management_product.approval_required` | `approval_required` on products; pending subscriptions stay `submitted` until approved |
-| Subscription limits | Partial | `azurerm_api_management_product.subscriptions_limit` | Enforced at portal sign-up (409 when reached; 0 disables self-serve) |
+| Subscription limits | Partial | `azurerm_api_management_product.subscriptions_limit` | Positive limits are enforced at portal sign-up with HTTP 409 when reached; omit the limit for unrestricted sign-up |
 
 ## Tags
 
