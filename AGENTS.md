@@ -5,10 +5,12 @@
 Use this file for durable, concise guidance for coding agents in this repository.
 
 - Treat tutorial outcomes as local simulation requirements; use local UI/API clients such as Bruno without emulating Azure CLI or writing editor extensions.
+- Write user-facing docs around what the reader can do and what result to expect. Put prerequisite checks before dependent commands. Keep implementation history and validation reports in maintainer docs.
 - Before changing code, read `README.md` and the nearest package/build manifest for the commands and constraints that apply.
 - For expression-cache, route-matching, or gateway-benchmark changes,
   read [the agent notes](docs/GATEWAY-OPTIMIZATION-LEARNINGS.md).
 - Run Python tests and lint with `uv run --extra dev`; do not invoke `.venv/bin/python` directly.
+- Authorize management API IDs from the decoded ASGI path or matched route parameters. URL parsing can reinterpret characters in an ID.
 - Keep new example lifecycle commands in `examples/<name>/Makefile`; the root lists entrypoints and delegates repo-wide validation.
 - When forwarding a transformed body or assembling a callout/resolver request, let HTTPX recalculate Content-Length; do not copy the incoming length.
 - Trace serialization must preserve request and callout bodies; enabling tracing must not change policy results.

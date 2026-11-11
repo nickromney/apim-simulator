@@ -26,15 +26,42 @@ EOF
 }
 
 verify_tutorial() {
+  for export_file in "$APIM_EXPORT_DIR/summary.json" "$APIM_EXPORT_DIR/apis.json"; do
+    if [[ ! -f "$export_file" ]]; then
+      echo "Missing inventory export $export_file; run tutorial11.sh --setup first." >&2
+      return 1
+    fi
+  done
   APIM_BASE="$APIM_BASE" APIM_TENANT_KEY="$APIM_TENANT_KEY" APIM_API_ID="$APIM_API_ID" APIM_API_PATH="$APIM_API_PATH" APIM_SUBSCRIPTION_KEY="$APIM_SUBSCRIPTION_KEY" \
     tutorial_python "$ROOT_DIR/examples/apim-tutorials/workflows.py" catalog verify
   echo "Verifying exported inventory inputs"
+  expected_summary="$(EXPORT_PATH="$APIM_EXPORT_DIR/summary.json" tutorial_python - <<'PYCODE'
+import json
+import os
+
+with open(os.environ["EXPORT_PATH"], encoding="utf-8") as source:
+    data = json.load(source)
+keys = ["api_releases", "api_revisions", "api_version_sets", "apis", "products", "subscriptions"]
+print(json.dumps({"api_ids": sorted(item.get("id") for item in data.get("apis", [])),
+                  "counts": {key: (data.get("service") or {}).get("counts", {}).get(key) for key in keys}}))
+PYCODE
+)"
+  expected_apis="$(EXPORT_PATH="$APIM_EXPORT_DIR/apis.json" tutorial_python - <<'PYCODE'
+import json
+import os
+
+with open(os.environ["EXPORT_PATH"], encoding="utf-8") as source:
+    data = json.load(source)
+print(json.dumps({"api_ids": sorted(item.get("id") for item in data),
+                  "paths": sorted(item.get("path") for item in data)}))
+PYCODE
+)"
 
   echo '$ curl -sS -H "X-Apim-Tenant-Key: '"$APIM_TENANT_KEY"'" "'"$APIM_BASE"'/apim/management/summary"'
   summary_response="$(management_get "/apim/management/summary")"
   json_expect_summary \
     "$summary_response" \
-    '{"api_ids":["default","tutorial-api"],"counts":{"api_releases":1,"api_revisions":2,"api_version_sets":1,"apis":2,"products":2,"subscriptions":1}}' \
+    "$expected_summary" \
     'summary = {"api_ids": sorted(item.get("id") for item in data.get("apis", [])), "counts": {key: (data.get("service") or {}).get("counts", {}).get(key) for key in ["api_releases", "api_revisions", "api_version_sets", "apis", "products", "subscriptions"]}}'
 
   echo
@@ -42,7 +69,7 @@ verify_tutorial() {
   apis_response="$(management_get "/apim/management/apis")"
   json_expect_summary \
     "$apis_response" \
-    '{"api_ids":["default","tutorial-api"],"paths":["api","tutorial-api"]}' \
+    "$expected_apis" \
     'summary = {"api_ids": sorted(item.get("id") for item in data), "paths": sorted(item.get("path") for item in data)}'
   echo
 }

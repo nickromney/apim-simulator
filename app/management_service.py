@@ -912,6 +912,21 @@ class ManagementService:
             raise HTTPException(status_code=404, detail="Operation tag link not found")
         return self.persist_or_apply_config(cfg)
 
+    def link_product_api(self, cfg: GatewayConfig, product_id: str, api_id: str) -> GatewayConfig:
+        self.require_api_authoring_mode(cfg)
+        self._get_product_or_404(cfg, product_id)
+        api = self._get_api_or_404(cfg, api_id)
+        self._link_list_item(api.products, product_id)
+        return self.persist_or_apply_config(cfg)
+
+    def unlink_product_api(self, cfg: GatewayConfig, product_id: str, api_id: str) -> GatewayConfig:
+        self.require_api_authoring_mode(cfg)
+        self._get_product_or_404(cfg, product_id)
+        api = self._get_api_or_404(cfg, api_id)
+        if not self._unlink_list_item(api.products, product_id):
+            raise HTTPException(status_code=404, detail="Product API link not found")
+        return self.persist_or_apply_config(cfg)
+
     def link_product_group(self, cfg: GatewayConfig, product_id: str, group_id: str) -> GatewayConfig:
         product = self._get_product_or_404(cfg, product_id)
         self._get_group_or_404(cfg, group_id)

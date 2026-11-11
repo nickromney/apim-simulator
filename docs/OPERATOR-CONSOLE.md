@@ -2,7 +2,7 @@
 
 For scripted operation, the [agent operating model](AGENT-SYSTEM.md) documents CLI discovery, offline request previews, and effective-policy inspection over the same management API.
 
-The browser UI uses a compact Azure APIM-inspired layout with separate API and operation navigation and **Design**, **Settings**, and **Test** tabs. It provides a focused workflow for managing APIs in the local APIM simulator. It is intended for simulator operations and authoring; it does not reproduce the full Azure portal.
+The browser UI uses a compact Azure APIM-inspired layout with separate API and operation navigation and **Design**, **Settings**, **Test**, **Versions**, **Revisions**, and **Changelog** tabs. It provides a focused workflow for managing APIs in the local APIM simulator. It is intended for simulator operations and authoring; it does not reproduce the full Azure portal.
 
 ## Connect
 
@@ -27,7 +27,27 @@ In **Settings**, create an API or edit its display name, path, upstream URL and 
 
 Select an operation to edit its display name, HTTP method, URL template, and description. Creating or saving an operation preserves its imported request/response metadata and operation policy. Deleting APIs or operations requires an explicit browser confirmation.
 
-OpenAPI import is available for a saved API. Paste a document or provide a URL using a supported link format. Supported document scope is Swagger 2 JSON and OpenAPI 3.0.x (up to 3.0.3); OpenAPI 3.1 is rejected. The importer reports unsupported constructs instead of claiming support for the complete Azure APIM import surface. **Required query parameters** controls whether required query parameters are represented in operation templates or retained as query parameters.
+OpenAPI import is available for a saved API. Paste a document or provide a URL using a supported link format. Supported document scope is Swagger 2 JSON and OpenAPI 3.0.x (through 3.0.4); OpenAPI 3.1 is rejected. Version 3.0.4 is a local extension beyond the 3.0.3 limit listed in Microsoft's import restrictions. The importer reports unsupported constructs instead of claiming support for the complete Azure APIM import surface. **Required query parameters** controls whether required query parameters are represented in operation templates or retained as query parameters.
+
+## Products and mock responses
+
+Open **Products** to create or edit a product, change its publication state,
+and associate or remove APIs. Product settings include subscription requirements
+and approval. Publication controls consumer portal discovery.
+
+Select an operation in **Settings** to edit response representations and examples.
+The mock response editor enables a `mock-response` policy for a selected status
+and content type. Use **Test** to call the operation and inspect the result.
+Existing response metadata and policies remain in place when editing supported
+fields. The simulator supports a subset of Azure's mock behavior.
+
+## Versions
+
+Select an API and open **Versions** to clone it into a new version. Choose a new
+version set or reuse an existing one. A new set can use Path, Header, or Query;
+Header and Query require a selector name. The clone inherits the source's product
+associations, operations, and policies. When the source has no version set, it
+remains available as Original. Versions can be edited independently.
 
 ## Policies
 

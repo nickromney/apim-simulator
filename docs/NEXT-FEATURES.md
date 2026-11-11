@@ -24,12 +24,13 @@ Good additions are:
 
 ### Better Import Fidelity
 
-The bounded OpenAPI 2 JSON and 3.0.x importer now projects operation IDs,
+The bounded OpenAPI 2 JSON and 3.0.x importer, through 3.0.4, projects operation IDs,
 parameters, schemas, request/response representations, and examples. It follows
 first-HTTPS server selection, required-query translation, body omission for
 GET/HEAD/OPTIONS, and documented reimport operation matching. See the
 [implemented contract](FIDELITY-CONTRACTS.md#openapi-import--verified-subset).
 
+Version 3.0.4 is a local extension beyond Microsoft's documented 3.0.3 limit.
 Further work needs separate contracts for additional serialization, parameter
 schema constraints, referenced components, `x-ms-paths`, and OpenAPI 3.1.
 External references and inferred security definitions remain excluded. Add
@@ -79,13 +80,21 @@ example targets the mock LLM backend. Do not implement embeddings or
 moderation logic here, and do not assume the two checkouts share a parent
 directory.
 
+### Workspaces
+
+[Azure workspaces](https://learn.microsoft.com/en-us/azure/api-management/workspaces-overview)
+are not implemented. A local workflow needs workspace-owned resources,
+workspace-scoped permissions and policy inheritance, gateway associations, and
+cross-workspace isolation. Existing API-scoped grants do not provide these
+semantics. Azure RBAC, Entra, and cloud gateway deployment and infrastructure
+isolation require explicit local adaptations.
+
 ## Still Deferred
 
 - External cache backends
 - Full APIM expression-engine compatibility
-- `quota-by-key` bandwidth enforcement
 - `llm-semantic-cache-lookup`/`-store` and `llm-content-safety` (both simulate other Azure services; see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
-- Developer portal CMS, theming, email, and notification features (the adapted consumer workflows ship at `/apim/portal`)
+- Full developer portal visual editing, custom widgets, email, and notification features. Local branding, themes, pages, media, and draft/publish workflows are available at `/apim/portal`.
 - Full ARM or SDK wire compatibility
 
 ## Bar For New Work

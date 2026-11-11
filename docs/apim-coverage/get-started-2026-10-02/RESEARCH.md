@@ -25,4 +25,4 @@ Client compatibility is separate from the observable workflows. The default
 target is local UI/API equivalents; unchanged Azure clients may need an
 additional ARM compatibility surface if requested.
 
-References are the eleven source links in the [tutorial index](README.md).
+References are the source links in the [tutorial guides](../../tutorials/apim-get-started/README.md).

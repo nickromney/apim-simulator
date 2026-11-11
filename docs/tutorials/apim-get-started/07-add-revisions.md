@@ -1,10 +1,12 @@
-# 7 - Add Revisions
+# 7 - Add revisions
 
-Source: [Tutorial: Use revisions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-revise-api)
+Microsoft Learn equivalent tutorial: [Tutorial: Use revisions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-revise-api)
 
-Simulator status: Supported for local revision isolation, routing, and release promotion.
+Create a revision, test it without changing the current API, and publish it.
 
-## Run It Locally
+## Create and test revisions
+
+The setup recreates the tutorial gateway. [Save any edits you want to keep](../../LOCAL-LIFECYCLE.md#save-edits-before-stopping) first.
 
 From the repo root:
 
@@ -15,8 +17,7 @@ export APIM_TENANT_KEY=local-dev-tenant-key
 ./docs/tutorials/apim-get-started/tutorial07.sh --verify
 ```
 
-Setup recreates the tutorial gateway and imports the local mock API. It then
-rehearses the tutorial's sequence:
+Setup recreates the tutorial gateway and imports the local mock API. It then performs these steps:
 
 1. Keep revision 1 current and online.
 2. Copy its definition into revision 2 and add a `POST /test` operation that
@@ -55,12 +56,7 @@ Expected statuses are `200`, `200`, `404`, and `404`, respectively. The two
 successful responses contain `{"sampleField":"revision-two"}`. `--verify` checks
 these routes and the current-revision and release metadata without changing state.
 
-## Differences From Azure APIM
+## View release notes in the portal
 
-- Revision authoring uses the simulator management API and saved definitions
-  instead of the Azure portal revision selector.
-- The added operation uses an operation policy to return a deterministic sample;
-  no change to the mock backend is needed.
-- Release notes are exposed in the local developer portal catalog for APIs
-  associated with a visible published product. This standalone script checks
-  release metadata; it does not publish a product or exercise the portal UI.
+To see release notes in the developer portal catalog, associate the API with a
+visible published product. This exercise does not create a product.

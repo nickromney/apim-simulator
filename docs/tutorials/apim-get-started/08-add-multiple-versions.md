@@ -1,12 +1,10 @@
-# 8 - Add Multiple Versions
+# 8 - Add multiple versions
 
-Source: [Tutorial: Add multiple versions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-publish-versions)
+Microsoft Learn equivalent tutorial: [Tutorial: Add multiple versions](https://learn.microsoft.com/en-us/azure/api-management/api-management-get-started-publish-versions)
 
-Simulator status: Supported locally
+## Create the example
 
-## Run It Locally
-
-The shortcut follows Microsoft's version creation workflow: create an unversioned API, clone it into a Path version, preserve the source as **Original**, and include both APIs in a published product.
+Create an API with an Original version and a Path version, then call both through a published product.
 
 ```bash
 ./docs/tutorials/apim-get-started/tutorial08.sh --setup
@@ -23,11 +21,28 @@ Setup creates these local resources:
 | Version set | `tutorial-path-versions`, Segment scheme (the portal calls this Path) |
 | Product subscription | `version-tutorial-sub`, local key `version-tutorial-key` |
 
-The v2 API inherits the source's operations, schemas, policies, and product association. Setup then edits only the cloned echo operation to return `x-version: v2`. The Original API continues working at its previous URL without this header. Verification checks both requests, product catalog visibility, and the existing Header version example.
+The v2 API inherits the source's operations, schemas, policies, and product association. Setup then edits only the cloned echo operation to return `x-version: v2`. The Original API continues working at its previous URL without this header. The verification command checks both requests, product catalog visibility, and the existing Header version example.
 
 Set `APIM_BASE`, `APIM_TENANT_KEY`, `PATH_VERSIONED_PATH`, `PATH_VERSION_SET_ID`, `VERSION_PRODUCT_ID`, `VERSION_SUBSCRIPTION_ID`, or `VERSION_SUBSCRIPTION_KEY` to use different local inputs. Setup recreates its two Path API identifiers so it can be repeated; `--verify` performs read-only checks.
 
-## Create a Version Through the Management API
+## Create a version in the browser
+
+Start the stack with `make up`, then open the operator console at
+[http://localhost:3007](http://localhost:3007). Select **Load Local Demo**, then
+**Connect**. Choose an existing API with operations and a product association.
+
+1. Select **Versions**.
+2. Enter a new **Version API ID** and **Version label**, such as `orders-v2` and `v2`.
+3. Select an existing version set, or choose **Create a version set** and enter its ID.
+4. For a new set, select **Path**, **Header**, or **Query**. For Header or Query, enter the selector name.
+5. Select **Create version**. The console selects the new API.
+
+The clone inherits the source API's product associations, operations, and
+policies. If the source did not belong to a version set, it remains available
+as **Original**. Open an operation in **Test** to call the new version. The
+console adds the configured version selector to the request.
+
+## Create a version through the management API
 
 Start with an API containing operations. Publish a product explicitly, then associate it with the API:
 
@@ -69,7 +84,7 @@ curl -i -H 'Ocp-Apim-Subscription-Key: version-tutorial-key' \
 
 The portal catalog at `/apim/portal` lists Original and v2 under the published product. Its operation metadata includes the URL and selector headers required by each version. Exporting a version through `/apim/management/apis/<api-id>/export` produces OpenAPI with the matching public server URL or version selector.
 
-## Other Versioning Schemes
+## Use other versioning schemes
 
 Use `"versioning_scheme":"Header","version_header_name":"x-api-version"` to select a version through a request header, or `"versioning_scheme":"Query","version_query_name":"api-version"` to select it through a query parameter. After a version set exists, omit `versioning_scheme` to reuse its settings. An unversioned Original is reached without a selector.
 

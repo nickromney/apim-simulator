@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import jwt
 from fastapi import HTTPException, Request
@@ -21,6 +21,9 @@ from app.config import (
     TrustedClientCertificateConfig,
 )
 from app.gateway_errors import GatewayError, subscription_key_error
+
+if TYPE_CHECKING:
+    from app.control_plane import Permission, ScopedGrant
 
 
 @dataclass(frozen=True)
@@ -489,18 +492,30 @@ def require_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-def require_tenant_access(request: Request, *, permission=None, api_id: str | None = None) -> None:
+def require_tenant_access(
+    request: Request,
+    *,
+    permission: Permission | None = None,
+    api_id: str | None = None,
+    api_collection: bool = False,
+    global_only: bool = False,
+) -> tuple[ScopedGrant, ...] | None:
     from app.control_plane import authorize_operator
 
     cfg: GatewayConfig = request.app.state.gateway_config
     if not cfg.tenant_access.enabled and not cfg.control_plane.enabled:
         raise HTTPException(status_code=404, detail="Not found")
-    if cfg.control_plane.enabled and request.headers.get("authorization"):
-        authorize_operator(request, cfg.control_plane, permission=permission, api_id=api_id)
-        return
-    if cfg.control_plane.enabled and not cfg.control_plane.allow_legacy_tenant_keys:
-        authorize_operator(request, cfg.control_plane, permission=permission, api_id=api_id)
-        return
+    if cfg.control_plane.enabled and (
+        request.headers.get("authorization") or not cfg.control_plane.allow_legacy_tenant_keys
+    ):
+        return authorize_operator(
+            request,
+            cfg.control_plane,
+            permission=permission,
+            api_id=api_id,
+            api_collection=api_collection,
+            global_only=global_only,
+        )
     admin = request.headers.get("x-apim-admin-token", "")
     provided = request.headers.get("x-apim-tenant-key", "")
     admin_valid = bool(cfg.admin_token and admin == cfg.admin_token)

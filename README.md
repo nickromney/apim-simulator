@@ -327,13 +327,10 @@ BFF uses a focused Makefile; run `make examples` for the demo entrypoints.
 `up-all` assigns a distinct slot to each stack automatically, including the
 todo, OIDC, edge, UI, hello, and private variants.
 
-## Tutorial Mirror
+## Get started with APIM
 
-For a simulator-native version of the Microsoft Learn getting-started sequence, see:
-
-- [apim-get-started](docs/tutorials/apim-get-started/README.md)
-- [tutorial01.sh](docs/tutorials/apim-get-started/tutorial01.sh) through [tutorial11.sh](docs/tutorials/apim-get-started/tutorial11.sh) for self-contained mirrored tutorial shortcuts kept alongside the matching markdown guides; use `--dry-run` to preview, `--setup`/`--execute` to apply a step, and `--verify` to validate it
-- [tutorial-cleanup.sh](docs/tutorials/apim-get-started/tutorial-cleanup.sh) to preview with `--dry-run` or stop the tutorial compose stacks with `--execute`
+Import an API, publish it to the developer portal, and try policies, revisions,
+and versions on your local gateway. [Get Started tutorials](docs/tutorials/apim-get-started/README.md)
 
 ## Interacting with the Simulator
 
@@ -357,7 +354,8 @@ curl http://localhost:8000/apim/startup
 
 ### Management API access
 
-The management API exists only when the loaded config enables `tenant_access`.
+The management API is available when the loaded config enables `tenant_access`
+or `control_plane`.
 
 These shipped configs enable it:
 
@@ -371,7 +369,7 @@ These shipped configs keep it off by default:
 - the `apim.*.json` files under [examples/hello-api/](examples/hello-api/)
 - [examples/todo-app/apim.json](examples/todo-app/apim.json)
 
-When the management API is enabled, use the tenant key header:
+For a stack that permits tenant keys, send the key with your request.
 
 ```bash
 curl \
@@ -430,6 +428,44 @@ It checks request construction, while the gateway validates authorization and
 policy semantics. Replay can cause backend and runtime side effects. See the
 [agent operating model](docs/AGENT-SYSTEM.md) for the complete verification loop.
 Run `uv run apimsim --help` for the full command list.
+
+#### Give an agent access to selected APIs
+
+Enable `control_plane.enabled` in your gateway configuration and set
+`control_plane.allow_legacy_tenant_keys` to `false` for a signed-token-only
+stack. Set `APIM_CONTROL_PLANE_SIGNING_KEY` in the gateway environment, or use
+the environment variable named by `control_plane.signing_key_env`.
+
+Issue a short-lived HS256 token with the configured issuer and audience, a
+distinct subject for each agent, and an `apim_grants` claim. Leave the token's
+service-wide `roles` claim empty. Use `reader` to inspect APIs or `contributor`
+to edit them. A review agent can use this grant to inspect `orders`.
+
+```json
+{"apim_grants": [{"role": "reader", "api_ids": ["orders"]}]}
+```
+
+Keep the signing key with the gateway and issuer. Set `APIM_BEARER_TOKEN` to the
+issued token in the agent's environment and `APIM_BASE_URL` to your gateway
+address. Run these commands with that identity.
+
+```bash
+uv run apimsim apis
+uv run apimsim api orders
+uv run apimsim policy api orders
+```
+
+`apis` returns only APIs covered by the token's grants. A grant with no matching
+APIs returns an empty list. With the reader grant above, an edit to `orders`
+returns HTTP 403. With a contributor grant for `orders`, the same edit can
+succeed, and an edit to another API returns HTTP 403.
+
+Creating an API version requires write access to the source and destination API
+IDs. Creating a version set requires service-wide write access.
+
+The CLI also accepts `--bearer-token`. Set one credential environment variable
+per agent process. An explicit credential flag selects that credential for the
+command. [Local signed-token setup](examples/apim-security/README.md)
 
 ### Developer portal and Scalar API client
 

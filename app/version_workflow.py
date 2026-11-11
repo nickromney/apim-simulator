@@ -109,12 +109,16 @@ def build_version_workflow_router(*, require_management_plane: Callable[[], Mana
 
     @router.post("/apim/management/apis/{api_id}/versions", status_code=201)
     async def version_api(api_id: str, body: VersionRequest, request: Request) -> dict[str, Any]:
-        require_tenant_access(request)
-        cfg = request.app.state.gateway_config.model_copy(deep=True)
+        require_tenant_access(request, permission="write", api_id=api_id)
+        require_tenant_access(request, permission="write", api_id=body.version_id)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        if body.version_set_id not in cfg.api_version_sets:
+            require_tenant_access(request, permission="write", global_only=True)
         manager = require_management_plane()
         manager.require_api_authoring_mode(cfg)
-        create_version(cfg, api_id, body)
-        updated = manager.persist_or_apply_config(cfg)
+        staged = cfg.model_copy(deep=True)
+        create_version(staged, api_id, body)
+        updated = manager.persist_or_apply_config(staged)
         return mask_secret_data(project_api(updated, body.version_id, updated.apis[body.version_id]), updated)
 
     return router

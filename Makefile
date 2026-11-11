@@ -755,3 +755,7 @@ security-lab-down:
 	$(MAKE) -C examples/apim-security down
 
 .PHONY: up-gateway
+
+.PHONY: smoke-authoring
+smoke-authoring:
+	$(MAKE) -C examples/portal smoke-authoring

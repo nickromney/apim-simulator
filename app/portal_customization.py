@@ -85,6 +85,10 @@ class PortalSite(BaseModel):
     background_color: str = Field(default="#f2ede1", pattern=r"^#[0-9a-fA-F]{6}$")
     background_image_url: str | None = Field(default=None, max_length=2048)
     theme: Literal["light", "dark"] = "light"
+    body_font: Literal["system", "serif", "monospace"] = "system"
+    heading_font: Literal["system", "serif", "monospace"] = "system"
+    button_style: Literal["filled", "outline"] = "filled"
+    button_radius: Literal["square", "rounded", "pill"] = "square"
     media: list[PortalMedia] = Field(default_factory=list, max_length=10)
     pages: list[PortalPage] = Field(
         default_factory=lambda: [
@@ -240,6 +244,10 @@ button{background:#12705f;color:white;cursor:pointer;margin:.3rem}textarea{min-h
 <div class="row"><label>Primary color<input id="accent-color" type="color"></label>
 <label>Background color<input id="background-color" type="color"></label>
 <label>Theme<select id="theme"><option>light</option><option>dark</option></select></label></div>
+<div class="row"><label>Body font<select id="body-font"><option value="system">System sans-serif</option><option value="serif">Serif</option><option value="monospace">Monospace</option></select></label>
+<label>Heading font<select id="heading-font"><option value="system">System sans-serif</option><option value="serif">Serif</option><option value="monospace">Monospace</option></select></label>
+<label>Button style<select id="button-style"><option value="filled">Filled</option><option value="outline">Outline</option></select></label>
+<label>Button corners<select id="button-radius"><option value="square">Square</option><option value="rounded">Rounded</option><option value="pill">Pill</option></select></label></div>
 <h2>Pages and navigation</h2><label>Page<select id="page-select"></select></label>
 <label>Page title<input id="page-title" maxlength="160"></label>
 <label>Page text<textarea id="page-content"></textarea></label>
@@ -250,6 +258,10 @@ button{background:#12705f;color:white;cursor:pointer;margin:.3rem}textarea{min-h
 </section><p id="status" role="status" aria-live="polite"></p><iframe id="preview-frame" title="Saved draft preview" sandbox="" hidden></iframe>
 </main><script>
 let site = null, selected = 'home';
+const siteFields = [
+  'site_title', 'logo_url', 'accent_color', 'background_color', 'background_image_url', 'theme',
+  'body_font', 'heading_font', 'button_style', 'button_radius',
+];
 const byId = id => document.getElementById(id);
 const status = message => { byId('status').textContent = message; };
 async function api(path, options = {}) {
@@ -279,11 +291,11 @@ function showMedia() {
 }
 async function load() {
   const data = await (await api('draft')).json(); site = data.site; selected = 'home';
-  for (const key of ['site_title','logo_url','accent_color','background_color','background_image_url','theme']) byId(key.replaceAll('_','-')).value = site[key] ?? '';
+  for (const key of siteFields) byId(key.replaceAll('_','-')).value = site[key] ?? '';
   byId('settings').hidden = false; showMenu(); showMedia(); status('Loaded saved draft. Publication ' + data.publication + '.');
 }
 async function save() {
-  rememberPage(); for (const key of ['site_title','logo_url','accent_color','background_color','background_image_url','theme']) site[key] = byId(key.replaceAll('_','-')).value || null;
+  rememberPage(); for (const key of siteFields) site[key] = byId(key.replaceAll('_','-')).value || null;
   const data = await (await api('draft', {method:'PUT',body:JSON.stringify(site)})).json(); site = data.site; showMenu(); status('Draft saved. Visitors still see the published version.');
 }
 async function preview() {

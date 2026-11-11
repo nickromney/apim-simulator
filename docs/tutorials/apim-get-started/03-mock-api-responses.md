@@ -1,10 +1,22 @@
-# 3 - Mock API Responses
+# 3 - Mock API responses
 
-Source: [Tutorial: Mock API responses](https://learn.microsoft.com/en-us/azure/api-management/mock-api-responses)
+Microsoft Learn equivalent tutorial: [Tutorial: Mock API responses](https://learn.microsoft.com/en-us/azure/api-management/mock-api-responses)
 
-Simulator status: Supported
+Create a mock response and call the API without a running backend.
 
-## Run It Locally
+## Use the operator console
+
+Start the stack with `make up`, open `http://localhost:3007`, and connect with the local demo credentials.
+
+1. Select **New API**, then **HTTP**. Create an API with ID `mock-only`, path `mock-only`, and upstream URL `http://example.invalid`.
+2. Select the API and create a `GET` operation with ID `test-call` and URL template `/test`.
+3. Select the operation and open **Settings**. Under **Response example and mocking**, enter status `200`, content type `application/json`, and body `{"sampleField":"test"}`. Select **Save response example**.
+4. Select **Enable mocking**. The editor reports that mocking is enabled.
+5. Open **Test** and select **Send request**. The response is `200` with `{"sampleField":"test"}`; the placeholder backend is not contacted.
+
+The editor changes a direct operation-level inbound `mock-response` policy. If mocking is conditional or appears in multiple places, edit the policy in **Design** instead. The editor preserves other policies and response metadata. Mocking uses the first non-null example for the matching status and content type.
+
+## Use the management API
 
 From the repo root:
 
@@ -46,56 +58,15 @@ Test the mocked API:
 curl -sS "$APIM_BASE/mock-only/test"
 ```
 
-## What Mapped Cleanly
+## Run the setup script
 
-- Blank API creation
-- Manual operation authoring
-- `mock-response` policy execution without reaching a backend
-
-## Shortcut
-
-If you want the scripted shortcut instead of running the commands manually:
+To run setup and verify the results with the tutorial script:
 
 ```bash
 ./docs/tutorials/apim-get-started/tutorial03.sh --setup
 ./docs/tutorials/apim-get-started/tutorial03.sh --verify
 ```
 
-Use `--setup` to have [`tutorial03.sh`](tutorial03.sh) perform the local setup for this step. Use `--verify` to validate the existing tutorial state without restarting the stack.
+Use `--setup` to create the API and mock. Use `--verify` to check the existing state without restarting the stack.
 
-Expected key `./docs/tutorials/apim-get-started/tutorial03.sh --verify` output:
-
-```text
-Creating blank API 'mock-only'
-{
-  "id": "mock-only",
-  "path": "mock-only",
-  "upstream_base_url": "http://example.invalid"
-}
-
-Adding operation 'test-call' with an authored example response
-{
-  "example_name": "ok",
-  "id": "test-call",
-  "method": "GET",
-  "url_template": "/test"
-}
-
-Enabling mock-response on 'mock-only:test-call'
-{
-  "contains_mock_response": true,
-  "scope_name": "mock-only:test-call",
-  "scope_type": "operation"
-}
-
-Verifying mocked response
-$ curl -sS "http://localhost:8000/mock-only/test"
-{
-  "sampleField": "test"
-}
-```
-
-## Differences From Azure APIM
-
-- The simulator returns the first matching authored response example for the current operation.
-- It does not attempt full schema-driven sample synthesis.
+Verification confirms `GET /mock-only/test` returns `{"sampleField":"test"}`.

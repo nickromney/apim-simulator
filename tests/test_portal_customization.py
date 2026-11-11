@@ -25,7 +25,15 @@ def test_draft_preview_and_publication_are_separate_snapshots() -> None:
     with _client(_portal_config()) as client:
         original = client.get("/apim/portal").text
         site = client.get("/apim/portal/editor/draft", headers=TENANT).json()["site"]
-        site.update(site_title="Contoso developer center", accent_color="#442288", theme="dark")
+        site.update(
+            site_title="Contoso developer center",
+            accent_color="#442288",
+            theme="dark",
+            body_font="serif",
+            heading_font="monospace",
+            button_style="outline",
+            button_radius="pill",
+        )
         site["pages"][0].update(title="Welcome Contoso developers", content="Build an integration with our APIs.")
         site["pages"].append({"slug": "getting-started", "title": "Getting started", "content": "Request a key."})
         saved = client.put("/apim/portal/editor/draft", headers=TENANT, json=site)
@@ -37,11 +45,20 @@ def test_draft_preview_and_publication_are_separate_snapshots() -> None:
         assert "Welcome Contoso developers" in preview.text
         assert "--accent:#442288" in preview.text
         assert "color-scheme:dark" in preview.text
+        assert "--portal-body-font:Georgia" in preview.text
+        assert "--portal-heading-font:ui-monospace" in preview.text
+        assert "--portal-button-radius:999px" in preview.text
+        assert "--portal-button-bg:transparent" in preview.text
+        assert "--portal-button-ink:var(--accent)" in preview.text
         assert preview.headers["cache-control"] == "no-store"
         assert client.post("/apim/portal/editor/publish", headers=TENANT).json()["publication"] == 1
         public = client.get("/apim/portal").text
         assert "Contoso developer center" in public and "Welcome Contoso developers" in public
         assert "Product catalog" in public and "try-send" in public
+        assert "--portal-body-font:Georgia" in public
+        assert "--portal-heading-font:ui-monospace" in public
+        assert "--portal-button-radius:999px" in public
+        assert "--portal-button-bg:transparent" in public
         page = client.get("/apim/portal/pages/getting-started")
         assert page.status_code == 200 and "Request a key." in page.text
         assert "--accent:#442288" in page.text
@@ -73,6 +90,10 @@ def test_drafts_cannot_be_read_or_written_by_consumers(headers) -> None:
         {"background_image_url": "/\\evil.com/logo.png"},
         {"accent_color": "red;display:none"},
         {"theme": "other"},
+        {"body_font": "invalid"},
+        {"heading_font": "invalid"},
+        {"button_style": "invalid"},
+        {"button_radius": "invalid"},
         {"pages": []},
         {"pages": [{"slug": "home", "title": "Home"}, {"slug": "home", "title": "Duplicate"}]},
         {"pages": [{"slug": "../private", "title": "Private"}]},
@@ -110,17 +131,31 @@ def test_portal_customization_survives_config_persistence(tmp_path, monkeypatch)
     monkeypatch.setenv("APIM_CONFIG_PATH", str(path))
     with _client(_portal_config()) as client:
         site = client.get("/apim/portal/editor/draft", headers=TENANT).json()["site"]
-        site["site_title"] = "Persisted portal"
+        site.update(
+            site_title="Persisted portal",
+            body_font="serif",
+            heading_font="monospace",
+            button_style="outline",
+            button_radius="pill",
+        )
         client.put("/apim/portal/editor/draft", headers=TENANT, json=site).raise_for_status()
         client.post("/apim/portal/editor/publish", headers=TENANT).raise_for_status()
-        site["site_title"] = "Private draft after publication"
+        site.update(site_title="Private draft after publication", body_font="monospace", button_radius="rounded")
         client.put("/apim/portal/editor/draft", headers=TENANT, json=site).raise_for_status()
     reloaded = GatewayConfig.model_validate(yaml.safe_load(path.read_text()))
     assert reloaded.portal_content.draft.site_title == "Private draft after publication"
     assert reloaded.portal_content.published.site_title == "Persisted portal"
+    assert reloaded.portal_content.draft.body_font == "monospace"
+    assert reloaded.portal_content.draft.button_radius == "rounded"
+    assert reloaded.portal_content.published.body_font == "serif"
+    assert reloaded.portal_content.published.heading_font == "monospace"
+    assert reloaded.portal_content.published.button_style == "outline"
+    assert reloaded.portal_content.published.button_radius == "pill"
     with _client(reloaded) as client:
         assert "Persisted portal" in client.get("/apim/portal").text
         assert "Private draft after publication" not in client.get("/apim/portal").text
+        assert "--portal-body-font:Georgia" in client.get("/apim/portal").text
+        assert "--portal-body-font:ui-monospace" in client.get("/apim/portal/editor/preview", headers=TENANT).text
 
 
 def test_disabled_portal_and_disabled_tenant_access_protect_editor() -> None:
@@ -131,6 +166,19 @@ def test_disabled_portal_and_disabled_tenant_access_protect_editor() -> None:
     config = _portal_config(tenant_access=TenantAccessConfig(enabled=False))
     with _client(config) as client:
         assert client.get("/apim/portal/editor/draft", headers=TENANT).status_code == 404
+
+
+def test_legacy_site_defaults_styles() -> None:
+    content = PortalContentConfig.model_validate(
+        {"draft": {"site_title": "Legacy"}, "published": {"site_title": "Legacy"}}
+    )
+    for site in (content.draft, content.published):
+        assert (site.body_font, site.heading_font, site.button_style, site.button_radius) == (
+            "system",
+            "system",
+            "filled",
+            "square",
+        )
 
 
 def test_default_snapshot_objects_are_independent() -> None:
