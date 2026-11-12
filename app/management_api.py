@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api_artifacts import ApiArtifactRequest, artifact_etag, export_artifact, plan_artifact, stage_artifact
 from app.config import (
     ApiConfig,
     ApiReleaseConfig,
@@ -456,6 +457,40 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
         cfg: GatewayConfig = request.app.state.gateway_config
         api = _get_api_or_404(cfg, api_id)
         return _masked(cfg, project_api(cfg, api_id, api))
+
+    @router.get("/apim/management/apis/{api_id}/artifacts")
+    async def get_api_artifacts(api_id: str, request: Request, response: Response) -> dict[str, Any]:
+        require_tenant_access(request, permission="read", api_id=api_id)
+        cfg = request.app.state.gateway_config
+        result = export_artifact(cfg, api_id)
+        response.headers["ETag"] = artifact_etag(cfg, api_id)
+        return result
+
+    @router.post("/apim/management/apis/{api_id}/artifacts")
+    async def plan_api_artifacts(
+        api_id: str, request: Request, response: Response, body: ApiArtifactRequest
+    ) -> dict[str, Any]:
+        require_tenant_access(request, permission="read", api_id=api_id)
+        plan = plan_artifact(require_management_plane(), request.app.state.gateway_config, api_id, body)
+        response.headers["ETag"] = plan["etag"]
+        return plan
+
+    @router.put("/apim/management/apis/{api_id}/artifacts")
+    async def put_api_artifacts(
+        api_id: str, request: Request, response: Response, body: ApiArtifactRequest
+    ) -> dict[str, Any]:
+        require_tenant_access(request, permission="write", api_id=api_id)
+        cfg = request.app.state.gateway_config
+        match = request.headers.get("if-match")
+        if match is None:
+            raise HTTPException(status_code=428, detail="If-Match is required")
+        if match != artifact_etag(cfg, api_id):
+            raise HTTPException(status_code=412, detail="The API changed. Plan again before applying.")
+        manager = require_management_plane()
+        staged, result = stage_artifact(manager, cfg, api_id, body)
+        updated = manager.persist_or_apply_config(staged)
+        response.headers["ETag"] = artifact_etag(updated, api_id)
+        return result
 
     @router.post("/apim/management/apis/{api_id}/import")
     async def import_api(api_id: str, request: Request, body: ApiImportRequest) -> dict[str, Any]:

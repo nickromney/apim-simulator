@@ -370,6 +370,35 @@ the change.
 and [APIOps workflow](https://learn.microsoft.com/en-us/azure/architecture/example-scenario/devops/automated-api-deployments-apiops).
 See [policy change tests](../tests/test_api_policy_changes.py). Confidence: `adapted`.
 
+## API artifact promotion
+
+**Contract.** Extract an authored HTTP API as a versioned JSON artifact with an
+OpenAPI document, API policy XML, and operation policy XML keyed by
+`operationId`. The OpenAPI server URL is the API's relative gateway path.
+Use the [local APIOps tutorial](APIOPS.md) to review the artifact in Git and
+promote it to a second gateway.
+
+**Inputs and result.** API readers can GET or POST to
+`/apim/management/apis/{api_id}/artifacts`. POST validates the proposed
+artifact against the target configuration and returns a diff and a target
+ETag. PUT requires API write access and the exact `If-Match` value. The
+server returns HTTP 428 for a missing precondition and HTTP 412 for a stale
+one. The API definition and policies are published together. A plan can
+target a new API when you supply its upstream base URL.
+
+**Scope.** The ETag covers the target API's authored state on one gateway
+process. Configure shared policies, named values, fragments, and other
+dependencies in each target. API and operation settings outside the artifact
+are target-local. The OpenAPI document uses the simulator's bounded REST
+import and export support. Its `x-apim-simulator-query-mode` extension
+preserves required query parameter routing. Extraction rejects GraphQL,
+operation-specific authorization, query constraints outside the OpenAPI
+subset, and operation orders that cannot be expressed as OpenAPI path groups.
+
+**Evidence.** [Microsoft Learn APIOps guide](https://learn.microsoft.com/en-us/azure/api-management/how-to-manage-apiops-cli)
+and [artifact promotion tests](../tests/test_api_artifacts.py). Confidence:
+`adapted`.
+
 ## Local tutorial services
 
 API-scoped debug credentials authorize tracing for at most one hour using

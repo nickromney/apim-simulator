@@ -245,6 +245,19 @@ contracts:
     fixture_or_golden: null
     assertion_kind: http-json
 
+  - id: MGMT-API-ARTIFACT-PROMOTION
+    status: adapted
+    surface: management
+    module: app/api_artifacts.py
+    doc_refs:
+      - docs/APIOPS.md
+      - docs/FIDELITY-CONTRACTS.md#api-artifact-promotion
+      - https://learn.microsoft.com/en-us/azure/api-management/how-to-manage-apiops-cli
+    owner_tests:
+      - tests/test_api_artifacts.py::*
+    fixture_or_golden: null
+    assertion_kind: http-json
+
   - id: MGMT-RELOAD
     status: supported
     surface: management

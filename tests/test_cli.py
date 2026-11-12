@@ -735,6 +735,62 @@ def test_policy_plan_and_guarded_apply(capsys: pytest.CaptureFixture[str], tmp_p
     assert requests[1].headers["if-match"] == plan["headers"]["If-Match"]
 
 
+def test_api_artifact_commands(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    artifact = {
+        "schema_version": 1,
+        "openapi": {"openapi": "3.0.0", "paths": {"/z": {"get": {}}, "/a": {"get": {}}}},
+        "api_policy": None,
+        "operation_policies": {},
+    }
+    source = tmp_path / "api.json"
+    source.write_text(json.dumps(artifact), encoding="utf-8")
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"api_id": "weather", "etag": '"v1"', "diff": {}})
+        return httpx.Response(200, json=artifact)
+
+    transport = httpx.MockTransport(handler)
+    assert main(["--tenant-key", "secret", "extract-api", "weather"], transport=transport) == 0
+    extracted = capsys.readouterr().out
+    assert json.loads(extracted) == artifact
+    assert extracted == json.dumps(artifact, indent=2) + "\n"
+    assert list(json.loads(extracted)["openapi"]["paths"]) == ["/z", "/a"]
+    assert requests[0].method == "GET"
+    assert requests[0].url.path == "/apim/management/apis/weather/artifacts"
+    args = ["weather", "--file", str(source), "--upstream-base-url", "https://example.test"]
+    assert main(["plan-api", *args], transport=transport) == 0
+    assert json.loads(capsys.readouterr().out)["etag"] == '"v1"'
+    assert requests[1].method == "POST"
+    assert json.loads(requests[1].content) == {"artifact": artifact, "upstream_base_url": "https://example.test"}
+    apply = ["apply-api", "weather", "--file", str(source), "--if-match", '"v1"']
+    assert main(["--dry-run", *apply], transport=transport) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["headers"] == {"If-Match": '"v1"'}
+    assert preview["body"] == {"artifact": artifact}
+    assert main(apply, transport=transport) == 0
+    assert json.loads(capsys.readouterr().out) == artifact
+    assert requests[2].method == "PUT"
+    assert requests[2].headers["if-match"] == '"v1"'
+    assert json.loads(requests[2].content) == preview["body"]
+
+
+def test_api_artifact_invalid_input_and_catalog(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    source = tmp_path / "api.json"
+    source.write_text("[]", encoding="utf-8")
+    assert main(["--dry-run", "plan-api", "weather", "--file", str(source)]) == 1
+    assert "must contain a JSON object" in capsys.readouterr().err
+    source.write_text("{}", encoding="utf-8")
+    assert main(["apply-api", "weather", "--file", str(source), "--if-match", "*"]) == 1
+    assert "specific strong quoted ETag" in capsys.readouterr().err
+    assert main(["commands"]) == 0
+    commands = json.loads(capsys.readouterr().out)["commands"]
+    assert commands["extract-api"]["effect"] == commands["plan-api"]["effect"] == "read"
+    assert commands["apply-api"]["effect"] == "write"
+
+
 @pytest.mark.parametrize("etag", ["*", 'W/"v1"', "v1", '"a", "b"', '"a\nb"'])
 def test_apply_policy_rejects_non_specific_etag(etag: str, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     source = tmp_path / "policy.xml"

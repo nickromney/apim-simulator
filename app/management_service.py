@@ -631,7 +631,9 @@ class ManagementService:
         self.set_policy_xml(target, cleaned)
         return self.persist_or_apply_config(cfg)
 
-    def import_api(self, cfg: GatewayConfig, api_id: str, body: Any) -> tuple[GatewayConfig, Any]:
+    def import_api(
+        self, cfg: GatewayConfig, api_id: str, body: Any, *, stage: bool = False
+    ) -> tuple[GatewayConfig, Any]:
         self.require_api_authoring_mode(cfg)
         self.validate_policy_xml(cfg, body.policies_xml)
         try:
@@ -669,6 +671,8 @@ class ManagementService:
                 ),
                 None,
             )
+            if stage:
+                operation_id = matched_id or imported_operation.name
             operation_id = operation_id or imported_operation.name
             base_id = operation_id
             suffix = 1
@@ -750,7 +754,7 @@ class ManagementService:
         )
         if existing is None:
             _ensure_initial_api_revision(cfg.apis[api_id])
-        return self.persist_or_apply_config(cfg), imported
+        return (cfg if stage else self.persist_or_apply_config(cfg)), imported
 
     def upsert_api(self, cfg: GatewayConfig, api_id: str, body: Any) -> GatewayConfig:
         self.require_api_authoring_mode(cfg)
