@@ -247,7 +247,7 @@ done
 
 ## Prepare other targets
 
-The simulator promotes one HTTP API at a time. Each target supplies its own
+When you promote an individual API, the target supplies its own
 shared policies, products, subscriptions, policy fragments, named values, and
 backends. For a protected API, create the target API with its intended product
 membership before promoting the artifact. Check the target plan for changes
@@ -256,6 +256,80 @@ artifact is removed from the target API. A
 `null` API policy or missing operation policy removes the authored policy at
 that scope. See [API artifact promotion](FIDELITY-CONTRACTS.md#api-artifact-promotion)
 for the supported OpenAPI subset.
+
+## Promote a product and its APIs
+
+Start two gateways with separate state. On the source, choose a product with
+HTTP APIs linked at API scope. Use service-wide read access to extract and
+plan, and service-wide write access to apply. The demo tenant key has both
+permissions on the tutorial stacks.
+
+Set `source_url` and `target_url` to the gateway addresses, and set
+`product_id` to the source product ID. Run from the simulator repository.
+Extract the product, check its API links and dependency names, and review
+the JSON in Git.
+
+```bash
+uv run apimsim --base-url "$source_url" extract-product "$product_id" > product.json
+jq '{apis: (.apis | keys), backends, named_values}' product.json
+```
+
+Prepare a separate override file for the destination. Use `api_upstreams`
+for direct upstream URLs on APIs that have no named backend. Use `backends`
+for the URLs of named backend resources. In `named_values`, key each override
+by the named-value resource ID. Use only IDs from the artifact. Keep the
+override file outside Git, especially when it contains secret values.
+
+```bash
+overrides="$(mktemp)"
+cat > "$overrides" <<'JSON'
+{
+  "api_upstreams": {"billing": "http://mock-backend:8080/billing"},
+  "backends": {"catalog": "http://mock-backend:8080/catalog"},
+  "named_values": {"shop-label": "local-target"}
+}
+JSON
+```
+
+Replace the sample entries with the IDs and values for your destination.
+Supply a URL for each new direct API and an override for each referenced
+backend or named value missing from the target. Omit entries you want to
+take from the target's existing configuration. A backend URL override
+updates the shared backend resource. Configure backend pools on the target.
+Named values set through `APIM_NAMED_VALUE_*` on the destination take
+precedence over stored values.
+
+Plan with the reviewed artifact and the destination overrides. Check the
+diff and the IDs listed under `overrides`.
+
+```bash
+uv run apimsim --base-url "$target_url" plan-product "$product_id" \
+  --file product.json --overrides "$overrides" > product-plan.json
+jq -r '.diff' product-plan.json
+jq '.overrides' product-plan.json
+```
+
+Use the same files and the ETag from the plan to publish the product and its
+member APIs together. If apply returns HTTP 412, review a new plan against
+the current target.
+
+```bash
+etag="$(jq -er '.etag' product-plan.json)"
+uv run apimsim --base-url "$target_url" apply-product "$product_id" \
+  --file product.json --overrides "$overrides" --if-match "$etag"
+uv run apimsim --base-url "$target_url" extract-product "$product_id" > deployed-product.json
+```
+
+Compare the deployed definition with the reviewed artifact. Call the member
+APIs to check that they reach the destination backends and that the policies
+use the destination named values. For a protected product, use a subscription
+issued on the destination. The artifact carries the subscription requirement
+and the API links. Subscriptions, keys, groups, and tags are managed per stack.
+
+Product promotion supports API-level membership. Keep the currently linked
+APIs in the artifact and manage intentional unlinking separately. Inline
+policy fragments in the authored policies before extracting a product bundle.
+[Product artifact promotion contract](FIDELITY-CONTRACTS.md#product-artifact-promotion)
 
 ## Run the Azure workflow
 

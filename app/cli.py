@@ -89,6 +89,16 @@ def _build_parser() -> argparse.ArgumentParser:
     product_parser = subparsers.add_parser("product", help="Show one product.")
     product_parser.add_argument("product_id")
 
+    extract_product_parser = subparsers.add_parser("extract-product", help="Extract a whole-product JSON artifact.")
+    extract_product_parser.add_argument("product_id")
+    for name in ("plan-product", "apply-product"):
+        artifact_parser = subparsers.add_parser(name, help="Plan or apply a whole-product JSON artifact.")
+        artifact_parser.add_argument("product_id")
+        artifact_parser.add_argument("--file", required=True, help="Path to the product artifact JSON file.")
+        artifact_parser.add_argument("--overrides", help="Path to environment override JSON.")
+        if name == "apply-product":
+            artifact_parser.add_argument("--if-match", required=True, help="Specific strong ETag from plan-product.")
+
     put_api_parser = subparsers.add_parser("put-api", help="Create or replace an API from a JSON file.")
     put_api_parser.add_argument("api_id")
     put_api_parser.add_argument("--file", required=True, help="Path to a JSON file with the API payload.")
@@ -274,6 +284,13 @@ def _api_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
     return body
 
 
+def _product_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
+    body = {"artifact": _read_json_file(args.file)}
+    if args.overrides is not None:
+        body["overrides"] = _read_json_file(args.overrides)
+    return body
+
+
 @dataclass(frozen=True)
 class _Command:
     """One CLI verb, as the management-plane call it turns into.
@@ -314,6 +331,13 @@ _COMMANDS: dict[str, _Command] = {
     "import-openapi": _Command("POST", "/apim/management/apis/{api_id}/import", body=_import_openapi_body),
     "products": _Command("GET", "/apim/management/products"),
     "product": _Command("GET", "/apim/management/products/{product_id}"),
+    "extract-product": _Command("GET", "/apim/management/products/{product_id}/artifacts"),
+    "plan-product": _Command(
+        "POST", "/apim/management/products/{product_id}/artifacts", body=_product_artifact_body, read_only=True
+    ),
+    "apply-product": _Command(
+        "PUT", "/apim/management/products/{product_id}/artifacts", body=_product_artifact_body, requires_etag=True
+    ),
     "put-product": _Command("PUT", "/apim/management/products/{product_id}", body=_json_file_body),
     "delete-product": _Command("DELETE", "/apim/management/products/{product_id}", confirm="product {product_id!r}"),
     "subscriptions": _Command("GET", "/apim/management/subscriptions"),
@@ -421,6 +445,8 @@ async def _dispatch(args: argparse.Namespace, client: httpx.AsyncClient) -> http
     if command.confirm is not None and not args.yes:
         raise CliUsageError(f"refusing to delete {command.confirm.format(**vars(args))} without --yes")
     plan = _request_plan(args)
+    if args.command in ("plan-product", "apply-product"):
+        args._product_request_body = plan["body"]
     return await _request(
         client,
         plan["method"],
@@ -461,6 +487,67 @@ def _error_detail(response: httpx.Response, args: argparse.Namespace) -> str:
     return json.dumps(payload)
 
 
+def _product_error_detail(response: httpx.Response, args: argparse.Namespace) -> str:
+    generic = "product artifact request failed"
+    try:
+        payload = response.json()
+    except ValueError:
+        return generic
+    if not isinstance(payload, dict) or not isinstance(payload.get("detail"), str):
+        return generic
+    detail = payload["detail"]
+    safe = {
+        "Invalid product artifact request; check artifact and override field types",
+        "Product not found",
+        "Overrides must refer to bundle dependencies",
+        "Backend override must be a URL",
+        "Use a backend override for APIs that reference a named backend",
+        "An API switching to direct routing requires an upstream override",
+        "upstream_base_url is required for a new API",
+        "upstream_base_url must be an absolute HTTP(S) URL without credentials, query, or fragment",
+        "Unsupported artifact schema version",
+        "Artifact contains a known secret",
+        "Removing product API links is not supported; include all currently linked APIs",
+        "Operation-level product membership cannot be represented; move membership to the API",
+        "Invalid product artifact metadata",
+        "Target API has operation-level product membership; move membership to the API",
+        "Bundle dependencies do not match its policies and APIs",
+        "Invalid policy or named value override in the product artifact",
+        "Invalid config update",
+        "If-Match is required",
+        "The configuration changed. Plan again before applying.",
+    }
+    body = args._product_request_body
+    if detail not in safe and not _is_dependency_error(detail, body):
+        return generic
+    if response.status_code == 422:
+        return generic
+    return _redact_product_overrides(detail, body, args)
+
+
+def _is_dependency_error(detail: str, body: dict[str, Any]) -> bool:
+    artifact = body.get("artifact", {})
+    if not isinstance(artifact, dict):
+        return False
+    for kind, label in (("backends", "Backend"), ("named_values", "Named value")):
+        dependencies = artifact.get(kind, {})
+        if isinstance(dependencies, (dict, list)):
+            if any(detail == f"{label} {identifier} requires an override" for identifier in dependencies):
+                return True
+    return False
+
+
+def _redact_product_overrides(detail: str, body: dict[str, Any], args: argparse.Namespace) -> str:
+    overrides = body.get("overrides", {})
+    if isinstance(overrides, dict):
+        for group in overrides.values():
+            if isinstance(group, dict):
+                for value in group.values():
+                    if isinstance(value, str) and value:
+                        detail = detail.replace(value, "[redacted]")
+    return _redact_credentials(detail, args)
+
+
 async def _run(
     args: argparse.Namespace,
     transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None,
@@ -474,10 +561,14 @@ async def _run(
             print(f"error: {exc}", file=sys.stderr)
             return 1
         except httpx.TransportError as exc:
-            print(f"error: could not reach simulator: {_redact_credentials(str(exc), args)}", file=sys.stderr)
+            detail = "transport error" if args.command in ("plan-product", "apply-product") else str(exc)
+            print(f"error: could not reach simulator: {_redact_credentials(detail, args)}", file=sys.stderr)
             return 2
 
     if response.status_code >= 400:
+        if args.command in ("plan-product", "apply-product"):
+            print(f"error: {response.status_code} {_product_error_detail(response, args)}", file=sys.stderr)
+            return 1
         print(
             f"error: {response.status_code} {_redact_credentials(_error_detail(response, args), args)}", file=sys.stderr
         )
@@ -517,7 +608,10 @@ def main(
         return 0
     if args.dry_run:
         try:
-            print(json.dumps(_request_plan(args), indent=2))
+            plan = _request_plan(args)
+            if args.command in ("plan-product", "apply-product") and "overrides" in plan["body"]:
+                plan["body"]["overrides"] = "[redacted]"
+            print(json.dumps(plan, indent=2))
         except CliUsageError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1

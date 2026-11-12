@@ -16,7 +16,7 @@ from typing import Any, Literal
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.api_artifacts import ApiArtifactRequest, artifact_etag, export_artifact, plan_artifact, stage_artifact
 from app.config import (
@@ -59,6 +59,13 @@ from app.portal import (
     portal_user_id,
     project_portal_subscription,
     render_portal_page,
+)
+from app.product_artifacts import (
+    ProductArtifactRequest,
+    export_product_artifact,
+    plan_product_artifact,
+    product_etag,
+    stage_product_artifact,
 )
 from app.resource_projection import (
     project_api,
@@ -863,6 +870,14 @@ def _build_policy_router(*, require_management_plane: Callable[[], ManagementSer
     return router
 
 
+async def _read_product_artifact_request(request: Request) -> ProductArtifactRequest:
+    try:
+        payload = await request.json()
+        return ProductArtifactRequest.model_validate(payload)
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(400, "Invalid product artifact request; check artifact and override field types") from exc
+
+
 def _build_products_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
     """Routes for products, their group and tag grants, and the tag catalogue."""
     router = APIRouter()
@@ -879,6 +894,38 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
         cfg: GatewayConfig = request.app.state.gateway_config
         product = _get_product_or_404(cfg, product_id)
         return _masked(cfg, project_product(cfg, product_id, product))
+
+    @router.get("/apim/management/products/{product_id}/artifacts")
+    async def get_product_artifacts(product_id: str, request: Request, response: Response) -> dict[str, Any]:
+        require_tenant_access(request, permission="read", global_only=True)
+        cfg = request.app.state.gateway_config
+        result = export_product_artifact(cfg, product_id)
+        response.headers["ETag"] = product_etag(cfg, product_id)
+        return result
+
+    @router.post("/apim/management/products/{product_id}/artifacts")
+    async def plan_product_artifacts(product_id: str, request: Request, response: Response) -> dict[str, Any]:
+        require_tenant_access(request, permission="read", global_only=True)
+        body = await _read_product_artifact_request(request)
+        result = plan_product_artifact(require_management_plane(), request.app.state.gateway_config, product_id, body)
+        response.headers["ETag"] = result["etag"]
+        return result
+
+    @router.put("/apim/management/products/{product_id}/artifacts")
+    async def put_product_artifacts(product_id: str, request: Request, response: Response) -> dict[str, Any]:
+        require_tenant_access(request, permission="write", global_only=True)
+        match = request.headers.get("if-match")
+        if match is None:
+            raise HTTPException(428, "If-Match is required")
+        body = await _read_product_artifact_request(request)
+        cfg = request.app.state.gateway_config
+        if match != product_etag(cfg, product_id):
+            raise HTTPException(412, "The configuration changed. Plan again before applying.")
+        manager = require_management_plane()
+        staged, result = stage_product_artifact(manager, cfg, product_id, body)
+        updated = manager.persist_or_apply_config(staged)
+        response.headers["ETag"] = product_etag(updated, product_id)
+        return result
 
     @router.put("/apim/management/products/{product_id}")
     async def upsert_product(product_id: str, request: Request, body: ProductUpsert) -> dict[str, Any]:

@@ -798,3 +798,68 @@ def test_apply_policy_rejects_non_specific_etag(etag: str, capsys: pytest.Captur
     for preview in ([], ["--dry-run"]):
         assert main([*preview, "apply-policy", "weather", "--file", str(source), "--if-match", etag]) == 1
         assert "specific strong quoted ETag" in capsys.readouterr().err
+
+
+def test_product_artifact_commands(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "artifact.json"
+    overrides = tmp_path / "overrides.json"
+    artifact.write_text('{"z": 1, "a": 2}')
+    overrides.write_text('{"named_values": {"token": "secret-value"}}')
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"diff": "reviewed", "override_ids": ["token"]})
+
+    transport = httpx.MockTransport(handler)
+    assert main(["extract-product", "starter"], transport=transport) == 0
+    capsys.readouterr()
+    assert requests[-1].method == "GET"
+    assert requests[-1].url.path == "/apim/management/products/starter/artifacts"
+    for command, method in (("plan-product", "POST"), ("apply-product", "PUT")):
+        args = ["--tenant-key", TENANT_KEY, command, "starter", "--file", str(artifact), "--overrides", str(overrides)]
+        if command == "apply-product":
+            args += ["--if-match", '"etag"']
+        assert main(args, transport=transport) == 0
+        assert json.loads(capsys.readouterr().out)["diff"] == "reviewed"
+        request = requests[-1]
+        assert request.method == method
+        assert request.headers["X-Apim-Tenant-Key"] == TENANT_KEY
+        assert list(json.loads(request.content)["artifact"]) == ["z", "a"]
+        assert json.loads(request.content)["overrides"]["named_values"]["token"] == "secret-value"
+        if command == "apply-product":
+            assert request.headers["If-Match"] == '"etag"'
+
+    assert main(["--dry-run", "plan-product", "starter", "--file", str(artifact), "--overrides", str(overrides)]) == 0
+    preview = capsys.readouterr().out
+    assert "secret-value" not in preview
+    assert json.loads(preview)["body"]["overrides"] == "[redacted]"
+
+
+def test_product_artifact_error_does_not_echo_overrides(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "artifact.json"
+    overrides = tmp_path / "overrides.json"
+    artifact.write_text("{}")
+    overrides.write_text('{"named_values": {"token": "secret-value"}}')
+    transport = httpx.MockTransport(lambda _: httpx.Response(422, json={"detail": [{"input": "secret-value"}]}))
+    assert (
+        main(["plan-product", "starter", "--file", str(artifact), "--overrides", str(overrides)], transport=transport)
+        == 1
+    )
+    assert "secret-value" not in capsys.readouterr().err
+
+
+def test_product_artifact_error_shows_safe_dependency_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    artifact = tmp_path / "artifact.json"
+    overrides = tmp_path / "overrides.json"
+    artifact.write_text('{"backends": {"orders": {}}}')
+    overrides.write_text('{"named_values": {"token": "secret-value"}}')
+    args = ["plan-product", "starter", "--file", str(artifact), "--overrides", str(overrides)]
+    safe = httpx.MockTransport(lambda _: httpx.Response(400, json={"detail": "Backend orders requires an override"}))
+    assert main(args, transport=safe) == 1
+    assert "Backend orders requires an override" in capsys.readouterr().err
+    malicious = httpx.MockTransport(lambda _: httpx.Response(400, json={"detail": "secret-value"}))
+    assert main(args, transport=malicious) == 1
+    assert "secret-value" not in capsys.readouterr().err

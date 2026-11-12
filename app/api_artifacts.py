@@ -166,8 +166,14 @@ def _query_mode(doc: dict[str, Any]) -> str:
     return mode
 
 
-def stage_artifact(
-    manager: ManagementService, cfg: GatewayConfig, api_id: str, body: ApiArtifactRequest
+def stage_artifact(  # noqa: C901 - shared staging preserves existing API artifact validation
+    manager: ManagementService,
+    cfg: GatewayConfig,
+    api_id: str,
+    body: ApiArtifactRequest,
+    *,
+    defer_validation: bool = False,
+    backend: str | None = None,
 ) -> tuple[GatewayConfig, dict[str, Any]]:
     artifact = body.artifact.model_dump()
     if artifact["schema_version"] != 1:
@@ -178,7 +184,7 @@ def stage_artifact(
     if existing is not None and existing.graphql is not None:
         raise HTTPException(status_code=400, detail="GraphQL APIs are not supported by artifacts")
     _validate_upstream(body.upstream_base_url)
-    if existing is None and not body.upstream_base_url:
+    if existing is None and not body.upstream_base_url and not backend:
         raise HTTPException(status_code=400, detail="upstream_base_url is required for a new API")
     doc = artifact["openapi"]
     _validate_operation_ids(doc, artifact["operation_policies"])
@@ -206,13 +212,19 @@ def stage_artifact(
     staged, _ = manager.import_api(cfg.model_copy(deep=True), api_id, SimpleNamespace(**params), stage=True)
     api = staged.apis[api_id]
     api.path = api_path
+    if backend is not None:
+        api.backend = backend
     if body.upstream_base_url is not None:
         api.backend = None
     api.policies_xml = artifact["api_policy"]
-    manager.validate_policy_xml(staged, api.policies_xml)
+    if not defer_validation:
+        manager.validate_policy_xml(staged, api.policies_xml)
     for op_id, operation in api.operations.items():
         operation.policies_xml = artifact["operation_policies"].get(op_id)
-        manager.validate_policy_xml(staged, operation.policies_xml)
+        if not defer_validation:
+            manager.validate_policy_xml(staged, operation.policies_xml)
+    if defer_validation:
+        return staged, artifact
     try:
         from app.management_service import _validate_open_product_associations
         from app.security_governance import validate_governance_mutation
