@@ -44,6 +44,8 @@ claims, and local tests do not establish live Azure parity.
    `atomic: false` means the reads can see different instants or workers.
 4. Inspect effective policy for the relevant scope and product. For an API-level
    policy, use `plan-policy` to validate the proposed XML and review the live diff.
+   Use `extract-api`, `plan-api`, and `apply-api` to promote the OpenAPI
+   definition and authored policies together. [Practice APIOps locally](APIOPS.md)
    Capture the authored resource before replacement for other scopes.
 5. Apply one bounded change. Read back the changed resource. Verify a positive
    case and the relevant negative or boundary case; inspect the returned trace

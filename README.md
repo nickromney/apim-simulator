@@ -429,11 +429,14 @@ policy semantics. Replay can cause backend and runtime side effects. See the
 [agent operating model](docs/AGENT-SYSTEM.md) for the complete verification loop.
 Run `uv run apimsim --help` for the full command list.
 
-#### Review and apply an API policy
+#### Promote an API between stacks
 
-[Practice APIOps locally](docs/APIOPS.md) follows the Microsoft Learn APIOps
-workflow with two local gateways. Extract a policy, review it in Git, preview
-and publish the approved commit, then verify and roll back the change.
+[Practice APIOps locally](docs/APIOPS.md) walks through extracting an API's
+OpenAPI definition, API policy, and operation policies. Review the artifact in
+Git, validate it against the target with `plan-api`, then publish it with
+`apply-api` and the target's ETag.
+
+#### Review and apply an API policy
 
 Connect to a running gateway and choose an existing API. Save your proposed XML
 in `policy.xml`. An API reader can plan the change. Use a contributor credential

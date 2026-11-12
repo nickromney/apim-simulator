@@ -1,8 +1,8 @@
 # Practice APIOps locally
 
-Promote an API policy from a disposable source gateway to a separate target.
-Use Git to review the change, preview and publish the reviewed commit, then
-verify the live response and roll back.
+Promote an HTTP API from a disposable source gateway to a separate target.
+Extract its OpenAPI definition and authored policies, review a change in Git,
+and publish the reviewed commit. Verify the live response and roll back.
 
 [Microsoft Learn equivalent tutorial](https://learn.microsoft.com/en-us/azure/architecture/example-scenario/devops/automated-api-deployments-apiops)
 
@@ -38,7 +38,7 @@ lsof -nP -iTCP:$((8000 + 100 * target_slot)) -sTCP:LISTEN
 docker compose ls -a
 ```
 
-## Start the gateways and extract a policy
+## Start the gateways and prepare the source API
 
 ```bash
 STACK_SLOT="$source_slot" make up-gateway
@@ -48,8 +48,10 @@ curl -fsS --retry 15 --retry-all-errors --retry-delay 1 "$target_url/apim/health
 ```
 
 Both health requests should succeed. Create a temporary Git repository and
-seed both gateways with the same known-good policy for the `default` API.
-The seeded policy inherits the parent policy in each section.
+import the example API into the source gateway. It starts with one operation
+that forwards to the bundled mock backend. This example uses the demo tenant
+key. With signed credentials, use API read access to extract and plan and API
+write access to apply.
 
 ```bash
 repo="$(mktemp -d)"
@@ -60,102 +62,153 @@ git -C "$repo" config commit.gpgsign false
 unset APIM_BEARER_TOKEN
 export APIM_TENANT_KEY=local-dev-tenant-key
 
-cat > "$repo/policy.xml" <<'XML'
+cat > "$repo/source-openapi.json" <<'JSON'
+{
+  "openapi": "3.0.3",
+  "info": {"title": "APIOps demo", "version": "1.0"},
+  "servers": [{"url": "http://mock-backend:8080/api"}],
+  "paths": {
+    "/echo": {"get": {"operationId": "echo", "responses": {"200": {"description": "Echo"}}}}
+  }
+}
+JSON
+
+uv run apimsim --base-url "$source_url" import-openapi apiops-demo --file "$repo/source-openapi.json"
+
+cat > "$repo/api-policy.xml" <<'XML'
 <policies>
-  <inbound><base /></inbound>
-  <backend><base /></backend>
-  <outbound><base /></outbound>
-  <on-error><base /></on-error>
-</policies>
-XML
-
-uv run apimsim --base-url "$source_url" set-policy api default --file "$repo/policy.xml"
-uv run apimsim --base-url "$target_url" set-policy api default --file "$repo/policy.xml"
-uv run apimsim --base-url "$source_url" policy api default | jq -er '.xml' > "$repo/policy.xml"
-git -C "$repo" add policy.xml
-git -C "$repo" commit -m 'Record baseline policy'
-git -C "$repo" switch -c policy-change
-```
-
-The first commit is your rollback input. Review extracted files for secrets and
-environment-specific values before committing policies from a real gateway.
-
-## Review and record the change in Git
-
-Add a response header to the outbound policy.
-
-```bash
-cat > "$repo/policy.xml" <<'XML'
-<policies>
-  <inbound><base /></inbound>
-  <backend><base /></backend>
   <outbound>
     <base />
-    <set-header name="X-APIOps-Demo" exists-action="override"><value>published</value></set-header>
+    <set-header name="X-APIOps-API" exists-action="override"><value>active</value></set-header>
   </outbound>
-  <on-error><base /></on-error>
 </policies>
 XML
 
-git -C "$repo" diff --check
-git -C "$repo" diff -- policy.xml
+cat > "$repo/echo-policy.xml" <<'XML'
+<policies>
+  <outbound>
+    <base />
+    <set-header name="X-APIOps-Echo" exists-action="override"><value>baseline</value></set-header>
+  </outbound>
+</policies>
+XML
+
+uv run apimsim --base-url "$source_url" set-policy api apiops-demo --file "$repo/api-policy.xml"
+uv run apimsim --base-url "$source_url" set-policy operation apiops-demo:echo --file "$repo/echo-policy.xml"
 ```
 
-Review the diff and confirm that the change adds the expected header. For team
-releases, run the API tests and applicable contract and security checks in the
-pull request, and use the merged commit after approval. In this disposable
-repository, merge locally and export the release file from that commit.
+## Extract and publish a baseline
+
+Extract the source API into a JSON file. The file contains an OpenAPI document
+with a relative gateway path, the API policy, and the operation policies
+keyed by OpenAPI operation ID. Inspect the artifact for secrets before
+committing it. In this example the policies set response headers.
 
 ```bash
-git -C "$repo" add policy.xml
-git -C "$repo" commit -m 'Add demo response header'
+uv run apimsim --base-url "$source_url" extract-api apiops-demo > "$repo/api.json"
+jq '.openapi' "$repo/api.json"
+jq -r '.api_policy, .operation_policies.echo' "$repo/api.json"
+git -C "$repo" add api.json
+git -C "$repo" commit -m 'Record baseline API'
+```
+
+Plan against the target gateway. The target lacks `apiops-demo`, so supply
+its upstream base URL with the mock backend's `/api` prefix. The plan
+should show a new API with one operation.
+
+```bash
+export APIM_BASE_URL="$target_url"
+upstream=http://mock-backend:8080/api
+uv run apimsim plan-api apiops-demo --file "$repo/api.json" \
+  --upstream-base-url "$upstream" > "$repo/baseline-plan.json"
+jq -er '.diff' "$repo/baseline-plan.json"
+```
+
+Apply the baseline with the quoted ETag from the target's plan. The request
+should return HTTP 200 and include `X-APIOps-Echo: baseline`.
+
+```bash
+etag="$(jq -er '.etag' "$repo/baseline-plan.json")"
+uv run apimsim apply-api apiops-demo --file "$repo/api.json" \
+  --upstream-base-url "$upstream" --if-match "$etag"
+curl -fsS -D - -o /dev/null "$target_url/apiops-demo/echo"
+```
+
+## Review and record a change in Git
+
+Add a health operation to the OpenAPI document and change the echo response
+header in its operation policy.
+
+```bash
+git -C "$repo" switch -c api-change
+jq '
+  .openapi.paths["/health"] = {
+    get: {operationId: "health", summary: "Health", parameters: [], responses: {"200": {description: "Healthy"}}}
+  }
+  | .operation_policies.echo |= sub(">baseline<"; ">published<")
+' "$repo/api.json" > "$repo/proposed.json"
+mv "$repo/proposed.json" "$repo/api.json"
+git -C "$repo" diff --check
+git -C "$repo" diff -- api.json
+```
+
+Confirm that the diff adds `GET /health` and updates the echo policy. For
+team releases, run API tests and applicable contract and security checks in the
+pull request. Use the merged commit after approval. In this disposable
+repository, merge locally and export the release file from the commit.
+
+```bash
+git -C "$repo" add api.json
+git -C "$repo" commit -m 'Add health and update the echo policy'
 git -C "$repo" switch main
-git -C "$repo" merge --ff-only policy-change
+git -C "$repo" merge --ff-only api-change
 release="$(git -C "$repo" rev-parse HEAD)"
-git -C "$repo" show "$release:policy.xml" > "$repo/release.xml"
+git -C "$repo" show "$release:api.json" > "$repo/release.json"
 printf 'Release commit %s\n' "$release"
 ```
 
 ## Preview and publish to the target
 
-Use the exported XML for both commands. The target checks the proposed XML
-against its current configuration and returns a diff and an ETag.
+Use the release file for both commands. The target validates the definition
+and policies together. Leave the upstream override out to use the backend
+already configured on the target API.
 
 ```bash
-export APIM_BASE_URL="$target_url"
-uv run apimsim plan-policy default --file "$repo/release.xml" > "$repo/plan.json"
+uv run apimsim plan-api apiops-demo --file "$repo/release.json" > "$repo/plan.json"
 jq -er '.diff' "$repo/plan.json"
 ```
 
-The diff should add the outbound response header. After review, apply the
-release file using the ETag from the plan.
+Review the target diff, then apply the release file using the ETag from the
+plan. The API definition and policies take effect together.
 
 ```bash
-policy_etag="$(jq -er '.etag' "$repo/plan.json")"
-uv run apimsim apply-policy default --file "$repo/release.xml" --if-match "$policy_etag"
+etag="$(jq -er '.etag' "$repo/plan.json")"
+uv run apimsim apply-api apiops-demo --file "$repo/release.json" --if-match "$etag"
 ```
 
-HTTP 412 means the authored policy changed after you planned. Review the new
+HTTP 412 means the target API changed after you planned. Review the new
 target state and diff before retrying. Run one publisher at a time for each
 target. When promoting the same commit to another target, obtain a plan and
 ETag from that target.
 
 ## Verify the deployment
 
-Compare the deployed policy with the release file. Call the target API and
-check that it returns the new response header.
+Compare the deployed definition and policies with the release file. Check
+that the health operation works and that both policies run on the echo
+request.
 
 ```bash
-uv run apimsim policy api default | jq -er '.xml' > "$repo/deployed.xml"
-cmp "$repo/release.xml" "$repo/deployed.xml"
-curl -fsS -D - -o /dev/null "$target_url/api/echo" | grep -i '^X-APIOps-Demo: published'
-curl -fsS -D - -o /dev/null "$source_url/api/echo"
+uv run apimsim extract-api apiops-demo | jq -S . > "$repo/deployed.json"
+jq -S . "$repo/release.json" > "$repo/expected.json"
+diff -u "$repo/expected.json" "$repo/deployed.json"
+curl -fsS -D - -o /dev/null "$target_url/apiops-demo/echo"
+curl -fsS "$target_url/apiops-demo/health"
 ```
 
-`cmp` should print nothing. The header should appear on the target response.
-Record the release commit with your test results. If someone makes an approved
-emergency change on a gateway, extract the updated policy and review it in Git
-so the next deployment includes the change.
+`diff` should print nothing. Echo should return `X-APIOps-API: active` and
+`X-APIOps-Echo: published`. Health should return HTTP 200. Record the release
+commit with your test results. If someone makes an approved emergency change
+on a gateway, extract the updated artifact and review it in Git.
 
 ## Roll back
 
@@ -164,18 +217,20 @@ For a team release, review and approve the revert before publishing it.
 
 ```bash
 git -C "$repo" revert --no-edit "$release"
-git -C "$repo" show HEAD:policy.xml > "$repo/rollback.xml"
-uv run apimsim plan-policy default --file "$repo/rollback.xml" > "$repo/rollback-plan.json"
+git -C "$repo" show HEAD:api.json > "$repo/rollback.json"
+uv run apimsim plan-api apiops-demo --file "$repo/rollback.json" > "$repo/rollback-plan.json"
 jq -er '.diff' "$repo/rollback-plan.json"
 ```
 
-The rollback diff should remove the response header. Apply it and check the
-response again. The header should be absent.
+The rollback diff should remove the health operation and restore the echo
+policy. Apply it and check the response again. Echo should return
+`X-APIOps-Echo: baseline`, and health should return HTTP 404.
 
 ```bash
-policy_etag="$(jq -er '.etag' "$repo/rollback-plan.json")"
-uv run apimsim apply-policy default --file "$repo/rollback.xml" --if-match "$policy_etag"
-curl -fsS -D - -o /dev/null "$target_url/api/echo"
+etag="$(jq -er '.etag' "$repo/rollback-plan.json")"
+uv run apimsim apply-api apiops-demo --file "$repo/rollback.json" --if-match "$etag"
+curl -fsS -D - -o /dev/null "$target_url/apiops-demo/echo"
+curl -sS -o /dev/null -w '%{http_code}\n' "$target_url/apiops-demo/health"
 ```
 
 ## Clean up
@@ -190,10 +245,21 @@ for slot in "$source_slot" "$target_slot"; do
 done
 ```
 
+## Prepare other targets
+
+The simulator promotes one HTTP API at a time. Each target supplies its own
+shared policies, products, subscriptions, policy fragments, named values, and
+backends. For a protected API, create the target API with its intended product
+membership before promoting the artifact. Check the target plan for changes
+the OpenAPI importer makes to the definition. An operation absent from the
+artifact is removed from the target API. A
+`null` API policy or missing operation policy removes the authored policy at
+that scope. See [API artifact promotion](FIDELITY-CONTRACTS.md#api-artifact-promotion)
+for the supported OpenAPI subset.
+
 ## Run the Azure workflow
 
-This exercise covers the lifecycle of one API policy. Use the Microsoft APIOps
-CLI and a nonproduction Azure API Management instance to rehearse the full
-scenario, including artifact extraction and publishing, resource deletion
-plans, environment overrides, and a pipeline with workload identity and
-deployment approvals. [Microsoft Learn APIOps setup guide](https://learn.microsoft.com/en-us/azure/api-management/how-to-manage-apiops-cli)
+Use the Microsoft APIOps CLI and a nonproduction Azure API Management instance
+for the Azure scenario, including service-wide artifacts, environment
+overrides, and a pipeline with workload identity and deployment approvals.
+[Microsoft Learn APIOps setup guide](https://learn.microsoft.com/en-us/azure/api-management/how-to-manage-apiops-cli)

@@ -72,6 +72,16 @@ def _build_parser() -> argparse.ArgumentParser:
     api_parser = subparsers.add_parser("api", help="Show one API.")
     api_parser.add_argument("api_id")
 
+    extract_parser = subparsers.add_parser("extract-api", help="Extract a whole-API JSON artifact.")
+    extract_parser.add_argument("api_id")
+    for name in ("plan-api", "apply-api"):
+        artifact_parser = subparsers.add_parser(name, help="Plan or apply a whole-API JSON artifact.")
+        artifact_parser.add_argument("api_id")
+        artifact_parser.add_argument("--file", required=True, help="Path to the API artifact JSON file.")
+        artifact_parser.add_argument("--upstream-base-url", help="Override the imported upstream URL.")
+        if name == "apply-api":
+            artifact_parser.add_argument("--if-match", required=True, help="Specific strong ETag from plan-api.")
+
     operations_parser = subparsers.add_parser("operations", help="List operations for one API.")
     operations_parser.add_argument("api_id")
 
@@ -181,7 +191,7 @@ def _headers(tenant_key: str | None, bearer_token: str | None) -> dict[str, str]
 def _read_text_file(path: str) -> str:
     try:
         return Path(path).read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         raise CliUsageError(f"could not read {path}: {exc}") from exc
 
 
@@ -257,6 +267,13 @@ def _json_file_body(args: argparse.Namespace) -> Any:
     return _read_json_file(args.file)
 
 
+def _api_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
+    body = {"artifact": _read_json_file(args.file)}
+    if args.upstream_base_url is not None:
+        body["upstream_base_url"] = args.upstream_base_url
+    return body
+
+
 @dataclass(frozen=True)
 class _Command:
     """One CLI verb, as the management-plane call it turns into.
@@ -286,6 +303,11 @@ _COMMANDS: dict[str, _Command] = {
     "service": _Command("GET", "/apim/management/service"),
     "apis": _Command("GET", "/apim/management/apis"),
     "api": _Command("GET", "/apim/management/apis/{api_id}"),
+    "extract-api": _Command("GET", "/apim/management/apis/{api_id}/artifacts"),
+    "plan-api": _Command("POST", "/apim/management/apis/{api_id}/artifacts", body=_api_artifact_body, read_only=True),
+    "apply-api": _Command(
+        "PUT", "/apim/management/apis/{api_id}/artifacts", body=_api_artifact_body, requires_etag=True
+    ),
     "operations": _Command("GET", "/apim/management/apis/{api_id}/operations"),
     "put-api": _Command("PUT", "/apim/management/apis/{api_id}", body=_json_file_body),
     "delete-api": _Command("DELETE", "/apim/management/apis/{api_id}", confirm="API {api_id!r}"),
