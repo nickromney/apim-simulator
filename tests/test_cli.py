@@ -921,10 +921,56 @@ def test_service_artifact_errors_hide_override_values(tmp_path: Path, capsys: py
     assert "Backend orders requires an override" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("command", ["plan-service", "apply-service"])
+def test_service_artifact_prune_requires_baseline_and_sends_it(
+    command: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    artifact = tmp_path / "service.json"
+    baseline = tmp_path / "previous.json"
+    artifact.write_text('{"apis": {}}')
+    baseline.write_text('{"apis": {"old": {}}}')
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(handler)
+    args = [command, "--file", str(artifact), "--prune"]
+    if command == "apply-service":
+        args += ["--if-match", '"etag"']
+    assert main(args, transport=transport) == 1
+    assert "--prune requires --baseline" in capsys.readouterr().err
+    assert not requests
+    args += ["--baseline", str(baseline)]
+    assert main(args, transport=transport) == 0
+    capsys.readouterr()
+    assert json.loads(requests[-1].content) == {
+        "artifact": {"apis": {}},
+        "baseline": {"apis": {"old": {}}},
+        "prune": True,
+    }
+    assert main(["--dry-run", *args], transport=transport) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["body"]["baseline"] == {"apis": {"old": {}}}
+    assert plan["body"]["prune"] is True
+    assert plan["effect"] == ("read" if command == "plan-service" else "write")
+
+
 def test_service_artifact_error_shows_safe_service_message(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     artifact = tmp_path / "service.json"
     artifact.write_text("{}")
     message = "API product links must reference bundle products"
     transport = httpx.MockTransport(lambda _: httpx.Response(400, json={"detail": message}))
     assert main(["plan-service", "--file", str(artifact)], transport=transport) == 1
+    assert message in capsys.readouterr().err
+
+
+def test_service_prune_error_shows_stale_plan_message(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "service.json"
+    artifact.write_text("{}")
+    message = "The configuration or plan changed. Plan again before applying."
+    transport = httpx.MockTransport(lambda _: httpx.Response(412, json={"detail": message}))
+    args = ["apply-service", "--file", str(artifact), "--baseline", str(artifact), "--prune", "--if-match", '"etag"']
+    assert main(args, transport=transport) == 1
     assert message in capsys.readouterr().err
