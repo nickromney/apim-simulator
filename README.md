@@ -436,6 +436,11 @@ OpenAPI definition, API policy, and operation policies. Review the artifact in
 Git, validate it against the target with `plan-api`, then publish it with
 `apply-api` and the target's ETag.
 
+Use `extract-product`, `plan-product`, and `apply-product` to promote a
+product with its member APIs. Supply target-specific backend URLs and named
+values in a separate override file.
+[Promote a product and its APIs](docs/APIOPS.md#promote-a-product-and-its-apis)
+
 #### Review and apply an API policy
 
 Connect to a running gateway and choose an existing API. Save your proposed XML

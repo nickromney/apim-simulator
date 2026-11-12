@@ -399,6 +399,33 @@ subset, and operation orders that cannot be expressed as OpenAPI path groups.
 and [artifact promotion tests](../tests/test_api_artifacts.py). Confidence:
 `adapted`.
 
+## Product artifact promotion
+
+**Contract.** A versioned product artifact carries product metadata and
+policy XML, API-level membership, and an OpenAPI and policy artifact for each
+member API. It carries the IDs of referenced named backends and the IDs,
+display names, and secret flags of referenced named values.
+
+**Inputs and result.** GET, POST, and PUT use
+`/apim/management/products/{product_id}/artifacts`. GET and POST require
+service-wide read access. PUT requires service-wide write access and the
+exact plan ETag in `If-Match`. POST validates the staged product, APIs,
+and override dependencies and returns a diff and the override IDs. A
+successful PUT saves them together. A missing precondition returns HTTP 428.
+A stale ETag returns HTTP 412. The tag covers the destination's authored
+configuration on one gateway process.
+
+**Scope.** Override files can supply direct API upstream URLs, named backend
+URLs, and named values. Existing target subscriptions, groups, tags, and
+unrelated product memberships are managed on the target. Supported bundles
+use API-level membership and routing. Plans reject removal of a target
+product's API links, policies with fragment includes, and dynamic backend
+IDs. Use the [product promotion walkthrough](APIOPS.md#promote-a-product-and-its-apis).
+
+**Evidence.** [Microsoft Learn APIOps guide](https://learn.microsoft.com/en-us/azure/architecture/example-scenario/devops/automated-api-deployments-apiops)
+and [product artifact tests](../tests/test_product_artifacts.py). Confidence:
+`adapted`.
+
 ## Local tutorial services
 
 API-scoped debug credentials authorize tracing for at most one hour using
