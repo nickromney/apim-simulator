@@ -441,6 +441,44 @@ def _build_service_router(*, require_management_plane: Callable[[], ManagementSe
         cfg: GatewayConfig = request.app.state.gateway_config
         return _summary_payload(cfg, request)
 
+    @router.get("/apim/management/service/artifacts")
+    async def get_service_artifacts(request: Request, response: Response) -> dict[str, Any]:
+        from app.service_artifacts import export_service_artifact, service_etag
+
+        require_tenant_access(request, permission="read", global_only=True)
+        cfg = request.app.state.gateway_config
+        result = export_service_artifact(cfg)
+        response.headers["ETag"] = service_etag(cfg)
+        return result
+
+    @router.post("/apim/management/service/artifacts")
+    async def plan_service_artifacts(request: Request, response: Response) -> dict[str, Any]:
+        from app.service_artifacts import plan_service_artifact
+
+        require_tenant_access(request, permission="read", global_only=True)
+        body = await _read_service_artifact_request(request)
+        result = plan_service_artifact(require_management_plane(), request.app.state.gateway_config, body)
+        response.headers["ETag"] = result["etag"]
+        return result
+
+    @router.put("/apim/management/service/artifacts")
+    async def put_service_artifacts(request: Request, response: Response) -> dict[str, Any]:
+        from app.service_artifacts import service_etag, stage_service_artifact
+
+        require_tenant_access(request, permission="write", global_only=True)
+        match = request.headers.get("if-match")
+        if match is None:
+            raise HTTPException(428, "If-Match is required")
+        body = await _read_service_artifact_request(request)
+        cfg = request.app.state.gateway_config
+        if match != service_etag(cfg):
+            raise HTTPException(412, "The configuration changed. Plan again before applying.")
+        manager = require_management_plane()
+        staged, result = stage_service_artifact(manager, cfg, body)
+        updated = manager.persist_or_apply_config(staged)
+        response.headers["ETag"] = service_etag(updated)
+        return result
+
     return router
 
 
@@ -868,6 +906,15 @@ def _build_policy_router(*, require_management_plane: Callable[[], ManagementSer
         }
 
     return router
+
+
+async def _read_service_artifact_request(request: Request):
+    from app.service_artifacts import ServiceArtifactRequest
+
+    try:
+        return ServiceArtifactRequest.model_validate(await request.json())
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(400, "Invalid service artifact request; check artifact and override field types") from exc
 
 
 async def _read_product_artifact_request(request: Request) -> ProductArtifactRequest:

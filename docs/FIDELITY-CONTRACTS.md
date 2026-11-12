@@ -426,6 +426,34 @@ IDs. Use the [product promotion walkthrough](APIOPS.md#promote-a-product-and-its
 and [product artifact tests](../tests/test_product_artifacts.py). Confidence:
 `adapted`.
 
+## Service artifact promotion
+
+**Contract.** A versioned service artifact includes the authored gateway
+policies, shared policy fragments, products, API-level product links, and
+REST API artifacts. The dependency inventory includes references from all
+promoted policy scopes and fragments. Stack overrides supply direct API
+upstream URLs, named backend URLs, and named values.
+
+**Inputs and result.** GET, POST, and PUT use
+`/apim/management/service/artifacts`. GET and POST require service-wide read
+access. PUT requires service-wide write access and the exact plan ETag in
+`If-Match`. The plan validates the destination candidate and returns a diff
+and override IDs. Apply saves the configuration in one update. A missing
+precondition returns HTTP 428. A stale ETag returns HTTP 412. The ETag covers
+the destination configuration on one gateway process.
+
+**Scope.** Destination-only APIs, products, and fragments are retained. The
+artifact replaces gateway policies and updates listed resources. It supports
+API-level product membership and the [API artifact subset](#api-artifact-promotion).
+Product link removal and legacy route-only configurations require separate
+management. Subscriptions, credentials, portal content, and service
+infrastructure are destination-local.
+
+**Evidence.** [Service promotion walkthrough](APIOPS.md#promote-a-service),
+[service artifact tests](../tests/test_service_artifacts.py), and
+[Microsoft Learn APIOps guide](https://learn.microsoft.com/en-us/azure/architecture/example-scenario/devops/automated-api-deployments-apiops).
+Confidence: `adapted`.
+
 ## Local tutorial services
 
 API-scoped debug credentials authorize tracing for at most one hour using

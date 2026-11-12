@@ -57,7 +57,9 @@ def product_etag(cfg: GatewayConfig, product_id: str) -> str:
     return f'"{hashlib.sha256(raw.encode()).hexdigest()}"'
 
 
-def _dependencies(cfg: GatewayConfig, policies: list[str | None], api_backends: set[str]) -> tuple[list[str], dict]:  # noqa: C901 - checks each policy dependency kind
+def _dependencies(  # noqa: C901 - checks each policy dependency kind
+    cfg: GatewayConfig, policies: list[str | None], api_backends: set[str], *, allow_fragments: bool = False
+) -> tuple[list[str], dict]:
     backends = set(api_backends)
     named_values = {}
     for policy in filter(None, policies):
@@ -74,7 +76,7 @@ def _dependencies(cfg: GatewayConfig, policies: list[str | None], api_backends: 
         except Exception as exc:
             raise HTTPException(400, "Invalid policy XML") from exc
         for element in root.iter():
-            if element.tag.split("}")[-1] == "include-fragment":
+            if element.tag.split("}")[-1] == "include-fragment" and not allow_fragments:
                 raise HTTPException(
                     400, "Policy fragments are not supported in product artifacts; inline the policy first"
                 )

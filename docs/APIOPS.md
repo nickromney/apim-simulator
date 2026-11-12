@@ -331,6 +331,59 @@ APIs in the artifact and manage intentional unlinking separately. Inline
 policy fragments in the authored policies before extracting a product bundle.
 [Product artifact promotion contract](FIDELITY-CONTRACTS.md#product-artifact-promotion)
 
+## Promote a service
+
+Start two gateways with separate state. Use a source with API-authored
+configuration and a destination you can update. Use service-wide read
+access to extract and plan, and service-wide write access to apply.
+
+Set `source_url` and `target_url` to the gateway addresses. Run from the
+simulator repository with `uv` and `jq` available. Extract the source into
+a file you can review in Git.
+
+```bash
+uv run apimsim --base-url "$source_url" extract-service > service.json
+jq '{products: (.products | keys), apis: (.apis | keys), policy_fragments: (.policy_fragments | keys), backends, named_values}' service.json
+```
+
+Each API appears once, with all its product links. The artifact also
+includes the gateway policy, product and API policies, operation policies,
+and the XML for shared fragments. Keep the fragment definitions with the
+policies that reference them.
+
+Prepare a separate override file for the destination, using the same
+`api_upstreams`, `backends`, and `named_values` maps as the
+[product workflow](#promote-a-product-and-its-apis). Supply URLs for new
+direct APIs and values for missing dependencies, including those used by
+fragments. Keep the override file outside Git. Set `overrides` to its path.
+
+```bash
+uv run apimsim --base-url "$target_url" plan-service \
+  --file service.json --overrides "$overrides" > service-plan.json
+jq -r '.diff' service-plan.json
+jq '.overrides' service-plan.json
+```
+
+Review the diff and the override IDs. Apply with the same files and the
+ETag from the plan. If apply returns HTTP 412, generate and review a new plan.
+
+```bash
+etag="$(jq -er '.etag' service-plan.json)"
+uv run apimsim --base-url "$target_url" apply-service \
+  --file service.json --overrides "$overrides" --if-match "$etag"
+uv run apimsim --base-url "$target_url" extract-service > deployed-service.json
+```
+
+Check the deployed product links and fragments. Call the member APIs with
+the destination's subscriptions and confirm that they reach the expected
+backends and run the shared policies.
+
+The service artifact updates the gateway policy and creates or updates
+the listed APIs, products, and fragments. Resources that exist only on the
+destination stay there. Handle intentional product unlinking separately.
+Subscription keys, users, and infrastructure settings are managed per stack.
+[Service artifact promotion contract](FIDELITY-CONTRACTS.md#service-artifact-promotion)
+
 ## Run the Azure workflow
 
 Use the Microsoft APIOps CLI and a nonproduction Azure API Management instance
