@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import hmac
 import json
+import secrets
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from app.api_artifacts import ApiArtifactRequest, export_artifact, stage_artifact
 from app.config import ApiConfig, GatewayConfig, ProductConfig
@@ -46,6 +48,26 @@ class ServiceArtifactRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     artifact: ServiceArtifact
     overrides: ProductOverrides = Field(default_factory=ProductOverrides)
+    baseline: ServiceArtifact | None = None
+    prune: StrictBool = False
+
+
+_PLAN_KEY = secrets.token_bytes(32)
+
+
+def prune_etag(cfg: GatewayConfig, body: ServiceArtifactRequest) -> str:
+    if body.baseline is None:
+        raise HTTPException(400, "Prune requires a baseline artifact")
+    raw = json.dumps([cfg.model_dump(mode="json"), body.model_dump(mode="json")], separators=(",", ":"))
+    return f'"{hmac.new(_PLAN_KEY, raw.encode(), hashlib.sha256).hexdigest()}"'
+
+
+def deletion_candidates(cfg: GatewayConfig, body: ServiceArtifactRequest) -> dict[str, list[str]]:
+    result = {}
+    for kind in ("apis", "products", "policy_fragments"):
+        baseline = getattr(body.baseline, kind) if body.baseline else {}
+        result[kind] = sorted((set(baseline) - set(getattr(body.artifact, kind))) & set(getattr(cfg, kind)))
+    return result
 
 
 def service_etag(cfg: GatewayConfig) -> str:
@@ -163,8 +185,53 @@ def _stage_apis(
     return cfg
 
 
+def _check_prune_references(cfg: GatewayConfig, candidates: dict[str, list[str]]) -> None:  # noqa: C901 - checks independent retained references
+    deleted_apis = set(candidates["apis"])
+    deleted_products = set(candidates["products"])
+    for subscription in cfg.subscription.subscriptions.values():
+        if subscription.api_id in deleted_apis or set(subscription.products) & deleted_products:
+            raise HTTPException(400, "Cannot prune a resource referenced by a subscription")
+    for api in cfg.apis.values():
+        if set(api.products) & deleted_products:
+            raise HTTPException(400, "Cannot prune a product linked to a retained API")
+        references = [
+            api.source_api_id,
+            *(r.source_api_id for r in api.revisions.values()),
+            *(r.api_id for r in api.releases.values()),
+        ]
+        for reference in references:
+            if reference and reference.rsplit("/", 1)[-1].split(";rev=", 1)[0] in deleted_apis:
+                raise HTTPException(400, "Cannot prune an API referenced by a retained API revision or release")
+        if not deleted_products and not candidates["policy_fragments"]:
+            continue
+        current_id = api.revision or next((key for key, rev in api.revisions.items() if rev.is_current), None)
+        for revision_id, revision in api.revisions.items():
+            if revision_id == current_id or not revision.definition:
+                continue
+            try:
+                snapshot = ApiConfig.model_validate({**revision.definition, "revisions": {}, "releases": {}})
+                if set(snapshot.products) & deleted_products or any(
+                    set(operation.products or []) & deleted_products for operation in snapshot.operations.values()
+                ):
+                    raise HTTPException(400, "Cannot prune a product referenced by a retained API revision")
+                if candidates["policy_fragments"]:
+                    policies = [snapshot.policies_xml, *(op.policies_xml for op in snapshot.operations.values())]
+                    if snapshot.graphql:
+                        policies.extend(resolver.policies_xml for resolver in snapshot.graphql.resolvers.values())
+                    for policy in policies:
+                        if policy:
+                            validate_fragment_references(policy, cfg.policy_fragments, cfg)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(400, "Cannot prune a fragment referenced by a retained API revision") from exc
+
+
 def stage_service_artifact(manager: ManagementService, cfg: GatewayConfig, body: ServiceArtifactRequest):  # noqa: C901 - stages the service atomically
     artifact = body.artifact
+    if body.prune and body.baseline is None:
+        raise HTTPException(400, "Prune requires a baseline artifact")
+    if body.baseline is not None and body.baseline.schema_version != 1:
+        raise HTTPException(400, "Unsupported baseline artifact schema version")
+    candidates = deletion_candidates(cfg, body)
     if artifact.schema_version != 1:
         raise HTTPException(400, "Unsupported artifact schema version")
     if mask_secret_data(artifact.model_dump(), cfg) != artifact.model_dump():
@@ -172,15 +239,23 @@ def stage_service_artifact(manager: ManagementService, cfg: GatewayConfig, body:
     if cfg.routes and not cfg.apis:
         raise HTTPException(400, "Cannot import APIs into a legacy route-only configuration")
     for api_id, api in cfg.apis.items():
-        if api_id not in artifact.apis and set(api.products) & set(artifact.products):
+        if body.baseline is None and api_id not in artifact.apis and set(api.products) & set(artifact.products):
             raise HTTPException(400, "Removing product API links is not supported")
     staged = cfg.model_copy(deep=True)
+    if body.prune:
+        if candidates["apis"]:
+            staged.routes = []
+        for kind, ids in candidates.items():
+            for identifier in ids:
+                del getattr(staged, kind)[identifier]
     staged.policy_fragments.update(artifact.policy_fragments)
     staged.policies_xml = artifact.gateway_policy
     staged.policies_xml_documents = artifact.gateway_policy_documents
     _stage_dependencies(staged, artifact, body.overrides)
     _stage_products(staged, artifact.products)
     staged = _stage_apis(manager, staged, artifact, body.overrides)
+    if body.prune and any(candidates.values()):
+        _check_prune_references(staged, candidates)
     policies = _policies(staged, artifact.apis, artifact.products, artifact.policy_fragments)
     actual_backends, actual_values = _dependencies(
         staged, policies, {entry.backend for entry in artifact.apis.values() if entry.backend}, allow_fragments=True
@@ -196,6 +271,10 @@ def stage_service_artifact(manager: ManagementService, cfg: GatewayConfig, body:
         for fragment in staged.policy_fragments.values():
             manager.validate_fragment_xml(staged, fragment)
     except (HTTPException, ValueError, TypeError) as exc:
+        if body.prune and candidates["policy_fragments"]:
+            raise HTTPException(
+                400, "Cannot prune policy fragments referenced by retained policies, or invalid policy configuration"
+            ) from exc
         raise HTTPException(400, "Invalid policy or configuration in the service artifact") from exc
 
     from app.management_service import _validate_open_product_associations
@@ -211,14 +290,47 @@ def stage_service_artifact(manager: ManagementService, cfg: GatewayConfig, body:
 
 
 def plan_service_artifact(manager: ManagementService, cfg: GatewayConfig, body: ServiceArtifactRequest):
-    _, proposed = stage_service_artifact(manager, cfg, body)
+    staged, proposed = stage_service_artifact(manager, cfg, body)
     current = export_service_artifact(cfg)
 
     def lines(value):
         return json.dumps(value, indent=2, ensure_ascii=False).splitlines()
 
+    drift = {}
+    baseline = body.baseline.model_dump(mode="json") if body.baseline else {}
+    desired = body.artifact.model_dump(mode="json")
+    for kind in ("apis", "products", "policy_fragments"):
+        live, wanted, previous = current[kind], desired[kind], baseline.get(kind, {})
+        drift[kind] = {
+            "create": sorted(set(wanted) - set(live)),
+            "update": sorted(key for key in set(wanted) & set(live) if proposed[kind][key] != live[key]),
+            "target_only": sorted(set(live) - set(wanted) - set(previous)),
+        }
+    drift["gateway_policy"] = (current["gateway_policy"], current["gateway_policy_documents"]) != (
+        proposed["gateway_policy"],
+        proposed["gateway_policy_documents"],
+    )
+    drift["api_order"] = list(current["apis"]) != list(proposed["apis"])
+    drift["overrides"] = {
+        "api_upstreams": sorted(
+            key
+            for key in body.overrides.api_upstreams
+            if key not in cfg.apis or cfg.apis[key].upstream_base_url != staged.apis[key].upstream_base_url
+        ),
+        "backends": sorted(
+            key
+            for key in body.overrides.backends
+            if key not in cfg.backends or cfg.backends[key].url != staged.backends[key].url
+        ),
+        "named_values": sorted(
+            key for key in body.overrides.named_values if cfg.named_values.get(key) != staged.named_values[key]
+        ),
+    }
     return {
-        "etag": service_etag(cfg),
+        "etag": prune_etag(cfg, body) if body.prune else service_etag(cfg),
+        "drift": drift,
+        "deletions": deletion_candidates(cfg, body),
+        "prune": body.prune,
         "diff": "\n".join(
             difflib.unified_diff(lines(current), lines(proposed), fromfile="current", tofile="proposed", lineterm="")
         ),

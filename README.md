@@ -445,6 +445,9 @@ Use `extract-service`, `plan-service`, and `apply-service` to promote
 multiple products, APIs, and shared policy fragments in one update.
 [Promote a service](docs/APIOPS.md#promote-a-service)
 
+Use the previous Git artifact as a baseline to identify deletions and prune
+them explicitly. [Check drift and prune removed resources](docs/APIOPS.md#check-drift-and-prune-removed-resources)
+
 #### Review and apply an API policy
 
 Connect to a running gateway and choose an existing API. Save your proposed XML

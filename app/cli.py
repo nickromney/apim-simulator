@@ -43,6 +43,12 @@ def _add_service_artifact_parsers(subparsers: Any) -> None:
         artifact_parser = subparsers.add_parser(name, help="Plan or apply a whole-service JSON artifact.")
         artifact_parser.add_argument("--file", required=True, help="Path to the service artifact JSON file.")
         artifact_parser.add_argument("--overrides", help="Path to environment override JSON.")
+        artifact_parser.add_argument("--baseline", help="Path to the previous service artifact JSON file.")
+        artifact_parser.add_argument(
+            "--prune",
+            action="store_true",
+            help="Remove resources present in the baseline but absent from the artifact.",
+        )
         if name == "apply-service":
             artifact_parser.add_argument("--if-match", required=True, help="Specific strong ETag from plan-service.")
 
@@ -300,9 +306,15 @@ def _api_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _bundle_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
+    if getattr(args, "prune", False) and not args.baseline:
+        raise CliUsageError("--prune requires --baseline")
     body = {"artifact": _read_json_file(args.file)}
     if args.overrides is not None:
         body["overrides"] = _read_json_file(args.overrides)
+    if getattr(args, "baseline", None) is not None:
+        body["baseline"] = _read_json_file(args.baseline)
+    if getattr(args, "prune", False):
+        body["prune"] = True
     return body
 
 
@@ -544,6 +556,15 @@ def _bundle_error_detail(response: httpx.Response, args: argparse.Namespace) -> 
         "Invalid config update",
         "If-Match is required",
         "The configuration changed. Plan again before applying.",
+        "The configuration or plan changed. Plan again before applying.",
+        "Prune requires a baseline artifact",
+        "Unsupported baseline artifact schema version",
+        "Cannot prune a resource referenced by a subscription",
+        "Cannot prune a product linked to a retained API",
+        "Cannot prune an API referenced by a retained API revision or release",
+        "Cannot prune a product referenced by a retained API revision",
+        "Cannot prune a fragment referenced by a retained API revision",
+        "Cannot prune policy fragments referenced by retained policies, or invalid policy configuration",
     }
     body = args._bundle_request_body
     if detail not in safe and not _is_dependency_error(detail, body):

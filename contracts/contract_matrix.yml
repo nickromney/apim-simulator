@@ -281,6 +281,7 @@ contracts:
       - https://learn.microsoft.com/en-us/azure/architecture/example-scenario/devops/automated-api-deployments-apiops
     owner_tests:
       - tests/test_service_artifacts.py::*
+      - tests/test_service_prune.py::*
     fixture_or_golden: null
     assertion_kind: http-json
 

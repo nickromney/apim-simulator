@@ -384,6 +384,51 @@ destination stay there. Handle intentional product unlinking separately.
 Subscription keys, users, and infrastructure settings are managed per stack.
 [Service artifact promotion contract](FIDELITY-CONTRACTS.md#service-artifact-promotion)
 
+## Check drift and prune removed resources
+
+Use the desired `service.json` from Git and the override file for the
+destination. A service plan reports the APIs, products, and fragments that
+need creation or an update, plus resources specific to the target. It also
+reports changes to gateway policy, API ordering, and supplied overrides.
+The plan identifies overrides by resource ID.
+
+To preview deletions, use the Git commit last deployed to this destination
+as the baseline. Set `previous_commit` to its commit ID. Extract the service
+artifact from that commit to a temporary file.
+
+```bash
+baseline="$(mktemp)"
+git show "${previous_commit}:service.json" > "$baseline"
+uv run apimsim --base-url "$target_url" plan-service \
+  --file service.json --overrides "$overrides" --baseline "$baseline" > service-plan.json
+jq '{drift, deletions}' service-plan.json
+```
+
+`deletions` lists resources present in the baseline and live target that are
+absent from the desired artifact. An ordinary apply retains those resources.
+To delete them, request a prune plan and review its diff.
+
+```bash
+uv run apimsim --base-url "$target_url" plan-service --prune \
+  --file service.json --overrides "$overrides" --baseline "$baseline" > prune-plan.json
+jq '.deletions' prune-plan.json
+jq -r '.diff' prune-plan.json
+```
+
+Apply with `--prune`, the same inputs, and the ETag from the prune plan.
+If you get HTTP 412, make and review a fresh prune plan.
+
+```bash
+etag="$(jq -er '.etag' prune-plan.json)"
+uv run apimsim --base-url "$target_url" apply-service --prune \
+  --file service.json --overrides "$overrides" --baseline "$baseline" --if-match "$etag"
+```
+
+Prune covers APIs, products, and policy fragments. The gateway checks
+references and governance locks before applying any changes. Resolve a
+blocking dependency on the destination, then plan again. The OpenAPI
+definition still controls operation updates within a retained API.
+
 ## Run the Azure workflow
 
 Use the Microsoft APIOps CLI and a nonproduction Azure API Management instance
