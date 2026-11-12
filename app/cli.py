@@ -34,6 +34,19 @@ class _ArgumentParser(argparse.ArgumentParser):
         super().error(message)
 
 
+_BUNDLE_WRITE_COMMANDS = frozenset({"plan-product", "apply-product", "plan-service", "apply-service"})
+
+
+def _add_service_artifact_parsers(subparsers: Any) -> None:
+    subparsers.add_parser("extract-service", help="Extract a whole-service JSON artifact.")
+    for name in ("plan-service", "apply-service"):
+        artifact_parser = subparsers.add_parser(name, help="Plan or apply a whole-service JSON artifact.")
+        artifact_parser.add_argument("--file", required=True, help="Path to the service artifact JSON file.")
+        artifact_parser.add_argument("--overrides", help="Path to environment override JSON.")
+        if name == "apply-service":
+            artifact_parser.add_argument("--if-match", required=True, help="Specific strong ETag from plan-service.")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = _ArgumentParser(
         prog="apimsim",
@@ -116,6 +129,8 @@ def _build_parser() -> argparse.ArgumentParser:
     import_source_group.add_argument("--url", help="URL the simulator should fetch the OpenAPI document from.")
     import_openapi_parser.add_argument("--api-name", dest="api_name", help="Override the imported API's name.")
     import_openapi_parser.add_argument("--api-path", dest="api_path", help="Override the imported API's path.")
+
+    _add_service_artifact_parsers(subparsers)
 
     put_product_parser = subparsers.add_parser("put-product", help="Create or replace a product from a JSON file.")
     put_product_parser.add_argument("product_id")
@@ -284,7 +299,7 @@ def _api_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
     return body
 
 
-def _product_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
+def _bundle_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
     body = {"artifact": _read_json_file(args.file)}
     if args.overrides is not None:
         body["overrides"] = _read_json_file(args.overrides)
@@ -333,10 +348,15 @@ _COMMANDS: dict[str, _Command] = {
     "product": _Command("GET", "/apim/management/products/{product_id}"),
     "extract-product": _Command("GET", "/apim/management/products/{product_id}/artifacts"),
     "plan-product": _Command(
-        "POST", "/apim/management/products/{product_id}/artifacts", body=_product_artifact_body, read_only=True
+        "POST", "/apim/management/products/{product_id}/artifacts", body=_bundle_artifact_body, read_only=True
     ),
     "apply-product": _Command(
-        "PUT", "/apim/management/products/{product_id}/artifacts", body=_product_artifact_body, requires_etag=True
+        "PUT", "/apim/management/products/{product_id}/artifacts", body=_bundle_artifact_body, requires_etag=True
+    ),
+    "extract-service": _Command("GET", "/apim/management/service/artifacts"),
+    "plan-service": _Command("POST", "/apim/management/service/artifacts", body=_bundle_artifact_body, read_only=True),
+    "apply-service": _Command(
+        "PUT", "/apim/management/service/artifacts", body=_bundle_artifact_body, requires_etag=True
     ),
     "put-product": _Command("PUT", "/apim/management/products/{product_id}", body=_json_file_body),
     "delete-product": _Command("DELETE", "/apim/management/products/{product_id}", confirm="product {product_id!r}"),
@@ -445,8 +465,8 @@ async def _dispatch(args: argparse.Namespace, client: httpx.AsyncClient) -> http
     if command.confirm is not None and not args.yes:
         raise CliUsageError(f"refusing to delete {command.confirm.format(**vars(args))} without --yes")
     plan = _request_plan(args)
-    if args.command in ("plan-product", "apply-product"):
-        args._product_request_body = plan["body"]
+    if args.command in _BUNDLE_WRITE_COMMANDS:
+        args._bundle_request_body = plan["body"]
     return await _request(
         client,
         plan["method"],
@@ -487,8 +507,8 @@ def _error_detail(response: httpx.Response, args: argparse.Namespace) -> str:
     return json.dumps(payload)
 
 
-def _product_error_detail(response: httpx.Response, args: argparse.Namespace) -> str:
-    generic = "product artifact request failed"
+def _bundle_error_detail(response: httpx.Response, args: argparse.Namespace) -> str:
+    generic = f"{'service' if args.command.endswith('service') else 'product'} artifact request failed"
     try:
         payload = response.json()
     except ValueError:
@@ -498,6 +518,14 @@ def _product_error_detail(response: httpx.Response, args: argparse.Namespace) ->
     detail = payload["detail"]
     safe = {
         "Invalid product artifact request; check artifact and override field types",
+        "Invalid service artifact request; check artifact and override field types",
+        "Invalid policy or configuration in the service artifact",
+        "Cannot import APIs into a legacy route-only configuration",
+        "API product links must reference bundle products",
+        "Removing product API links is not supported",
+        "Operation-level backend settings cannot be represented; move routing to the API",
+        "Legacy route-only configuration cannot be represented as a service artifact",
+        "API product links reference missing products",
         "Product not found",
         "Overrides must refer to bundle dependencies",
         "Backend override must be a URL",
@@ -517,12 +545,12 @@ def _product_error_detail(response: httpx.Response, args: argparse.Namespace) ->
         "If-Match is required",
         "The configuration changed. Plan again before applying.",
     }
-    body = args._product_request_body
+    body = args._bundle_request_body
     if detail not in safe and not _is_dependency_error(detail, body):
         return generic
     if response.status_code == 422:
         return generic
-    return _redact_product_overrides(detail, body, args)
+    return _redact_bundle_overrides(detail, body, args)
 
 
 def _is_dependency_error(detail: str, body: dict[str, Any]) -> bool:
@@ -537,7 +565,7 @@ def _is_dependency_error(detail: str, body: dict[str, Any]) -> bool:
     return False
 
 
-def _redact_product_overrides(detail: str, body: dict[str, Any], args: argparse.Namespace) -> str:
+def _redact_bundle_overrides(detail: str, body: dict[str, Any], args: argparse.Namespace) -> str:
     overrides = body.get("overrides", {})
     if isinstance(overrides, dict):
         for group in overrides.values():
@@ -561,13 +589,13 @@ async def _run(
             print(f"error: {exc}", file=sys.stderr)
             return 1
         except httpx.TransportError as exc:
-            detail = "transport error" if args.command in ("plan-product", "apply-product") else str(exc)
+            detail = "transport error" if args.command in _BUNDLE_WRITE_COMMANDS else str(exc)
             print(f"error: could not reach simulator: {_redact_credentials(detail, args)}", file=sys.stderr)
             return 2
 
     if response.status_code >= 400:
-        if args.command in ("plan-product", "apply-product"):
-            print(f"error: {response.status_code} {_product_error_detail(response, args)}", file=sys.stderr)
+        if args.command in _BUNDLE_WRITE_COMMANDS:
+            print(f"error: {response.status_code} {_bundle_error_detail(response, args)}", file=sys.stderr)
             return 1
         print(
             f"error: {response.status_code} {_redact_credentials(_error_detail(response, args), args)}", file=sys.stderr
@@ -609,7 +637,7 @@ def main(
     if args.dry_run:
         try:
             plan = _request_plan(args)
-            if args.command in ("plan-product", "apply-product") and "overrides" in plan["body"]:
+            if args.command in _BUNDLE_WRITE_COMMANDS and "overrides" in plan["body"]:
                 plan["body"]["overrides"] = "[redacted]"
             print(json.dumps(plan, indent=2))
         except CliUsageError as exc:

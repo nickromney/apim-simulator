@@ -441,6 +441,10 @@ product with its member APIs. Supply target-specific backend URLs and named
 values in a separate override file.
 [Promote a product and its APIs](docs/APIOPS.md#promote-a-product-and-its-apis)
 
+Use `extract-service`, `plan-service`, and `apply-service` to promote
+multiple products, APIs, and shared policy fragments in one update.
+[Promote a service](docs/APIOPS.md#promote-a-service)
+
 #### Review and apply an API policy
 
 Connect to a running gateway and choose an existing API. Save your proposed XML
