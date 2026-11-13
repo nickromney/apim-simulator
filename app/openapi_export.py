@@ -110,15 +110,19 @@ def _content(representations: list[OperationRepresentationConfig], schemas: dict
 
 
 def _operation_parameters(operation: OperationConfig, path: str, schemas: dict[str, Any]) -> list[dict[str, Any]]:
-    path_names = set(re.findall(r"\{([^{}]+)\}", path))
-    parameters = {
-        ("path" if item.name in path_names else "query", item.name): item for item in operation.template_parameters
-    }
+    path_names = {name.casefold(): name for name in re.findall(r"\{([^{}]+)\}", path)}
+    parameters = {}
+    for item in operation.template_parameters:
+        name = path_names.get(item.name.casefold())
+        if name is None:
+            parameters["query", item.name] = item
+        else:
+            parameters["path", name] = item.model_copy(update={"name": name})
     if operation.request is not None:
         parameters.update({("query", item.name): item for item in operation.request.query_parameters})
         parameters.update({("header", item.name): item for item in operation.request.headers})
     # Hand-authored URL templates may omit parameter metadata.
-    for name in path_names:
+    for name in path_names.values():
         parameters.setdefault(("path", name), OperationParameterConfig(name=name, required=True, type="string"))
     return [_parameter(item, location, schemas) for (location, _), item in parameters.items()]
 

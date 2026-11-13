@@ -96,6 +96,28 @@ def test_config_from_tofu_show_json_mvp() -> None:
     assert cfg.subscription.subscriptions["sub1"].products == ["app-a"]
 
 
+def test_tofu_import_preserves_an_explicit_root_api_path() -> None:
+    cfg = config_from_tofu_show_json(
+        _tf_json(
+            [
+                {
+                    "type": "azurerm_api_management_api",
+                    "name": "root",
+                    "values": {"name": "root", "path": "", "service_url": http_url("upstream")},
+                },
+                {
+                    "type": "azurerm_api_management_api_operation",
+                    "name": "health",
+                    "values": {"api_name": "root", "operation_id": "health", "url_template": "/health"},
+                },
+            ]
+        )
+    )
+
+    assert cfg.apis["root"].path == ""
+    assert cfg.materialize_routes()[0].path_prefix == "/health"
+
+
 def test_tofu_import_rejects_policy_referencing_a_missing_named_value() -> None:
     """Terraform/OpenTofu policy import validates named-value references.
 
