@@ -145,6 +145,35 @@ def test_prune_tag_requires_preview_and_binds_order_and_live_state(change):
         assert current["policy_fragments"]["local"] == LOCAL_FRAGMENT
 
 
+def test_reviewed_plan_binds_inputs_and_mode_without_baseline(change):
+    cfg, body = change
+    reviewed = {
+        "artifact": body["artifact"],
+        "overrides": {"api_upstreams": {"keep": "http://target/one"}},
+        "reviewed": True,
+    }
+    with TestClient(create_app(config=cfg)) as client:
+        plan = client.post(PATH, headers=HEADERS, json=reviewed)
+        assert plan.status_code == 200, plan.text
+        assert plan.json()["reviewed"] is True
+        assert "http://target/one" not in plan.text
+        changed_artifact = json.loads(json.dumps(reviewed))
+        changed_artifact["artifact"]["products"]["keep"]["name"] = "Changed"
+        changed_override = {**reviewed, "overrides": {"api_upstreams": {"keep": "http://target/two"}}}
+        ordinary = {key: value for key, value in reviewed.items() if key != "reviewed"}
+        for changed in (changed_artifact, changed_override, ordinary):
+            assert client.put(PATH, headers=etag_headers(plan), json=changed).status_code == 412
+        ordinary_plan = client.post(PATH, headers=HEADERS, json=ordinary)
+        assert client.put(PATH, headers=etag_headers(ordinary_plan), json=reviewed).status_code == 412
+        assert client.put(PATH, headers=etag_headers(plan), json=reviewed).status_code == 200
+
+
+def test_reviewed_requires_strict_boolean(change):
+    cfg, body = change
+    with TestClient(create_app(config=cfg)) as client:
+        assert client.post(PATH, headers=HEADERS, json={**body, "reviewed": "true"}).status_code == 400
+
+
 @pytest.mark.parametrize("blocker", ["subscription", "link", "fragment", "revision_fragment", "api_reference", "lock"])
 def test_prune_previews_blocked_removals_but_rejects_destructive_plan(change, blocker):
     cfg, body = change
@@ -194,3 +223,167 @@ def test_pruning_last_api_removes_materialized_routes(change):
         assert applied.status_code == 200, applied.text
         assert client.get("/retire/item").status_code == 404
         assert applied.json()["apis"] == {}
+
+
+def test_reconciliation_classifies_changes_without_values(change):
+    cfg, body = change
+    cfg.products["keep"].name = "live-secret-value"
+    body["artifact"]["products"]["keep"]["name"] = "git-secret-value"
+    cfg.policy_fragments["local"] = LOCAL_FRAGMENT
+    body["artifact"]["policy_fragments"]["new"] = "<set-header name='x-new'><value>new</value></set-header>"
+    cfg.policies_xml = "<policies><backend><forward-request /></backend></policies>"
+    with TestClient(create_app(config=cfg)) as client:
+        response = client.post(PATH, headers=HEADERS, json=body)
+        assert response.status_code == 200, response.text
+        report = response.json()["reconciliation"]
+        assert report["products"]["conflicts"] == ["keep"]
+        assert report["products"]["git_only"] == ["retire"]
+        assert report["policy_fragments"]["live_only"] == ["local"]
+        assert report["policy_fragments"]["git_only"] == ["new", "retire"]
+        assert report["gateway_policy"] == "live_only"
+        assert "secret-value" not in json.dumps(report)
+        no_baseline = client.post(PATH, headers=HEADERS, json={"artifact": artifact(config())})
+        assert no_baseline.status_code == 200, no_baseline.text
+        assert "reconciliation" not in no_baseline.json()
+
+
+def test_reconciliation_matching_changes_conflicts_and_order():
+    from app.service_artifacts import _reconciliation
+
+    baseline = artifact(config())
+    desired = json.loads(json.dumps(baseline))
+    live = json.loads(json.dumps(baseline))
+    desired["products"]["keep"]["name"] = live["products"]["keep"]["name"] = "same"
+    desired["policy_fragments"]["retire"] = "desired"
+    live["policy_fragments"]["retire"] = "live"
+    desired["gateway_policy"] = live["gateway_policy"] = "same"
+    live["apis"]["local"] = live["apis"]["keep"]
+    report = _reconciliation(live, desired, baseline)
+    assert report["products"]["matching"] == ["keep"]
+    assert report["policy_fragments"]["conflicts"] == ["retire"]
+    assert report["gateway_policy"] == "matching"
+    assert report["apis"]["live_only"] == ["local"]
+    assert report["api_order"] == "unchanged"
+    desired["apis"] = dict(reversed(list(desired["apis"].items())))
+    assert _reconciliation(live, desired, baseline)["api_order"] == "git_only"
+
+
+def test_invalid_baseline_product_is_rejected(change):
+    cfg, body = change
+    body["baseline"]["products"]["keep"]["state"] = "invalid"
+    with TestClient(create_app(config=cfg)) as client:
+        response = client.post(PATH, headers=HEADERS, json=body)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid baseline product metadata"
+
+
+def test_reconciliation_detects_operation_order_without_metadata_order(change):
+    from app.service_artifacts import _reconciliation
+
+    cfg, _ = change
+    cfg.apis["keep"].operations["other"] = OperationConfig(name="Other", url_template="/other")
+    baseline = artifact(cfg)
+    desired = json.loads(json.dumps(baseline))
+    live = json.loads(json.dumps(baseline))
+    paths = desired["apis"]["keep"]["artifact"]["openapi"]["paths"]
+    desired["apis"]["keep"]["artifact"]["openapi"]["paths"] = dict(reversed(list(paths.items())))
+    assert _reconciliation(live, desired, baseline)["apis"]["git_only"] == ["keep"]
+    with TestClient(create_app(config=cfg)) as client:
+        plan = client.post(PATH, headers=HEADERS, json={"artifact": desired, "baseline": baseline})
+        assert plan.status_code == 200, plan.text
+        assert plan.json()["drift"]["apis"]["update"] == ["keep"]
+    desired = json.loads(json.dumps(baseline))
+    info = desired["apis"]["keep"]["artifact"]["openapi"]["info"]
+    desired["apis"]["keep"]["artifact"]["openapi"]["info"] = dict(reversed(list(info.items())))
+    assert _reconciliation(live, desired, baseline)["apis"]["git_only"] == []
+
+
+def test_reconciliation_ignores_target_only_product_links():
+    cfg = config()
+    baseline = artifact(cfg)
+    cfg.products["local"] = ProductConfig(name="Local")
+    cfg.apis["keep"].products.append("local")
+    desired = json.loads(json.dumps(baseline))
+    desired["apis"]["keep"]["artifact"]["openapi"]["info"]["title"] = "Git edit"
+    with TestClient(create_app(config=cfg)) as client:
+        plan = client.post(PATH, headers=HEADERS, json={"artifact": desired, "baseline": baseline})
+        assert plan.status_code == 200, plan.text
+        report = plan.json()["reconciliation"]
+        assert report["apis"]["git_only"] == ["keep"]
+        assert report["apis"]["conflicts"] == []
+        assert report["products"]["live_only"] == ["local"]
+
+
+def test_reviewed_unlinks_preserve_local_links_and_allow_atomic_product_deletion():
+    cfg = config()
+    cfg.apis["keep"].products = ["keep", "retire"]
+    baseline = artifact(cfg)
+    desired = json.loads(json.dumps(baseline))
+    desired["apis"]["keep"]["products"] = ["keep"]
+    del desired["apis"]["retire"]
+    del desired["products"]["retire"]
+    del desired["policy_fragments"]["retire"]
+    cfg.products["local"] = ProductConfig(name="Local")
+    cfg.apis["keep"].products.append("local")
+    body = {"artifact": desired, "baseline": baseline}
+    with TestClient(create_app(config=cfg)) as client:
+        ordinary = client.post(PATH, headers=HEADERS, json=body)
+        assert ordinary.status_code == 200, ordinary.text
+        assert ordinary.json()["unlinks"] == {"keep": ["retire"]}
+        applied = client.put(PATH, headers=etag_headers(ordinary), json=body)
+        assert applied.status_code == 200, applied.text
+        assert set(applied.json()["apis"]["keep"]["products"]) == {"keep", "retire", "local"}
+        request = {**body, "prune": True}
+        plan = client.post(PATH, headers=HEADERS, json=request)
+        assert plan.status_code == 200, plan.text
+        assert plan.json()["unlinks"] == {"keep": ["retire"]}
+        applied = client.put(PATH, headers=etag_headers(plan), json=request)
+        assert applied.status_code == 200, applied.text
+        assert set(applied.json()["apis"]["keep"]["products"]) == {"keep", "local"}
+        assert "retire" not in applied.json()["products"]
+
+
+def test_prune_rejects_last_subscription_product_and_unreviewed_removal():
+    cfg = config()
+    baseline = artifact(cfg)
+    desired = json.loads(json.dumps(baseline))
+    desired["apis"]["keep"]["products"] = []
+    body = {"artifact": desired, "baseline": baseline}
+    with TestClient(create_app(config=cfg)) as client:
+        ordinary = client.post(PATH, headers=HEADERS, json=body)
+        assert ordinary.status_code == 200, ordinary.text
+        assert ordinary.json()["unlinks"] == {"keep": ["keep"]}
+        prune = client.post(PATH, headers=HEADERS, json={**body, "prune": True})
+        assert prune.status_code == 400
+        assert "last subscription-enforcing product" in prune.text
+        unreviewed = {"artifact": desired}
+        assert client.post(PATH, headers=HEADERS, json=unreviewed).status_code == 400
+
+
+def test_unlink_from_already_open_api_is_allowed():
+    cfg = config()
+    cfg.products["open"] = ProductConfig(name="Open", require_subscription=False)
+    cfg.apis["keep"].products = ["keep", "open"]
+    baseline = artifact(cfg)
+    desired = json.loads(json.dumps(baseline))
+    desired["apis"]["keep"]["products"] = ["open"]
+    request = {"artifact": desired, "baseline": baseline, "prune": True}
+    with TestClient(create_app(config=cfg)) as client:
+        plan = client.post(PATH, headers=HEADERS, json=request)
+        assert plan.status_code == 200, plan.text
+        applied = client.put(PATH, headers=etag_headers(plan), json=request)
+        assert applied.status_code == 200, applied.text
+        assert applied.json()["apis"]["keep"]["products"] == ["open"]
+
+
+def test_unlink_cannot_replace_protected_product_with_open_product():
+    cfg = config()
+    cfg.products["open"] = ProductConfig(name="Open", require_subscription=False)
+    baseline = artifact(cfg)
+    desired = json.loads(json.dumps(baseline))
+    desired["apis"]["keep"]["products"] = ["open"]
+    request = {"artifact": desired, "baseline": baseline, "prune": True}
+    with TestClient(create_app(config=cfg)) as client:
+        plan = client.post(PATH, headers=HEADERS, json=request)
+        assert plan.status_code == 400
+        assert "subscription-enforcing product" in plan.text

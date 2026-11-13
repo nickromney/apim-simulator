@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -902,6 +903,57 @@ def test_service_artifact_commands(tmp_path: Path, capsys: pytest.CaptureFixture
         assert json.loads(preview)["body"]["overrides"] == "[redacted]"
 
 
+def test_service_git_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    git("config", "commit.gpgsign", "false")
+    git("config", "core.hooksPath", "/dev/null")
+    artifact = tmp_path / "service.json"
+    artifact.write_text('{"apis": {"old": {}}}')
+    git("add", "service.json")
+    git("commit", "-qm", "baseline")
+    baseline = git("rev-parse", "HEAD")
+    artifact.write_text('{"apis": {"new": {}}}')
+    git("add", "service.json")
+    git("commit", "-qm", "desired")
+    desired = git("rev-parse", "HEAD")
+    artifact.write_text('{"apis": {"uncommitted": {}}}')
+    monkeypatch.chdir(tmp_path)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"changes": []})
+
+    args = ["plan-service", "--file", "service.json", "--git-ref", "HEAD", "--baseline-ref", baseline, "--prune"]
+    transport = httpx.MockTransport(handler)
+    assert main(args, transport=transport) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["inputs"]["artifact"]["commit"] == desired
+    assert result["inputs"]["baseline"]["commit"] == baseline
+    assert json.loads(requests[-1].content) == {
+        "artifact": {"apis": {"new": {}}},
+        "baseline": {"apis": {"old": {}}},
+        "prune": True,
+    }
+    assert main(["--dry-run", *args], transport=transport) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["inputs"] == result["inputs"]
+    assert preview["body"] == json.loads(requests[-1].content)
+    assert git("rev-parse", "HEAD") == desired
+    assert "uncommitted" in artifact.read_text()
+
+    for path, ref in (("../service.json", "HEAD"), ("service.json", "missing-ref"), ("missing.json", "HEAD")):
+        assert main(["--dry-run", "plan-service", "--file", path, "--git-ref", ref]) == 1
+        assert "error:" in capsys.readouterr().err
+
+
 def test_service_artifact_errors_hide_override_values(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     artifact = tmp_path / "service.json"
     overrides = tmp_path / "overrides.json"
@@ -957,6 +1009,17 @@ def test_service_artifact_prune_requires_baseline_and_sends_it(
     assert plan["effect"] == ("read" if command == "plan-service" else "write")
 
 
+@pytest.mark.parametrize("command", ["plan-service", "apply-service"])
+def test_service_artifact_reviewed_flag(command: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "service.json"
+    artifact.write_text('{"apis": {}}')
+    args = ["--dry-run", command, "--file", str(artifact), "--reviewed"]
+    if command == "apply-service":
+        args += ["--if-match", '"etag"']
+    assert main(args) == 0
+    assert json.loads(capsys.readouterr().out)["body"]["reviewed"] is True
+
+
 def test_service_artifact_error_shows_safe_service_message(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     artifact = tmp_path / "service.json"
     artifact.write_text("{}")
@@ -974,3 +1037,147 @@ def test_service_prune_error_shows_stale_plan_message(tmp_path: Path, capsys: py
     args = ["apply-service", "--file", str(artifact), "--baseline", str(artifact), "--prune", "--if-match", '"etag"']
     assert main(args, transport=transport) == 1
     assert message in capsys.readouterr().err
+
+
+def test_service_apply_receipt_success_and_secrecy(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "service.json"
+    baseline = tmp_path / "baseline.json"
+    overrides = tmp_path / "overrides.json"
+    receipt = tmp_path / "receipt.json"
+    artifact.write_text('{"apis":{"z":{},"a":{}}}')
+    baseline.write_text('{"apis":{}}')
+    overrides.write_text('{"named_values":{"secret":"override-secret"}}')
+    args = [
+        "--base-url",
+        "http://user:password@localhost:8000?token=query-secret#fragment-secret",
+        "--tenant-key",
+        "tenant-secret",
+        "apply-service",
+        "--file",
+        str(artifact),
+        "--baseline",
+        str(baseline),
+        "--overrides",
+        str(overrides),
+        "--prune",
+        "--reviewed",
+        "--if-match",
+        '"old"',
+        "--receipt",
+        str(receipt),
+    ]
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"result": "ok"}, headers={"ETag": '"new"'}))
+    assert main(["--dry-run", *args], transport=transport) == 0
+    assert json.loads(capsys.readouterr().out)["receipt"] == str(receipt)
+    assert not receipt.exists()
+    assert main(args, transport=transport) == 0
+    assert json.loads(capsys.readouterr().out) == {"result": "ok"}
+    data = json.loads(receipt.read_text())
+    assert data["target_url"] == "http://localhost:8000"
+    assert data["etag"] == '"new"'
+    assert data["prune"] and data["reviewed"]
+    assert len(data["baseline_sha256"]) == 64
+    assert receipt.stat().st_mode & 0o777 == 0o600
+    for secret in ("password", "query-secret", "fragment-secret", "tenant-secret", "override-secret"):
+        assert secret not in receipt.read_text()
+    from app.cli_receipt import _digest
+
+    assert data["desired_sha256"] == _digest({"apis": {"z": {}, "a": {}}})
+    assert data["desired_sha256"] != _digest({"apis": {"a": {}, "z": {}}})
+
+
+def test_service_apply_receipt_rejection_and_no_overwrite(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "service.json"
+    artifact.write_text("{}")
+    receipt = tmp_path / "receipt.json"
+    args = ["apply-service", "--file", str(artifact), "--if-match", '"old"', "--receipt", str(receipt)]
+    transport = httpx.MockTransport(lambda _: httpx.Response(412, json={"detail": "If-Match is required"}))
+    assert main(args, transport=transport) == 1
+    assert not receipt.exists()
+    receipt.write_text("existing")
+    assert main(args, transport=httpx.MockTransport(lambda _: pytest.fail("network called"))) == 1
+    assert receipt.read_text() == "existing"
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_service_apply_receipt_race_reports_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "service.json"
+    artifact.write_text("{}")
+    receipt = tmp_path / "receipt.json"
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        receipt.write_text("other")
+        return httpx.Response(200, json={"result": "ok"})
+
+    args = ["apply-service", "--file", str(artifact), "--if-match", '"old"', "--receipt", str(receipt)]
+    assert main(args, transport=httpx.MockTransport(handler)) == 1
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {"result": "ok"}
+    assert "apply succeeded but receipt could not be written" in output.err
+    assert receipt.read_text() == "other"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["receipt.json", "service.json"]
+
+
+def _verify_plan() -> dict:
+    return {
+        "drift": {
+            **{
+                kind: {"create": [], "update": [], "target_only": ["ignored"]}
+                for kind in ("apis", "products", "policy_fragments")
+            },
+            "gateway_policy": False,
+            "api_order": False,
+            "overrides": {"api_upstreams": [], "backends": [], "named_values": []},
+        },
+        "deletions": {kind: [] for kind in ("apis", "products", "policy_fragments")},
+        "unlinks": {},
+        "reconciliation": {"apis": {"old": "deleted"}},
+    }
+
+
+def test_verify_service_checks_plan_and_prune(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "service.json"
+    artifact.write_text("{}")
+    plan = _verify_plan()
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=plan)
+
+    transport = httpx.MockTransport(handler)
+    args = ["verify-service", "--file", str(artifact)]
+    assert main(args, transport=transport) == 0
+    assert json.loads(capsys.readouterr().out)["in_sync"] is True
+    assert requests[-1].method == "POST"
+    assert json.loads(requests[-1].content) == {"artifact": {}}
+    plan["deletions"]["apis"] = ["old"]
+    assert main(args, transport=transport) == 0
+    capsys.readouterr()
+    assert main(args + ["--baseline", str(artifact), "--prune"], transport=transport) == 1
+    assert json.loads(capsys.readouterr().out)["in_sync"] is False
+    plan["deletions"]["apis"] = []
+    plan["unlinks"] = {"api": ["product"]}
+    assert main(args + ["--baseline", str(artifact), "--prune"], transport=transport) == 1
+    capsys.readouterr()
+    plan["drift"]["overrides"]["named_values"] = ["token"]
+    assert main(args, transport=transport) == 1
+    capsys.readouterr()
+    count = len(requests)
+    assert main(["--dry-run", *args], transport=transport) == 0
+    assert json.loads(capsys.readouterr().out)["effect"] == "read"
+    assert len(requests) == count
+
+
+@pytest.mark.parametrize("field", ["apis", "products", "policy_fragments", "gateway_policy", "api_order", "overrides"])
+def test_verify_service_rejects_invalid_drift(field: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact = tmp_path / "service.json"
+    artifact.write_text("{}")
+    plan = _verify_plan()
+    plan["drift"][field] = "secret response"
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=plan))
+    assert main(["verify-service", "--file", str(artifact)], transport=transport) == 1
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "secret response" not in captured.err
+    assert "invalid service plan response" in captured.err

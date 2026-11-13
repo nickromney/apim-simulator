@@ -443,18 +443,28 @@ policy, API ordering, and authored stack overrides. Apply saves the
 configuration in one update. A missing precondition returns HTTP 428. A stale
 ETag returns HTTP 412.
 
+**Reconciliation.** With a baseline, a plan identifies Git-only changes,
+live-only changes, matching changes, and conflicts for APIs, products,
+fragments, gateway policy, and API order.
+
+**Reviewed plans.** The optional `reviewed` request flag binds a plan ETag
+to the destination configuration, artifact, baseline if supplied, and
+overrides. Use the same flag and inputs to apply. The CLI can read artifacts
+directly from Git and reports the resolved commit IDs.
+
 **Prune.** Supply the previously deployed Git artifact as a baseline. The
-plan reports APIs, products, and fragments that exist on the destination and
-in the baseline but are absent from the desired artifact. Both plan and apply
-take an explicit prune option. The prune plan's ETag binds the destination
-state and the reviewed artifact, baseline, and overrides to one gateway
-process. Active references and governance locks can block deletion.
+plan reports APIs, products, fragments, and API-to-product links that exist
+on the destination and in the baseline but are absent from the desired
+artifact. Both plan and apply take an explicit prune option. The prune plan's
+ETag binds the destination state and the reviewed artifact, baseline, and
+overrides to one gateway process. Active references and governance locks can
+block deletion. Unlinks cannot open a previously protected API.
 
 **Scope.** Destination-only APIs, products, and fragments are retained. The
 artifact replaces gateway policies and updates listed resources. It supports
 API-level product membership and the [API artifact subset](#api-artifact-promotion).
-Product link removal and legacy route-only configurations require separate
-management. Subscriptions, credentials, portal content, and service
+Legacy route-only configurations require separate management.
+Subscriptions, credentials, portal content, and service
 infrastructure are destination-local.
 
 **Evidence.** [Service promotion walkthrough](APIOPS.md#promote-a-service),
