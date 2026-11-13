@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,6 +14,8 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+from app.cli_receipt import validate_receipt_path, write_receipt
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_TIMEOUT = 10.0
@@ -34,23 +37,30 @@ class _ArgumentParser(argparse.ArgumentParser):
         super().error(message)
 
 
-_BUNDLE_WRITE_COMMANDS = frozenset({"plan-product", "apply-product", "plan-service", "apply-service"})
+_BUNDLE_WRITE_COMMANDS = frozenset({"plan-product", "apply-product", "plan-service", "apply-service", "verify-service"})
 
 
 def _add_service_artifact_parsers(subparsers: Any) -> None:
     subparsers.add_parser("extract-service", help="Extract a whole-service JSON artifact.")
-    for name in ("plan-service", "apply-service"):
+    for name in ("plan-service", "apply-service", "verify-service"):
         artifact_parser = subparsers.add_parser(name, help="Plan or apply a whole-service JSON artifact.")
         artifact_parser.add_argument("--file", required=True, help="Path to the service artifact JSON file.")
         artifact_parser.add_argument("--overrides", help="Path to environment override JSON.")
         artifact_parser.add_argument("--baseline", help="Path to the previous service artifact JSON file.")
+        artifact_parser.add_argument("--git-ref", help="Read --file from this Git commit or ref.")
+        artifact_parser.add_argument("--baseline-ref", help="Read the baseline from this Git commit or ref.")
         artifact_parser.add_argument(
             "--prune",
             action="store_true",
             help="Remove resources present in the baseline but absent from the artifact.",
         )
+        if name != "verify-service":
+            artifact_parser.add_argument(
+                "--reviewed", action="store_true", help="Bind the plan to the supplied inputs."
+            )
         if name == "apply-service":
             artifact_parser.add_argument("--if-match", required=True, help="Specific strong ETag from plan-service.")
+            artifact_parser.add_argument("--receipt", help="Write a local deployment receipt after success.")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -228,6 +238,10 @@ def _read_text_file(path: str) -> str:
 
 def _read_json_file(path: str) -> dict[str, Any]:
     text = _read_text_file(path)
+    return _parse_json_object(text, path)
+
+
+def _parse_json_object(text: str, path: str) -> dict[str, Any]:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -235,6 +249,26 @@ def _read_json_file(path: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise CliUsageError(f"{path} must contain a JSON object")
     return payload
+
+
+def _read_git_json(path: str, ref: str) -> tuple[dict[str, Any], str]:
+    if not path or path.startswith("/") or "\\" in path or any(part in ("", ".", "..") for part in path.split("/")):
+        raise CliUsageError(f"Git artifact path must be repository-relative: {path}")
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        content = subprocess.run(
+            ["git", "show", f"{commit}:{path}"],
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8")
+    except (OSError, subprocess.CalledProcessError, UnicodeError, ValueError) as exc:
+        raise CliUsageError(f"could not read {path} from Git ref {ref!r}: {exc}") from exc
+    return _parse_json_object(content, f"{commit}:{path}"), commit
 
 
 async def _request(
@@ -306,15 +340,29 @@ def _api_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _bundle_artifact_body(args: argparse.Namespace) -> dict[str, Any]:
-    if getattr(args, "prune", False) and not args.baseline:
-        raise CliUsageError("--prune requires --baseline")
-    body = {"artifact": _read_json_file(args.file)}
+    git_ref = getattr(args, "git_ref", None)
+    baseline_ref = getattr(args, "baseline_ref", None)
+    if getattr(args, "prune", False) and not (args.baseline or baseline_ref):
+        raise CliUsageError("--prune requires --baseline or --baseline-ref")
+    args._git_inputs = {}
+    if git_ref is not None:
+        artifact, commit = _read_git_json(args.file, git_ref)
+        args._git_inputs["artifact"] = {"path": args.file, "ref": git_ref, "commit": commit}
+    else:
+        artifact = _read_json_file(args.file)
+    body = {"artifact": artifact}
     if args.overrides is not None:
         body["overrides"] = _read_json_file(args.overrides)
-    if getattr(args, "baseline", None) is not None:
+    if baseline_ref is not None:
+        path = args.baseline or args.file
+        body["baseline"], commit = _read_git_json(path, baseline_ref)
+        args._git_inputs["baseline"] = {"path": path, "ref": baseline_ref, "commit": commit}
+    elif getattr(args, "baseline", None) is not None:
         body["baseline"] = _read_json_file(args.baseline)
     if getattr(args, "prune", False):
         body["prune"] = True
+    if getattr(args, "reviewed", False):
+        body["reviewed"] = True
     return body
 
 
@@ -367,6 +415,9 @@ _COMMANDS: dict[str, _Command] = {
     ),
     "extract-service": _Command("GET", "/apim/management/service/artifacts"),
     "plan-service": _Command("POST", "/apim/management/service/artifacts", body=_bundle_artifact_body, read_only=True),
+    "verify-service": _Command(
+        "POST", "/apim/management/service/artifacts", body=_bundle_artifact_body, read_only=True
+    ),
     "apply-service": _Command(
         "PUT", "/apim/management/service/artifacts", body=_bundle_artifact_body, requires_etag=True
     ),
@@ -468,11 +519,19 @@ def _request_plan(args: argparse.Namespace) -> dict[str, Any]:
     }
     if headers:
         plan["headers"] = headers
+    plan.update({"receipt": args.receipt} if getattr(args, "receipt", None) else {})
+    if getattr(args, "_git_inputs", None):
+        plan["inputs"] = args._git_inputs
     return plan
 
 
 async def _dispatch(args: argparse.Namespace, client: httpx.AsyncClient) -> httpx.Response:
     """Execute the same request described by the offline plan."""
+    if getattr(args, "receipt", None):
+        try:
+            validate_receipt_path(args.receipt)
+        except (OSError, ValueError) as exc:
+            raise CliUsageError(str(exc)) from exc
     command = _COMMANDS[args.command]
     if command.confirm is not None and not args.yes:
         raise CliUsageError(f"refusing to delete {command.confirm.format(**vars(args))} without --yes")
@@ -531,6 +590,7 @@ def _bundle_error_detail(response: httpx.Response, args: argparse.Namespace) -> 
     safe = {
         "Invalid product artifact request; check artifact and override field types",
         "Invalid service artifact request; check artifact and override field types",
+        "Invalid baseline product metadata",
         "Invalid policy or configuration in the service artifact",
         "Cannot import APIs into a legacy route-only configuration",
         "API product links must reference bundle products",
@@ -597,6 +657,75 @@ def _redact_bundle_overrides(detail: str, body: dict[str, Any], args: argparse.N
     return _redact_credentials(detail, args)
 
 
+def _save_receipt(args: argparse.Namespace, response: httpx.Response, result: Any) -> bool:
+    if args.command != "apply-service" or not args.receipt:
+        return True
+    try:
+        write_receipt(args.receipt, args, response)
+    except (OSError, ValueError) as exc:
+        print(f"error: apply succeeded but receipt could not be written: {exc}", file=sys.stderr)
+        print(json.dumps(result, indent=2))
+        return False
+    return True
+
+
+def _id_list(value: Any) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError("invalid plan")
+    return value
+
+
+def _prune_changes(result: dict[str, Any]) -> bool:
+    deletions, unlinks = result.get("deletions"), result.get("unlinks")
+    if not isinstance(deletions, dict) or not isinstance(unlinks, dict):
+        raise ValueError("invalid plan")
+    lists = [_id_list(deletions.get(kind)) for kind in ("apis", "products", "policy_fragments")]
+    lists.extend(_id_list(value) for value in unlinks.values())
+    if any(not isinstance(key, str) for key in unlinks):
+        raise ValueError("invalid plan")
+    return any(lists)
+
+
+def _service_in_sync(result: Any, prune: bool) -> bool:
+    if not isinstance(result, dict) or not isinstance(result.get("drift"), dict):
+        raise ValueError("invalid plan")
+    drift = result["drift"]
+    lists = []
+    for kind in ("apis", "products", "policy_fragments"):
+        group = drift.get(kind)
+        if not isinstance(group, dict):
+            raise ValueError("invalid plan")
+        lists.extend(_id_list(group.get(field)) for field in ("create", "update"))
+    flags = [drift.get(field) for field in ("gateway_policy", "api_order")]
+    if any(not isinstance(flag, bool) for flag in flags):
+        raise ValueError("invalid plan")
+    overrides = drift.get("overrides")
+    if not isinstance(overrides, dict):
+        raise ValueError("invalid plan")
+    lists.extend(_id_list(overrides.get(field)) for field in ("api_upstreams", "backends", "named_values"))
+    prune_changed = _prune_changes(result) if prune else False
+    return not (any(lists) or any(flags) or prune_changed)
+
+
+def _response_result(args: argparse.Namespace, response: httpx.Response) -> tuple[Any, bool]:
+    try:
+        result = response.json()
+        in_sync = _service_in_sync(result, args.prune) if args.command == "verify-service" else True
+        if args.command == "verify-service":
+            result["in_sync"] = in_sync
+        if (
+            args.command in {"plan-service", "verify-service"}
+            and getattr(args, "_git_inputs", None)
+            and isinstance(result, dict)
+        ):
+            result["inputs"] = args._git_inputs
+        return result, in_sync
+    except (ValueError, TypeError):
+        if args.command != "verify-service":
+            raise
+        raise CliUsageError("invalid service plan response") from None
+
+
 async def _run(
     args: argparse.Namespace,
     transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None,
@@ -623,8 +752,15 @@ async def _run(
         )
         return 1
 
-    print(json.dumps(response.json(), indent=2))
-    return 0
+    try:
+        result, in_sync = _response_result(args, response)
+    except CliUsageError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if not _save_receipt(args, response, result):
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0 if args.command != "verify-service" or in_sync else 1
 
 
 def main(

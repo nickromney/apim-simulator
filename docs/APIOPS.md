@@ -380,8 +380,8 @@ backends and run the shared policies.
 
 The service artifact updates the gateway policy and creates or updates
 the listed APIs, products, and fragments. Resources that exist only on the
-destination stay there. Handle intentional product unlinking separately.
-Subscription keys, users, and infrastructure settings are managed per stack.
+destination stay there. Subscription keys, users, and infrastructure settings
+are managed per stack.
 [Service artifact promotion contract](FIDELITY-CONTRACTS.md#service-artifact-promotion)
 
 ## Check drift and prune removed resources
@@ -401,17 +401,24 @@ baseline="$(mktemp)"
 git show "${previous_commit}:service.json" > "$baseline"
 uv run apimsim --base-url "$target_url" plan-service \
   --file service.json --overrides "$overrides" --baseline "$baseline" > service-plan.json
-jq '{drift, deletions}' service-plan.json
+jq '{drift, reconciliation, deletions, unlinks}' service-plan.json
 ```
 
+Use `reconciliation` to tell where a change came from. `git_only` means only
+the desired artifact differs from the baseline. `live_only` means only the
+destination differs, including resources added there. `matching` means both
+sides made the same change. Review `conflicts` when both sides changed the
+same resource in different ways.
+
 `deletions` lists resources present in the baseline and live target that are
-absent from the desired artifact. An ordinary apply retains those resources.
-To delete them, request a prune plan and review its diff.
+absent from the desired artifact. `unlinks` lists removed API-to-product
+links with the same baseline requirement. To apply these removals, request
+a prune plan and review its diff.
 
 ```bash
 uv run apimsim --base-url "$target_url" plan-service --prune \
   --file service.json --overrides "$overrides" --baseline "$baseline" > prune-plan.json
-jq '.deletions' prune-plan.json
+jq '{deletions, unlinks}' prune-plan.json
 jq -r '.diff' prune-plan.json
 ```
 
@@ -424,10 +431,63 @@ uv run apimsim --base-url "$target_url" apply-service --prune \
   --file service.json --overrides "$overrides" --baseline "$baseline" --if-match "$etag"
 ```
 
-Prune covers APIs, products, and policy fragments. The gateway checks
-references and governance locks before applying any changes. Resolve a
-blocking dependency on the destination, then plan again. The OpenAPI
-definition still controls operation updates within a retained API.
+Prune covers APIs, products, policy fragments, and API-to-product links. A
+protected API needs another subscription-enforcing product if you unlink its
+last protected product. The gateway checks references and governance locks
+before applying changes. Resolve a blocking dependency on the destination,
+then plan again. The OpenAPI definition controls operation updates within a
+retained API.
+
+## Apply reviewed Git inputs
+
+With `--git-ref`, `--file` is a path from the repository root. With
+`--baseline-ref`, the CLI reads the same path from the previous deployment
+commit. Pass `--baseline` as well if the previous artifact used a different
+path.
+
+```bash
+uv run apimsim --base-url "$target_url" plan-service --reviewed \
+  --file service.json --git-ref HEAD --baseline-ref "$previous_commit" \
+  --overrides "$overrides" > service-plan.json
+jq '.inputs' service-plan.json
+```
+
+`inputs` shows the resolved commits. With `--reviewed`, the plan ETag also
+binds the desired artifact, baseline, and overrides. Review the plan and use
+the recorded commits to apply it.
+
+```bash
+release_commit="$(jq -er '.inputs.artifact.commit' service-plan.json)"
+baseline_commit="$(jq -er '.inputs.baseline.commit' service-plan.json)"
+etag="$(jq -er '.etag' service-plan.json)"
+uv run apimsim --base-url "$target_url" apply-service --reviewed \
+  --file service.json --git-ref "$release_commit" --baseline-ref "$baseline_commit" \
+  --overrides "$overrides" --if-match "$etag" --receipt deployment-receipt.json
+```
+
+Make a fresh plan if the destination or any reviewed input changes.
+
+The optional receipt records the destination, apply time, artifact digests,
+Git commits, apply mode, and resulting ETag. Choose a new receipt path for each
+deployment. Keep the override file with your stack configuration. If the CLI
+reports that apply succeeded but receipt creation failed, inspect the target
+before attempting another apply.
+
+## Verify a deployment
+
+Run `verify-service` against the destination with the same Git artifact and
+overrides you deployed. The command prints the plan with `in_sync` and exits
+zero when no changes are needed. Exit code 1 signals drift or a failed
+verification, and exit code 2 signals a transport failure.
+
+```bash
+uv run apimsim --base-url "$target_url" verify-service \
+  --file service.json --git-ref "$release_commit" --overrides "$overrides"
+```
+
+To check for pending deletions or unlinks after a prune, include `--prune`
+and the same baseline. Target-only resources are compatible with an in-sync
+result. Call the member APIs separately to verify runtime responses.
 
 ## Run the Azure workflow
 

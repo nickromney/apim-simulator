@@ -50,13 +50,14 @@ class ServiceArtifactRequest(BaseModel):
     overrides: ProductOverrides = Field(default_factory=ProductOverrides)
     baseline: ServiceArtifact | None = None
     prune: StrictBool = False
+    reviewed: StrictBool = False
 
 
 _PLAN_KEY = secrets.token_bytes(32)
 
 
-def prune_etag(cfg: GatewayConfig, body: ServiceArtifactRequest) -> str:
-    if body.baseline is None:
+def reviewed_etag(cfg: GatewayConfig, body: ServiceArtifactRequest) -> str:
+    if body.prune and body.baseline is None:
         raise HTTPException(400, "Prune requires a baseline artifact")
     raw = json.dumps([cfg.model_dump(mode="json"), body.model_dump(mode="json")], separators=(",", ":"))
     return f'"{hmac.new(_PLAN_KEY, raw.encode(), hashlib.sha256).hexdigest()}"'
@@ -68,6 +69,19 @@ def deletion_candidates(cfg: GatewayConfig, body: ServiceArtifactRequest) -> dic
         baseline = getattr(body.baseline, kind) if body.baseline else {}
         result[kind] = sorted((set(baseline) - set(getattr(body.artifact, kind))) & set(getattr(cfg, kind)))
     return result
+
+
+def unlink_candidates(cfg: GatewayConfig, body: ServiceArtifactRequest) -> dict[str, list[str]]:
+    if body.baseline is None:
+        return {}
+    result = {}
+    for api_id in body.artifact.apis.keys() & body.baseline.apis.keys() & cfg.apis.keys():
+        removed = (set(body.baseline.apis[api_id].products) - set(body.artifact.apis[api_id].products)) & set(
+            cfg.apis[api_id].products
+        )
+        if removed:
+            result[api_id] = sorted(removed)
+    return dict(sorted(result.items()))
 
 
 def service_etag(cfg: GatewayConfig) -> str:
@@ -157,7 +171,11 @@ def _merge_order(existing: list[str], managed: list[str]) -> list[str]:
 
 
 def _stage_apis(
-    manager: ManagementService, cfg: GatewayConfig, artifact: ServiceArtifact, overrides: ProductOverrides
+    manager: ManagementService,
+    cfg: GatewayConfig,
+    artifact: ServiceArtifact,
+    overrides: ProductOverrides,
+    reviewed_unlinks: dict[str, list[str]],
 ) -> GatewayConfig:
     for api_id, entry in artifact.apis.items():
         target = cfg.apis.get(api_id)
@@ -165,7 +183,11 @@ def _stage_apis(
             raise HTTPException(400, "API product links must reference bundle products")
         if target:
             _api_portable(target)
-            if (set(target.products) & set(artifact.products)) - set(entry.products):
+            if (
+                (set(target.products) & set(artifact.products))
+                - set(entry.products)
+                - set(reviewed_unlinks.get(api_id, []))
+            ):
                 raise HTTPException(400, "Removing product API links is not supported")
         upstream = overrides.api_upstreams.get(api_id)
         if entry.backend is None and target and target.backend and upstream is None:
@@ -232,6 +254,7 @@ def stage_service_artifact(manager: ManagementService, cfg: GatewayConfig, body:
     if body.baseline is not None and body.baseline.schema_version != 1:
         raise HTTPException(400, "Unsupported baseline artifact schema version")
     candidates = deletion_candidates(cfg, body)
+    unlinks = unlink_candidates(cfg, body)
     if artifact.schema_version != 1:
         raise HTTPException(400, "Unsupported artifact schema version")
     if mask_secret_data(artifact.model_dump(), cfg) != artifact.model_dump():
@@ -245,6 +268,8 @@ def stage_service_artifact(manager: ManagementService, cfg: GatewayConfig, body:
     if body.prune:
         if candidates["apis"]:
             staged.routes = []
+        for api_id, products in unlinks.items():
+            staged.apis[api_id].products = [p for p in staged.apis[api_id].products if p not in products]
         for kind, ids in candidates.items():
             for identifier in ids:
                 del getattr(staged, kind)[identifier]
@@ -253,7 +278,20 @@ def stage_service_artifact(manager: ManagementService, cfg: GatewayConfig, body:
     staged.policies_xml_documents = artifact.gateway_policy_documents
     _stage_dependencies(staged, artifact, body.overrides)
     _stage_products(staged, artifact.products)
-    staged = _stage_apis(manager, staged, artifact, body.overrides)
+    staged = _stage_apis(manager, staged, artifact, body.overrides, unlinks)
+    if body.prune:
+        for api_id in unlinks:
+
+            def protected(config: GatewayConfig, identifier: str) -> bool:
+                products = config.apis[identifier].products
+                return bool(products) and all(
+                    p not in config.products or config.products[p].require_subscription for p in products
+                )
+
+            previously_protected = protected(cfg, api_id)
+            still_protected = protected(staged, api_id)
+            if previously_protected and not still_protected:
+                raise HTTPException(400, "Cannot unlink the last subscription-enforcing product from a retained API")
     if body.prune and any(candidates.values()):
         _check_prune_references(staged, candidates)
     policies = _policies(staged, artifact.apis, artifact.products, artifact.policy_fragments)
@@ -289,6 +327,79 @@ def stage_service_artifact(manager: ManagementService, cfg: GatewayConfig, body:
     return staged, export_service_artifact(staged)
 
 
+_MISSING = object()
+
+
+def _change_category(previous: Any, wanted: Any, live: Any) -> str | None:
+    git_changed = wanted != previous
+    live_changed = live != previous
+    if git_changed and live_changed:
+        return "matching" if wanted == live else "conflicts"
+    if git_changed:
+        return "git_only"
+    if live_changed:
+        return "live_only"
+    return None
+
+
+def _normalized_product(value: Any) -> Any:
+    if value is _MISSING:
+        return value
+    try:
+        return ProductConfig.model_validate(value).model_dump(mode="json", exclude={"groups", "tags"})
+    except ValidationError as exc:
+        raise HTTPException(400, "Invalid baseline product metadata") from exc
+
+
+def _api_comparison(value: Any, managed_products: set[str] | None = None) -> Any:
+    if value is _MISSING:
+        return value
+    if managed_products is not None:
+        value = {**value, "products": [product for product in value["products"] if product in managed_products]}
+    paths = value.get("artifact", {}).get("openapi", {}).get("paths", {})
+    if not isinstance(paths, dict):
+        return value, None
+    methods = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
+    order = [
+        (path, method)
+        for path, item in paths.items()
+        if isinstance(item, dict)
+        for method in item
+        if isinstance(method, str) and method.lower() in methods
+    ]
+    return value, order
+
+
+def _identity(value: Any) -> Any:
+    return value
+
+
+def _reconciliation(current: dict, desired: dict, baseline: dict) -> dict:
+    categories = ("git_only", "live_only", "matching", "conflicts")
+    managed_products = set(baseline["products"]) | set(desired["products"])
+    result = {}
+    for kind in ("apis", "products", "policy_fragments"):
+        groups = {category: [] for category in categories}
+        for identifier in sorted(set(current[kind]) | set(desired[kind]) | set(baseline[kind])):
+            values = [state[kind].get(identifier, _MISSING) for state in (baseline, desired, current)]
+            if kind == "products":
+                values = [_normalized_product(value) for value in values]
+            elif kind == "apis":
+                values = [_api_comparison(value, managed_products) for value in values]
+            category = _change_category(*values)
+            if category:
+                groups[category].append(identifier)
+        result[kind] = groups
+    policies = [(state["gateway_policy"], state["gateway_policy_documents"]) for state in (baseline, desired, current)]
+    result["gateway_policy"] = _change_category(*policies) or "unchanged"
+    managed = set(baseline["apis"]) | set(desired["apis"])
+    orders = [
+        [identifier for identifier in state["apis"] if identifier in managed] for state in (baseline, desired, current)
+    ]
+    result["api_order"] = _change_category(*orders) or "unchanged"
+    return result
+
+
 def plan_service_artifact(manager: ManagementService, cfg: GatewayConfig, body: ServiceArtifactRequest):
     staged, proposed = stage_service_artifact(manager, cfg, body)
     current = export_service_artifact(cfg)
@@ -301,9 +412,12 @@ def plan_service_artifact(manager: ManagementService, cfg: GatewayConfig, body: 
     desired = body.artifact.model_dump(mode="json")
     for kind in ("apis", "products", "policy_fragments"):
         live, wanted, previous = current[kind], desired[kind], baseline.get(kind, {})
+        compare = _api_comparison if kind == "apis" else _identity
         drift[kind] = {
             "create": sorted(set(wanted) - set(live)),
-            "update": sorted(key for key in set(wanted) & set(live) if proposed[kind][key] != live[key]),
+            "update": sorted(
+                key for key in set(wanted) & set(live) if compare(proposed[kind][key]) != compare(live[key])
+            ),
             "target_only": sorted(set(live) - set(wanted) - set(previous)),
         }
     drift["gateway_policy"] = (current["gateway_policy"], current["gateway_policy_documents"]) != (
@@ -326,13 +440,18 @@ def plan_service_artifact(manager: ManagementService, cfg: GatewayConfig, body: 
             key for key in body.overrides.named_values if cfg.named_values.get(key) != staged.named_values[key]
         ),
     }
-    return {
-        "etag": prune_etag(cfg, body) if body.prune else service_etag(cfg),
+    result = {
+        "etag": reviewed_etag(cfg, body) if body.prune or body.reviewed else service_etag(cfg),
         "drift": drift,
         "deletions": deletion_candidates(cfg, body),
+        "unlinks": unlink_candidates(cfg, body),
         "prune": body.prune,
+        "reviewed": body.reviewed,
         "diff": "\n".join(
             difflib.unified_diff(lines(current), lines(proposed), fromfile="current", tofile="proposed", lineterm="")
         ),
         "overrides": {key: sorted(value) for key, value in body.overrides.model_dump().items()},
     }
+    if body.baseline is not None:
+        result["reconciliation"] = _reconciliation(current, desired, baseline)
+    return result

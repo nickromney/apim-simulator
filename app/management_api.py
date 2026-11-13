@@ -463,7 +463,7 @@ def _build_service_router(*, require_management_plane: Callable[[], ManagementSe
 
     @router.put("/apim/management/service/artifacts")
     async def put_service_artifacts(request: Request, response: Response) -> dict[str, Any]:
-        from app.service_artifacts import prune_etag, service_etag, stage_service_artifact
+        from app.service_artifacts import reviewed_etag, service_etag, stage_service_artifact
 
         require_tenant_access(request, permission="write", global_only=True)
         match = request.headers.get("if-match")
@@ -471,10 +471,10 @@ def _build_service_router(*, require_management_plane: Callable[[], ManagementSe
             raise HTTPException(428, "If-Match is required")
         body = await _read_service_artifact_request(request)
         cfg = request.app.state.gateway_config
-        if match != (prune_etag(cfg, body) if body.prune else service_etag(cfg)):
+        if match != (reviewed_etag(cfg, body) if body.prune or body.reviewed else service_etag(cfg)):
             detail = (
                 "The configuration or plan changed. Plan again before applying."
-                if body.prune
+                if body.prune or body.reviewed
                 else "The configuration changed. Plan again before applying."
             )
             raise HTTPException(412, detail)
