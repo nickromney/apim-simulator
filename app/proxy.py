@@ -441,17 +441,20 @@ def apply_claim_headers(headers: dict[str, str], claims: dict[str, Any]) -> None
     headers["x-ms-client-principal-name"] = str(claims.get("preferred_username", ""))
 
 
+def hop_by_hop_headers(connection_values: list[str]) -> set[str]:
+    return HOP_BY_HOP_HEADERS | {
+        name.strip().lower() for value in connection_values for name in value.split(",") if name.strip()
+    }
+
+
 def build_upstream_headers(
     request: Request,
     auth: AuthContext,
     *,
     inject_simulator_identity_headers: bool = False,
 ) -> dict[str, str]:
-    headers: dict[str, str] = {
-        key: value
-        for key, value in request.headers.items()
-        if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() not in INTERNAL_UPSTREAM_HEADERS
-    }
+    excluded = hop_by_hop_headers(request.headers.getlist("connection")) | INTERNAL_UPSTREAM_HEADERS
+    headers: dict[str, str] = {key: value for key, value in request.headers.items() if key.lower() not in excluded}
 
     client_host = request.client.host if request.client else ""
     incoming_forwarded_for = request.headers.get("x-forwarded-for", "").strip()
@@ -476,7 +479,9 @@ def build_upstream_headers(
 
 
 def filter_response_headers(upstream_headers: dict[str, str]) -> dict[str, str]:
-    return {key: value for key, value in upstream_headers.items() if key.lower() not in HOP_BY_HOP_HEADERS}
+    connection_values = [value for key, value in upstream_headers.items() if key.lower() == "connection"]
+    excluded = hop_by_hop_headers(connection_values)
+    return {key: value for key, value in upstream_headers.items() if key.lower() not in excluded}
 
 
 def build_user_payload(auth: AuthContext, issuer: str | None, audience: str | None) -> dict[str, Any]:

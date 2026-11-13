@@ -51,7 +51,7 @@ from app.policy import (
     parse_policies_xml,
 )
 from app.policy_errors import build_last_error, exception_last_error, response_last_error
-from app.proxy import HOP_BY_HOP_HEADERS, apply_claim_headers, build_upstream_headers, resolve_route
+from app.proxy import apply_claim_headers, build_upstream_headers, hop_by_hop_headers, resolve_route
 from app.security import AuthContext, authenticate_request, subscription_bypassed, validate_client_certificate
 
 APIM_ROUTE_NAME_ATTR = "apim.route.name"
@@ -537,8 +537,9 @@ async def _read_upstream_response(
     asked to buffer, or a non-streaming configuration.
     """
     headers = MultiValueMap()
+    excluded = hop_by_hop_headers(upstream_response.headers.get_list("connection"))
     for name, value in upstream_response.headers.multi_items():
-        if name.lower() not in HOP_BY_HOP_HEADERS:
+        if name.lower() not in excluded:
             headers.set_list(name, headers.get_list(name, []) + [value])
     _add_simulator_response_headers(headers, cfg, correlation_id)
     if pool.pool_backend is not None:

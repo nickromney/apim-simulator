@@ -406,3 +406,24 @@ def test_backend_connection_failure_exposes_last_error_reason_to_on_error() -> N
 
     assert response.status_code == 599
     assert response.headers["error-reason"] == "BackendConnectionFailure"
+
+
+def test_connection_named_headers_are_not_forwarded_in_either_direction() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            headers=[("connection", "X-Backend-Private"), ("x-backend-private", "secret"), ("x-visible", "yes")],
+        )
+
+    with _app_client(_config(), httpx.MockTransport(handler)) as client:
+        response = client.get(
+            "/api/resource",
+            headers=[("connection", "keep-alive, X-Client-Private"), ("x-client-private", "secret")],
+        )
+
+    assert "x-client-private" not in seen[0].headers
+    assert "x-backend-private" not in response.headers
+    assert response.headers["x-visible"] == "yes"
