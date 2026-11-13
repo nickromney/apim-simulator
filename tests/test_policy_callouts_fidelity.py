@@ -11,6 +11,7 @@ from app.apim_expr import CalloutResponse
 from app.backend_pool import apply_backend_credentials
 from app.config import BackendConfig, GatewayConfig
 from app.policy import (
+    MultiValueMap,
     PolicyRequest,
     PolicyRuntime,
     PolicyTraceCollector,
@@ -146,6 +147,29 @@ def test_send_request_body_remains_available_to_outbound_when_traced(traced: boo
             await runtime.http_client.aclose()
 
     asyncio.run(scenario())
+
+
+def test_send_request_header_does_not_change_parent_expression_context() -> None:
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["x-example"])
+        return httpx.Response(200)
+
+    doc = parse_policies_xml(
+        '<policies><inbound><send-request mode="new" response-variable-name="r">'
+        "<set-url>https://example.test</set-url><set-method>GET</set-method>"
+        '<set-header name="x-example" exists-action="override"><value>callout</value></set-header>'
+        '</send-request><set-variable name="after" '
+        "value='@(context.Request.Headers.GetValueOrDefault(&quot;x-example&quot;, &quot;&quot;))' />"
+        "</inbound></policies>"
+    )
+    expression_headers = MultiValueMap({"x-example": "original"})
+    req = _request(headers={"x-example": "original"}, variables={"_request_headers": expression_headers})
+    asyncio.run(apply_inbound_async([doc], req, _runtime(handler)))
+    assert seen == ["callout"]
+    assert req.headers["x-example"] == "original"
+    assert req.variables["after"] == "original"
 
 
 def test_send_request_proxy_is_rejected_instead_of_dropped() -> None:

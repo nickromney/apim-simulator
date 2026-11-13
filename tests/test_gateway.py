@@ -3701,6 +3701,20 @@ def test_management_replay_returns_response_and_trace() -> None:
     assert payload["trace"]["route"] == "r1"
 
 
+def test_management_replay_rejects_invalid_base64() -> None:
+    app = create_app(config=GatewayConfig(tenant_access=TenantAccessConfig(enabled=True, primary_key="t1")))
+
+    with TestClient(app) as client:
+        replay = client.post(
+            "/apim/management/replay",
+            headers={"X-Apim-Tenant-Key": "t1"},
+            json={"method": "POST", "path": "/api/health", "body_base64": "!!!!"},
+        )
+
+    assert replay.status_code == 400
+    assert replay.json()["detail"] == "Invalid base64 replay body"
+
+
 def test_management_replay_uses_https_replay_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     created_base_urls: list[str | None] = []
     real_async_client = httpx.AsyncClient

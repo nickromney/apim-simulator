@@ -4711,6 +4711,9 @@ class SendRequest(PolicyNode):
             body=req.body if copying and not req.in_outbound else b"",
             section=req.section,
         )
+        expression_headers = temp_req.variables.get("_request_headers")
+        if isinstance(expression_headers, MultiValueMap):
+            temp_req.variables["_request_headers"] = expression_headers.copy()
         for header in self.headers:
             header.apply(temp_req, runtime)
         if self.body is not None:

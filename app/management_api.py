@@ -880,7 +880,7 @@ def _build_policy_router(*, require_management_plane: Callable[[], ManagementSer
         content = b""
         if body.body_base64 is not None:
             try:
-                content = base64.b64decode(body.body_base64)
+                content = base64.b64decode(body.body_base64, validate=True)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail="Invalid base64 replay body") from exc
         elif body.body_text is not None:
