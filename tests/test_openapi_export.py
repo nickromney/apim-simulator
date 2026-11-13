@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api_artifacts import export_artifact
 from app.config import ApiConfig, ApiVersionSetConfig, GatewayConfig, OperationConfig, TenantAccessConfig
 from app.openapi_export import build_openapi, build_openapi_export_router
 from app.openapi_import import parse_api_import
@@ -100,6 +101,31 @@ def test_export_import_roundtrip_preserves_request_response_and_array_metadata()
     assert restored.request == original.request
     assert restored.responses == original.responses
     assert roundtrip.schemas["Widget"].components["schemas"]["Widget"] == document["components"]["schemas"]["Widget"]
+
+
+def test_export_uses_template_spelling_for_path_parameter_metadata() -> None:
+    api, _ = _imported_api(
+        {
+            "openapi": "3.0.3",
+            "paths": {
+                "/widgets/{widgetId}": {
+                    "get": {
+                        "parameters": [
+                            {"name": "widgetid", "in": "path", "required": True, "schema": {"type": "integer"}}
+                        ]
+                    }
+                }
+            },
+        }
+    )
+
+    exported = build_openapi(api)
+    parameters = exported["paths"]["/widgets/{widgetId}"]["get"]["parameters"]
+    assert parameters == [{"name": "widgetId", "in": "path", "required": True, "schema": {"type": "integer"}}]
+    restored = parse_api_import(content_format="openapi+json", content_value=json.dumps(exported))
+    assert restored.operations[0].url_template == "/widgets/{widgetId}"
+    artifact = export_artifact(GatewayConfig(apis={"widgets": api}), "widgets")
+    assert artifact["openapi"]["paths"] == exported["paths"]
 
 
 def test_swagger_schema_references_are_converted_to_openapi_components() -> None:

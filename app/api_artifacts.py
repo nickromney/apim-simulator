@@ -42,8 +42,12 @@ def _validate_portable_operations(api: Any) -> None:
                 status_code=400, detail=f"Operation {operation_id} has authorization that artifacts cannot represent"
             )
         path, separator, query = operation.url_template.partition("?")
-        path_names = set(re.findall(r"\{([^{}]+)\}", path))
-        params = {item.name for item in operation.template_parameters if item.required and item.name not in path_names}
+        path_names = {name.casefold() for name in re.findall(r"\{([^{}]+)\}", path)}
+        params = {
+            item.name
+            for item in operation.template_parameters
+            if item.required and item.name.casefold() not in path_names
+        }
         if operation.request is not None:
             params.update(item.name for item in operation.request.query_parameters if item.required)
         expected = (

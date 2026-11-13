@@ -1275,6 +1275,7 @@ def _merge_api_revision(
 
 def _import_api(res: TFResource, acc: _ImportAccumulator) -> None:
     api_name = str(res.values.get("name") or res.name)
+    path = res.values.get("path")
     revision = str(res.values.get("revision") or "1")
     version_set_id = str(res.values.get("version_set_id") or "")
     source_api_id = str(res.values.get("source_api_id")) if res.values.get("source_api_id") else None
@@ -1292,7 +1293,7 @@ def _import_api(res: TFResource, acc: _ImportAccumulator) -> None:
 
     candidate = ApiConfig(
         name=api_name,
-        path=str(res.values.get("path") or api_name),
+        path=str(path) if path is not None else api_name,
         upstream_base_url=str(res.values.get("service_url") or http_url("upstream")),
         protocols=_string_list(res.values.get("protocols")) or ["http", "https"],
         api_version_set=_resource_name_from_id(version_set_id, acc.id_to_name) if version_set_id else None,
