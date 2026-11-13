@@ -316,7 +316,7 @@ html[data-theme="dark"] button { color:var(--portal-button-ink,#111827); }
 <body>
   <header class="masthead"><strong>APIM Simulator - developer portal</strong><nav aria-label="Applications"><a href="/apim/portal" aria-current="page">Developer portal</a><a href="__OPERATOR_URL__">Console</a><label>Appearance <select id="theme-select"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav><small class="project-notice">Unofficial community project. Not affiliated with, endorsed by, or supported by Microsoft; behavior may differ from Azure API Management.</small></header>
   <script src="/apim/portal/assets/theme.js"></script>
-<main>
+<main data-portal-user-header="__PORTAL_USER_HEADER__">
   <h1>Developer Portal</h1>
   <p class="lede">
     Browse published products, request a subscription, and try API calls against the local simulator.
@@ -421,7 +421,8 @@ html[data-theme="dark"] button { color:var(--portal-button-ink,#111827); }
   function headers() {
     const token = document.getElementById("portal-token").value.trim();
     if (token) return { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
-    return { "X-Apim-Portal-User": state.user, "Content-Type": "application/json" };
+    const userHeader = document.querySelector('main').dataset.portalUserHeader;
+    return { [userHeader]: state.user, "Content-Type": "application/json" };
   }
 
   async function fetchJson(path, init) {
@@ -606,9 +607,11 @@ html[data-theme="dark"] button { color:var(--portal-button-ink,#111827); }
     const output = document.getElementById("try-output");
     status.textContent = "Calling " + method + " " + path + " ...";
     try {
+      const url = new URL(path, location.href);
+      if (url.origin !== location.origin) throw new Error("Enter a path on this same gateway.");
       const requestHeaders = {...(operation?.request_headers ?? {})};
       if (key) requestHeaders["Ocp-Apim-Subscription-Key"] = key;
-      const response = await fetch(path, { method, headers: requestHeaders });
+      const response = await fetch(url, { method, headers: requestHeaders, redirect: 'error' });
       const text = await response.text();
       if (generation !== state.identityGeneration) return;
       status.textContent = response.status + " " + response.statusText;
@@ -711,7 +714,7 @@ def _portal_image_url(site: PortalSite, url: str) -> str:
     return f"data:{media.content_type};base64,{media.content_base64}" if media else url
 
 
-def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
+def render_portal_page(site: PortalSite, *, user_header: str, slug: str = "home") -> str:
     """Render only a selected immutable snapshot; all editable text is escaped."""
     page = next((page for page in site.pages if page.slug == slug), None)
     if page is None:
@@ -736,7 +739,7 @@ def render_portal_page(site: PortalSite, *, slug: str = "home") -> str:
         f'<h1>{escape(page.title)}</h1><p class="lede" style="white-space:pre-wrap">{escape(page.content)}</p>'
         + surface_guide
     )
-    html = PORTAL_HTML.replace(
+    html = PORTAL_HTML.replace("__PORTAL_USER_HEADER__", escape(user_header, quote=True)).replace(
         "<title>APIM Simulator Developer Portal</title>",
         f"<title>APIM Simulator - developer portal | {escape(site.site_title)}</title>",
     )
