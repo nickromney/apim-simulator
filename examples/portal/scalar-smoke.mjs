@@ -37,11 +37,20 @@ try {
   await page.locator('#key-select').selectOption('scalar-demo-key');
   const reference = page.frameLocator('#api-reference iframe');
   await reference.getByRole('heading', { name: 'Echo v2', exact: true }).waitFor();
-  await page.locator('#theme-select').selectOption('dark');
-  await expect(reference.locator('.dark-mode').first()).toBeVisible();
+  await expect(reference.locator('body')).toHaveClass(/\blight-mode\b/);
+  await page.emulateMedia({colorScheme:'dark'});
+  await expect(reference.locator('body')).toHaveClass(/\bdark-mode\b/);
   await page.locator('#theme-select').selectOption('light');
-  await expect(reference.locator('.light-mode').first()).toBeVisible();
-  await reference.getByRole('button', { name: /Test Request/ }).first().click();
+  await expect(reference.locator('body')).toHaveClass(/\blight-mode\b/);
+  await page.locator('#theme-select').selectOption('dark');
+  await page.emulateMedia({colorScheme:'light'});
+  await expect(reference.locator('body')).toHaveClass(/\bdark-mode\b/);
+  await page.locator('#theme-select').selectOption('light');
+  await expect(reference.locator('body')).toHaveClass(/\blight-mode\b/);
+  await page.setViewportSize({width:1440, height:903});
+  await reference.getByRole('link', { name: /Echo JSON v2/ }).click();
+  const operation = reference.getByRole('region', { name: 'Echo JSON v2' });
+  await operation.getByRole('button', { name: 'Test Request (post /json)' }).click();
   const waitForCall = () => page.waitForResponse((response) => response.url() === baseURL + '/echo/v2/json'
     && response.request().method() === 'POST');
   const firstResponse = waitForCall();
@@ -51,7 +60,11 @@ try {
   assert.equal(first.request().headers()['x-echo-key'], 'scalar-demo-key');
   assert.equal(first.request().headers().authorization, undefined);
   assert.deepEqual(await first.json(), { message: 'hello v2' });
-  await reference.locator('.cm-content[contenteditable="true"]').first().fill('{"message":"edited locally"}');
+  const requestBody = reference.locator('.cm-content[contenteditable="true"]').first();
+  await requestBody.fill('{"message":"edited locally"}');
+  await page.locator('#theme-select').selectOption('dark');
+  await expect(reference.locator('body')).toHaveClass(/\bdark-mode\b/);
+  await expect(requestBody).toHaveText('{"message":"edited locally"}');
   const editedResponse = waitForCall();
   await reference.getByRole('button', { name: /Send post request/ }).first().click();
   assert.deepEqual(await (await editedResponse).json(), { message: 'edited locally' });
@@ -63,10 +76,11 @@ try {
   await page.locator('#user-select').selectOption('other-dev');
   await expect(page.locator('#key-select option')).toHaveCount(1);
   await reference.getByRole('heading', { name: 'Echo v1', exact: true }).waitFor();
+  await expect(reference.locator('body')).toHaveClass(/\bdark-mode\b/);
   assert.ok(!(await reference.locator('body').innerText()).includes('scalar-demo-key'));
   assert.deepEqual(externalRequests, []);
   assert.deepEqual(errors, []);
-  console.log('PASS: offline Scalar rendering, version selection, custom subscription header, POST example, edited JSON body, no persisted key and identity reset');
+  console.log('PASS: offline Scalar rendering, system and manual appearance, version selection, custom subscription header, POST examples, draft preserved across theme change, no persisted key and identity reset');
 } finally {
   await browser.close();
 }
