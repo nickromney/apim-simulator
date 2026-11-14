@@ -208,6 +208,7 @@ help-dev:
 help-verify:
 	@printf "\nVerification and Smoke:\n"
 	@printf $(HELP_FMT) "export-todo-har" "Capture the todo APIM flow as a HAR file for Proxyman"
+	@printf $(HELP_FMT) "smoke-browser" "Run Scalar and console browser smokes in Docker slot 7"
 	@printf $(HELP_FMT) "smoke-ai" "Run the AI gateway token-limit smoke test"
 	@printf $(HELP_FMT) "smoke-ai-foundry" "Run the AI Foundry integration smoke test (cache, content safety, 429)"
 	@printf $(HELP_FMT) "smoke-aws" "Run the LocalStack AWS API Gateway comparison smoke test"
@@ -756,6 +757,9 @@ security-lab-down:
 
 .PHONY: up-gateway
 
-.PHONY: smoke-authoring
+.PHONY: smoke-authoring smoke-browser
 smoke-authoring:
 	$(MAKE) -C examples/portal smoke-authoring
+
+smoke-browser:
+	$(MAKE) -C examples/portal smoke-browser

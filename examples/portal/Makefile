@@ -13,9 +13,10 @@ STACK_SUFFIX := $(if $(STACK_SLOT),-s$(STACK_SLOT),$(if $(filter-out 0,$(PORT_OF
 export APIM_GATEWAY_PORT
 COMPOSE := docker compose --project-directory "$(REPO_ROOT)" --project-name apim-simulator-scalar$(STACK_SUFFIX) -f "$(REPO_ROOT)/compose.yml" -f "$(REPO_ROOT)/compose.public.yml" -f "$(CURDIR)/compose.scalar.yml"
 
-.PHONY: help up down smoke smoke-authoring compose-config
+.PHONY: help up down smoke smoke-authoring smoke-browser compose-config
 help:
 	@echo "Scalar portal lab: make -C examples/portal up / smoke / down [STACK_SLOT=1]"
+	@echo "Run both browser smokes in Docker slot 7: make smoke-browser"
 up:
 	$(COMPOSE) up --build --wait
 down:
@@ -28,3 +29,6 @@ smoke:
 
 smoke-authoring:
 	APIM_BASE_URL="$(APIM_BASE_URL)" OPERATOR_CONSOLE_BASE_URL="$(OPERATOR_CONSOLE_BASE_URL)" npm run smoke-authoring
+
+smoke-browser:
+	./smoke-browser.sh --execute
