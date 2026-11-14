@@ -1201,7 +1201,7 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
     async def portal_page(request: Request) -> HTMLResponse:
         cfg: GatewayConfig = request.app.state.gateway_config
         _require_portal_enabled(cfg)
-        return HTMLResponse(render_portal_page(cfg.portal_content.published))
+        return HTMLResponse(render_portal_page(cfg.portal_content.published, user_header=cfg.portal.user_header))
 
     @router.get("/apim/portal/users")
     async def portal_list_users(request: Request, response: Response) -> dict[str, Any]:

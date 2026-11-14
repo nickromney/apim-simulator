@@ -103,6 +103,16 @@ def test_portal_page_and_users_are_served_when_enabled() -> None:
         assert {user["id"] for user in users.json()["users"]} == {"dev-1", "dev-2"}
 
 
+def test_portal_pages_expose_the_configured_demo_identity_header() -> None:
+    config = _portal_config(portal=PortalConfig(enabled=True, user_header="X-Local-Developer"))
+    with _client(config) as client:
+        for path in ("/apim/portal", "/apim/portal/pages/home", "/apim/portal/editor/preview"):
+            page = client.get(path, headers={"X-Apim-Tenant-Key": "t1"})
+            assert page.status_code == 200
+            assert 'data-portal-user-header="X-Local-Developer"' in page.text
+        assert client.get("/apim/portal/catalog", headers={"X-Local-Developer": "dev-1"}).status_code == 200
+
+
 def test_basic_fixture_portal_exposes_a_protected_demo_without_gating_anonymous_echo(monkeypatch) -> None:
     """The first-run portal can teach access checks while curl's starter stays anonymous."""
     monkeypatch.delenv("APIM_CONFIG_PATH", raising=False)

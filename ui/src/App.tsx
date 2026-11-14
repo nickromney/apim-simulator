@@ -1,20 +1,16 @@
 import { type FormEvent, startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { ApiVersionsPanel } from "./ApiVersionsPanel";
 import MockResponseEditor from "./MockResponseEditor";
+import {
+  type Example,
+  fillOperationTestPath,
+  operationTestParameters,
+  operationTestPath,
+  type Parameter,
+} from "./operation-test";
 import ProductsPanel from "./ProductsPanel";
 
 type PolicyScope = { scope_type: string; scope_name: string };
-type Example = { name: string; summary?: string | null; description?: string | null; value?: unknown };
-type Parameter = {
-  name: string;
-  required: boolean;
-  type: string;
-  description?: string | null;
-  default_value?: string | null;
-  values?: string[];
-  examples?: Example[];
-  schema_id?: string | null;
-};
 type Representation = { content_type: string; schema_id?: string | null; examples?: Example[] };
 type OperationRequest = {
   description?: string | null;
@@ -275,14 +271,6 @@ function initialTestBody(operation: OperationSummary, api: ApiSummary): string {
   return "";
 }
 
-function apiPathFor(api: ApiSummary, operation: OperationSummary): string {
-  const pathTemplate = operation.url_template.split("?", 1)[0] ?? operation.url_template;
-  return `/${[api.path, pathTemplate]
-    .filter(Boolean)
-    .map((part) => part.replace(/^\/+|\/+$/g, ""))
-    .join("/")}`;
-}
-
 function apiRevisionPath(apiPath: string, revisionId: string, operationPath: string): string {
   const prefix = `/${apiPath.replace(/^\/+|\/+$/g, "")};rev=${encodeURIComponent(revisionId)}`;
   const suffix = operationPath.split("?", 1)[0]?.replace(/^\/+|\/+$/g, "") ?? "";
@@ -390,7 +378,6 @@ function App() {
   const [importValue, setImportValue] = useState("");
   const [importUpstream, setImportUpstream] = useState("");
   const [importDirty, setImportDirty] = useState(false);
-  const [testPath, setTestPath] = useState("");
   const [testPathParams, setTestPathParams] = useState<Record<string, string>>({});
   const [testQuery, setTestQuery] = useState<Record<string, string>>({});
   const [testHeaders, setTestHeaders] = useState<Record<string, string>>({ "x-apim-trace": "true" });
@@ -413,6 +400,12 @@ function App() {
   const scopes = useMemo(() => flattenPolicyScopes(summary, !scopedApiId.trim()), [summary, scopedApiId]);
   const selectedApi = summary?.apis.find((api) => api.id === selectedApiId) ?? null;
   const selectedOperation = selectedApi?.operations.find((operation) => operation.id === selectedOperationId) ?? null;
+  const testPath =
+    selectedApi && selectedOperation ? operationTestPath(selectedApi.path, selectedOperation.url_template) : "";
+  const testParameters = useMemo(
+    () => (selectedOperation ? operationTestParameters(selectedOperation) : null),
+    [selectedOperation],
+  );
   const revisionOperationMap =
     (revisionDefinition.operations as Record<string, Record<string, unknown>> | undefined) ?? {};
   const selectedRevisionOperation = revisionOperationMap[revisionOperationId] ?? null;
@@ -462,34 +455,25 @@ function App() {
   }, [hasUnsaved]);
 
   useEffect(() => {
-    if (!selectedApi || !selectedOperation) return;
-    const pathParameters = (selectedOperation.template_parameters ?? []).filter((parameter) =>
-      selectedOperation.url_template.split("?", 1)[0]?.includes(`{${parameter.name}}`),
-    );
-    const queryParameters = selectedOperation.request?.query_parameters ?? [];
+    if (!selectedApi || !selectedOperation || !testParameters) return;
     const nextPathParams = Object.fromEntries(
-      pathParameters.map((parameter) => [parameter.name, parameterValue(parameter)]),
+      testParameters.path.map((parameter) => [parameter.name, parameterValue(parameter)]),
     );
     const nextQuery = Object.fromEntries(
-      queryParameters.map((parameter) => [parameter.name, parameterValue(parameter)]),
+      testParameters.query.map((parameter) => [parameter.name, parameterValue(parameter)]),
     );
-    for (const parameter of selectedOperation.template_parameters ?? []) {
-      if (!pathParameters.some((item) => item.name === parameter.name))
-        nextQuery[parameter.name] ??= parameterValue(parameter);
-    }
     const nextHeaders = Object.fromEntries([
       ["x-apim-trace", "true"],
       ...(selectedOperation.request?.headers ?? []).map(
         (parameter) => [parameter.name, parameterValue(parameter)] as const,
       ),
     ]);
-    setTestPath(apiPathFor(selectedApi, selectedOperation));
     setTestPathParams(nextPathParams);
     setTestQuery(nextQuery);
     setTestHeaders(nextHeaders);
     setTestBody(initialTestBody(selectedOperation, selectedApi));
     setTestSubscriptionKey("");
-  }, [selectedApi, selectedOperation]);
+  }, [selectedApi, selectedOperation, testParameters]);
 
   async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     const headers = new Headers(init?.headers);
@@ -1465,12 +1449,10 @@ function App() {
 
   async function runApiTest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedApi || !selectedOperation) return;
-    let path = testPath.replace(/\{([^{}]+)\}/g, (_, name: string) =>
-      encodeURIComponent(testPathParams[name] ?? "value"),
-    );
+    if (!selectedApi || !selectedOperation || !testParameters) return;
+    let path = fillOperationTestPath(testPath, testPathParams);
     const headers = { ...testHeaders };
-    const query = { ...testQuery };
+    const query = { ...testQuery, ...testParameters.literalQuery };
     if (testSubscriptionKey) {
       const headerNames = selectedOperation.subscription_header_names?.length
         ? selectedOperation.subscription_header_names
@@ -1555,21 +1537,6 @@ function App() {
     { key: "backend", label: "Backend" },
     { key: "outbound", label: "Outbound processing" },
   ];
-  const pathParamNames = selectedOperation
-    ? (selectedOperation.template_parameters ?? []).filter((item) =>
-        selectedOperation.url_template.split("?", 1)[0]?.includes(`{${item.name}}`),
-      )
-    : [];
-  const queryParamNames = selectedOperation
-    ? Array.from(
-        new Map([
-          ...(selectedOperation.request?.query_parameters ?? []).map((item) => [item.name, item] as const),
-          ...(selectedOperation.template_parameters ?? [])
-            .filter((item) => !pathParamNames.some((pathItem) => pathItem.name === item.name))
-            .map((item) => [item.name, item] as const),
-        ]).values(),
-      )
-    : [];
 
   return (
     <div className="console-shell">
@@ -2935,9 +2902,9 @@ function App() {
                   </div>
                   <div className="test-target">
                     <span className="method-pill">{selectedOperation.method}</span>
-                    <code>{testPath || apiPathFor(selectedApi, selectedOperation)}</code>
+                    <code>{testPath}</code>
                   </div>
-                  {pathParamNames.map((parameter) => (
+                  {testParameters?.path.map((parameter) => (
                     <label key={`path-${parameter.name}`}>
                       <span className="field-label">
                         Path · {parameter.name}
@@ -2951,7 +2918,7 @@ function App() {
                       />
                     </label>
                   ))}
-                  {queryParamNames.map((parameter) => (
+                  {testParameters?.query.map((parameter) => (
                     <label key={`query-${parameter.name}`}>
                       <span className="field-label">
                         Query · {parameter.name}

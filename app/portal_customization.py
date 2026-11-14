@@ -164,7 +164,10 @@ def build_portal_customization_router(*, require_management_plane: Callable[[], 
 
     @router.get("/apim/portal/pages/{slug}", response_class=HTMLResponse)
     async def page(request: Request, slug: str) -> HTMLResponse:
-        return HTMLResponse(render_portal_page(config(request).portal_content.published, slug=slug))
+        cfg = config(request)
+        return HTMLResponse(
+            render_portal_page(cfg.portal_content.published, user_header=cfg.portal.user_header, slug=slug)
+        )
 
     @router.get("/apim/portal/media/{media_id}")
     async def public_media(request: Request, media_id: str) -> Response:
@@ -216,8 +219,11 @@ def build_portal_customization_router(*, require_management_plane: Callable[[], 
 
     @router.get("/apim/portal/editor/preview", response_class=HTMLResponse)
     async def preview(request: Request, slug: str = "home") -> HTMLResponse:
-        site = config(request, operator=True).portal_content.draft
-        return HTMLResponse(render_portal_page(site, slug=slug), headers={"Cache-Control": "no-store"})
+        cfg = config(request, operator=True)
+        return HTMLResponse(
+            render_portal_page(cfg.portal_content.draft, user_header=cfg.portal.user_header, slug=slug),
+            headers={"Cache-Control": "no-store"},
+        )
 
     return router
 
