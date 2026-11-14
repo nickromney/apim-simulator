@@ -158,6 +158,41 @@ jobs:
       - name: Run frontend checks
         run: make frontend-check
 
+  browser-smokes:
+    name: Docker Browser Smokes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHON_BUILD_IMAGE: python:3.13-slim
+      PYTHON_RUNTIME_IMAGE: python:3.13-slim
+      NGINX_RUNTIME_IMAGE: nginx:1.27-alpine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: examples/portal/package-lock.json
+
+      - name: Check resolved Node security floor
+        run: node ui/scripts/check-node-security-floor.mjs
+
+      - name: Run browser smokes
+        run: make smoke-browser
+
+      - name: Upload browser smoke logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: browser-smoke-logs
+          path: .run/verify/browser-s7.*/
+          include-hidden-files: true
+          if-no-files-found: warn
+
   compose-config:
     name: Compose Config Render
     runs-on: ubuntu-latest
