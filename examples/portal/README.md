@@ -1,5 +1,20 @@
 # Portal comparison fixture
 
+## Run both browser smokes
+
+Start Docker and install Node.js, npm, and Google Chrome. Make sure local ports
+8700 and 3707 are free. From the repository root, run:
+
+```sh
+make smoke-browser
+```
+
+The target builds a slot-7 stack, runs the operator console authoring smoke,
+then loads the Scalar fixture and runs the developer portal smoke. It prints a
+new `.run/verify/browser-s7.*` directory with the smoke output, Compose logs,
+and cleanup output. The target removes its stack even when a smoke fails and
+returns a nonzero status if either smoke fails.
+
 ## Scalar browser lab
 
 Run the versioned JSON echo fixture with:
