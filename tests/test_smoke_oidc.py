@@ -29,3 +29,13 @@ def test_retry_call_raises_last_error_when_attempts_are_exhausted() -> None:
         retry_call(operation, attempts=2, delay_seconds=0)
 
     assert attempts["count"] == 2
+
+
+def test_retry_after_seconds_reads_the_header() -> None:
+    import httpx
+
+    from scripts.smoke_oidc import retry_after_seconds
+
+    assert retry_after_seconds(httpx.Response(429, headers={"retry-after": "37"})) == 37.0
+    assert retry_after_seconds(httpx.Response(429)) == 1.0
+    assert retry_after_seconds(httpx.Response(429, headers={"retry-after": "soon"})) == 1.0

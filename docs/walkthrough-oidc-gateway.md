@@ -155,6 +155,7 @@ rm -f "$smoke_log"
     "uv run --project . python scripts/smoke_oidc.py",
     "OIDC smoke passed",
     "- user route: 200",
+    "- admin route with demo key: 401",
     "- admin route with user token: 403",
     "- admin route with admin token: 200"
   ]
