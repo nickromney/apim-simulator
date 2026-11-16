@@ -15,6 +15,7 @@ CLIENT_ID = "frontend-app"
 GATEWAY_BASE_URL = os.getenv("SMOKE_OIDC_BASE_URL", os.getenv("APIM_BASE_URL", "http://127.0.0.1:8000"))
 DEFAULT_ATTEMPTS = int(os.getenv("SMOKE_OIDC_ATTEMPTS", "20"))
 DEFAULT_DELAY_SECONDS = float(os.getenv("SMOKE_OIDC_RETRY_DELAY_SECONDS", "1"))
+MAX_RATE_LIMIT_WAIT_SECONDS = 61.0
 
 
 def retry_call[T](
@@ -58,7 +59,20 @@ def gateway_get(path: str, *, token: str, subscription_key: str) -> httpx.Respon
         "Ocp-Apim-Subscription-Key": subscription_key,
     }
     with httpx.Client(timeout=20.0) as client:
-        return client.get(f"{GATEWAY_BASE_URL}{path}", headers=headers)
+        response = client.get(f"{GATEWAY_BASE_URL}{path}", headers=headers)
+        # The admin API allows 2 calls a minute, and the smoke spends both, so a
+        # rerun inside that minute waits out the window instead of failing.
+        if response.status_code == 429:
+            time.sleep(min(retry_after_seconds(response), MAX_RATE_LIMIT_WAIT_SECONDS))
+            response = client.get(f"{GATEWAY_BASE_URL}{path}", headers=headers)
+        return response
+
+
+def retry_after_seconds(response: httpx.Response) -> float:
+    try:
+        return max(float(response.headers.get("retry-after", "1")), 0.0)
+    except ValueError:
+        return 1.0
 
 
 def require(condition: bool, message: str) -> None:
@@ -84,12 +98,27 @@ def main() -> int:
         user_payload = user_resp.json()
         require(user_payload["path"] == "/api/echo", f"unexpected proxied path: {json.dumps(user_payload)}")
 
-        denied_resp = retry_call(
+        # The subscription scope is checked before route roles, so each refusal
+        # needs its own call: a key outside the admin product is a 401, and a
+        # key inside it with a token lacking the admin role is a 403.
+        wrong_key_resp = retry_call(
             lambda: gateway_get("/admin/api/echo", token=user_token, subscription_key="oidc-demo-key")
+        )
+        require(
+            wrong_key_resp.status_code == 401,
+            f"/admin/api/echo with the demo key expected 401, got {wrong_key_resp.status_code}: {wrong_key_resp.text}",
+        )
+
+        denied_resp = retry_call(
+            lambda: gateway_get("/admin/api/echo", token=user_token, subscription_key="oidc-admin-key")
         )
         require(
             denied_resp.status_code == 403,
             f"/admin/api/echo for demo user expected 403, got {denied_resp.status_code}: {denied_resp.text}",
+        )
+        require(
+            denied_resp.json().get("message") == "Missing required role",
+            f"/admin/api/echo for demo user refused for the wrong reason: {denied_resp.text}",
         )
 
         admin_resp = retry_call(
@@ -102,6 +131,7 @@ def main() -> int:
 
         print("OIDC smoke passed")
         print("- user route: 200")
+        print("- admin route with demo key: 401")
         print("- admin route with user token: 403")
         print("- admin route with admin token: 200")
         return 0
