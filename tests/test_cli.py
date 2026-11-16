@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -906,6 +907,12 @@ def test_service_artifact_commands(tmp_path: Path, capsys: pytest.CaptureFixture
 def test_service_git_inputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # Git hooks export GIT_DIR (and from a linked worktree, more), which would
+    # point both this helper and the CLI's own git calls at the real repository
+    # instead of tmp_path. Clear them so the scratch repo is the only target.
+    for name in [name for name in os.environ if name.startswith("GIT_")]:
+        monkeypatch.delenv(name)
+
     def git(*args: str) -> str:
         return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
 
