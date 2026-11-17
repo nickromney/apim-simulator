@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import httpx
 from fastapi.testclient import TestClient
 
@@ -13,6 +15,8 @@ DEBUG = "/apim/management/gateways/managed/listDebugCredentials"
 def test_debug_credentials_are_scoped_expiring_and_do_not_change_bodies(monkeypatch) -> None:
     import app.debug_credentials as debug
 
+    now = 1_700_000_000.0
+    monkeypatch.setattr(debug, "time", SimpleNamespace(time=lambda: now))
     received = []
 
     async def upstream(request):
@@ -56,8 +60,7 @@ def test_debug_credentials_are_scoped_expiring_and_do_not_change_bodies(monkeypa
         assert wrong.status_code == 200
         assert "Apim-Debug-Authorization-WrongAPI" in wrong.headers
         assert "Apim-Trace-Id" not in wrong.headers
-        future = debug.time.time() + 2
-        monkeypatch.setattr(debug.time, "time", lambda: future)
+        now += 1
         expired = client.post("/first/echo", content=payload, headers={"Apim-Debug-Authorization": token})
         assert expired.content == payload
         assert "Apim-Debug-Authorization-Expired" in expired.headers

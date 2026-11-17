@@ -26,6 +26,8 @@ VERIFY_TLS = resolve_tls_verify(
     insecure_env="SMOKE_EDGE_INSECURE_SKIP_VERIFY",
 )
 EXPECTED_PROTO = os.getenv("SMOKE_EDGE_EXPECT_PROTO", "https" if BASE_URL.startswith("https://") else "http")
+MOCK_BACKEND_HOST = "mock-backend:8080"
+SPOOFED_CLIENT_IP = "203.0.113.99"
 DEFAULT_EXPECTED_HOST = urlparse(BASE_URL).netloc
 EXPECTED_HOST = os.getenv(
     "SMOKE_EDGE_EXPECT_HOST",
@@ -73,12 +75,15 @@ async def main_async() -> None:
             headers={
                 "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY,
                 "x-apim-trace": "true",
+                "x-forwarded-host": "spoofed.invalid",
+                "x-forwarded-proto": "spoofed",
+                "x-forwarded-for": SPOOFED_CLIENT_IP,
             },
         )
         payload = debug.json()
         echoed_headers = {key.lower(): value for key, value in payload["headers"].items()}
 
-        require(echoed_headers.get("host") == EXPECTED_HOST, f"unexpected upstream host: {echoed_headers}")
+        require(echoed_headers.get("host") == MOCK_BACKEND_HOST, f"unexpected upstream host: {echoed_headers}")
         require(
             echoed_headers.get("x-forwarded-host") == EXPECTED_HOST,
             f"unexpected forwarded host: {echoed_headers}",
@@ -88,6 +93,7 @@ async def main_async() -> None:
             f"unexpected forwarded proto: {echoed_headers}",
         )
         require(bool(echoed_headers.get("x-forwarded-for")), f"forwarded-for missing: {echoed_headers}")
+        require(SPOOFED_CLIENT_IP not in echoed_headers["x-forwarded-for"], "edge forwarded a spoofed client IP")
 
         trace_id = debug.headers.get("x-apim-trace-id")
         require(bool(trace_id), "trace id missing from edge debug response")
