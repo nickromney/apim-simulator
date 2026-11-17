@@ -196,14 +196,19 @@ PY
 }
 
 verify_petstore() {
-  local metadata pending tags
+  local metadata_file pending tags
   echo "Verifying unchanged Microsoft tutorial Petstore import"
-  metadata="$(curl -fsS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" "$APIM_BASE/apim/management/apis/petstore")"
-  METADATA_JSON="$metadata" repo_python - <<'PY'
+  # The Petstore metadata is about 145 KB, over Linux's 128 KB limit on a single
+  # environment string, so it goes through a file rather than the environment.
+  metadata_file="$(mktemp)"
+  trap 'rm -f "$metadata_file"; trap - RETURN' RETURN
+  curl -fsS -H "X-Apim-Tenant-Key: $APIM_TENANT_KEY" "$APIM_BASE/apim/management/apis/petstore" -o "$metadata_file"
+  METADATA_FILE="$metadata_file" repo_python - <<'PY'
 import json
 import os
+from pathlib import Path
 
-data = json.loads(os.environ["METADATA_JSON"])
+data = json.loads(Path(os.environ["METADATA_FILE"]).read_text(encoding="utf-8"))
 summary = {"id": data["id"], "operation_count": len(data["operations"]), "path": data["path"],
            "upstream_base_url": data["upstream_base_url"],
            "find_by_status_template": next(op["url_template"] for op in data["operations"]
