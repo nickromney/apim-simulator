@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from ipaddress import ip_network
 from pathlib import Path
 from string import Template
 
@@ -25,6 +27,16 @@ def _prepare_runtime_config() -> None:
     rendered = source_path.read_text(encoding="utf-8")
     if os.getenv("APIM_CONFIG_TEMPLATE_SUBSTITUTE", "").strip().lower() in {"1", "true", "yes", "on"}:
         rendered = Template(rendered).safe_substitute(os.environ)
+
+    proxy_cidr = os.getenv("APIM_CONFIG_TRUSTED_PROXY_CIDR", "").strip()
+    if proxy_cidr:
+        config = json.loads(rendered)
+        network = config.setdefault("network_security", {})
+        proxies = network.setdefault("trusted_proxy_cidrs", [])
+        cidr = str(ip_network(proxy_cidr, strict=False))
+        if cidr not in proxies:
+            proxies.append(cidr)
+        rendered = json.dumps(config)
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(rendered, encoding="utf-8")

@@ -11,6 +11,7 @@ from smoke_mcp import run as run_mcp
 
 DEFAULT_PRIVATE_BASE_URL = "http://apim-simulator:8000"
 DEFAULT_PRIVATE_HOST = "apim-simulator:8000"
+MOCK_BACKEND_HOST = "mock-backend:8080"
 BASE_URL = os.getenv("SMOKE_PRIVATE_BASE_URL", DEFAULT_PRIVATE_BASE_URL).rstrip("/")
 SUBSCRIPTION_KEY = os.getenv("SMOKE_MCP_SUBSCRIPTION_KEY", "mcp-demo-key")
 
@@ -33,7 +34,7 @@ async def main_async() -> None:
         payload = debug.json()
         echoed_headers = {key.lower(): value for key, value in payload["headers"].items()}
 
-        require(echoed_headers.get("host") == DEFAULT_PRIVATE_HOST, f"unexpected upstream host: {echoed_headers}")
+        require(echoed_headers.get("host") == MOCK_BACKEND_HOST, f"unexpected upstream host: {echoed_headers}")
 
         trace_id = debug.headers.get("x-apim-trace-id")
         require(bool(trace_id), "trace id missing from private debug response")
