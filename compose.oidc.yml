@@ -37,6 +37,7 @@ services:
       timeout: 5s
       retries: 30
       start_period: 240s
+      start_interval: 2s
     networks:
       - apim
 

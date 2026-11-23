@@ -1,18 +1,24 @@
-.git
-.gitignore
-.venv
-**/.venv
-.pytest_cache
-.ruff_cache
+# Allowlist. The repository-root build context holds only what the Python
+# images COPY: the lockfile, the gateway package and the example tenant
+# documents and backends. Docs, tests, coverage and mutation output stay on the
+# host, so they cannot leak into an image or slow the context transfer.
+**
+!pyproject.toml
+!uv.lock
+!app/
+!examples/
+
+# Never send these, even from allowlisted directories.
 **/__pycache__
 **/*.pyc
 **/node_modules
 **/dist
+**/.astro
 **/playwright-report
 **/test-results
+**/.run
 examples/edge/certs
 examples/apim-security/.runtime
-**/.run
+examples/azure-validation/.runtime
 **/.env
 **/.env.*
-!**/.env.example

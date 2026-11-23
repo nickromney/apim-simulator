@@ -164,9 +164,12 @@ def test_uv_managed_python_dockerfiles_use_cache_mounts() -> None:
     ):
         contents = (REPO_ROOT / relative_path).read_text()
         assert "# syntax=docker/dockerfile:1.7" in contents
-        assert "RUN --mount=type=cache,target=/root/.cache/uv" in contents
-        assert "uv sync --frozen" in contents
+        assert "--mount=type=cache,target=/root/.cache/uv" in contents
+        assert "uv sync --locked" in contents
         assert "--no-cache" not in contents
+        # uv is bind-mounted from a digest-pinned image, never copied into a layer.
+        assert re.search(r"^FROM ghcr\.io/astral-sh/uv:[0-9.]+@sha256:[0-9a-f]{64} AS uv$", contents, re.M)
+        assert "--mount=from=uv,source=/uv,target=/usr/local/bin/uv" in contents
 
 
 def test_runtime_defaults_use_dhi_images() -> None:
@@ -347,7 +350,7 @@ def test_todo_astro_builder_enforces_stable_node_floor() -> None:
     )
     gate = 'RUN ["node", "scripts/check-node-security-floor.mjs"]'
     assert gate in contents
-    assert contents.index(gate) < contents.index("RUN npm ci")
+    assert contents.index(gate) < contents.index("RUN --mount=type=cache,target=/root/.npm npm ci")
     assert contents.index("FROM ${NGINX_RUNTIME_IMAGE}") > contents.index("RUN npm run build")
     _assert_node_security_floor_policy(NODE_SECURITY_FLOOR_CHECKERS[0])
 
@@ -499,27 +502,61 @@ def _dockerfile() -> str:
     return (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
 
+PYTHON_DOCKERFILES = (
+    "Dockerfile",
+    "examples/architecture-patterns-extra/Dockerfile",
+    "examples/bff/Dockerfile",
+    "examples/hello-api/Dockerfile",
+    "examples/llm-backend/Dockerfile",
+    "examples/mcp-server/Dockerfile",
+    "examples/mock-backend/Dockerfile",
+    "examples/todo-app/api-fastapi-container-app/Dockerfile",
+    "examples/apim-policies/broker.Dockerfile",
+)
+
+
+def _stage(dockerfile: str, name: str) -> str:
+    """Return the instructions of one named build stage."""
+    match = re.search(rf"^FROM \S+ AS {name}$(.*?)(?=^FROM |\Z)", dockerfile, re.M | re.S)
+    assert match, f"stage {name!r} not found"
+    return match.group(1)
+
+
+def _instructions(stage: str) -> str:
+    return "\n".join(line for line in stage.splitlines() if line.strip() and not line.lstrip().startswith("#"))
+
+
 def test_dependency_bytecode_is_compiled_into_the_image() -> None:
     """Containers run read-only, so a .pyc not baked in can never be cached.
 
-    Without --compile-bytecode the interpreter recompiles the whole dependency
+    Without precompiled bytecode the interpreter recompiles the whole dependency
     tree in memory on every start, and nothing about that failure is visible
-    except a slower boot.
+    except a slower boot. Hash-based invalidation keeps the layer reproducible;
+    uv's --compile-bytecode embeds build timestamps.
     """
-    assert "--compile-bytecode" in _dockerfile()
+    deps = _stage(_dockerfile(), "deps")
+    assert "compileall -q --invalidation-mode unchecked-hash /app/.venv/lib" in deps
+    assert "--compile-bytecode" not in _instructions(_dockerfile())
+
+
+def test_bytecode_compilation_is_serial_so_layers_are_reproducible() -> None:
+    """compileall -j 0 gives each worker different interpreter state, and marshal output varies with it."""
+    for relative_path in PYTHON_DOCKERFILES:
+        assert " -j " not in _instructions((REPO_ROOT / relative_path).read_text()), relative_path
 
 
 def test_application_bytecode_is_compiled_into_the_image() -> None:
-    compile_line = next((line for line in _dockerfile().splitlines() if "compileall" in line), "")
-    assert "compileall" in compile_line and "/app/app" in compile_line, (
+    app = _stage(_dockerfile(), "app")
+    assert "COPY app ./app" in app
+    assert "compileall -q --invalidation-mode checked-hash app" in app, (
         "app/ bytecode is not precompiled; it cannot be cached on a read-only rootfs"
     )
+    assert "COPY --link --from=app /app/app /app/app" in _dockerfile()
 
 
 def test_application_bytecode_compilation_is_not_best_effort() -> None:
     """An app/ that will not compile is a broken image, not a warning."""
-    compile_line = next(line for line in _dockerfile().splitlines() if "compileall" in line)
-    assert "|| true" not in compile_line
+    assert "|| true" not in _dockerfile()
 
 
 def test_image_declares_a_healthcheck_against_the_startup_probe() -> None:
@@ -527,22 +564,54 @@ def test_image_declares_a_healthcheck_against_the_startup_probe() -> None:
     dockerfile = _dockerfile()
     assert "HEALTHCHECK" in dockerfile
     assert "/apim/startup" in dockerfile
+    # Probe every second while starting, so dependants do not wait a full interval.
+    assert "--start-interval=1s" in dockerfile
 
 
 def test_runtime_image_still_carries_the_example_tenant_documents() -> None:
     """compose points APIM_CONFIG_SOURCE_PATH at /app/examples: runtime input, not samples."""
-    assert re.search(r"^COPY .*examples \./examples$", _dockerfile(), re.M)
+    assert re.search(r"^COPY --link examples /app/examples$", _dockerfile(), re.M)
 
 
-def test_the_bytecode_compile_step_uses_exec_form() -> None:
-    """The hardened runtime image ships no /bin/sh.
+def test_runtime_stage_runs_nothing() -> None:
+    """The hardened runtime image ships no /bin/sh, and nothing needs to run there.
 
-    A shell-form `RUN` in that stage fails the build with
-    `stat /bin/sh: no such file or directory`, which is how this was found.
-    Exec form runs the binary directly and needs no shell.
+    All compilation happens in build stages; the runtime stage only copies
+    layers in. A RUN here would need a shell or an exec-form workaround.
     """
-    compile_line = next(line for line in _dockerfile().splitlines() if "compileall" in line)
-    assert compile_line.strip().startswith("RUN ["), "compileall must use exec-form RUN; the runtime image has no shell"
+    runtime = _instructions(_stage(_dockerfile(), "runtime"))
+    assert not re.search(r"^RUN ", runtime, re.M)
+
+
+def test_runtime_files_are_root_owned() -> None:
+    """The service user can read its code and config but cannot rewrite them."""
+    for relative_path in (*PYTHON_DOCKERFILES, "ui/Dockerfile", "examples/todo-app/frontend-astro/Dockerfile"):
+        assert "--chown" not in (REPO_ROOT / relative_path).read_text(), relative_path
+
+
+def test_python_images_share_one_dependency_stage() -> None:
+    """Identical uv and deps stages let BuildKit resolve and store the venv once for every image."""
+    gateway = _dockerfile()
+    expected = (_instructions(_stage(gateway, "uv")), _instructions(_stage(gateway, "deps")))
+    for relative_path in (
+        "examples/architecture-patterns-extra/Dockerfile",
+        "examples/bff/Dockerfile",
+        "examples/hello-api/Dockerfile",
+        "examples/llm-backend/Dockerfile",
+        "examples/todo-app/api-fastapi-container-app/Dockerfile",
+    ):
+        contents = (REPO_ROOT / relative_path).read_text()
+        actual = (_instructions(_stage(contents, "uv")), _instructions(_stage(contents, "deps")))
+        assert actual == expected, f"{relative_path} has drifted from the gateway's dependency stages"
+
+
+def test_root_build_context_is_an_allowlist() -> None:
+    """Docs, tests, coverage and mutmut output never reach the daemon."""
+    patterns = [
+        line for line in (REPO_ROOT / ".dockerignore").read_text().splitlines() if line and not line.startswith("#")
+    ]
+    assert patterns[0] == "**"
+    assert {"!pyproject.toml", "!uv.lock", "!app/", "!examples/"} <= set(patterns)
 
 
 def test_security_lab_private_material_is_excluded_from_gateway_image_context() -> None:

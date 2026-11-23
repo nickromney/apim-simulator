@@ -11,7 +11,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY --chown=${APP_UID}:${APP_GID} server.py .
+# Root-owned, so the service user can read but not modify it.
+COPY server.py .
 
 EXPOSE 8080
 

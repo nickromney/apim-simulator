@@ -31,7 +31,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 15
-      start_period: 5s
+      start_period: 30s
+      start_interval: 1s
     networks: [private]
 
   order-backend:
@@ -52,7 +53,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 15
-      start_period: 5s
+      start_period: 30s
+      start_interval: 1s
     networks: [private]
 
   apim-simulator:
