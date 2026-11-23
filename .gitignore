@@ -36,3 +36,6 @@ examples/apim-security/.runtime/
 /backstage/
 
 examples/azure-validation/.runtime/
+
+# TypeScript incremental-build caches, rewritten by every UI build.
+*.tsbuildinfo
