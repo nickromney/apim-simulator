@@ -13,6 +13,7 @@ from xml.etree import ElementTree as XmlTree
 from defusedxml import ElementTree
 
 from app.config import DEFAULT_GLOBAL_POLICY_XML, GatewayConfig, ProductConfig, RouteConfig
+from app.workspaces import route_workspace
 
 EMPTY_POLICY_XML = "<policies><inbound /><backend /><outbound /><on-error /></policies>"
 POLICY_SECTION_NAMES = ("inbound", "backend", "outbound", "on-error")
@@ -153,7 +154,7 @@ def stacked_policy_scopes(
     effective_product: ProductConfig | None,
     effective_product_id: str = "",
 ) -> list[tuple[str, str]]:
-    """The global -> product -> API -> operation documents, each with its scope label."""
+    """The global -> workspace -> product -> API -> operation documents, each with its scope label."""
     global_documents = [xml for xml in cfg.policies_xml_documents if xml]
     if cfg.policies_xml:
         global_documents.append(cfg.policies_xml)
@@ -164,6 +165,12 @@ def stacked_policy_scopes(
         # no global policy document therefore inherits this backend policy.
         else [("global", DEFAULT_GLOBAL_POLICY_XML)]
     )
+    workspace_id = route_workspace(cfg, route)
+    workspace = cfg.workspaces.get(workspace_id) if workspace_id else None
+    if workspace is not None and workspace.policies_xml:
+        # Workspace APIs run global -> workspace -> product -> API -> operation.
+        # https://learn.microsoft.com/en-us/azure/api-management/workspaces-overview
+        scoped.append((f"workspace:{workspace_id}", workspace.policies_xml))
     if effective_product is not None and effective_product.policies_xml:
         scoped.append((f"product:{effective_product_id}", effective_product.policies_xml))
     scoped.extend(_route_policy_scopes(cfg, route))

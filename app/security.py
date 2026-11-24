@@ -508,9 +508,11 @@ def require_tenant_access(
     if cfg.control_plane.enabled and (
         request.headers.get("authorization") or not cfg.control_plane.allow_legacy_tenant_keys
     ):
+        from app.workspaces import control_plane_with_owned_apis
+
         return authorize_operator(
             request,
-            cfg.control_plane,
+            control_plane_with_owned_apis(cfg),
             permission=permission,
             api_id=api_id,
             api_collection=api_collection,

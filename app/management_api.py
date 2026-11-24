@@ -91,8 +91,11 @@ from app.resource_projection import (
     project_summary,
     project_tag,
     project_user,
+    project_workspace,
+    project_workspace_gateway,
 )
 from app.security import require_tenant_access
+from app.workspaces import control_plane_with_owned_apis
 
 logger = logging.getLogger("apim-simulator")
 
@@ -120,6 +123,7 @@ class SubscriptionUpsert(BaseModel):
     service_scoped: bool = False
     primary_key: str | None = None
     secondary_key: str | None = None
+    workspace: str | None = None
 
 
 class SubscriptionUpdate(BaseModel):
@@ -149,6 +153,7 @@ class ApiUpsert(BaseModel):
     subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None
     translate_required_query_parameters: Literal["template", "query"] = "template"
+    workspace: str | None = None
 
 
 class OperationUpsert(BaseModel):
@@ -188,6 +193,7 @@ class ApiImportRequest(BaseModel):
     subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None
     translate_required_query_parameters: Literal["template", "query"] = "template"
+    workspace: str | None = None
 
 
 class ApiVersionSetUpsert(BaseModel):
@@ -221,6 +227,7 @@ class ProductUpsert(BaseModel):
     approval_required: bool = False
     subscriptions_limit: int | None = Field(default=None, ge=1)
     terms: str | None = None
+    workspace: str | None = None
 
 
 class PortalSubscriptionRequest(BaseModel):
@@ -265,6 +272,7 @@ class BackendUpsert(BaseModel):
     header_credentials: dict[str, str] = Field(default_factory=dict)
     query_credentials: dict[str, str] = Field(default_factory=dict)
     client_certificate_thumbprints: list[str] = Field(default_factory=list)
+    workspace: str | None = None
 
 
 class NamedValueUpsert(BaseModel):
@@ -272,6 +280,24 @@ class NamedValueUpsert(BaseModel):
     value: str | None = None
     secret: bool = False
     value_from_key_vault: KeyVaultNamedValueConfig | None = None
+    workspace: str | None = None
+
+
+class WorkspaceUpsert(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = None
+    description: str | None = None
+    gateways: list[str] | None = None
+    policy_fragments: list[str] | None = None
+
+
+class WorkspaceGatewayUpsert(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = None
+    description: str | None = None
+    host_names: list[str] = Field(default_factory=list)
 
 
 class PolicyUpdate(BaseModel):
@@ -498,7 +524,7 @@ def _build_apis_router(*, require_management_plane: Callable[[], ManagementServi
         return [
             _masked(cfg, project_api(cfg, api_id, api))
             for api_id, api in cfg.apis.items()
-            if api_visible_in_collection(grants, api_id, cfg.control_plane)
+            if api_visible_in_collection(grants, api_id, control_plane_with_owned_apis(cfg))
         ]
 
     @router.get("/apim/management/apis/{api_id}")
@@ -1436,6 +1462,93 @@ def _build_versioning_router(*, require_management_plane: Callable[[], Managemen
     return router
 
 
+def _build_workspaces_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
+    """Routes for workspaces and the workspace gateways that serve them.
+
+    Creating, changing and deleting workspaces and gateways is a platform-team
+    action, so a grant scoped to one workspace cannot do it.
+    """
+    router = APIRouter()
+
+    def _workspace_or_404(cfg: GatewayConfig, workspace_id: str) -> Any:
+        workspace = cfg.workspaces.get(workspace_id)
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        return workspace
+
+    def _gateway_or_404(cfg: GatewayConfig, gateway_id: str) -> Any:
+        gateway = cfg.workspace_gateways.get(gateway_id)
+        if gateway is None:
+            raise HTTPException(status_code=404, detail="Workspace gateway not found")
+        return gateway
+
+    @router.get("/apim/management/workspaces")
+    async def list_workspaces(request: Request) -> list[dict[str, Any]]:
+        require_tenant_access(request, global_only=True)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [project_workspace(cfg, workspace_id, workspace) for workspace_id, workspace in cfg.workspaces.items()]
+
+    @router.get("/apim/management/workspaces/{workspace_id}")
+    async def get_workspace(workspace_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request, global_only=True)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return project_workspace(cfg, workspace_id, _workspace_or_404(cfg, workspace_id))
+
+    @router.put("/apim/management/workspaces/{workspace_id}")
+    async def upsert_workspace(workspace_id: str, request: Request, body: WorkspaceUpsert) -> dict[str, Any]:
+        require_tenant_access(request, global_only=True)
+        cfg = _config_for_management_write(request)
+        updated = require_management_plane().upsert_workspace(cfg, workspace_id, body)
+        return project_workspace(updated, workspace_id, updated.workspaces[workspace_id])
+
+    @router.delete("/apim/management/workspaces/{workspace_id}")
+    async def delete_workspace(workspace_id: str, request: Request, delete_resources: bool = False) -> dict[str, Any]:
+        require_tenant_access(request, global_only=True)
+        cfg = _config_for_management_write(request)
+        updated, removed = require_management_plane().delete_workspace(
+            cfg, workspace_id, delete_resources=delete_resources
+        )
+        return {
+            "deleted": True,
+            "workspace_id": workspace_id,
+            "deleted_resources": removed,
+            "remaining": len(updated.workspaces),
+        }
+
+    @router.get("/apim/management/workspace-gateways")
+    async def list_workspace_gateways(request: Request) -> list[dict[str, Any]]:
+        require_tenant_access(request, global_only=True)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [
+            project_workspace_gateway(cfg, gateway_id, gateway)
+            for gateway_id, gateway in cfg.workspace_gateways.items()
+        ]
+
+    @router.get("/apim/management/workspace-gateways/{gateway_id}")
+    async def get_workspace_gateway(gateway_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request, global_only=True)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return project_workspace_gateway(cfg, gateway_id, _gateway_or_404(cfg, gateway_id))
+
+    @router.put("/apim/management/workspace-gateways/{gateway_id}")
+    async def upsert_workspace_gateway(
+        gateway_id: str, request: Request, body: WorkspaceGatewayUpsert
+    ) -> dict[str, Any]:
+        require_tenant_access(request, global_only=True)
+        cfg = _config_for_management_write(request)
+        updated = require_management_plane().upsert_workspace_gateway(cfg, gateway_id, body)
+        return project_workspace_gateway(updated, gateway_id, updated.workspace_gateways[gateway_id])
+
+    @router.delete("/apim/management/workspace-gateways/{gateway_id}")
+    async def delete_workspace_gateway(gateway_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request, global_only=True)
+        cfg = _config_for_management_write(request)
+        updated = require_management_plane().delete_workspace_gateway(cfg, gateway_id)
+        return {"deleted": True, "gateway_id": gateway_id, "remaining": len(updated.workspace_gateways)}
+
+    return router
+
+
 def _build_identity_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
     """Routes for users, groups and group membership."""
     router = APIRouter()
@@ -1578,6 +1691,7 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         _build_infrastructure_router,
         _build_versioning_router,
         _build_identity_router,
+        _build_workspaces_router,
         _build_imports_router,
     ):
         router.include_router(build(require_management_plane=require_management_plane))

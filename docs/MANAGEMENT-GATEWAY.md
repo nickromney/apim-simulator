@@ -85,7 +85,8 @@ stack.
 
 When forwarding, the management gateway:
 
-- keeps the method, path, query string, body and the caller's `Host` header;
+- keeps the method, path, query string, body and the caller's `Host` header,
+  so [workspace gateways](WORKSPACES.md) chosen by host name still work;
 - removes hop-by-hop headers, and lets the body's actual length set
   `Content-Length`;
 - appends the caller's address to `X-Forwarded-For`. The serving gateway ignores

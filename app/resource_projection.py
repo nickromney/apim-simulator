@@ -21,6 +21,8 @@ from app.config import (
     Subscription,
     TagConfig,
     UserConfig,
+    WorkspaceConfig,
+    WorkspaceGatewayConfig,
 )
 from app.named_values import mask_secret_data, resolve_named_value
 
@@ -190,6 +192,7 @@ def project_subscription(config: GatewayConfig, config_key: str, subscription: S
         "all_apis": subscription.all_apis,
         "service_scoped": subscription.service_scoped,
         "created_by": subscription.created_by,
+        **({"workspace": subscription.workspace} if subscription.workspace else {}),
         "keys": subscription.keys.model_dump(mode="json"),
     }
 
@@ -226,6 +229,7 @@ def project_named_value(config: GatewayConfig, named_value_id: str, named_value:
         "id": named_value_id,
         "resource_id": nested_resource_id(config, "named-values", named_value_id),
         "display_name": named_value.display_name or named_value_id,
+        **({"workspace": named_value.workspace} if named_value.workspace else {}),
         "secret": named_value.secret,
         "value": named_value.value,
         "value_from_key_vault": (
@@ -292,9 +296,13 @@ def project_api_version_set(
 
 
 def project_policy_fragment(config: GatewayConfig, fragment_id: str, xml: str) -> dict[str, Any]:
+    from app.workspaces import fragment_owners
+
+    owner = fragment_owners(config).get(fragment_id)
     return {
         "id": fragment_id,
         "resource_id": nested_resource_id(config, "policy-fragments", fragment_id),
+        **({"workspace": owner} if owner else {}),
         "xml": xml,
     }
 
@@ -433,3 +441,32 @@ def project_summary(config: GatewayConfig, *, trace_store: dict[str, Any] | None
         "tags": [project_tag(config, tag_id, tag) for tag_id, tag in config.tags.items()],
     }
     return mask_secret_data(payload, config)
+
+
+def project_workspace(config: GatewayConfig, workspace_id: str, workspace: WorkspaceConfig) -> dict[str, Any]:
+    from app.workspaces import workspace_resources
+
+    return {
+        "id": workspace_id,
+        "resource_id": nested_resource_id(config, "workspaces", workspace_id),
+        "display_name": workspace.display_name or workspace_id,
+        "description": workspace.description,
+        "gateways": list(workspace.gateways),
+        "policy_scope": policy_scope("workspace", workspace_id),
+        "resources": workspace_resources(config, workspace_id),
+    }
+
+
+def project_workspace_gateway(
+    config: GatewayConfig, gateway_id: str, gateway: WorkspaceGatewayConfig
+) -> dict[str, Any]:
+    return {
+        "id": gateway_id,
+        "resource_id": nested_resource_id(config, "gateways", gateway_id),
+        "display_name": gateway.display_name or gateway_id,
+        "description": gateway.description,
+        "host_names": gateway.effective_host_names(gateway_id),
+        "workspaces": sorted(
+            workspace_id for workspace_id, workspace in config.workspaces.items() if gateway_id in workspace.gateways
+        ),
+    }

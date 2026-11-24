@@ -82,12 +82,12 @@ directory.
 
 ### Workspaces
 
-[Azure workspaces](https://learn.microsoft.com/en-us/azure/api-management/workspaces-overview)
-are not implemented. A local workflow needs workspace-owned resources,
-workspace-scoped permissions and policy inheritance, gateway associations, and
-cross-workspace isolation. Existing API-scoped grants do not provide these
-semantics. Azure RBAC, Entra, and cloud gateway deployment and infrastructure
-isolation require explicit local adaptations.
+Workspaces are implemented: workspace-owned APIs, products, subscriptions,
+named values, backends and policy fragments, a workspace policy scope,
+host-based workspace gateways, and cross-workspace reference checks (see
+[WORKSPACES.md](WORKSPACES.md)). Still not modelled: workspace-owned tags,
+groups, schemas, version sets and notifications; ARM-shaped
+`/workspaces/{id}/...` child routes; and workspace RBAC role names.
 
 ## Still Deferred
 

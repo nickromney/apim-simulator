@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from app.config import (
     DEFAULT_GLOBAL_POLICY_XML,
+    MANAGED_GATEWAY_ID,
     ApiConfig,
     ApiReleaseConfig,
     ApiRevisionConfig,
@@ -31,6 +32,8 @@ from app.config import (
     SubscriptionScope,
     TagConfig,
     UserConfig,
+    WorkspaceConfig,
+    WorkspaceGatewayConfig,
     load_config,
     validate_policy_config,
 )
@@ -125,6 +128,18 @@ def _validate_open_product_associations(cfg: GatewayConfig) -> None:
 logger = logging.getLogger("apim-simulator")
 
 
+def _owner_from_body(body: Any, existing: Any) -> str | None:
+    """The workspace a write names, or the resource's current owner when it names none.
+
+    A PUT that leaves out ``workspace`` keeps the resource where it is, so a
+    client that does not know about workspaces cannot move a resource by accident.
+    """
+    fields_set = getattr(body, "model_fields_set", set())
+    if "workspace" in fields_set:
+        return getattr(body, "workspace", None)
+    return getattr(existing, "workspace", None) if existing is not None else None
+
+
 class ManagementService:
     def __init__(
         self,
@@ -178,6 +193,8 @@ class ManagementService:
             cfg.apis,
             cfg.routes,
             cfg.backends,
+            cfg.workspaces,
+            cfg.workspace_gateways,
         )
 
     def consume_saved_config_fingerprint(self, path: Path) -> bool:
@@ -377,6 +394,7 @@ class ManagementService:
                 all_apis=getattr(body, "all_apis", False),
                 service_scoped=getattr(body, "service_scoped", False),
                 created_by="management",
+                workspace=getattr(body, "workspace", None),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -519,6 +537,12 @@ class ManagementService:
             raise HTTPException(status_code=404, detail="API policy scope not found")
         return api
 
+    def _workspace_scope(self, cfg: GatewayConfig, scope_name: str) -> Any:
+        workspace = cfg.workspaces.get(scope_name)
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Workspace policy scope not found")
+        return workspace
+
     def _product_scope(self, cfg: GatewayConfig, scope_name: str) -> Any:
         product = cfg.products.get(scope_name)
         if product is None:
@@ -554,6 +578,7 @@ class ManagementService:
             return cfg
         resolvers = {
             "api": self._api_scope,
+            "workspace": self._workspace_scope,
             "product": self._product_scope,
             "operation": self._operation_scope,
             "route": self._route_scope,
@@ -751,6 +776,7 @@ class ManagementService:
             schemas=imported.schemas,
             revisions=existing.revisions if existing is not None else {},
             releases=existing.releases if existing is not None else {},
+            workspace=_owner_from_body(body, existing),
         )
         if existing is None:
             _ensure_initial_api_revision(cfg.apis[api_id])
@@ -785,6 +811,7 @@ class ManagementService:
             schemas=existing.schemas if existing is not None else {},
             revisions=existing.revisions if existing is not None else {},
             releases=existing.releases if existing is not None else {},
+            workspace=_owner_from_body(body, existing),
         )
         if existing is None:
             _ensure_initial_api_revision(cfg.apis[api_id])
@@ -1004,6 +1031,7 @@ class ManagementService:
 
     def upsert_backend(self, cfg: GatewayConfig, backend_id: str, body: Any) -> GatewayConfig:
         payload = body.model_dump(mode="json") if hasattr(body, "model_dump") else dict(body)
+        payload["workspace"] = _owner_from_body(body, cfg.backends.get(backend_id))
         cfg.backends[backend_id] = BackendConfig(**payload)
         return self.persist_or_apply_config(cfg)
 
@@ -1077,6 +1105,76 @@ class ManagementService:
         if fragment_id not in cfg.policy_fragments:
             raise HTTPException(status_code=404, detail="Policy fragment not found")
         del cfg.policy_fragments[fragment_id]
+        return self.persist_or_apply_config(cfg)
+
+    def upsert_workspace(self, cfg: GatewayConfig, workspace_id: str, body: Any) -> GatewayConfig:
+        if workspace_id == MANAGED_GATEWAY_ID:
+            raise HTTPException(status_code=400, detail=f"Workspace ID {MANAGED_GATEWAY_ID} is reserved")
+        existing = cfg.workspaces.get(workspace_id)
+        payload = existing.model_dump(mode="python") if existing is not None else {}
+        updates = body.model_dump(exclude_unset=True) if hasattr(body, "model_dump") else dict(body)
+        updates = {key: value for key, value in updates.items() if value is not None}
+        try:
+            cfg.workspaces[workspace_id] = WorkspaceConfig.model_validate({**payload, **updates})
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid workspace configuration: {exc}") from exc
+        return self.persist_or_apply_config(cfg)
+
+    def delete_workspace(
+        self, cfg: GatewayConfig, workspace_id: str, *, delete_resources: bool = False
+    ) -> tuple[GatewayConfig, dict[str, list[str]]]:
+        """Remove a workspace; with ``delete_resources`` also everything it owns.
+
+        Azure's portal deletes a workspace's child resources with it. Here that
+        is opt-in, and without it a workspace that still owns resources is a 409.
+        """
+        from app.workspaces import workspace_resources
+
+        if workspace_id not in cfg.workspaces:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        owned = workspace_resources(cfg, workspace_id)
+        if any(owned.values()) and not delete_resources:
+            summary = ", ".join(f"{len(ids)} {kind.replace('_', ' ')}" for kind, ids in owned.items() if ids)
+            raise HTTPException(
+                status_code=409,
+                detail=f"Workspace still owns {summary}. Delete them first or pass delete_resources=true.",
+            )
+        stores: dict[str, dict[str, Any]] = {
+            "apis": cfg.apis,
+            "products": cfg.products,
+            "named_values": cfg.named_values,
+            "backends": cfg.backends,
+            "policy_fragments": cfg.policy_fragments,
+        }
+        for kind, store in stores.items():
+            for resource_id in owned[kind]:
+                store.pop(resource_id, None)
+        cfg.subscription.subscriptions = {
+            key: item for key, item in cfg.subscription.subscriptions.items() if item.workspace != workspace_id
+        }
+        del cfg.workspaces[workspace_id]
+        if not cfg.apis:
+            cfg.routes = []
+        return self.persist_or_apply_config(cfg), owned
+
+    def upsert_workspace_gateway(self, cfg: GatewayConfig, gateway_id: str, body: Any) -> GatewayConfig:
+        payload = body.model_dump(mode="python") if hasattr(body, "model_dump") else dict(body)
+        try:
+            cfg.workspace_gateways[gateway_id] = WorkspaceGatewayConfig.model_validate(payload)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid workspace gateway configuration: {exc}") from exc
+        return self.persist_or_apply_config(cfg)
+
+    def delete_workspace_gateway(self, cfg: GatewayConfig, gateway_id: str) -> GatewayConfig:
+        if gateway_id not in cfg.workspace_gateways:
+            raise HTTPException(status_code=404, detail="Workspace gateway not found")
+        users = sorted(key for key, item in cfg.workspaces.items() if gateway_id in item.gateways)
+        if users:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Workspace gateway still serves workspaces: {', '.join(users)}",
+            )
+        del cfg.workspace_gateways[gateway_id]
         return self.persist_or_apply_config(cfg)
 
     def link_group_user(self, cfg: GatewayConfig, group_id: str, user_id: str) -> GatewayConfig:
