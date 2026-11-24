@@ -36,7 +36,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
-      start_period: 5s
+      start_period: 30s
+      start_interval: 1s
     networks:
       - apim
 
@@ -67,7 +68,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
-      start_period: 5s
+      start_period: 30s
+      start_interval: 1s
     networks:
       - apim
 

@@ -1,21 +1,30 @@
 # syntax=docker/dockerfile:1.7
+# The uv and deps stages match the gateway's Dockerfile at the repository root
+# line for line, so BuildKit resolves the lockfile once and every Python image
+# shares one dependency layer. Keep them in step when you change either file.
 ARG PYTHON_BUILD_IMAGE=dhi.io/python:3.13-debian13-dev
 ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13
-FROM ${PYTHON_BUILD_IMAGE} AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
+FROM ${PYTHON_BUILD_IMAGE} AS deps
 WORKDIR /app
+ENV UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+RUN --mount=from=uv,source=/uv,target=/usr/local/bin/uv \
+    --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    uv sync --locked --no-dev --no-install-project \
+    && /app/.venv/bin/python -m compileall -q --invalidation-mode unchecked-hash /app/.venv/lib
 
-COPY --from=ghcr.io/astral-sh/uv:0.10.4 /uv /usr/local/bin/uv
+# Source, byte-compiled for the read-only runtime filesystem.
+FROM deps AS app
+COPY app ./app
+COPY examples/llm-backend/main.py ./main.py
+RUN /app/.venv/bin/python -m compileall -q --invalidation-mode checked-hash app main.py
 
-COPY pyproject.toml uv.lock ./
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
-
-FROM ${PYTHON_RUNTIME_IMAGE}
+FROM ${PYTHON_RUNTIME_IMAGE} AS runtime
 
 ARG APP_UID=65532
 ARG APP_GID=65532
@@ -28,9 +37,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY --chown=${APP_UID}:${APP_GID} --from=builder /app/.venv /app/.venv
-COPY --chown=${APP_UID}:${APP_GID} app ./app
-COPY --chown=${APP_UID}:${APP_GID} examples/llm-backend/main.py ./main.py
+# Root-owned, so the service user can read but not modify its code.
+COPY --link --from=deps /app/.venv /app/.venv
+COPY --link --from=app /app/app /app/app
+COPY --link --from=app /app/main.py /app/main.py
+COPY --link --from=app /app/__pycache__ /app/__pycache__
 
 EXPOSE 8000
 

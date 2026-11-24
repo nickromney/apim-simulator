@@ -20,7 +20,7 @@ RUNTIME_INCLUDE_PATHS = (
     "uv.lock",
 )
 
-DOCKERFILE_LINES_TO_DROP = ("COPY --chown=${APP_UID}:${APP_GID} examples ./examples",)
+DOCKERFILE_LINES_TO_DROP = ("COPY --link examples /app/examples",)
 
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 

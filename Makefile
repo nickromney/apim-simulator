@@ -277,6 +277,11 @@ check-docker-prerequisites:
 		echo "Docker is not running. Start Docker Desktop and try again." >&2; \
 		exit 1; \
 	fi
+	@engine="$$(docker version --format '{{.Server.Version}}')"; \
+	if [ "$${engine%%.*}" -lt 25 ] 2>/dev/null; then \
+		echo "Docker Engine 25 or later is required (found $$engine): the healthchecks use start_interval." >&2; \
+		exit 1; \
+	fi
 
 check-mkcert-prerequisites:
 	@if ! command -v mkcert >/dev/null 2>&1; then \

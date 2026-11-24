@@ -43,12 +43,15 @@ for compose_name in ("compose.otel.yml", "compose.todo.otel.yml"):
         fixture.parent.mkdir(parents=True, exist_ok=True)
         fixture.write_text(json.dumps({"digest": digest}), encoding="utf-8")
 
-uv_pattern = re.compile(r'COPY --from=ghcr\.io/astral-sh/uv:([^\s]+) /uv /usr/local/bin/uv')
+uv_pattern = re.compile(r'^FROM ghcr\.io/astral-sh/uv:([^\s@]+)(?:@sha256:[0-9a-f]{64})?\s+AS uv$', re.MULTILINE)
 for dockerfile in (
     "Dockerfile",
     "examples/hello-api/Dockerfile",
     "examples/todo-app/api-fastapi-container-app/Dockerfile",
     "examples/mcp-server/Dockerfile",
+    "examples/llm-backend/Dockerfile",
+    "examples/bff/Dockerfile",
+    "examples/architecture-patterns-extra/Dockerfile",
 ):
     text = (repo_root / dockerfile).read_text(encoding="utf-8")
     for version in uv_pattern.findall(text):
@@ -56,6 +59,9 @@ for dockerfile in (
         fixture.parent.mkdir(parents=True, exist_ok=True)
         fixture.write_text(json.dumps({"sha": "079e3fd059c3d073151a6ac3b39eb129d66b517d"}), encoding="utf-8")
 PY
+
+  export EXPECTED_UV_VERSION
+  EXPECTED_UV_VERSION="$(sed -n 's|^FROM ghcr.io/astral-sh/uv:\([^@ ]*\).*|\1|p' "$REPO_ROOT/Dockerfile")"
 
   export EXPECTED_VERSION
   EXPECTED_VERSION="$(
@@ -78,7 +84,7 @@ PY
   [[ "$output" == *"Release version declarations are synchronized at $EXPECTED_VERSION"* ]]
   [[ "$output" == *"actions/checkout v6.0.2 resolves to the pinned SHA"* ]]
   [[ "$output" == *"grafana/otel-lgtm:0.24.0 matches the pinned digest"* ]]
-  [[ "$output" == *"All uv-backed Dockerfiles use ghcr.io/astral-sh/uv:0.10.4"* ]]
+  [[ "$output" == *"All uv-backed Dockerfiles use ghcr.io/astral-sh/uv:$EXPECTED_UV_VERSION"* ]]
   [[ "$output" == *"All .npmrc files set min-release-age=7"* ]]
   [[ "$output" == *"All uv-managed pyproject.toml files set exclude-newer='7 days'"* ]]
   [[ "$output" == *"All version checks passed."* ]]

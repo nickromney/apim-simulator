@@ -11,6 +11,19 @@ FRONTEND_BASE_URL = os.environ.get("TODO_FRONTEND_BASE_URL", "http://127.0.0.1:3
 SUBSCRIPTION_KEY = os.environ.get("TODO_SUBSCRIPTION_KEY", "todo-demo-key")
 INVALID_SUBSCRIPTION_KEY = os.environ.get("TODO_INVALID_SUBSCRIPTION_KEY", "todo-demo-key-invalid")
 
+# Azure APIM's caller-visible 401 bodies. Kept literal, not imported from app/,
+# so the smoke checks the gateway against Azure's contract rather than itself.
+MISSING_KEY_BODY = {
+    "statusCode": 401,
+    "message": "Access denied due to missing subscription key. "
+    "Make sure to include subscription key when making requests to an API.",
+}
+INVALID_KEY_BODY = {
+    "statusCode": 401,
+    "message": "Access denied due to invalid subscription key. "
+    "Make sure to provide a valid key for an active subscription.",
+}
+
 
 def wait_for(url: str, label: str, timeout_seconds: float = 60.0) -> None:
     deadline = time.time() + timeout_seconds
@@ -66,7 +79,7 @@ def main() -> None:
         raise SystemExit("CORS preflight did not echo the allowed frontend origin")
 
     missing = httpx.get(f"{APIM_BASE_URL}/api/todos", timeout=5.0)
-    if missing.status_code != 401 or missing.json().get("detail") != "Missing subscription key":
+    if missing.status_code != 401 or missing.json() != MISSING_KEY_BODY:
         raise SystemExit("missing subscription key did not return the expected 401 response")
 
     invalid = httpx.get(
@@ -74,7 +87,7 @@ def main() -> None:
         headers={"Ocp-Apim-Subscription-Key": INVALID_SUBSCRIPTION_KEY},
         timeout=5.0,
     )
-    if invalid.status_code != 401 or invalid.json().get("detail") != "Invalid subscription key":
+    if invalid.status_code != 401 or invalid.json() != INVALID_KEY_BODY:
         raise SystemExit("invalid subscription key did not return the expected 401 response")
 
     create = httpx.post(

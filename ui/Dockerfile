@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Node 22.23.4 includes the 2026-10-21 security fixes (including CVE-2026-111497
 # and CVE-2026-105482). This Node image is build-only; Nginx serves static output.
 # Release notes: https://nodejs.org/en/blog/release/v22.23.4/
@@ -14,7 +15,9 @@ WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 COPY scripts/check-node-security-floor.mjs ./scripts/check-node-security-floor.mjs
 RUN ["node", "scripts/check-node-security-floor.mjs"]
-RUN ["npm", "ci"]
+# The cache mount keeps downloaded tarballs between builds, so a lockfile change
+# re-downloads only what changed.
+RUN --mount=type=cache,target=/root/.npm ["npm", "ci"]
 
 COPY . .
 RUN ["npm", "run", "build"]
@@ -24,9 +27,10 @@ FROM ${NGINX_RUNTIME_IMAGE}
 ARG NGINX_UID=101
 ARG NGINX_GID=101
 
-COPY --chown=${NGINX_UID}:${NGINX_GID} nginx-main.conf /etc/nginx/nginx.conf
-COPY --chown=${NGINX_UID}:${NGINX_GID} nginx.conf /etc/nginx/conf.d/default.conf
-COPY --chown=${NGINX_UID}:${NGINX_GID} --from=builder /app/dist /usr/share/nginx/html
+# Root-owned: nginx reads its config and site but cannot rewrite them.
+COPY nginx-main.conf /etc/nginx/nginx.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 8080
 

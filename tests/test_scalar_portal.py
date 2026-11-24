@@ -124,4 +124,4 @@ def test_vendored_bundle_provenance_and_release_packaging():
     manifest = json.loads((ASSET_DIR / "manifest.json").read_text())
     assert hashlib.sha256(gzip.decompress((ASSET_DIR / "scalar.js.gz").read_bytes())).hexdigest() == manifest["sha256"]
     assert "Copyright (c) 2023-present Scalar" in (ASSET_DIR / "LICENSE").read_text()
-    assert "COPY --chown=${APP_UID}:${APP_GID} app ./app" in (Path(__file__).parents[1] / "Dockerfile").read_text()
+    assert "COPY app ./app" in (Path(__file__).parents[1] / "Dockerfile").read_text()

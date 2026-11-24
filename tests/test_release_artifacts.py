@@ -72,8 +72,8 @@ def test_runtime_artifact_contains_only_gitea_build_inputs(tmp_path: Path) -> No
     assert "contracts/contract_matrix.yml" in names
     assert "ARG PYTHON_BUILD_IMAGE=dhi.io/python:3.13-debian13-dev" in dockerfile
     assert "ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13" in dockerfile
-    assert "COPY --chown=${APP_UID}:${APP_GID} app ./app" in dockerfile
-    assert "examples ./examples" not in dockerfile
+    assert "COPY app ./app" in dockerfile
+    assert "COPY --link examples /app/examples" not in dockerfile
 
     excluded_prefixes = (
         ".github/",

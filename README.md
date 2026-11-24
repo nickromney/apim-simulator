@@ -77,7 +77,7 @@ Its dated reports distinguish live matches from cases blocked by Azure Policy.
 Before running the simulator:
 
 - run `make prereqs` for the full-stack checks (Docker, `mkcert` and common host ports); the default HTTP stack itself needs Docker, while TLS/OTEL stacks also need `mkcert` and its installed local CA
-- make sure Docker Engine or Docker Desktop is running
+- make sure Docker Engine 25 or later (or a current Docker Desktop) is running
 - use `uv` if you want to run smoke scripts, import helpers, or tests from the host
 - use `npm` only for the browser-facing demo checks such as Playwright, Bruno, or the UI toolchain
 
