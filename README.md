@@ -250,6 +250,7 @@ stays on a hardened runtime base.
 | AI Foundry integration | `make up-ai-foundry` | [http://localhost:8000](http://localhost:8000) | You want the gateway fronting the sibling AI Foundry simulator (semantic cache, content safety) |
 | BFF pattern demo | `make -C examples/bff up` / `make -C examples/bff up-series` | [http://localhost:8000](http://localhost:8000) | You want web/mobile BFFs and an optional second APIM hop |
 | Shared gateway RBAC example | `make up-shared` | [http://localhost:8000](http://localhost:8000) | You want one gateway shared by several workload identities, segregated by role |
+| Management gateway | `make up-management-gateway` | [http://localhost:8000](http://localhost:8000) routes to [http://localhost:8001](http://localhost:8001) | You want a self-hosted gateway topology: one instance routes, a second serves ([guide](docs/MANAGEMENT-GATEWAY.md)) |
 | AWS API Gateway comparison | `make up-aws` | [http://localhost:4566](http://localhost:4566) | You want an AWS-shaped gateway beside the simulator for comparison |
 | MCP example | `make up-mcp` | [http://localhost:8000/mcp](http://localhost:8000/mcp) | You want an MCP server behind APIM |
 | Edge HTTP | `make up-edge` | [http://edge.apim.127.0.0.1.sslip.io:8088](http://edge.apim.127.0.0.1.sslip.io:8088) | You want forwarded-header and reverse-proxy behaviour |
