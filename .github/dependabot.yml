@@ -3,6 +3,10 @@ version: 2
 # Every ecosystem waits 7 days after a release before proposing it, matching
 # exclude-newer in pyproject.toml and min-release-age in each .npmrc.
 #
+# Python and npm major versions are upgraded by hand, not by Dependabot: they
+# carry breaking changes (mcp is pinned exactly, and @types/node follows the
+# Node version the images build on, not the latest).
+#
 # The DHI images need a Dependabot secret (not an Actions secret) named
 # DHI_USERNAME and DHI_TOKEN; without them the dhi.io pins are not updated.
 registries:
@@ -21,6 +25,9 @@ updates:
       time: "09:00"
     cooldown:
       default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       python-minor-and-patch:
         update-types: ["minor", "patch"]
@@ -40,6 +47,9 @@ updates:
       time: "09:00"
     cooldown:
       default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-and-patch:
         update-types: ["minor", "patch"]
