@@ -453,6 +453,7 @@ local-ci:
 	gitleaks detect --source . --config .gitleaks.toml --redact
 	@$(MAKE) --no-print-directory lint
 	@$(MAKE) --no-print-directory test-python
+	@$(MAKE) --no-print-directory test-shell
 	@$(MAKE) --no-print-directory compat
 	@TOFU_SHOW=tests/fixtures/tofu_show/sample.json $(MAKE) --no-print-directory compat-report
 	@$(MAKE) --no-print-directory frontend-check
