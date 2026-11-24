@@ -49,6 +49,7 @@ from app.config import (
 )
 from app.control_plane import api_visible_in_collection
 from app.diagnostic_logging import api_diagnostic_key, validate_diagnostic
+from app.email_notification_management import build_email_notification_router
 from app.management_service import ManagementService
 from app.named_values import mask_secret_data
 from app.operation_authoring import build_operation_authoring_router
@@ -1329,6 +1330,9 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
         persisted = updated.subscription.subscriptions.get(subscription.id)
         if persisted is None:
             raise HTTPException(status_code=500, detail="Subscription persistence failed")
+        notification_runtime = getattr(request.app.state, "notification_runtime", None)
+        if notification_runtime is not None:
+            notification_runtime.subscription_created(updated, persisted)
         return project_portal_subscription(persisted)
 
     return router
@@ -1774,6 +1778,7 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         _build_policy_router,
         _build_products_router,
         _build_subscriptions_router,
+        build_email_notification_router,
         _build_portal_router,
         _build_infrastructure_router,
         _build_versioning_router,

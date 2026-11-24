@@ -225,6 +225,23 @@ class PortalConfig(BaseModel):
     identity: PortalIdentityConfig = Field(default_factory=PortalIdentityConfig)
 
 
+class NotificationRecipientConfig(BaseModel):
+    emails: list[str] = Field(default_factory=list)
+    users: list[str] = Field(default_factory=list)
+
+
+class EmailTemplateConfig(BaseModel):
+    subject: str
+    body: str
+
+
+class EmailSettingsConfig(BaseModel):
+    administrator_email: str | None = None
+    organization_name: str = "Local APIM Simulator"
+    originating_email: str = "no-reply@localhost"
+    developer_portal_url: str = "http://localhost:8000/apim/portal"
+
+
 class TenantAccessConfig(BaseModel):
     enabled: bool = False
     primary_key: str | None = None
@@ -976,6 +993,9 @@ class GatewayConfig(BaseModel):
     portal_content: PortalContentConfig = Field(default_factory=PortalContentConfig)
     api_center: ApiCenterState = Field(default_factory=ApiCenterState)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    notification_recipients: dict[str, NotificationRecipientConfig] = Field(default_factory=dict)
+    email_templates: dict[str, EmailTemplateConfig] = Field(default_factory=dict)
+    email_settings: EmailSettingsConfig = Field(default_factory=EmailSettingsConfig)
     security_governance: SecurityGovernanceConfig = Field(default_factory=SecurityGovernanceConfig)
     security_observability: SecurityObservabilityConfig = Field(default_factory=SecurityObservabilityConfig)
     security_ingress: SecurityIngressConfig = Field(default_factory=SecurityIngressConfig)

@@ -435,6 +435,7 @@ class ManagementService:
         sub = self.find_subscription_by_id(cfg, subscription_id)
         if sub is None:
             raise HTTPException(status_code=404, detail="Subscription not found")
+        previous = sub.model_copy(deep=True)
 
         if body.name is not None:
             sub.name = body.name
@@ -457,7 +458,12 @@ class ManagementService:
             sub.api_id = replacement.api_id
             sub.all_apis = replacement.all_apis
             sub.service_scoped = replacement.service_scoped
-        return self.persist_or_apply_config(cfg)
+        updated = self.persist_or_apply_config(cfg)
+        notification_runtime = getattr(self.app.state, "notification_runtime", None)
+        current = self.find_subscription_by_id(updated, subscription_id)
+        if notification_runtime is not None and current is not None:
+            notification_runtime.subscription_state_changed(updated, previous, current)
+        return updated
 
     def delete_subscription(self, cfg: GatewayConfig, subscription_id: str) -> GatewayConfig:
         entry = self.find_subscription_entry(cfg, subscription_id)
@@ -1214,6 +1220,9 @@ class ManagementService:
             "security_observability",
             "portal",
             "local_messaging",
+            "notification_recipients",
+            "email_templates",
+            "email_settings",
         ):
             setattr(imported, field, getattr(current.model_copy(deep=True), field))
         imported.policy_fragments = current.policy_fragments

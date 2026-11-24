@@ -90,6 +90,7 @@ rows retain the older labels so the matrix remains easy to scan.
 | Subscription bypass | Yes | - | Header conditions |
 | Approval required | Yes | `azurerm_api_management_product.approval_required` | `approval_required` on products; pending subscriptions stay `submitted` until approved |
 | Subscription limits | Partial | `azurerm_api_management_product.subscriptions_limit` | Positive limits are enforced at portal sign-up with HTTP 409 when reached; omit the limit for unrestricted sign-up |
+| Local email notifications | Adapted | `azurerm_api_management.notification` / email templates | Approval, activation, and rejection flows render Azure-shaped messages into a tenant-key-protected in-memory outbox; see [email notifications](EMAIL-NOTIFICATIONS.md) |
 
 ## Tags
 

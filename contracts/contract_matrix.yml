@@ -169,6 +169,20 @@ contracts:
     fixture_or_golden: null
     assertion_kind: http-json
 
+  - id: PORTAL-EMAIL-NOTIFICATIONS
+    status: adapted
+    surface: portal
+    module: app/email_notifications.py
+    doc_refs:
+      - docs/EMAIL-NOTIFICATIONS.md
+      - docs/CAPABILITY-MATRIX.md#products-and-subscriptions
+      - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-configure-notifications
+      - https://learn.microsoft.com/en-us/rest/api/apimanagement/email-template
+    owner_tests:
+      - tests/test_email_notifications.py::*
+    fixture_or_golden: inline-config
+    assertion_kind: http-json
+
   - id: TRACE-LOOKUP
     status: supported
     surface: observability

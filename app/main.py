@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import GatewayConfig, load_config, validate_policy_config
 from app.cors_preflight import answer_preflight
 from app.debug_credentials import build_debug_router
+from app.email_notifications import NotificationRuntime
 from app.gateway_errors import GatewayError, gateway_error_handler
 from app.graphql_resolvers import build_graphql_management_router
 from app.local_api_center import build_api_center_router
@@ -340,6 +341,7 @@ def _reset_runtime_stores(app: FastAPI) -> None:
     app.state.policy_background_tasks = set()
     app.state.monitoring_store = MonitoringStore()
     app.state.backend_health = {}
+    app.state.notification_runtime = NotificationRuntime()
 
 
 def _build_gateway_router(*, require_management_plane: Callable[[], ManagementService]) -> APIRouter:  # noqa: C901 - one branch per route registered, not per decision; see docs/complexity.md
