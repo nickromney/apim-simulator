@@ -26,6 +26,15 @@ EOF
   cat >"$TEST_BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >>"$CALL_LOG"
+# Like real curl, write the body to the -o file when one is given.
+out=/dev/stdout
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[i]}" == "-o" ]]; then
+    out="${args[i + 1]}"
+  fi
+done
+exec >"$out"
 case "$*" in
   *"/apim/health"*)
     printf '{"status":"healthy"}\n'
