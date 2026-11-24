@@ -6,7 +6,7 @@ services:
       - edge-ingress
 
   edge-proxy:
-    image: ${EDGE_PROXY_IMAGE:-dhi.io/nginx:1.29.5-debian13}
+    image: ${EDGE_PROXY_IMAGE:-dhi.io/nginx:1.29.5-debian13@sha256:9683af47feae3bab0031b489ed85f93f340a0f8b83a2edccc9f761dbfce1bffd}
     init: true
     read_only: true
     user: "${NGINX_UID:-101}:${NGINX_GID:-101}"

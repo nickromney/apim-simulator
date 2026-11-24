@@ -1,4 +1,4 @@
-ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13
+ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13@sha256:1fe1883f0c28d90b7364e6f069437801c9e8f150c886f02f74bfcefc9ea14591
 FROM ${PYTHON_RUNTIME_IMAGE}
 WORKDIR /app
 COPY app/local_pubsub.py server.py
