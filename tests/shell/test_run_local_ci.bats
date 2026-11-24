@@ -14,7 +14,9 @@ STUB
 }
 
 @test "the pre-push gate hides git's hook variables from the tests it runs" {
-  run env PATH="$TEST_BIN:$PATH" GIT_DIR="$REPO_ROOT/.git" GIT_INDEX_FILE="$REPO_ROOT/.git/index" \
+  # Unset the skip switches: this test may itself be running inside the gate.
+  run env -u APIM_SIMULATOR_LOCAL_CI_IN_PROGRESS -u APIM_SIMULATOR_SKIP_HOOKS \
+    PATH="$TEST_BIN:$PATH" GIT_DIR="$REPO_ROOT/.git" GIT_INDEX_FILE="$REPO_ROOT/.git/index" \
     "$REPO_ROOT/scripts/hooks/run-local-ci.sh" --execute
 
   [ "$status" -eq 0 ]
