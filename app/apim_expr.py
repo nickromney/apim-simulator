@@ -4,8 +4,10 @@ import ast
 import base64
 import datetime
 import json
+import math
 import re
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from types import CodeType
@@ -73,7 +75,7 @@ class CalloutBody:
 
     def AsJObject(self, preserve_content: bool = False) -> dict[str, Any]:
         try:
-            payload = json.loads(self._read(preserve_content).decode("utf-8"))
+            payload = json.loads(self._read(preserve_content).decode("utf-8"), object_hook=_JObjectView)
         except (UnicodeDecodeError, json.JSONDecodeError):
             # Microsoft documents the runtime exception, but not its exact message.
             raise ValueError("The body is not valid JSON.") from None
@@ -230,10 +232,93 @@ class _JsonObject(dict):
         super().__init__((property.name, property.value) for property in properties)
 
 
+def _json_array(*items: Any) -> list[Any]:
+    """new JArray(...): one list or array argument contributes its items, as JArray(IEnumerable) does."""
+    if len(items) == 1 and isinstance(items[0], (list, tuple)):
+        return list(items[0])
+    return list(items)
+
+
+class _JObjectView(dict):
+    """Parsed JSON object whose indexer returns null for an absent property, as Newtonsoft's JObject does."""
+
+    def __missing__(self, key: Any) -> None:
+        return None
+
+
 class _ConvertNamespace:
     @staticmethod
     def FromBase64String(value: str) -> bytes:
         return base64.b64decode("".join(value.split()), validate=True)
+
+    @staticmethod
+    def ToInt32(value: Any) -> int:
+        return _csharp_to_int(value)
+
+    @staticmethod
+    def ToInt64(value: Any) -> int:
+        return _csharp_to_int(value)
+
+    @staticmethod
+    def ToDouble(value: Any) -> float:
+        return 0.0 if value is None else float(value)
+
+    @staticmethod
+    def ToBoolean(value: Any) -> bool:
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered not in {"true", "false"}:
+                raise ValueError("String was not recognized as a valid Boolean.")
+            return lowered == "true"
+        return bool(value)
+
+    @staticmethod
+    def ToString(value: Any) -> str:
+        return "" if value is None else _csharp_tostring(value)
+
+
+def _csharp_to_int(value: Any) -> int:
+    """Convert.ToInt32 semantics: null is 0, doubles round to even, strings must be integral."""
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, float):
+        return round(value)
+    if isinstance(value, str):
+        return int(value.strip())
+    return int(value)
+
+
+class _MathNamespace:
+    @staticmethod
+    def Max(left: Any, right: Any) -> Any:
+        return max(left, right)
+
+    @staticmethod
+    def Min(left: Any, right: Any) -> Any:
+        return min(left, right)
+
+    @staticmethod
+    def Abs(value: Any) -> Any:
+        return abs(value)
+
+    @staticmethod
+    def Ceiling(value: Any) -> int:
+        return math.ceil(value)
+
+    @staticmethod
+    def Floor(value: Any) -> int:
+        return math.floor(value)
+
+
+class _StringComparisonNamespace:
+    Ordinal = "Ordinal"
+    OrdinalIgnoreCase = "OrdinalIgnoreCase"
+    CurrentCulture = "CurrentCulture"
+    CurrentCultureIgnoreCase = "CurrentCultureIgnoreCase"
+    InvariantCulture = "InvariantCulture"
+    InvariantCultureIgnoreCase = "InvariantCultureIgnoreCase"
 
 
 class _EncodingUTF8:
@@ -293,6 +378,10 @@ class _ExpressionResponse:
 class _ExpressionSubscription:
     id: str
 
+    @property
+    def Id(self) -> str:
+        return self.id
+
 
 @dataclass(frozen=True)
 class _ExpressionLastError:
@@ -328,7 +417,13 @@ class ExpressionContext:
     def Response(self) -> _ExpressionResponse:
         return self.response
 
-    def variables_get(self, key: str, default: Any = "") -> Any:
+    @property
+    def Subscription(self) -> _ExpressionSubscription | None:
+        """APIM exposes no subscription object for a call made without a subscription key."""
+        return self.subscription if self.subscription.id else None
+
+    def variables_get(self, key: str, default: Any = None) -> Any:
+        # Without a default APIM returns default(T): null for the object and string lookups fragments use.
         return self.variables.get(key, default)
 
 
@@ -377,12 +472,17 @@ ALLOWED_FUNCTIONS = {
     "_csharp_length",
     "_csharp_tostring",
     "_csharp_divide",
+    "_csharp_add",
     "_dict_contains_key",
     "_as_jwt",
     "_nullable_jwt_subject",
     "_try_get_value",
     "_parse_int",
+    "_csharp_coalesce",
+    "_jtoken_value",
     "DateTime",
+    "Math",
+    "StringComparison",
     "WebUtility",
     "Regex",
     "Convert",
@@ -391,6 +491,7 @@ ALLOWED_FUNCTIONS = {
     "Guid",
     "JObject",
     "JProperty",
+    "JArray",
 }
 
 
@@ -585,8 +686,17 @@ def _replace_generic_call(match: re.Match[str]) -> str:
 
 
 def _translate_code_fragment(fragment: str) -> str:
-    translated = re.sub(r"\((?:string|bool|IResponse|Jwt|JObject)\)", "", fragment)
-    translated = re.sub(r"\bnew\s+(?=JObject\b|JProperty\b)", "", translated)
+    translated = re.sub(
+        r"\((?:string|bool|int|long|double|decimal|float|IResponse|Jwt|JObject|JToken|JArray)\)", "", fragment
+    )
+    translated = re.sub(r"\.Value<(int|long|double|decimal|float|string|bool)>\(\)", r'.ValueAs("\1")', translated)
+    # Null-conditional access is approximated as plain access: a null receiver
+    # raises instead of propagating null.
+    translated = translated.replace(
+        "context.Subscription?.Id", "(context.Subscription.Id if context.Subscription else None)"
+    )
+    translated = translated.replace("?.", ".").replace("?[", "[")
+    translated = re.sub(r"\bnew\s+(?=JObject\b|JProperty\b|JArray\b)", "", translated)
     translated = re.sub(r"(?<![\w.)])(-?\d+)\.ToString\(\)", r"str(\1)", translated)
     translated = re.sub(
         r"\b(GetValueOrDefault|As)<([A-Za-z][\w.]*)>",
@@ -601,7 +711,6 @@ def _translate_code_fragment(fragment: str) -> str:
     translated = re.sub(r"\bnull\b", "None", translated)
     translated = re.sub(r"\bout\s+([A-Za-z_]\w*)", r'"\1"', translated)
     translated = translated.replace(".AsJwt()?.Subject", ".NullableJwtSubject()")
-    translated = translated.replace("]?.Value", "].Value")
     translated = translated.replace("int.Parse(", "_parse_int(")
     translated = translated.replace("System.Net.WebUtility.", "WebUtility.")
     translated = translated.replace("&&", " and ").replace("||", " or ")
@@ -650,41 +759,39 @@ def _update_levels(char: str, levels: dict[str, int]) -> bool:
     return False
 
 
-def _find_top_level_question(expression: str) -> int:
+def _top_level_tokens(text: str, start: int = 0) -> Iterator[tuple[int, str]]:
+    """Yield (position, token) for code outside quotes and brackets; ?? is one token."""
     levels = {"(": 0, "[": 0, "{": 0}
     quote = ""
-    position = 0
-    while position < len(expression):
-        char = expression[position]
+    position = start
+    while position < len(text):
+        char = text[position]
         if quote:
-            position, quote = _advance_quoted(expression, position, quote)
+            position, quote = _advance_quoted(text, position, quote)
             continue
         if char in {'"', "'"}:
             quote = char
-        elif not _update_levels(char, levels) and char == "?" and not any(levels.values()):
-            return position
+        elif not _update_levels(char, levels) and not any(levels.values()):
+            token = "??" if text.startswith("??", position) else char
+            yield position, token
+            position += len(token)
+            continue
         position += 1
-    return -1
+
+
+def _find_top_level_question(expression: str) -> int:
+    return next((position for position, token in _top_level_tokens(expression) if token == "?"), -1)
 
 
 def _find_ternary_colon(expression: str, question: int) -> int:
     nested = 0
-    quote = ""
-    position = question + 1
-    while position < len(expression):
-        char = expression[position]
-        if quote:
-            position, quote = _advance_quoted(expression, position, quote)
-            continue
-        if char in {'"', "'"}:
-            quote = char
-        elif char == "?":
+    for position, token in _top_level_tokens(expression, question + 1):
+        if token == "?":
             nested += 1
-        elif char == ":":
+        elif token == ":":
             if nested == 0:
                 return position
             nested -= 1
-        position += 1
     return -1
 
 
@@ -699,20 +806,91 @@ def _find_ternary_parts(expression: str) -> tuple[str, str, str] | None:
 
 
 def _translate_ternary(expression: str) -> str:
+    """Rewrite C# ?: and ?? operators, including those nested in calls and indexers.
+
+    ?: has the lowest precedence and ?? binds tighter, so the top-level
+    conditional splits first and its parts are searched for null coalescing.
+    """
+    expression = _translate_nested_groups(expression)
     parts = _find_ternary_parts(expression)
-    if parts is None:
+    if parts is not None:
+        condition, consequent, alternative = parts
+        return (
+            f"({_translate_ternary(consequent)} if {_translate_ternary(condition)} "
+            f"else {_translate_ternary(alternative)})"
+        )
+    coalesce = _find_top_level_coalesce(expression)
+    if coalesce < 0:
         return expression
-    condition, consequent, alternative = parts
-    return (
-        f"({_translate_ternary(consequent)} if {_translate_ternary(condition)} else {_translate_ternary(alternative)})"
-    )
+    left, right = expression[:coalesce], expression[coalesce + 2 :]
+    return f"_csharp_coalesce({_translate_ternary(left)}, {_translate_ternary(right)})"
+
+
+def _translate_nested_groups(expression: str) -> str:
+    """Apply operator rewriting inside each top-level (...) or [...] group, argument by argument."""
+    if "?" not in expression:
+        return expression
+    out: list[str] = []
+    quote = ""
+    position = 0
+    while position < len(expression):
+        char = expression[position]
+        if quote:
+            next_position, quote = _advance_quoted(expression, position, quote)
+            out.append(expression[position:next_position])
+            position = next_position
+            continue
+        if char in {'"', "'"}:
+            quote = char
+        elif char in {"(", "["}:
+            end = _balanced_end(expression, position, char, ")" if char == "(" else "]")
+            pieces = _split_top_level_commas(expression[position + 1 : end])
+            out.append(char + ", ".join(_translate_ternary(piece).strip() for piece in pieces) + expression[end])
+            position = end + 1
+            continue
+        out.append(char)
+        position += 1
+    return "".join(out)
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    pieces: list[str] = []
+    start = 0
+    for position, token in _top_level_tokens(text):
+        if token == ",":
+            pieces.append(text[start:position])
+            start = position + 1
+    pieces.append(text[start:])
+    return pieces
+
+
+def _find_top_level_coalesce(expression: str) -> int:
+    return next((position for position, token in _top_level_tokens(expression) if token == "??"), -1)
+
+
+def _csharp_coalesce(value: Any, fallback: Any) -> Any:
+    return fallback if value is None else value
+
+
+def _jtoken_value(value: Any, type_name: str) -> Any:
+    if value is None:
+        return None
+    if type_name in {"int", "long"}:
+        return _csharp_to_int(value)
+    if type_name in {"double", "decimal", "float"}:
+        return float(value)
+    if type_name == "bool":
+        return _ConvertNamespace.ToBoolean(value)
+    return _csharp_tostring(value)
 
 
 def _csharp_contains(value: Any, needle: Any) -> bool:
     return needle in value
 
 
-def _csharp_equals(value: Any, other: Any) -> bool:
+def _csharp_equals(value: Any, other: Any, comparison: str | None = None) -> bool:
+    if comparison and comparison.endswith("IgnoreCase") and isinstance(value, str) and isinstance(other, str):
+        return value.casefold() == other.casefold()
     return value == other
 
 
@@ -720,10 +898,47 @@ def _csharp_length(value: Any) -> int:
     return len(value)
 
 
-def _csharp_tostring(value: Any) -> str:
+def _csharp_tostring(value: Any, format_string: str | None = None) -> str:
+    if isinstance(value, datetime.datetime) and format_string is not None:
+        return _format_csharp_datetime(value, format_string)
     if isinstance(value, _JsonObject):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
+
+
+_CSHARP_DATETIME_TOKENS = re.compile(r"yyyy|yy|MM|dd|HH|mm|ss|fff|'[^']*'|.", re.DOTALL)
+
+
+def _format_csharp_datetime(value: datetime.datetime, format_string: str) -> str:
+    """Format a timestamp with the C# custom format specifiers fragments use for counter buckets."""
+    if format_string == "o":
+        return value.isoformat()
+    parts = {
+        "yyyy": f"{value.year:04d}",
+        "yy": f"{value.year % 100:02d}",
+        "MM": f"{value.month:02d}",
+        "dd": f"{value.day:02d}",
+        "HH": f"{value.hour:02d}",
+        "mm": f"{value.minute:02d}",
+        "ss": f"{value.second:02d}",
+        "fff": f"{value.microsecond // 1000:03d}",
+    }
+    out: list[str] = []
+    for token in _CSHARP_DATETIME_TOKENS.findall(format_string):
+        if token in parts:
+            out.append(parts[token])
+        elif token.startswith("'") and token.endswith("'") and len(token) > 1:
+            out.append(token[1:-1])
+        else:
+            out.append(token)
+    return "".join(out)
+
+
+def _csharp_add(left: Any, right: Any) -> Any:
+    """C# + concatenates when either side is a string; null concatenates as empty."""
+    if isinstance(left, str) or isinstance(right, str):
+        return ("" if left is None else _csharp_tostring(left)) + ("" if right is None else _csharp_tostring(right))
+    return left + right
 
 
 def _csharp_divide(left: Any, right: Any) -> Any:
@@ -745,6 +960,7 @@ class _CSharpAstTransformer(ast.NodeTransformer):
         "AsJwt": "_as_jwt",
         "NullableJwtSubject": "_nullable_jwt_subject",
         "TryGetValue": "_try_get_value",
+        "ValueAs": "_jtoken_value",
     }
     _aliases = {
         "StartsWith": "startswith",
@@ -756,7 +972,7 @@ class _CSharpAstTransformer(ast.NodeTransformer):
 
     def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
         node = self.generic_visit(node)
-        if node.attr != "Length":
+        if node.attr not in {"Length", "Count"}:
             return node
         return ast.copy_location(
             ast.Call(func=ast.Name(id="_csharp_length", ctx=ast.Load()), args=[node.value], keywords=[]),
@@ -766,6 +982,10 @@ class _CSharpAstTransformer(ast.NodeTransformer):
     def visit_Call(self, node: ast.Call) -> ast.AST:
         node = self.generic_visit(node)
         if not isinstance(node.func, ast.Attribute):
+            return node
+        # Static members such as Convert.ToString(x) are real methods on the
+        # namespace object, not instance calls on a value.
+        if isinstance(node.func.value, ast.Name) and node.func.value.id in {"Convert", "Math", "DateTime"}:
             return node
         helper = self._methods.get(node.func.attr)
         if helper is not None:
@@ -781,14 +1001,11 @@ class _CSharpAstTransformer(ast.NodeTransformer):
 
     def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
         node = self.generic_visit(node)
-        if not isinstance(node.op, ast.Div):
+        helper = {ast.Div: "_csharp_divide", ast.Add: "_csharp_add"}.get(type(node.op))
+        if helper is None:
             return node
         return ast.copy_location(
-            ast.Call(
-                func=ast.Name(id="_csharp_divide", ctx=ast.Load()),
-                args=[node.left, node.right],
-                keywords=[],
-            ),
+            ast.Call(func=ast.Name(id=helper, ctx=ast.Load()), args=[node.left, node.right], keywords=[]),
             node,
         )
 
@@ -950,12 +1167,17 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
         "_csharp_length": _csharp_length,
         "_csharp_tostring": _csharp_tostring,
         "_csharp_divide": _csharp_divide,
+        "_csharp_add": _csharp_add,
         "_dict_contains_key": _dict_contains_key,
         "_as_jwt": _as_jwt,
         "_nullable_jwt_subject": _nullable_jwt_subject,
         "_try_get_value": try_get_value,
         "_parse_int": int,
+        "_csharp_coalesce": _csharp_coalesce,
+        "_jtoken_value": _jtoken_value,
         "DateTime": _DateTimeNamespace(),
+        "Math": _MathNamespace(),
+        "StringComparison": _StringComparisonNamespace(),
         "WebUtility": _WebUtility(),
         "Regex": _RegexNamespace(),
         "Convert": _ConvertNamespace(),
@@ -964,6 +1186,7 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
         "Guid": type("Guid", (), {"NewGuid": staticmethod(uuid.uuid4)}),
         "JObject": _JsonObject,
         "JProperty": _JsonProperty,
+        "JArray": _json_array,
         **(locals_ or {}),
     }
     return eval(code, {"__builtins__": {}}, environment)
@@ -979,13 +1202,14 @@ def _execute_simple(
     declaration = re.match(
         r"^(?:var|[A-Za-z_]\w*(?:\s*<[^>]+>)?(?:\[\])?)\s+([A-Za-z_]\w*)\s*(?:=\s*(.*))?$",
         text,
+        re.DOTALL,
     )
     if declaration:
         locals_[declaration.group(1)] = (
             _evaluate_expression(declaration.group(2), context, locals_) if declaration.group(2) else None
         )
         return None
-    assignment = re.match(r"^([A-Za-z_]\w*)\s*=\s*(.*)$", text)
+    assignment = re.match(r"^([A-Za-z_]\w*)\s*=\s*(.*)$", text, re.DOTALL)
     if assignment and assignment.group(1) in locals_:
         locals_[assignment.group(1)] = _evaluate_expression(assignment.group(2), context, locals_)
         return None

@@ -28,6 +28,8 @@ def _prepare_runtime_config() -> None:
     if os.getenv("APIM_CONFIG_TEMPLATE_SUBSTITUTE", "").strip().lower() in {"1", "true", "yes", "on"}:
         rendered = Template(rendered).safe_substitute(os.environ)
 
+    rendered = _anchor_fragment_directory(rendered, source_path.parent)
+
     proxy_cidr = os.getenv("APIM_CONFIG_TRUSTED_PROXY_CIDR", "").strip()
     if proxy_cidr:
         config = json.loads(rendered)
@@ -40,6 +42,18 @@ def _prepare_runtime_config() -> None:
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(rendered, encoding="utf-8")
+
+
+def _anchor_fragment_directory(rendered: str, source_dir: Path) -> str:
+    """Keep a relative policy_fragments_directory pointing beside the source config after staging."""
+    if "policy_fragments_directory" not in rendered:
+        return rendered
+    config = json.loads(rendered)
+    directory = config.get("policy_fragments_directory")
+    if not isinstance(directory, str) or not directory or Path(directory).is_absolute():
+        return rendered
+    config["policy_fragments_directory"] = str((source_dir / directory).resolve())
+    return json.dumps(config)
 
 
 def main() -> None:

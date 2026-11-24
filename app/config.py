@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
@@ -1261,4 +1262,35 @@ def load_config() -> GatewayConfig:
     region = os.getenv("APIM_REGION", "").strip()
     if region:
         decoded.setdefault("service", {})["region"] = region
+    directory = decoded.pop("policy_fragments_directory", None)
+    if directory:
+        decoded["policy_fragments"] = merge_policy_fragment_files(
+            decoded.get("policy_fragments") or {}, Path(config_path).parent / directory
+        )
     return validate_policy_config(GatewayConfig.model_validate(decoded))
+
+
+def read_policy_fragment_files(directory: Path) -> dict[str, str]:
+    """Read fragments kept as files: ``<id>.xml`` or the APIOps ``<id>/policy.xml`` layout.
+
+    The fragment ID is the file stem or the APIOps folder name, matching the
+    ``fragment-id`` an ``include-fragment`` element uses.
+    """
+    if not directory.is_dir():
+        raise ValueError(f"Policy fragments directory not found: {directory}")
+    fragments: dict[str, str] = {}
+    candidates = [(path.stem, path) for path in directory.glob("*.xml")]
+    candidates += [(path.parent.name, path) for path in directory.glob("*/policy.xml")]
+    for fragment_id, path in sorted(candidates):
+        if fragment_id in fragments:
+            raise ValueError(f"Policy fragment {fragment_id} is defined by more than one file in {directory}")
+        fragments[fragment_id] = path.read_text(encoding="utf-8").strip()
+    return fragments
+
+
+def merge_policy_fragment_files(inline: dict[str, str], directory: Path) -> dict[str, str]:
+    from_files = read_policy_fragment_files(directory)
+    duplicated = sorted(set(inline) & set(from_files))
+    if duplicated:
+        raise ValueError(f"Policy fragments defined both inline and as files: {', '.join(duplicated)}")
+    return {**inline, **from_files}

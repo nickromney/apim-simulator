@@ -1,0 +1,34 @@
+<fragment>
+  <!--
+    core-token-budget-record: add the tokens a model response reports to the
+    caller's budget, and tell the caller what is left.
+
+    Include it in an outbound section of any API whose inbound section includes
+    core-token-budget-check. It does nothing when the check did not run.
+
+    Token usage is read from the JSON response body:
+      usage.total_tokens                         OpenAI and Azure OpenAI chat completions
+      usage.input_tokens + usage.output_tokens   OpenAI Responses and Anthropic Messages
+
+    Streamed (text/event-stream) and non-JSON responses are not metered.
+  -->
+  <choose>
+    <when condition="@(context.Variables.ContainsKey(&quot;core-token-budget-cache-key&quot;))">
+      <choose>
+        <when condition="@(context.Response.StatusCode == 200 &amp;&amp; context.Response.Headers.GetValueOrDefault(&quot;Content-Type&quot;, &quot;&quot;).Contains(&quot;application/json&quot;))">
+          <set-variable name="core-token-budget-consumed" value="@{
+            var usage = context.Response.Body.As&lt;JObject&gt;(preserveContent: true)[&quot;usage&quot;];
+            if (usage == null) { return 0; }
+            if (usage[&quot;total_tokens&quot;] != null) { return usage[&quot;total_tokens&quot;].Value&lt;int&gt;(); }
+            return (usage[&quot;input_tokens&quot;]?.Value&lt;int&gt;() ?? 0) + (usage[&quot;output_tokens&quot;]?.Value&lt;int&gt;() ?? 0);
+          }" />
+          <set-variable name="core-token-budget-used" value="@(Convert.ToInt32(context.Variables[&quot;core-token-budget-used&quot;]) + (int)context.Variables[&quot;core-token-budget-consumed&quot;])" />
+          <cache-store-value key="@((string)context.Variables[&quot;core-token-budget-cache-key&quot;])" value="@((int)context.Variables[&quot;core-token-budget-used&quot;])" duration="@((int)context.Variables[&quot;core-token-budget-ttl&quot;])" />
+        </when>
+      </choose>
+      <set-header name="x-token-budget-remaining" exists-action="override">
+        <value>@(Math.Max(0, (int)context.Variables[&quot;core-token-budget-limit-value&quot;] - Convert.ToInt32(context.Variables[&quot;core-token-budget-used&quot;])).ToString())</value>
+      </set-header>
+    </when>
+  </choose>
+</fragment>

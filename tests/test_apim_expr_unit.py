@@ -345,7 +345,7 @@ def test_variables_are_readable_by_name_and_by_lookup() -> None:
     context = _context(variables={"tier": "gold"})
     assert context.variables["tier"] == "gold"
     assert context.variables_get("tier") == "gold"
-    assert context.variables_get("absent") == ""
+    assert context.variables_get("absent") is None
     assert context.variables_get("absent", "fallback") == "fallback"
 
 
@@ -598,3 +598,73 @@ def test_the_allowed_names_are_not_refused() -> None:
     assert _evaluate("@(context.request.method)") == "GET"
     assert _evaluate("@(True)") is True
     assert _evaluate("@(False)") is False
+
+
+# Constructs the core reusable fragments rely on (examples/policy-fragments).
+_USAGE_BODY = b'{"usage": {"input_tokens": 3, "output_tokens": 4}}'
+
+
+@pytest.mark.parametrize(
+    ("expression", "variables", "expected"),
+    [
+        ('@(context.Variables.GetValueOrDefault("missing") ?? "fallback")', {}, "fallback"),
+        ('@(context.Variables.GetValueOrDefault("set") ?? "fallback")', {"set": "value"}, "value"),
+        (
+            '@((string)context.Variables.GetValueOrDefault("a") ?? (string)context.Variables.GetValueOrDefault("b") ?? "c")',
+            {},
+            "c",
+        ),
+        (
+            '@(context.Variables.GetValueOrDefault("k", context.Variables.GetValueOrDefault("x") ?? "inner"))',
+            {},
+            "inner",
+        ),
+        ("@(Math.Max(1, true ? 5 : 2))", {}, 5),
+        ("@(true ? (false ? 1 : 2) : 3)", {}, 2),
+        ('@((int)context.Variables["n"] + 1)', {"n": 5}, 6),
+        ('@(((int)context.Variables["n"]).ToString())', {"n": 5}, "5"),
+        ('@(Convert.ToInt32(context.Variables["n"]))', {"n": "7"}, 7),
+        ('@(Convert.ToInt32(context.Variables.GetValueOrDefault("missing")))', {}, 0),
+        ('@(Convert.ToString(context.Variables["n"]))', {"n": 7}, "7"),
+        ('@(Convert.ToBoolean(context.Variables["flag"]))', {"flag": "True"}, True),
+        ("@(Math.Min(10, 3) + Math.Abs(-2))", {}, 5),
+        ('@("MiXed".Equals("mixed", StringComparison.OrdinalIgnoreCase))', {}, True),
+        ('@("MiXed".Equals("mixed"))', {}, False),
+    ],
+)
+def test_fragment_expression_constructs(expression: str, variables: dict[str, object], expected: object) -> None:
+    assert _evaluate(expression, variables=variables) == expected
+
+
+def test_jobject_indexer_returns_null_for_absent_properties() -> None:
+    body = '@(context.Response.Body.As<JObject>(preserveContent: true)["usage"]'
+    assert _evaluate(body + '["total_tokens"] == null)', response_body=_USAGE_BODY) is True
+    assert _evaluate(body + '["input_tokens"].Value<int>())', response_body=_USAGE_BODY) == 3
+    assert _evaluate(body + '["total_tokens"]?.Value<int>() ?? 0)', response_body=_USAGE_BODY) == 0
+
+
+def test_subscription_is_null_without_a_subscription() -> None:
+    expression = "@(context.Subscription?.Id ?? context.Request.IpAddress)"
+    assert _evaluate(expression, variables={"client_ip": "203.0.113.9"}) == "203.0.113.9"
+    assert _evaluate(expression, variables={"subscription_id": "sub-1", "client_ip": "203.0.113.9"}) == "sub-1"
+    assert _evaluate("@(context.Subscription == null)") is True
+
+
+def test_datetime_formats_with_csharp_custom_specifiers() -> None:
+    from datetime import UTC, datetime
+
+    fixed = datetime(2026, 3, 4, 5, 6, 7, 890000, tzinfo=UTC)
+    with patch("app.apim_expr._DateTimeNamespace.UtcNow", new=fixed):
+        assert _evaluate('@(DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff"))') == "2026-03-04T05:06:07.890"
+        assert _evaluate("@(DateTime.UtcNow.ToString(\"yy'w'MM\"))") == "26w03"
+
+
+def test_multi_line_declarations_and_json_construction() -> None:
+    expression = """@{
+        var items = ((string)context.Variables["list"]).Split(',');
+        var payload = items.Length > 1
+            ? new JObject(new JProperty("items", new JArray(items)))
+            : new JObject();
+        return payload.ToString() + ":" + ((JArray)payload["items"]).Count;
+    }"""
+    assert _evaluate(expression, variables={"list": "a,b"}) == '{"items": ["a", "b"]}:2'

@@ -38,6 +38,26 @@ def _selected_headers(response: httpx.Response, names: list[str]) -> dict[str, s
     return {name.lower(): headers.get(name.lower(), "") for name in names}
 
 
+def _expectation_failure(case: dict, path: str, simulator: httpx.Response, azure: httpx.Response) -> str | None:
+    """Check both targets against the case's expected status, body and headers.
+
+    Two gateways agreeing is not enough: both returning the same wrong answer
+    must still fail.
+    """
+    expected = case.get("expected_status")
+    if expected is not None and (simulator.status_code != expected or azure.status_code != expected):
+        return f"{path}: expected {expected}, simulator {simulator.status_code}, Azure {azure.status_code}"
+    if "expected_body" in case:
+        if _response_body(simulator) != case["expected_body"] or _response_body(azure) != case["expected_body"]:
+            return f"{path}: response does not match expected body"
+    expected_headers = {name.lower(): value for name, value in (case.get("expected_headers") or {}).items()}
+    for target, response in (("simulator", simulator), ("Azure", azure)):
+        actual = _selected_headers(response, list(expected_headers))
+        if actual != expected_headers:
+            return f"{path}: {target} headers {actual} != expected {expected_headers}"
+    return None
+
+
 def _compare_case(
     client: httpx.Client,
     case: dict,
@@ -71,12 +91,8 @@ def _compare_case(
         method, f"{azure_base_url}{path}", params=query, headers={**(azure_headers or {}), **headers}, content=body
     )
 
-    expected = case.get("expected_status")
-    if expected is not None and (simulator.status_code != expected or azure.status_code != expected):
-        return f"{path}: expected {expected}, simulator {simulator.status_code}, Azure {azure.status_code}"
-    if "expected_body" in case:
-        if _response_body(simulator) != case["expected_body"] or _response_body(azure) != case["expected_body"]:
-            return f"{path}: response does not match expected body"
+    if failure := _expectation_failure(case, path, simulator, azure):
+        return failure
     if simulator.status_code != azure.status_code:
         return f"{path}: status {simulator.status_code} != {azure.status_code}"
 

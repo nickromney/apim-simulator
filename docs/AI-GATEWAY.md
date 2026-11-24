@@ -136,11 +136,13 @@ the budget), `x-semantic-cache` miss-then-hit on a repeated prompt,
 unchanged, deterministic embeddings, and the Content Safety
 `text:analyze` / `text:shieldPrompt` operations.
 
-The `llm-semantic-cache-*` and `llm-content-safety` *policies* remain
-unimplemented (see the capability matrix): caching and filtering happen
-service-side in the Foundry simulator, which is where Azure hosts them too.
-Gateway-side thin clients of that service are the natural next step —
-tracked in [NEXT-FEATURES.md](NEXT-FEATURES.md).
+The `llm-content-safety` policy is a thin client of that Content Safety API:
+the gateway sends prompt or completion text to `text:analyze` and
+`text:shieldPrompt` and returns 403 when the backend's verdict crosses a
+threshold. The [core reusable fragments](../examples/policy-fragments/README.md)
+wrap it as `core-content-safety`. The `llm-semantic-cache-*` policies remain
+unimplemented (see the capability matrix); caching happens service-side in the
+Foundry simulator — tracked in [NEXT-FEATURES.md](NEXT-FEATURES.md).
 
 ## How Kong and NGINX solve the same problems
 

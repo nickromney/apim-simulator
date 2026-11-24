@@ -44,11 +44,13 @@ def prepare() -> None:
         manifest["skip_fragments"] = os.environ["PARITY_SKIP_FRAGMENTS"] == "1"
     if manifest.get("skip_fragments"):
         config.pop("policy_fragments", None)
-        config["apis"][prefix]["operations"].pop("fragment", None)
-        cases = [case for case in cases if case["name"] != "fragment"]
-        save(
-            "excluded.json", [{"name": "fragment", "reason": "Explicitly excluded: deployment policy blocks fragments"}]
-        )
+        operations = config["apis"][prefix]["operations"]
+        blocked = {name for name, op in operations.items() if "include-fragment" in op["policies_xml"]}
+        blocked_paths = {f"/{prefix}{operations.pop(name)['url_template']}" for name in blocked}
+        excluded = [case["name"] for case in cases if case["path"] in blocked_paths]
+        cases = [case for case in cases if case["path"] not in blocked_paths]
+        reason = "Explicitly excluded: deployment policy blocks fragments"
+        save("excluded.json", [{"name": name, "reason": reason} for name in excluded])
     else:
         save("excluded.json", [])
     config["subscription"]["subscriptions"] = {
@@ -244,13 +246,21 @@ def cleanup() -> None:
     prefix = manifest["prefix"]
     if not prefix.startswith("sim-parity-"):
         raise ValueError("Refusing to remove a resource outside the fixture namespace")
+    # Regenerate the owned names from the prefix rather than trusting the saved
+    # config, and delete only names inside this run's namespace.
+    config, _ = fixtures(prefix)
+    owned = [("policyFragments", name) for name in config.get("policy_fragments", {})]
+    owned += [("namedValues", name) for name in config.get("named_values", {})]
+    if any(not name.startswith(prefix + "-") for _, name in owned):
+        raise ValueError("Refusing to remove a resource outside the fixture namespace")
     client, base = azure_client()
     with client:
         arm(client, base, "DELETE", f"/subscriptions/{prefix}")
         arm(client, base, "DELETE", f"/apis/{prefix}?deleteRevisions=true")
-        arm(client, base, "DELETE", f"/policyFragments/{prefix}-fragment")
-        arm(client, base, "DELETE", f"/namedValues/{prefix}-greeting")
-    print("Removed Azure fixture API and subscription; networking is managed separately in Terraform")
+        # Fragments reference named values, so they go first.
+        for kind, name in owned:
+            arm(client, base, "DELETE", f"/{kind}/{quote(name, safe='')}")
+    print("Removed Azure fixture API, subscription, fragments and named values; networking is managed in Terraform")
 
 
 def main() -> int:

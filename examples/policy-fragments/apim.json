@@ -1,0 +1,199 @@
+{
+  "allow_anonymous": true,
+  "trace_enabled": true,
+  "trace_allow_unauthenticated": true,
+  "proxy_streaming": false,
+  "tenant_access": {
+    "enabled": true,
+    "primary_key": "local-dev-tenant-key",
+    "secondary_key": "local-dev-tenant-key-secondary"
+  },
+  "policy_fragments_directory": "fragments",
+  "named_values": {
+    "core-rate-limit-enabled": {
+      "value": "true"
+    },
+    "core-rate-limit-default-calls": {
+      "value": "60"
+    },
+    "core-rate-limit-default-period": {
+      "value": "60"
+    },
+    "core-token-budget-enabled": {
+      "value": "true"
+    },
+    "core-token-budget-default-limit": {
+      "value": "100000"
+    },
+    "core-token-budget-default-period": {
+      "value": "day"
+    },
+    "core-content-safety-enabled": {
+      "value": "true"
+    },
+    "core-content-safety-backend-id": {
+      "value": "content-safety"
+    },
+    "core-content-safety-shield-prompt": {
+      "value": "true"
+    },
+    "core-content-safety-default-threshold": {
+      "value": "4"
+    },
+    "core-pii-enabled": {
+      "value": "true"
+    },
+    "core-pii-default-action": {
+      "value": "redact"
+    },
+    "core-pii-default-categories": {
+      "value": "all"
+    },
+    "core-pii-language-endpoint": {
+      "value": "http://aifoundry-simulator:8000"
+    },
+    "core-pii-api-version": {
+      "value": "2026-05-01"
+    },
+    "core-pii-language-key": {
+      "value": "local-foundry-key-alpha",
+      "secret": true
+    }
+  },
+  "products": {
+    "shared-workloads": {
+      "name": "Shared workloads",
+      "description": "Teams sharing one gateway, each API choosing its core fragments",
+      "require_subscription": true
+    }
+  },
+  "subscription": {
+    "required": true,
+    "header_names": [
+      "Ocp-Apim-Subscription-Key",
+      "api-key"
+    ],
+    "subscriptions": {
+      "team-alpha": {
+        "id": "sub-team-alpha",
+        "name": "team-alpha",
+        "keys": {
+          "primary": "team-alpha-key",
+          "secondary": "team-alpha-key-secondary"
+        },
+        "products": [
+          "shared-workloads"
+        ],
+        "created_by": "publisher"
+      },
+      "team-beta": {
+        "id": "sub-team-beta",
+        "name": "team-beta",
+        "keys": {
+          "primary": "team-beta-key",
+          "secondary": "team-beta-key-secondary"
+        },
+        "products": [
+          "shared-workloads"
+        ],
+        "created_by": "publisher"
+      }
+    }
+  },
+  "policies_xml": "<policies><inbound><include-fragment fragment-id=\"core-rate-limit\" /></inbound><backend><forward-request /></backend><outbound /><on-error /></policies>",
+  "backends": {
+    "llm-backend": {
+      "url": "http://llm-backend:8000",
+      "description": "Mock OpenAI-compatible model backend"
+    },
+    "content-safety": {
+      "url": "http://aifoundry-simulator:8000",
+      "description": "Azure AI Content Safety, served by the sibling aifoundry-simulator",
+      "header_credentials": {
+        "api-key": "local-foundry-key-alpha"
+      }
+    }
+  },
+  "apis": {
+    "chat": {
+      "name": "Chat completions with a token budget",
+      "path": "chat",
+      "upstream_base_url": "http://llm-backend:8000",
+      "upstream_path_prefix": "/v1",
+      "backend": "llm-backend",
+      "products": [
+        "shared-workloads"
+      ],
+      "policies_xml": "<policies><inbound><base /><set-variable name=\"core-token-budget-limit\" value=\"@(100)\" /><include-fragment fragment-id=\"core-token-budget-check\" /></inbound><backend><base /></backend><outbound><base /><include-fragment fragment-id=\"core-token-budget-record\" /></outbound><on-error><base /></on-error></policies>",
+      "operations": {
+        "chat-completions": {
+          "name": "Chat Completions",
+          "method": "POST",
+          "url_template": "/chat/completions"
+        },
+        "responses": {
+          "name": "Responses",
+          "method": "POST",
+          "url_template": "/responses"
+        },
+        "messages": {
+          "name": "Messages",
+          "method": "POST",
+          "url_template": "/messages"
+        }
+      }
+    },
+    "orders": {
+      "name": "Orders with a tight rate limit",
+      "path": "orders",
+      "upstream_base_url": "http://llm-backend:8000",
+      "upstream_path_prefix": "",
+      "products": [
+        "shared-workloads"
+      ],
+      "policies_xml": "<policies><inbound><set-variable name=\"core-rate-limit-calls\" value=\"@(3)\" /><set-variable name=\"core-rate-limit-period\" value=\"@(60)\" /><base /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>",
+      "operations": {
+        "health": {
+          "name": "Health",
+          "method": "GET",
+          "url_template": "/health"
+        }
+      }
+    },
+    "internal": {
+      "name": "Internal API that opts out of rate limiting",
+      "path": "internal",
+      "upstream_base_url": "http://llm-backend:8000",
+      "upstream_path_prefix": "",
+      "products": [
+        "shared-workloads"
+      ],
+      "policies_xml": "<policies><inbound><set-variable name=\"core-rate-limit-enabled\" value=\"false\" /><base /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>",
+      "operations": {
+        "health": {
+          "name": "Health",
+          "method": "GET",
+          "url_template": "/health"
+        }
+      }
+    },
+    "assistant": {
+      "name": "Assistant with personal-data redaction and content safety",
+      "path": "assistant",
+      "upstream_base_url": "http://llm-backend:8000",
+      "upstream_path_prefix": "/v1",
+      "backend": "llm-backend",
+      "products": [
+        "shared-workloads"
+      ],
+      "policies_xml": "<policies><inbound><base /><include-fragment fragment-id=\"core-pii\" /><include-fragment fragment-id=\"core-content-safety\" /></inbound><backend><base /></backend><outbound><base /><include-fragment fragment-id=\"core-content-safety\" /></outbound><on-error><base /></on-error></policies>",
+      "operations": {
+        "chat-completions": {
+          "name": "Chat Completions",
+          "method": "POST",
+          "url_template": "/chat/completions"
+        }
+      }
+    }
+  }
+}
