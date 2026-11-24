@@ -18,7 +18,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.61b0",
     "opentelemetry-instrumentation-httpx>=0.61b0",
     "opentelemetry-instrumentation-logging>=0.61b0",
-    "graphql-core>=3.2.7,<3.3",
+    "graphql-core>=3.2.7,<3.4",
 ]
 
 [project.optional-dependencies]
