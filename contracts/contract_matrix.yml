@@ -540,6 +540,21 @@ contracts:
     fixture_or_golden: inline-xml
     assertion_kind: http-json
 
+  - id: POLICY-RETRY
+    status: adapted
+    surface: policy
+    module: app/policy.py
+    doc_refs:
+      - docs/RETRY-POLICY.md
+      - https://learn.microsoft.com/en-us/azure/api-management/retry-policy
+    owner_tests:
+      - tests/test_policy_retry.py::test_retry_runs_children_once_then_while_condition_holds
+      - tests/test_policy_retry.py::test_retry_exponential_interval_is_jittered_and_capped
+      - tests/test_policy_retry.py::test_retry_switches_backend_after_429
+      - tests/test_regional_gateways_example.py::test_retry_fails_over_to_the_other_region_when_the_home_backend_is_down
+    fixture_or_golden: inline-xml
+    assertion_kind: http-json
+
   - id: EXPORT-POSTMAN
     status: supported
     surface: management

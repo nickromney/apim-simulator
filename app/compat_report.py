@@ -28,6 +28,7 @@ SUPPORTED_POLICY_TAGS = {
     "return-response",
     "choose",
     "when",
+    "retry",
     "otherwise",
     "check-header",
     "ip-filter",

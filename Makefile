@@ -498,6 +498,7 @@ compose-config-ci:
 	@$(MAKE) --no-print-directory -C examples/bff compose-config compose-config-series
 	@$(MAKE) --no-print-directory -C examples/architecture-patterns compose-config
 	@$(MAKE) --no-print-directory -C examples/architecture-patterns-extra compose-config
+	@$(MAKE) --no-print-directory -C examples/regional-gateways compose-config
 
 fmt:
 	uv run --extra dev ruff format .
@@ -774,6 +775,7 @@ examples:
 	@printf "  %-18s %-34s %s\n" "BFF" "make -C examples/bff help" "Web/mobile backends and gateways in series"
 	@printf "  %-18s %-34s %s\n" "Gateway patterns" "make -C examples/architecture-patterns help" "Routing, offloading, aggregation, gatekeeper"
 	@printf "  %-18s %-34s %s\n" "Workload patterns" "make -C examples/architecture-patterns-extra help" "Domain adapter, deployment stamps, bulkheads"
+	@printf "  %-18s %-34s %s\n" "Regional gateways" "make -C examples/regional-gateways help" "Deployment.Region routing, retry and regional failover"
 	@printf "  %-18s %-34s %s\n" "Hello API" "make up-hello" "Smallest backend behind APIM"
 	@printf "  %-18s %-34s %s\n" "MCP" "make up-mcp" "MCP server behind APIM"
 	@printf "  %-18s %-34s %s\n" "OIDC" "make up-oidc" "JWT and subscription flows with Keycloak"

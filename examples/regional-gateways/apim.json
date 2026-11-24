@@ -1,0 +1,23 @@
+{
+  "allow_anonymous": true,
+  "trace_enabled": true,
+  "trace_allow_unauthenticated": true,
+  "proxy_max_attempts": 1,
+  "backends": {
+    "orders-eu": {"url": "http://orders-westeurope:8080"},
+    "orders-us": {"url": "http://orders-eastus:8080"}
+  },
+  "policies_xml": "<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-apim-region\" exists-action=\"override\"><value>@(context.Deployment.Region)</value></set-header></outbound><on-error><set-header name=\"x-apim-region\" exists-action=\"override\"><value>@(context.Deployment.Region)</value></set-header></on-error></policies>",
+  "apis": {
+    "orders": {
+      "name": "Orders (regional routing)",
+      "path": "orders",
+      "upstream_base_url": "http://orders-westeurope:8080",
+      "upstream_path_prefix": "/api/orders",
+      "policies_xml": "<policies><inbound><base /><choose><when condition=\"@(&quot;West Europe&quot;.Equals(context.Deployment.Region, StringComparison.OrdinalIgnoreCase))\"><set-variable name=\"home-backend\" value=\"orders-eu\" /><set-variable name=\"other-backend\" value=\"orders-us\" /></when><otherwise><set-variable name=\"home-backend\" value=\"orders-us\" /><set-variable name=\"other-backend\" value=\"orders-eu\" /></otherwise></choose></inbound><backend><retry condition=\"@(context.Response != null &amp;&amp; context.Response.StatusCode == 503)\" count=\"1\" interval=\"0\" first-fast-retry=\"true\"><set-variable name=\"attempt\" value=\"@(context.Variables.GetValueOrDefault&lt;int&gt;(&quot;attempt&quot;, 0) + 1)\" /><set-backend-service backend-id=\"@((int)context.Variables[&quot;attempt&quot;] == 1 ? (string)context.Variables[&quot;home-backend&quot;] : (string)context.Variables[&quot;other-backend&quot;])\" /><forward-request /></retry></backend><outbound><base /><set-header name=\"x-apim-attempts\" exists-action=\"override\"><value>@(context.Variables.GetValueOrDefault&lt;int&gt;(&quot;attempt&quot;, 0).ToString())</value></set-header></outbound><on-error><base /></on-error></policies>",
+      "operations": {
+        "get-order": {"name": "Get order", "method": "GET", "url_template": "/{order_id}"}
+      }
+    }
+  }
+}
