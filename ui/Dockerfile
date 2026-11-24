@@ -5,7 +5,7 @@
 # The official Alpine tag was published 2026-10-22T02:39:08Z; the isolated
 # container proof is pending its seven-day cooldown or a reviewed digest exception.
 ARG UI_BUILD_IMAGE=node:22.23.4-alpine3.24@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
-ARG NGINX_RUNTIME_IMAGE=dhi.io/nginx:1.29.5-debian13
+ARG NGINX_RUNTIME_IMAGE=dhi.io/nginx:1.29.5-debian13@sha256:9683af47feae3bab0031b489ed85f93f340a0f8b83a2edccc9f761dbfce1bffd
 
 FROM ${UI_BUILD_IMAGE} AS builder
 

@@ -41,7 +41,7 @@ services:
 
   lgtm-proxy:
     <<: *lgtm-proxy-hardening
-    image: ${EDGE_PROXY_IMAGE:-dhi.io/nginx:1.29.5-debian13}
+    image: ${EDGE_PROXY_IMAGE:-dhi.io/nginx:1.29.5-debian13@sha256:9683af47feae3bab0031b489ed85f93f340a0f8b83a2edccc9f761dbfce1bffd}
     depends_on:
       lgtm:
         condition: service_started

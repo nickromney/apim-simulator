@@ -180,13 +180,11 @@ override file and set the upstream image refs explicitly:
 cp .env.example .env
 ```
 
-Then uncomment the upstream overrides:
+Then uncomment the upstream overrides. Each is pinned by digest in `.env.example`:
 
-- `PYTHON_BUILD_IMAGE=python:3.13-slim`
-- `PYTHON_RUNTIME_IMAGE=python:3.13-slim`
-- `NGINX_RUNTIME_IMAGE=nginx:1.27-alpine`
-- `EDGE_PROXY_IMAGE=nginx:1.27-alpine`
-- `SMOKE_RUNNER_IMAGE=python:3.13-slim`
+- `PYTHON_BUILD_IMAGE` and `PYTHON_RUNTIME_IMAGE`: `python:3.13-slim`
+- `NGINX_RUNTIME_IMAGE` and `EDGE_PROXY_IMAGE`: `nginx:1.29.5-alpine`
+- `SMOKE_RUNNER_IMAGE`: `python:3.13-slim`
 
 If you stay on the default path, authenticate once with:
 

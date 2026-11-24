@@ -2,8 +2,8 @@
 # The uv and deps stages match the gateway's Dockerfile at the repository root
 # line for line, so BuildKit resolves the lockfile once and every Python image
 # shares one dependency layer. Keep them in step when you change either file.
-ARG PYTHON_BUILD_IMAGE=dhi.io/python:3.13-debian13-dev
-ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13
+ARG PYTHON_BUILD_IMAGE=dhi.io/python:3.13-debian13-dev@sha256:ea5fd1cae2463b48c7627577584e582ce3d6d99ba3789723051df9a707f658b0
+ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13@sha256:1fe1883f0c28d90b7364e6f069437801c9e8f150c886f02f74bfcefc9ea14591
 
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 

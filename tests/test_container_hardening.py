@@ -114,7 +114,7 @@ def test_non_dhi_opt_out_is_documented() -> None:
     env_example = (REPO_ROOT / ".env.example").read_text()
     assert "PYTHON_BUILD_IMAGE=python:3.13-slim" in env_example
     assert "PYTHON_RUNTIME_IMAGE=python:3.13-slim" in env_example
-    assert "NGINX_RUNTIME_IMAGE=nginx:1.27-alpine" in env_example
+    assert "NGINX_RUNTIME_IMAGE=nginx:1.29.5-alpine" in env_example
 
 
 def test_prereqs_requires_mkcert() -> None:
@@ -190,7 +190,7 @@ def test_ci_compose_jobs_auto_detect_dhi_auth() -> None:
         run_script = step["run"]
         assert "scripts/check_docker_registry_auth.py" in run_script
         assert "PYTHON_BUILD_IMAGE=python:3.13-slim" in run_script
-        assert "NGINX_RUNTIME_IMAGE=nginx:1.27-alpine" in run_script
+        assert "NGINX_RUNTIME_IMAGE=nginx:1.29.5-alpine" in run_script
 
     private_smoke = next(step for step in ci["jobs"]["compose-smokes"]["steps"] if step["name"] == "Private-mode smoke")
     assert "make check-private-port-clear" in private_smoke["run"]

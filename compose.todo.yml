@@ -1,6 +1,6 @@
 x-python-build-args: &python-build-args
-  PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev}
-  PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13}
+  PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev@sha256:ea5fd1cae2463b48c7627577584e582ce3d6d99ba3789723051df9a707f658b0}
+  PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13@sha256:1fe1883f0c28d90b7364e6f069437801c9e8f150c886f02f74bfcefc9ea14591}
   APP_UID: ${APP_UID:-65532}
   APP_GID: ${APP_GID:-65532}
 
@@ -100,7 +100,7 @@ services:
       dockerfile: Dockerfile
       args:
         TODO_FRONTEND_BUILD_IMAGE: ${TODO_FRONTEND_BUILD_IMAGE:-node:22.23.4-alpine3.24@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914}
-        NGINX_RUNTIME_IMAGE: ${NGINX_RUNTIME_IMAGE:-dhi.io/nginx:1.29.5-debian13}
+        NGINX_RUNTIME_IMAGE: ${NGINX_RUNTIME_IMAGE:-dhi.io/nginx:1.29.5-debian13@sha256:9683af47feae3bab0031b489ed85f93f340a0f8b83a2edccc9f761dbfce1bffd}
         NGINX_UID: ${NGINX_UID:-101}
         NGINX_GID: ${NGINX_GID:-101}
     image: apim-simulator-todo-frontend:latest
