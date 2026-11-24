@@ -714,4 +714,14 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     return app
 
 
-app = create_app()
+def _create_process_app() -> FastAPI:
+    """The app uvicorn serves: a management-gateway router when the flag is on, else the gateway."""
+    from app.management_gateway import ManagementGatewaySettings, create_management_gateway_app
+
+    settings = ManagementGatewaySettings.from_env()
+    if settings is not None:
+        return create_management_gateway_app(settings)
+    return create_app()
+
+
+app = _create_process_app()
