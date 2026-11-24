@@ -1,7 +1,8 @@
 # APIM fidelity contracts
 
 Additional verified subsets: [Postman collection export](POSTMAN-EXPORT.md),
-[set-method policy](SET-METHOD.md) and [retry policy](RETRY-POLICY.md). Their owner tests and primary references are
+[set-method policy](SET-METHOD.md), [retry policy](RETRY-POLICY.md) and
+[XML and JSON transforms](XML-JSON-TRANSFORMS.md). Their owner tests and primary references are
 listed in `contracts/contract_matrix.yml`.
 
 This project implements a narrow, testable subset of Azure API Management. A

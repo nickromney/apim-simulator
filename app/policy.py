@@ -6422,6 +6422,8 @@ _POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
     "log-to-eventhub": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "send-one-way-request": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "find-and-replace": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "xml-to-json": frozenset({"inbound", "outbound", "on-error"}),
+    "json-to-xml": frozenset({"inbound", "outbound", "on-error"}),
     "cross-domain": frozenset({"inbound"}),
     "include-fragment": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "set-header": frozenset({"inbound", "backend", "outbound", "on-error"}),
@@ -6532,12 +6534,14 @@ def _parse_extension(el, path):
     from app.policy_content_safety import parse_content_safety_policy
     from app.policy_messaging import parse_messaging_policy
     from app.policy_transforms import parse_transform_policy
+    from app.policy_xml_json import parse_xml_json_policy
 
     try:
         node = (
             parse_certificate_policy(el)
             or parse_messaging_policy(el)
             or parse_transform_policy(el)
+            or parse_xml_json_policy(el)
             or parse_content_safety_policy(el)
         )
     except ValueError as exc:
@@ -6730,12 +6734,15 @@ def _reads_response_body(step: PolicyNode) -> bool:
     from app.policy_content_safety import LlmContentSafety
     from app.policy_messaging import LogToEventHub, SendOneWayRequest, SendServiceBusMessage
     from app.policy_transforms import FindAndReplace
+    from app.policy_xml_json import JsonToXml, XmlToJson
 
     return isinstance(
         step,
         SetBody
         | ValidateContent
         | FindAndReplace
+        | XmlToJson
+        | JsonToXml
         | LogToEventHub
         | SendServiceBusMessage
         | SendOneWayRequest

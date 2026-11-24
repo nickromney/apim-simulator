@@ -25,7 +25,7 @@ teach the wrong thing, or the feature belongs to another project.
 | 12 | Route by `context.Deployment.Region` to the regional backend | Covered | [Regional gateways](../examples/regional-gateways/README.md) runs Microsoft's pattern end to end |
 | 13 | Callouts with token caching, traffic mirroring, Event Hubs | Covered | `send-request`, `cache-store-value`, `send-one-way-request`, `log-to-eventhub` |
 | 13 | Policy categories: rate limits, auth, validation, routing, caching, transformation, cross-domain | Covered | Rate/quota (by key), `validate-*`, `cors`, `cross-domain`, `cache-*`, `set-*`, `find-and-replace` |
-| 13 | `json-to-xml`, `xml-to-json`, `xsl-transform` | Gap | Not implemented |
+| 13 | `json-to-xml`, `xml-to-json` | Adapted | Added after the Masterclass review: [XML-JSON-TRANSFORMS.md](XML-JSON-TRANSFORMS.md). `xsl-transform` is not implemented |
 | 13 | `choose` and C# policy expressions, dynamic rate limiting | Covered | `@(...)`/`@{...}` evaluator; `rate-limit-by-key` with expressions |
 | 13 | Copilot authoring | Out of scope | Editor feature |
 | 14 | Token limits and PTU-to-pay-as-you-go spillover | Covered | `llm-token-limit`, `llm-emit-token-metric`, priority backend pools ([AI-GATEWAY.md](AI-GATEWAY.md)) |

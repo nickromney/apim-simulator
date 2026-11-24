@@ -29,6 +29,8 @@ SUPPORTED_POLICY_TAGS = {
     "choose",
     "when",
     "retry",
+    "xml-to-json",
+    "json-to-xml",
     "otherwise",
     "check-header",
     "ip-filter",

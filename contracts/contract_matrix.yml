@@ -555,6 +555,21 @@ contracts:
     fixture_or_golden: inline-xml
     assertion_kind: http-json
 
+  - id: POLICY-XML-JSON
+    status: adapted
+    surface: policy
+    module: app/policy_xml_json.py
+    doc_refs:
+      - docs/XML-JSON-TRANSFORMS.md
+      - https://learn.microsoft.com/en-us/azure/api-management/xml-to-json-policy
+      - https://learn.microsoft.com/en-us/azure/api-management/json-to-xml-policy
+    owner_tests:
+      - tests/test_policy_xml_json.py::test_xml_to_json_direct_maps_elements_attributes_text_and_repeats
+      - tests/test_policy_xml_json.py::test_json_to_xml_matches_microsoft_soap_example
+      - tests/test_policy_xml_json.py::test_gateway_converts_xml_backend_response_to_json
+    fixture_or_golden: inline-xml
+    assertion_kind: http-json
+
   - id: EXPORT-POSTMAN
     status: supported
     surface: management
