@@ -11,7 +11,13 @@ pre-commit:
       glob: "*.{yaml,yml}"
       run: scripts/hooks/check-staged-yaml.sh --execute {staged_files}
 
+# A script, not a command: lefthook skips pre-push commands and jobs when it
+# finds no "push files", which happens for any push of a branch that is not
+# checked out. See .lefthook/pre-push/local-ci.sh.
 pre-push:
-  commands:
-    local-ci:
-      run: scripts/hooks/run-local-ci.sh --execute
+  scripts:
+    "local-ci.sh":
+      runner: bash
+      use_stdin: true
+      env:
+        APIM_SIMULATOR_PRE_PUSH_HOOK: "1"

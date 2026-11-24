@@ -21,6 +21,7 @@ Use this file for durable, concise guidance for coding agents in this repository
 - Verify Docker smoke through published localhost ports; in-container checks can miss inaccessible host ports.
 - To prove gateway, policy or management behaviour on a running stack, use `skills/verify-apim-simulator/SKILL.md` (slot-7 compose project, recorded requests, `--execute` interface; `make verify` runs the full proven cycle).
 - Public examples, reports, and docs must use placeholders or environment inputs for real deployment identifiers, including storage accounts, subscriptions, resource names, endpoints, and private IPs.
+- Validate locally, not in GitHub CI: `make local-ci` (the lefthook pre-push gate) must pass on the commit being pushed. A lefthook `(skip)` on pre-push is a gate failure to investigate.
 - Add confirmed project-specific commands, conventions, and constraints here when they become durable.
 
 ## Codex workflow
