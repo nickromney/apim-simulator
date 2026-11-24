@@ -88,3 +88,12 @@ def test_every_dependabot_update_waits_seven_days() -> None:
     assert {name: u.get("cooldown", {}).get("default-days") for name, u in ecosystems.items()} == dict.fromkeys(
         ecosystems, 7
     )
+
+
+def test_dependabot_leaves_python_and_npm_major_versions_to_a_person() -> None:
+    config = yaml.safe_load((REPO_ROOT / ".github/dependabot.yml").read_text())
+    ecosystems = {update["package-ecosystem"]: update for update in config["updates"]}
+    ignore_majors = {"dependency-name": "*", "update-types": ["version-update:semver-major"]}
+
+    for name in ("uv", "npm"):
+        assert ignore_majors in ecosystems[name].get("ignore", []), name
