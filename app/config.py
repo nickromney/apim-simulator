@@ -422,6 +422,8 @@ class DiagnosticConfig(BaseModel):
     sampling_percentage: float | None = None
     verbosity: str | None = None
     operation_name_format: str | None = None
+    # Set for an API-scope diagnostic, which replaces the service-scope one for that API.
+    api_id: str | None = None
 
 
 class UserConfig(BaseModel):

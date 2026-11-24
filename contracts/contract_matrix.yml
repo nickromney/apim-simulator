@@ -570,6 +570,20 @@ contracts:
     fixture_or_golden: inline-xml
     assertion_kind: http-json
 
+  - id: OBS-DIAGNOSTIC-TELEMETRY
+    status: adapted
+    surface: management
+    module: app/diagnostic_logging.py
+    doc_refs:
+      - docs/DIAGNOSTIC-LOGGING.md
+      - https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-app-insights
+    owner_tests:
+      - tests/test_diagnostic_logging.py::test_diagnostic_logs_selected_headers_bodies_and_masks_query
+      - tests/test_diagnostic_logging.py::test_sampling_drops_requests_but_always_log_errors_keeps_failures
+      - tests/test_diagnostic_logging.py::test_api_scope_diagnostic_overrides_the_service_one
+    fixture_or_golden: inline-json
+    assertion_kind: http-json
+
   - id: EXPORT-POSTMAN
     status: supported
     surface: management

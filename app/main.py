@@ -323,6 +323,7 @@ def _install_request_state(request: Request, correlation_id: str) -> None:
     request.state.apim_upstream_attempts = 0
     request.state.apim_trace_requested = False
     request.state.apim_result_reason = None
+    request.state.apim_policy_variables = {}
 
 
 def _reset_runtime_stores(app: FastAPI) -> None:
@@ -492,7 +493,10 @@ def _add_observability_middleware(app: FastAPI, telemetry: ObservabilityRuntime)
             duration_seconds = time.perf_counter() - start
             _record_request_observation(request, status_code=response.status_code, duration_seconds=duration_seconds)
             request.app.state.monitoring_store.record(
-                request, status_code=response.status_code, duration_seconds=duration_seconds
+                request,
+                status_code=response.status_code,
+                duration_seconds=duration_seconds,
+                response_headers=response.headers,
             )
             telemetry.logger.info(
                 "request completed",

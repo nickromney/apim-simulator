@@ -232,11 +232,12 @@ rows retain the older labels so the matrix remains easy to scan.
 | Trace lookup | Yes | - | `/apim/trace/{id}` |
 | Trace summaries | Yes | - | `/apim/management/traces` |
 | Logger resources | Partial | `azurerm_api_management_logger` | Imported and exposed read-only; sink configuration is descriptive only |
-| Diagnostic resources | Partial | `azurerm_api_management_diagnostic` | Imported and exposed read-only; sampling and logger routing are descriptive only |
+| Diagnostic resources | Adapted | `azurerm_api_management_diagnostic`, `azurerm_api_management_api_diagnostic` | `applicationinsights` and `azuremonitor` diagnostics at service or API scope, imported or written through `/apim/management/diagnostics` and `/apim/management/apis/{api_id}/diagnostics`. Sampling, always-log-errors, client IP, correlation protocol, verbosity, headers and body bytes at the four stages, and masking shape local telemetry. See [diagnostic logging](DIAGNOSTIC-LOGGING.md) |
 | Forwarded-header trace fields | Yes | - | `incoming_host`, `forwarded_host`, `forwarded_proto`, `forwarded_for`, `client_ip`, `upstream_url` |
 | Policy execution trace | Yes | - | Includes policy steps, variable writes, JWT validation, send-request activity, selected backend, cache/throttle actions |
-| Application Insights | No | `azurerm_api_management.application_insights` | Use external APM |
-| Diagnostic logs | No | `azurerm_api_management_diagnostic` | Use container logs and OTEL for actual runtime logging |
+| Application Insights | Adapted | `azurerm_api_management.application_insights` | Request telemetry shaped by the diagnostic goes to an in-memory store at `/apim/management/monitoring/telemetry`, not to Application Insights. Use the OTEL stacks for dashboards |
+| Diagnostic logs | Adapted | `azurerm_api_management_diagnostic` | The `azuremonitor` diagnostic records to the same local telemetry store with `destination: azuremonitor`. Container logs and OTEL remain the runtime logs |
+| `trace` policy | Yes | - | `source`, `severity` (`verbose`, `information`, `error`), `message` and `metadata`, in every section. Messages appear in the request trace, and in telemetry when at or above the diagnostic's verbosity. See [trace](https://learn.microsoft.com/en-us/azure/api-management/trace-policy) |
 
 ## Named Values / Secrets
 

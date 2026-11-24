@@ -33,6 +33,7 @@ from app.backend_pool import (
     select_pool_member,
 )
 from app.config import MANAGED_GATEWAY_ID, BackendConfig, GatewayConfig, RouteConfig, SubscriptionScope
+from app.diagnostic_logging import capture_stage
 from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
@@ -493,6 +494,8 @@ def _policy_response(
     policy_req: PolicyRequest,
     policy_runtime: PolicyRuntime,
 ) -> Response:
+    # Diagnostic logging reads the body a policy answered with.
+    policy_req.variables["_diagnostic_response_body"] = body
     finalize_deferred_actions(
         PolicyRequest(
             method=policy_req.method,
@@ -1629,6 +1632,7 @@ def _uncached_response(
             },
         )
 
+    request.state.apim_policy_variables.setdefault("_diagnostic_response_body", None if streaming else content)
     if streaming:
         response = StreamingResponse(
             upstream_response.aiter_bytes(),
@@ -2369,6 +2373,8 @@ async def execute_gateway_request(request: Request) -> Response:
     request.state.apim_api_id = route.api_id
 
     body = await _read_body_within_limit(request, cfg)
+    capture_stage(request.state, cfg, "frontend_request", headers=list(request.headers.items()), body=body)
+    request.state.apim_operation_id = route.operation_id
     correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
     headers = _initial_upstream_headers(request, auth, cfg, correlation_id)
     # Debug credentials authorize gateway tracing, not the backend.
@@ -2393,6 +2399,7 @@ async def execute_gateway_request(request: Request) -> Response:
         subscription_groups=subscription_groups,
     )
 
+    request.state.apim_policy_variables = policy_req.variables
     trace = _TraceContext.read(request, cfg, route.api_id)
     trace_requested, trace_id, trace_collector = trace.requested, trace.trace_id, trace.collector
     client: httpx.AsyncClient = request.app.state.http_client
@@ -2547,6 +2554,7 @@ async def execute_gateway_request(request: Request) -> Response:
         policy_runtime=policy_runtime,
         request=request,
     )
+    capture_stage(request.state, cfg, "backend_request", headers=policy_req.headers, body=policy_req.body)
     upstream_response = attempt_result.response
     attempts_used = attempt_result.attempts
     last_exc = attempt_result.error
@@ -2585,6 +2593,13 @@ async def execute_gateway_request(request: Request) -> Response:
         cache_key=cache_key,
         policy_req=policy_req,
         policy_response_cache_active=policy_response_cache_active,
+    )
+    capture_stage(
+        request.state,
+        cfg,
+        "backend_response",
+        headers=upstream.headers,
+        body=upstream.content if upstream.buffered else None,
     )
     response_headers, media_type, content = upstream.headers, upstream.media_type, upstream.content
     upstream_status_code = upstream.status_code

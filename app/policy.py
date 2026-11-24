@@ -6423,6 +6423,7 @@ _POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
     "send-one-way-request": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "find-and-replace": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "xml-to-json": frozenset({"inbound", "outbound", "on-error"}),
+    "trace": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "json-to-xml": frozenset({"inbound", "outbound", "on-error"}),
     "cross-domain": frozenset({"inbound"}),
     "include-fragment": frozenset({"inbound", "backend", "outbound", "on-error"}),
@@ -6530,6 +6531,7 @@ def _parse_node(
 
 
 def _parse_extension(el, path):
+    from app.diagnostic_logging import parse_trace_policy
     from app.policy_certificates import parse_certificate_policy
     from app.policy_content_safety import parse_content_safety_policy
     from app.policy_messaging import parse_messaging_policy
@@ -6542,6 +6544,7 @@ def _parse_extension(el, path):
             or parse_messaging_policy(el)
             or parse_transform_policy(el)
             or parse_xml_json_policy(el)
+            or parse_trace_policy(el)
             or parse_content_safety_policy(el)
         )
     except ValueError as exc:
