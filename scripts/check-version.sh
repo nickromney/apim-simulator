@@ -94,7 +94,7 @@ else
   WORKFLOW_FILES="${ROOT_DIR}/.github/workflows/ci.yml ${ROOT_DIR}/.github/workflows/release.yml"
 fi
 COMPOSE_FILES="${CHECK_VERSION_COMPOSE_FILES:-${ROOT_DIR}/compose.otel.yml ${ROOT_DIR}/compose.todo.otel.yml}"
-DOCKERFILES="${CHECK_VERSION_DOCKERFILES:-${ROOT_DIR}/Dockerfile ${ROOT_DIR}/examples/hello-api/Dockerfile ${ROOT_DIR}/examples/todo-app/api-fastapi-container-app/Dockerfile ${ROOT_DIR}/examples/mcp-server/Dockerfile}"
+DOCKERFILES="${CHECK_VERSION_DOCKERFILES:-${ROOT_DIR}/Dockerfile ${ROOT_DIR}/examples/hello-api/Dockerfile ${ROOT_DIR}/examples/todo-app/api-fastapi-container-app/Dockerfile ${ROOT_DIR}/examples/mcp-server/Dockerfile ${ROOT_DIR}/examples/llm-backend/Dockerfile ${ROOT_DIR}/examples/bff/Dockerfile ${ROOT_DIR}/examples/architecture-patterns-extra/Dockerfile}"
 CHECK_VERSION_SKIP_UPSTREAM="${CHECK_VERSION_SKIP_UPSTREAM:-0}"
 CHECK_VERSION_GITHUB_API_BASE="${CHECK_VERSION_GITHUB_API_BASE:-https://api.github.com}"
 CHECK_VERSION_DOCKER_HUB_BASE="${CHECK_VERSION_DOCKER_HUB_BASE:-https://hub.docker.com/v2}"
@@ -453,7 +453,7 @@ import re
 import sys
 from pathlib import Path
 
-pattern = re.compile(r'COPY --from=ghcr\.io/astral-sh/uv:([^\s]+) /uv /usr/local/bin/uv')
+pattern = re.compile(r'^FROM ghcr\.io/astral-sh/uv:([^\s@]+)(?:@sha256:[0-9a-f]{64})?\s+AS uv$', re.MULTILINE)
 seen = set()
 for raw_path in sys.argv[1:]:
     path = Path(raw_path)
