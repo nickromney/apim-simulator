@@ -51,14 +51,19 @@ def _assert_node_security_floor_policy(checker: Path) -> None:
 
 PINNED_LGTM_IMAGE = "grafana/otel-lgtm:0.24.0@sha256:a7fbde2893d86ae4807701bc482736243e584eb90b5faa273d291ffff2a1374f"
 PINNED_NODE_BUILDER = "node:22.23.4-alpine3.24@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914"
-PINNED_ACTION_REFS = {
-    "actions/checkout": "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
-    "actions/setup-python": "a309ff8b426b58ec0e2a45f0f869d46889d02405",
-    "astral-sh/setup-uv": "cec208311dfd045dd5311c1add060b2062131d57",
-    "actions/setup-node": "53b83947a5a98c8d113130e565377fae1a50d02f",
-    "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
-    "gitleaks/gitleaks-action": "ff98106e4c7b2bc287b24eaf42907196329070c7",
-}
+# Each action must be pinned to a full commit SHA, and only these actions may
+# be used. Which SHA is up to Dependabot: the tests do not repeat it, so an
+# action bump does not need a test change.
+CI_ACTIONS = frozenset(
+    {
+        "actions/checkout",
+        "actions/setup-python",
+        "astral-sh/setup-uv",
+        "actions/setup-node",
+        "actions/upload-artifact",
+        "gitleaks/gitleaks-action",
+    }
+)
 
 
 def _load_yaml(relative_path: str) -> dict:
@@ -216,17 +221,15 @@ def test_ci_uses_pinned_action_shas_and_runs_gitleaks() -> None:
             action, ref = uses.split("@", 1)
             seen_actions.add(action)
             assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{uses} is not commit-pinned"
-            if action in PINNED_ACTION_REFS:
-                assert ref == PINNED_ACTION_REFS[action]
 
-    assert seen_actions == set(PINNED_ACTION_REFS)
+    assert seen_actions == CI_ACTIONS
 
     secret_scan = ci["jobs"]["secret-scan"]
     checkout = _workflow_step_by_name(secret_scan, "Checkout")
     assert checkout["with"]["fetch-depth"] == 0
 
     gitleaks = _workflow_step_by_name(secret_scan, "Run gitleaks")
-    assert gitleaks["uses"] == f"gitleaks/gitleaks-action@{PINNED_ACTION_REFS['gitleaks/gitleaks-action']}"
+    assert re.fullmatch(r"gitleaks/gitleaks-action@[0-9a-f]{40}", gitleaks["uses"])
     assert gitleaks["env"]["GITLEAKS_CONFIG"] == ".gitleaks.toml"
     assert gitleaks["env"]["GITLEAKS_ENABLE_COMMENTS"] == "false"
     assert gitleaks["env"]["GITLEAKS_ENABLE_UPLOAD_ARTIFACT"] == "false"
