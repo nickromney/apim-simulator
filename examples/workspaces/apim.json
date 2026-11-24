@@ -1,0 +1,92 @@
+{
+  "allow_anonymous": true,
+  "trace_enabled": true,
+  "trace_allow_unauthenticated": true,
+  "tenant_access": {
+    "enabled": true,
+    "primary_key": "local-dev-tenant-key",
+    "secondary_key": "local-dev-tenant-key-secondary"
+  },
+  "policies_xml": "<policies><inbound /><backend><forward-request /></backend><outbound><set-header name=\"x-apim-gateway\" exists-action=\"override\"><value>@(context.Deployment.Gateway.Id)</value></set-header></outbound></policies>",
+  "workspace_gateways": {
+    "orders-gw": {
+      "display_name": "Orders workspace gateway",
+      "host_names": ["orders-gw.gateway.localhost"]
+    }
+  },
+  "workspaces": {
+    "orders": {
+      "display_name": "Orders team",
+      "description": "Served only by its own workspace gateway.",
+      "gateways": ["orders-gw"],
+      "policies_xml": "<policies><inbound><base /></inbound><backend><base /></backend><outbound><base /><set-header name=\"x-apim-workspace\" exists-action=\"override\"><value>{{orders-team}}</value></set-header></outbound></policies>"
+    },
+    "payroll": {
+      "display_name": "Payroll team",
+      "description": "Shares the managed gateway with the service-level APIs.",
+      "gateways": ["managed"],
+      "policies_xml": "<policies><inbound><base /></inbound><backend><base /></backend><outbound><base /><set-header name=\"x-apim-workspace\" exists-action=\"override\"><value>@(context.Workspace.Name)</value></set-header></outbound></policies>"
+    }
+  },
+  "named_values": {
+    "orders-team": {
+      "value": "Orders team",
+      "workspace": "orders"
+    }
+  },
+  "products": {
+    "orders-starter": {
+      "name": "Orders starter",
+      "description": "Subscription-keyed access to the Orders workspace API.",
+      "require_subscription": true,
+      "workspace": "orders"
+    }
+  },
+  "subscription": {
+    "required": true,
+    "subscriptions": {
+      "orders-key": {
+        "id": "orders-key",
+        "name": "Orders team key",
+        "keys": {
+          "primary": "orders-primary-key",
+          "secondary": "orders-secondary-key"
+        },
+        "products": ["orders-starter"],
+        "workspace": "orders"
+      }
+    }
+  },
+  "apis": {
+    "status": {
+      "name": "Service status",
+      "path": "status",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "operations": {
+        "echo": { "name": "Echo", "method": "GET", "url_template": "/echo" }
+      }
+    },
+    "orders": {
+      "name": "Orders",
+      "path": "orders",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "products": ["orders-starter"],
+      "workspace": "orders",
+      "operations": {
+        "echo": { "name": "Echo", "method": "GET", "url_template": "/echo" }
+      }
+    },
+    "payroll": {
+      "name": "Payroll",
+      "path": "payroll",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "workspace": "payroll",
+      "operations": {
+        "echo": { "name": "Echo", "method": "GET", "url_template": "/echo" }
+      }
+    }
+  }
+}

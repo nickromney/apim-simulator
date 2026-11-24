@@ -32,11 +32,25 @@ def _operation_groups(cfg: GatewayConfig, scope_name: str, product_id: str | Non
     ]
 
 
+def _workspace_documents(cfg: GatewayConfig, scope_type: str, scope_name: str, target: object) -> list[str]:
+    """The owning workspace's policy, which sits between global and product scope."""
+    if scope_type in {"gateway", "workspace", "route"}:
+        return []
+    if scope_type == "operation":
+        workspace_id = cfg.apis[scope_name.partition(":")[0]].workspace
+    else:
+        workspace_id = getattr(target, "workspace", None)
+    workspace = cfg.workspaces.get(workspace_id) if workspace_id else None
+    return policy_xml_documents_for_target(workspace) if workspace is not None else []
+
+
 def _child_groups(
     cfg: GatewayConfig, scope_type: str, scope_name: str, target: object, product_id: str | None
 ) -> list[list[str]]:
     if scope_type == "gateway":
         return []
+    if scope_type == "workspace":
+        return [policy_xml_documents_for_target(target)]
     if scope_type == "operation":
         return _operation_groups(cfg, scope_name, product_id)
     if scope_type == "product":
@@ -59,9 +73,10 @@ def inspect_effective_policy(
     product policy. Named-value references remain authored references here.
     """
     global_documents = policy_xml_documents_for_target(cfg) or [DEFAULT_GLOBAL_POLICY_XML]
+    workspace_documents = _workspace_documents(cfg, scope_type.lower(), scope_name, target)
     groups = _child_groups(cfg, scope_type.lower(), scope_name, target, product_id)
     try:
-        xml = effective_policy_xml(global_documents, *groups)
+        xml = effective_policy_xml(global_documents, workspace_documents, *groups)
         parse_policies_xml(xml, policy_fragments=cfg.policy_fragments, gateway_config=cfg)
         return expand_policy_fragments_xml(xml, cfg.policy_fragments, cfg)
     except (ValueError, HTTPException) as exc:

@@ -38,6 +38,7 @@ from app.named_values import (
 )
 from app.policy_errors import element_name
 from app.throttling_config import TokenBucket, token_bucket
+from app.workspaces import backend_visible_to_api
 
 
 @dataclass(frozen=True)
@@ -4585,8 +4586,13 @@ class SetBackendService(PolicyNode):
         if resolved_backend_id:
             req.variables["selected_backend_id"] = resolved_backend_id
             if runtime and runtime.gateway_config:
-                backend = runtime.gateway_config.backends.get(resolved_backend_id)
-                if backend is None:
+                gateway_config = runtime.gateway_config
+                backend = gateway_config.backends.get(resolved_backend_id)
+                # A workspace backend is invisible outside its workspace, which
+                # also covers backend IDs chosen by a policy expression.
+                if backend is None or not backend_visible_to_api(
+                    gateway_config, resolved_backend_id, str(req.variables.get("api_id") or "") or None
+                ):
                     raise HTTPException(status_code=500, detail=f"Unknown backend: {resolved_backend_id}")
                 req.variables["selected_backend_url"] = backend.url
             if runtime and runtime.trace is not None:

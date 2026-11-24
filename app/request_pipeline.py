@@ -32,7 +32,7 @@ from app.backend_pool import (
     render_backend_value,
     select_pool_member,
 )
-from app.config import BackendConfig, GatewayConfig, RouteConfig, SubscriptionScope
+from app.config import MANAGED_GATEWAY_ID, BackendConfig, GatewayConfig, RouteConfig, SubscriptionScope
 from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
@@ -53,6 +53,7 @@ from app.policy import (
 from app.policy_errors import build_last_error, exception_last_error, response_last_error
 from app.proxy import apply_claim_headers, build_upstream_headers, hop_by_hop_headers, resolve_route
 from app.security import AuthContext, authenticate_request, subscription_bypassed, validate_client_certificate
+from app.workspaces import route_workspace, subscription_workspace, workspaces_enabled
 
 APIM_ROUTE_NAME_ATTR = "apim.route.name"
 APIM_CACHE_RESULT_ATTR = "apim.cache.result"
@@ -138,18 +139,26 @@ def effective_product_id_for_call(
     return allowed_products[0]
 
 
-def _subscription_scope_applies(route: RouteConfig, auth: AuthContext, allowed_products: list[str]) -> bool:
+def _subscription_scope_applies(
+    route: RouteConfig, auth: AuthContext, allowed_products: list[str], cfg: GatewayConfig | None = None
+) -> bool:
     """Whether an accepted subscription covers this API or product.
 
     API Management accepts API-, all-APIs-, and service-scoped subscriptions
     without a product association, and does not apply product policy for them:
     https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    An all-APIs subscription covers the APIs of its own owner only: a workspace
+    subscription its workspace's APIs, a service-level one the service-level APIs.
     """
     if auth.subscription is None:
         return False
     if auth.subscription_scope == SubscriptionScope.Api:
         return auth.subscription_api_id == route.api_id
-    if auth.subscription_scope in {SubscriptionScope.AllApis, SubscriptionScope.Service}:
+    if auth.subscription_scope == SubscriptionScope.AllApis:
+        if cfg is None or not workspaces_enabled(cfg):
+            return True
+        return subscription_workspace(cfg, auth.subscription.id) == route_workspace(cfg, route)
+    if auth.subscription_scope == SubscriptionScope.Service:
         return True
     if auth.subscription_scope == SubscriptionScope.Product:
         return bool(set(allowed_products).intersection(auth.subscription_products))
@@ -171,7 +180,7 @@ def _enforce_non_product_scope(
     non_product_scopes = {SubscriptionScope.Api, SubscriptionScope.AllApis, SubscriptionScope.Service}
     if auth.subscription is None or auth.subscription_scope not in non_product_scopes:
         return False
-    if not _subscription_scope_applies(route, auth, allowed_products):
+    if not _subscription_scope_applies(route, auth, allowed_products, cfg):
         raise subscription_key_error(request, cfg, route, missing=False)
     return True
 
@@ -211,7 +220,7 @@ def _reject_key_scoped_elsewhere(
         return
     if auth.subscription_scope is None and not auth.subscription_products:
         return
-    if not _subscription_scope_applies(route, auth, allowed_products):
+    if not _subscription_scope_applies(route, auth, allowed_products, cfg):
         raise subscription_key_error(request, cfg, route, missing=False)
 
 
@@ -1590,6 +1599,16 @@ class _ForwardingContext:
         }
 
 
+def _expression_workspace(cfg: GatewayConfig, api: Any) -> dict[str, str] | None:
+    """context.Workspace for a workspace API; service-level APIs have none."""
+    workspace_id = getattr(api, "workspace", None)
+    if not workspace_id:
+        return None
+    workspace = cfg.workspaces.get(workspace_id)
+    name = workspace.display_name if workspace is not None and workspace.display_name else workspace_id
+    return {"Id": workspace_id, "Name": name}
+
+
 def _build_policy_request(
     *,
     cfg: GatewayConfig,
@@ -1616,6 +1635,7 @@ def _build_policy_request(
         upstream_query.set_list(name, upstream_query.get_list(name, []) + [value])
     api = cfg.apis.get(route.api_id or "")
     operation = api.operations.get(route.operation_id or "") if api is not None else None
+    gateway_id = getattr(resolved, "gateway_id", MANAGED_GATEWAY_ID)
     user = cfg.users.get((subscription_owner or "").removeprefix("portal:"))
     product = cfg.products.get(effective_product_id)
     expression_headers = headers.copy()
@@ -1668,7 +1688,11 @@ def _build_policy_request(
             },
             "_expression_product": {"Id": effective_product_id, "Name": product.name} if product else None,
             "location": cfg.service.region,
-            "gateway_id": "local",
+            # A workspace gateway reports its own ID; the managed gateway keeps the
+            # simulator's historical "local" value.
+            "gateway_id": gateway_id if gateway_id != MANAGED_GATEWAY_ID else "local",
+            "gateway_is_managed": gateway_id == MANAGED_GATEWAY_ID,
+            "_expression_workspace": _expression_workspace(cfg, api),
             "service_id": cfg.service.name,
             "service_name": cfg.service.name,
             "request_id": str(uuid.uuid4()),

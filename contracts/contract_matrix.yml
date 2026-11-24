@@ -552,3 +552,20 @@ contracts:
       - tests/test_postman_export.py::test_export_scoped_readers_cannot_export_other_apis*
     fixture_or_golden: inline-json
     assertion_kind: http-json
+
+  - id: WORKSPACE-ISOLATION
+    status: adapted
+    surface: gateway
+    module: app/workspaces.py
+    doc_refs:
+      - docs/WORKSPACES.md
+      - docs/CAPABILITY-MATRIX.md#management-plane
+      - https://learn.microsoft.com/en-us/azure/api-management/workspaces-overview
+    owner_tests:
+      - tests/test_workspaces.py::test_each_gateway_serves_only_its_workspaces*
+      - tests/test_workspaces.py::test_workspace_policy_runs_between_global_and_api
+      - tests/test_workspaces.py::test_cross_workspace_references_are_rejected*
+      - tests/test_workspaces.py::test_workspace_all_apis_subscription_covers_only_its_workspace
+      - tests/test_workspaces.py::test_management_api_manages_workspaces_end_to_end
+    fixture_or_golden: null
+    assertion_kind: http-json

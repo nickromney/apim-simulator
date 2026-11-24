@@ -7,8 +7,9 @@ from typing import Any
 
 from fastapi import Request
 
-from app.config import ApiConfig, ApiVersioningScheme, GatewayConfig, RouteConfig, RouteMatch
+from app.config import MANAGED_GATEWAY_ID, ApiConfig, ApiVersioningScheme, GatewayConfig, RouteConfig, RouteMatch
 from app.security import AuthContext, build_client_principal
+from app.workspaces import route_served_on_gateway, workspaces_enabled
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -47,6 +48,7 @@ class ResolvedRoute:
     api_version: str | None = None
     matched_parameters: dict[str, str] = field(default_factory=dict)
     matched_query_parameters: frozenset[str] = frozenset()
+    gateway_id: str = MANAGED_GATEWAY_ID
 
 
 def _normalize_host(host: str) -> str:
@@ -126,6 +128,21 @@ def _route_matches_host(route: RouteConfig, request_hosts: list[str]) -> bool:
         return False
     patterns = [normalized for expected in route.host_match if (normalized := _normalize_host(expected))]
     return any(_host_pattern_matches(pattern, request_host) for pattern in patterns for request_host in request_hosts)
+
+
+def gateway_for_hosts(config: GatewayConfig, request_hosts: list[str]) -> str:
+    """The workspace gateway whose host name the request used, else the managed gateway."""
+    for gateway_id, gateway in config.workspace_gateways.items():
+        patterns = [
+            normalized for host in gateway.effective_host_names(gateway_id) if (normalized := _normalize_host(host))
+        ]
+        if any(_host_pattern_matches(pattern, host) for pattern in patterns for host in request_hosts):
+            return gateway_id
+    return MANAGED_GATEWAY_ID
+
+
+def _route_on_gateway(config: GatewayConfig, route: RouteConfig, gateway_id: str) -> bool:
+    return not workspaces_enabled(config) or route_served_on_gateway(config, route, gateway_id)
 
 
 def _available_versions(config: GatewayConfig, *, path: str, version_set: str) -> set[str]:
@@ -218,6 +235,7 @@ def _match_versioned_candidate(
     upstream_path: str,
     request: Request,
     request_hosts: list[str],
+    gateway_id: str = MANAGED_GATEWAY_ID,
 ) -> RouteMatch | None:
     if candidate.api_version_set != version_set_id:
         return None
@@ -226,6 +244,8 @@ def _match_versioned_candidate(
     if requested_version is not None and not _version_matches(candidate, requested_version, scheme):
         return None
     if not candidate.matches_api_path(path) or not _route_matches_host(candidate, request_hosts):
+        return None
+    if not _route_on_gateway(config, candidate, gateway_id):
         return None
     if not _route_protocol_allowed(candidate, request):
         return None
@@ -242,6 +262,7 @@ def _resolve_versioned_route(
     route: RouteConfig,
     path: str,
     request_hosts: list[str],
+    gateway_id: str = MANAGED_GATEWAY_ID,
 ) -> ResolvedRoute | None:
     """Pick the route for the API version this request asked for.
 
@@ -267,6 +288,7 @@ def _resolve_versioned_route(
             upstream_path=upstream_path,
             request=request,
             request_hosts=request_hosts,
+            gateway_id=gateway_id,
         )
         if match is None:
             continue
@@ -282,6 +304,7 @@ def _resolve_versioned_route(
         api_version=requested_version,
         matched_parameters=match.parameters,
         matched_query_parameters=match.query_parameters,
+        gateway_id=gateway_id,
     )
 
 
@@ -292,8 +315,11 @@ def _resolve_versioned_candidate(
     route: RouteConfig,
     path: str,
     request_hosts: list[str],
+    gateway_id: str = MANAGED_GATEWAY_ID,
 ) -> tuple[RouteMatch, ResolvedRoute] | None:
-    resolved = _resolve_versioned_route(config, request, route=route, path=path, request_hosts=request_hosts)
+    resolved = _resolve_versioned_route(
+        config, request, route=route, path=path, request_hosts=request_hosts, gateway_id=gateway_id
+    )
     if resolved is None:
         return None
     match = resolved.route.match(method=request.method, path=resolved.upstream_path, query=request.query_params)
@@ -308,8 +334,11 @@ def _resolve_route_candidate(
     path: str,
     request_hosts: list[str],
     version_cache: dict[tuple[str, str], tuple[RouteMatch, ResolvedRoute] | None],
+    gateway_id: str = MANAGED_GATEWAY_ID,
 ) -> tuple[RouteMatch, ResolvedRoute] | None:
     if not _route_matches_host(route, request_hosts) or not _route_protocol_allowed(route, request):
+        return None
+    if not _route_on_gateway(config, route, gateway_id):
         return None
     api_config = config.apis.get(route.api_id or "")
     if api_config is not None and api_config.is_online is False:
@@ -323,6 +352,7 @@ def _resolve_route_candidate(
             upstream_path=path,
             matched_parameters=match.parameters,
             matched_query_parameters=match.query_parameters,
+            gateway_id=gateway_id,
         )
     if not route.matches_api_path(path):
         return None
@@ -337,6 +367,7 @@ def _resolve_route_candidate(
             route=route,
             path=path,
             request_hosts=request_hosts,
+            gateway_id=gateway_id,
         )
     return version_cache[version_key]
 
@@ -386,8 +417,10 @@ def _select_api_revision(config: GatewayConfig, request: Request) -> tuple[Gatew
     revision = api.revisions.get(revision_id)
     if revision is None or revision.is_online is False or not revision.definition:
         return None
+    # Ownership belongs to the API, not to a revision snapshot taken before the
+    # API joined (or moved between) workspaces.
     revision_api = ApiConfig.model_validate(
-        {**revision.definition, "revisions": api.revisions, "releases": api.releases}
+        {**revision.definition, "revisions": api.revisions, "releases": api.releases, "workspace": api.workspace}
     )
     config = config.model_copy(update={"apis": {api_id: revision_api}, "routes": []})
     config.routes = config.materialize_routes()
@@ -410,6 +443,8 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
         # fallback must rescan with its own host group, never a cached result
         # from a different forwarded or direct host.
         version_cache: dict[tuple[str, str], tuple[RouteMatch, ResolvedRoute] | None] = {}
+        # The gateway is a property of the host group, like the version cache.
+        gateway_id = gateway_for_hosts(config, request_hosts) if config.workspace_gateways else MANAGED_GATEWAY_ID
         candidates: list[tuple[RouteMatch, int, ResolvedRoute]] = []
         for index, route in enumerate(config.routes):
             candidate = _resolve_route_candidate(
@@ -419,6 +454,7 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
                 path=path,
                 request_hosts=request_hosts,
                 version_cache=version_cache,
+                gateway_id=gateway_id,
             )
             if candidate is None:
                 continue

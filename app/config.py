@@ -129,6 +129,7 @@ class Subscription(BaseModel):
     # The built-in APIM all-access subscription is never created implicitly.
     service_scoped: bool = False
     created_by: str | None = None
+    workspace: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
 
     def _selected_scopes(self) -> list[SubscriptionScope]:
         selectors: list[SubscriptionScope] = []
@@ -368,6 +369,7 @@ class NamedValueConfig(BaseModel):
     value: str | None = None
     secret: bool = False
     value_from_key_vault: KeyVaultNamedValueConfig | None = None
+    workspace: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
 
 
 class LoggerApplicationInsightsConfig(BaseModel):
@@ -464,6 +466,7 @@ class ProductConfig(BaseModel):
     groups: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     policies_xml: str | None = None
+    workspace: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
 
     @model_validator(mode="after")
     def _approval_requires_subscription(self) -> ProductConfig:
@@ -601,6 +604,7 @@ class BackendConfig(BaseModel):
     allow_simulated_certificate: bool = False
     verify_certificate_chain: bool = True
     verify_certificate_name: bool = True
+    workspace: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
 
     @model_validator(mode="before")
     @classmethod
@@ -899,6 +903,49 @@ class RouteConfig(BaseModel):
         return base + upstream_path
 
 
+MANAGED_GATEWAY_ID = "managed"
+
+
+class WorkspaceGatewayConfig(BaseModel):
+    """A dedicated workspace gateway, told apart from the managed gateway by Host.
+
+    Azure gives each workspace gateway its own hostname
+    (``<gateway-name>-<hash>.gateway.<region>.azure-api.net``). Locally a
+    request arrives on this gateway when its Host matches one of ``host_names``;
+    with none listed, ``<gateway-id>.gateway.localhost`` is used, which resolves
+    to the loopback address without any DNS setup.
+    https://learn.microsoft.com/en-us/azure/api-management/workspaces-overview
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = None
+    description: str | None = None
+    host_names: list[str] = Field(default_factory=list)
+
+    def effective_host_names(self, gateway_id: str) -> list[str]:
+        return list(self.host_names) or [f"{gateway_id}.gateway.localhost"]
+
+
+class WorkspaceConfig(BaseModel):
+    """A team-owned slice of the service, as in APIM Premium and v2 workspaces.
+
+    Resources join a workspace through their own ``workspace`` field. Policy
+    fragments are plain XML strings, so the workspace lists the fragment IDs it
+    owns instead. ``gateways`` names the gateways that serve the workspace's
+    APIs: workspace gateway IDs, and ``managed`` for the default gateway (the v2
+    tiers' ``serveOn: workspaceAndDefault``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = None
+    description: str | None = None
+    gateways: list[str] = Field(default_factory=lambda: [MANAGED_GATEWAY_ID])
+    policies_xml: str | None = None
+    policy_fragments: list[str] = Field(default_factory=list)
+
+
 class GatewayConfig(BaseModel):
     schema_version: int = 1
     service: ServiceMetadataConfig = Field(default_factory=ServiceMetadataConfig)
@@ -954,6 +1001,10 @@ class GatewayConfig(BaseModel):
     backends: dict[str, BackendConfig] = Field(default_factory=dict)
     apis: dict[str, ApiConfig] = Field(default_factory=dict)
     routes: list[RouteConfig] = Field(default_factory=list)
+    workspaces: dict[str, WorkspaceConfig] = Field(default_factory=dict, exclude_if=lambda value: not value, repr=False)
+    workspace_gateways: dict[str, WorkspaceGatewayConfig] = Field(
+        default_factory=dict, exclude_if=lambda value: not value, repr=False
+    )
 
     def materialize_routes(self) -> list[RouteConfig]:
         """Flatten the API catalogue into the flat route table the gateway matches.
@@ -1002,6 +1053,13 @@ def _route_policy_xml_entries(route: RouteConfig) -> list[tuple[str, str]]:
     return entries
 
 
+def _scope_policy_xml_entries(cfg: GatewayConfig) -> list[tuple[str, str]]:
+    """Policy XML values authored at workspace and product scope."""
+    workspaces = [(f"workspace {key}", item.policies_xml) for key, item in cfg.workspaces.items() if item.policies_xml]
+    products = [(f"product {key}", item.policies_xml) for key, item in cfg.products.items() if item.policies_xml]
+    return [*workspaces, *products]
+
+
 def _policy_xml_entries(cfg: GatewayConfig) -> list[tuple[str, str]]:
     """Policy XML values authored in the gateway document and its scopes."""
     entries: list[tuple[str, str]] = []
@@ -1010,9 +1068,7 @@ def _policy_xml_entries(cfg: GatewayConfig) -> list[tuple[str, str]]:
             entries.append((f"gateway document {index}", xml))
     if cfg.policies_xml:
         entries.append(("gateway", cfg.policies_xml))
-    for product_id, product in cfg.products.items():
-        if product.policies_xml:
-            entries.append((f"product {product_id}", product.policies_xml))
+    entries.extend(_scope_policy_xml_entries(cfg))
     for api_id, api in cfg.apis.items():
         entries.extend(_api_policy_xml_entries(api_id, api))
     for route in cfg.routes:
@@ -1064,6 +1120,10 @@ def validate_policy_config(cfg: GatewayConfig) -> GatewayConfig:
             validate_named_value_references(xml, cfg)
         except ValueError as exc:
             raise ValueError(f"Invalid policy XML at {location}: {exc}") from exc
+
+    from app.workspaces import validate_workspace_isolation
+
+    validate_workspace_isolation(cfg)
     return cfg
 
 
@@ -1177,6 +1237,7 @@ class ApiConfig(BaseModel):
     revisions: dict[str, ApiRevisionConfig] = Field(default_factory=dict)
     releases: dict[str, ApiReleaseConfig] = Field(default_factory=dict)
     graphql: GraphQLApiConfig | None = None
+    workspace: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
 
 
 def _default_config_from_env() -> GatewayConfig:

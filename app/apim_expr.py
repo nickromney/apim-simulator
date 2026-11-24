@@ -150,11 +150,25 @@ class _ExpressionMetadata:
 
 
 @dataclass(frozen=True)
+class _ExpressionGateway:
+    Id: str = "local"
+    InstanceId: str = "local"
+    IsManaged: bool = True
+
+
+@dataclass(frozen=True)
 class _ExpressionDeployment:
     Region: str = "local"
     GatewayId: str = "local"
     ServiceId: str = "apim-simulator"
     ServiceName: str = "apim-simulator"
+    Gateway: _ExpressionGateway = _ExpressionGateway()
+
+
+@dataclass(frozen=True)
+class _ExpressionWorkspace:
+    Id: str = ""
+    Name: str = ""
 
 
 @dataclass(frozen=True)
@@ -408,6 +422,7 @@ class ExpressionContext:
     Product: _ExpressionMetadata | None = None
     GraphQL: _ExpressionGraphQL | None = None
     RequestId: str = ""
+    Workspace: _ExpressionWorkspace | None = None
 
     @property
     def Request(self) -> _ExpressionRequest:
@@ -562,7 +577,15 @@ def build_expression_context(req: PolicyRequest) -> ExpressionContext:
             GatewayId=str(req.variables.get("gateway_id") or "local"),
             ServiceId=str(req.variables.get("service_id") or "apim-simulator"),
             ServiceName=str(req.variables.get("service_name") or "apim-simulator"),
+            Gateway=_ExpressionGateway(
+                Id=str(req.variables.get("gateway_id") or "local"),
+                InstanceId=str(req.variables.get("gateway_id") or "local"),
+                IsManaged=req.variables.get("gateway_is_managed", True) is not False,
+            ),
         ),
+        Workspace=_ExpressionWorkspace(**req.variables["_expression_workspace"])
+        if req.variables.get("_expression_workspace")
+        else None,
         GraphQL=_ExpressionGraphQL(req.variables["_graphql_arguments"], req.variables.get("_graphql_parent"))
         if "_graphql_arguments" in req.variables
         else None,
