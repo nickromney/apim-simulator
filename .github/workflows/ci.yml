@@ -164,9 +164,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      PYTHON_BUILD_IMAGE: python:3.13-slim
-      PYTHON_RUNTIME_IMAGE: python:3.13-slim
-      NGINX_RUNTIME_IMAGE: nginx:1.27-alpine
+      PYTHON_BUILD_IMAGE: python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+      PYTHON_RUNTIME_IMAGE: python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+      NGINX_RUNTIME_IMAGE: nginx:1.29.5-alpine@sha256:1eff5a5f3fcf8431a0abb7eddf5471fec24e5e1905a2581aeacdb07a4479b92b
 
     steps:
       - name: Checkout
@@ -210,11 +210,11 @@ jobs:
             echo "Using DHI defaults for compose validation"
           else
             {
-              echo "PYTHON_BUILD_IMAGE=python:3.13-slim"
-              echo "PYTHON_RUNTIME_IMAGE=python:3.13-slim"
-              echo "NGINX_RUNTIME_IMAGE=nginx:1.27-alpine"
-              echo "EDGE_PROXY_IMAGE=nginx:1.27-alpine"
-              echo "SMOKE_RUNNER_IMAGE=python:3.13-slim"
+              echo "PYTHON_BUILD_IMAGE=python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+              echo "PYTHON_RUNTIME_IMAGE=python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+              echo "NGINX_RUNTIME_IMAGE=nginx:1.29.5-alpine@sha256:1eff5a5f3fcf8431a0abb7eddf5471fec24e5e1905a2581aeacdb07a4479b92b"
+              echo "EDGE_PROXY_IMAGE=nginx:1.29.5-alpine@sha256:1eff5a5f3fcf8431a0abb7eddf5471fec24e5e1905a2581aeacdb07a4479b92b"
+              echo "SMOKE_RUNNER_IMAGE=python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
             } >> "${GITHUB_ENV}"
             echo "Falling back to upstream images for compose validation"
           fi
@@ -262,11 +262,11 @@ jobs:
             echo "Using DHI defaults for compose smokes"
           else
             {
-              echo "PYTHON_BUILD_IMAGE=python:3.13-slim"
-              echo "PYTHON_RUNTIME_IMAGE=python:3.13-slim"
-              echo "NGINX_RUNTIME_IMAGE=nginx:1.27-alpine"
-              echo "EDGE_PROXY_IMAGE=nginx:1.27-alpine"
-              echo "SMOKE_RUNNER_IMAGE=python:3.13-slim"
+              echo "PYTHON_BUILD_IMAGE=python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+              echo "PYTHON_RUNTIME_IMAGE=python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+              echo "NGINX_RUNTIME_IMAGE=nginx:1.29.5-alpine@sha256:1eff5a5f3fcf8431a0abb7eddf5471fec24e5e1905a2581aeacdb07a4479b92b"
+              echo "EDGE_PROXY_IMAGE=nginx:1.29.5-alpine@sha256:1eff5a5f3fcf8431a0abb7eddf5471fec24e5e1905a2581aeacdb07a4479b92b"
+              echo "SMOKE_RUNNER_IMAGE=python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
             } >> "${GITHUB_ENV}"
             echo "Falling back to upstream images for compose smokes"
           fi

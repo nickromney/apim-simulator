@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-ARG NGINX_RUNTIME_IMAGE=dhi.io/nginx:1.29.5-debian13
+ARG NGINX_RUNTIME_IMAGE=dhi.io/nginx:1.29.5-debian13@sha256:9683af47feae3bab0031b489ed85f93f340a0f8b83a2edccc9f761dbfce1bffd
 # Node 22.23.4 includes the 2026-10-21 security fixes (including CVE-2026-111497
 # and CVE-2026-105482). This Node image is build-only; Nginx serves static output.
 # Release notes: https://nodejs.org/en/blog/release/v22.23.4/
@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM golang:1.26.1-alpine3.23 AS runtime-config-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.1-alpine3.23@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS runtime-config-builder
 
 WORKDIR /src
 ARG TARGETOS

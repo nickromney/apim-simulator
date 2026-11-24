@@ -127,7 +127,7 @@ RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 help:
 	@echo "Local APIM Simulator"
 	@echo ""
-	@echo "Start here: make up    Stop stacks: make down"
+	@echo "Start here: make doctor, then make up    Stop stacks: make down"
 	@echo ""
 	@printf $(HELP_FMT) "make examples" "Choose a demo and see how to run it"
 	@printf $(HELP_FMT) "make help-all" "Show the complete command reference"
@@ -209,6 +209,7 @@ help-dev:
 	@printf $(HELP_FMT) "lint-markdown" "Lint tracked Markdown files"
 	@printf $(HELP_FMT) "lint-shell" "Audit executable shell script interfaces and hygiene"
 	@printf $(HELP_FMT) "lint-yaml" "Lint tracked YAML files"
+	@printf $(HELP_FMT) "doctor" "Check this machine can run the simulator, with a fix for each problem"
 	@printf $(HELP_FMT) "prereqs" "Check Docker, mkcert, and local host ports before starting stacks"
 	@printf $(HELP_FMT) "test" "Run Python and shell tests"
 	@printf $(HELP_FMT) "test-python" "Run the Python test suite"
@@ -266,6 +267,11 @@ help-config:
 	@printf $(HELP_FMT) "compose-config-todo" "Render docker compose config for the todo demo stack"
 	@printf $(HELP_FMT) "compose-config-todo-otel" "Render docker compose config for the todo demo LGTM stack"
 	@printf $(HELP_FMT) "compose-config-ui" "Render docker compose config for the console stack"
+
+.PHONY: doctor
+
+doctor:
+	@./scripts/doctor.sh --execute
 
 prereqs: check-docker-prerequisites check-mkcert-prerequisites check-host-ports
 

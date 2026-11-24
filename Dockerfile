@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.7
 # Default: Docker Hardened Images (DHI). The runtime has no shell or package
 # manager; dependencies are installed with the matching -dev image. To use
-# stock images instead, set both to python:3.13-slim (see .env.example).
-ARG PYTHON_BUILD_IMAGE=dhi.io/python:3.13-debian13-dev
-ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13
+# stock images instead, set both to python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 (see .env.example).
+ARG PYTHON_BUILD_IMAGE=dhi.io/python:3.13-debian13-dev@sha256:ea5fd1cae2463b48c7627577584e582ce3d6d99ba3789723051df9a707f658b0
+ARG PYTHON_RUNTIME_IMAGE=dhi.io/python:3.13-debian13@sha256:1fe1883f0c28d90b7364e6f069437801c9e8f150c886f02f74bfcefc9ea14591
 
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 

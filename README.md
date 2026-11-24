@@ -13,9 +13,12 @@ The default stack needs no Azure account, subscription, or cloud deployment. Use
 Follow the [getting-started journey](docs/GETTING-STARTED.md): start the stack, call anonymous echo, see a protected call fail, request a portal subscription, use its key in Scalar, and inspect the gateway trace. Each step has an expected result and a recovery point.
 
 ```bash
+make doctor
 make up
 curl -i http://localhost:8000/api/echo
 ```
+
+`make doctor` checks Docker, the `dhi.io` login and the optional tools, and prints a fix for each problem. It ends with `Ready for make up` when nothing blocks the default stack.
 
 The first build downloads dependencies and container images. Subsequent local requests use the running containers. Docker Hardened Images require `docker login dhi.io`; the [public-image overrides](#container-hardening) are available if you need them.
 
@@ -76,7 +79,8 @@ Its dated reports distinguish live matches from cases blocked by Azure Policy.
 
 Before running the simulator:
 
-- run `make prereqs` for the full-stack checks (Docker, `mkcert` and common host ports); the default HTTP stack itself needs Docker, while TLS/OTEL stacks also need `mkcert` and its installed local CA
+- run `make doctor` to check everything below and get a fix for each problem
+- run `make prereqs` for the strict full-stack checks (Docker, `mkcert` and common host ports); the default HTTP stack itself needs Docker, while TLS/OTEL stacks also need `mkcert` and its installed local CA
 - make sure Docker Engine 25 or later (or a current Docker Desktop) is running
 - use `uv` if you want to run smoke scripts, import helpers, or tests from the host
 - use `npm` only for the browser-facing demo checks such as Playwright, Bruno, or the UI toolchain
@@ -180,13 +184,11 @@ override file and set the upstream image refs explicitly:
 cp .env.example .env
 ```
 
-Then uncomment the upstream overrides:
+Then uncomment the upstream overrides. Each is pinned by digest in `.env.example`:
 
-- `PYTHON_BUILD_IMAGE=python:3.13-slim`
-- `PYTHON_RUNTIME_IMAGE=python:3.13-slim`
-- `NGINX_RUNTIME_IMAGE=nginx:1.27-alpine`
-- `EDGE_PROXY_IMAGE=nginx:1.27-alpine`
-- `SMOKE_RUNNER_IMAGE=python:3.13-slim`
+- `PYTHON_BUILD_IMAGE` and `PYTHON_RUNTIME_IMAGE`: `python:3.13-slim`
+- `NGINX_RUNTIME_IMAGE` and `EDGE_PROXY_IMAGE`: `nginx:1.29.5-alpine`
+- `SMOKE_RUNNER_IMAGE`: `python:3.13-slim`
 
 If you stay on the default path, authenticate once with:
 
