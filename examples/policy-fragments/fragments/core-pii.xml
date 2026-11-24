@@ -1,0 +1,96 @@
+<fragment>
+  <!--
+    core-pii: find personal data in a request body with Azure AI Language PII
+    detection, then redact it, refuse the request, or only record it.
+
+    Include it in an inbound section. Set any of these context variables before
+    the include to override the platform defaults held in named values:
+
+      core-pii-enabled     "true" or "false"               default {{core-pii-enabled}}
+      core-pii-action      "redact", "block" or "detect"   default {{core-pii-default-action}}
+      core-pii-categories  comma-separated PII categories, or "all"
+                                                           default {{core-pii-default-categories}}
+
+    The Language endpoint, API version and key come from the named values
+    {{core-pii-language-endpoint}}, {{core-pii-api-version}} and {{core-pii-language-key}}.
+
+    redact  replaces the request body with the service's redactedText: each
+            entity's characters become "*", so a JSON body stays valid JSON.
+    block   answers 403 when any entity is found.
+    detect  changes nothing.
+
+    Every action sets core-pii-entity-count for later policies. If the Language
+    call fails, or its answer has no analysed document (the body is over the
+    document size limit, or results.documents is missing or empty), the
+    request is refused with 503 rather than forwarded unchecked.
+  -->
+  <choose>
+    <when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault(&quot;core-pii-enabled&quot;, &quot;{{core-pii-enabled}}&quot;)))">
+      <set-variable name="core-pii-action-value" value="@(Convert.ToString(context.Variables.GetValueOrDefault(&quot;core-pii-action&quot;, &quot;{{core-pii-default-action}}&quot;)).ToLower())" />
+      <set-variable name="core-pii-categories-value" value="@(Convert.ToString(context.Variables.GetValueOrDefault(&quot;core-pii-categories&quot;, &quot;{{core-pii-default-categories}}&quot;)))" />
+      <send-request mode="new" response-variable-name="core-pii-result" timeout="20" ignore-error="true">
+        <set-url>{{core-pii-language-endpoint}}/language/:analyze-text?api-version={{core-pii-api-version}}</set-url>
+        <set-method>POST</set-method>
+        <set-header name="Content-Type" exists-action="override">
+          <value>application/json</value>
+        </set-header>
+        <set-header name="Ocp-Apim-Subscription-Key" exists-action="override">
+          <value>{{core-pii-language-key}}</value>
+        </set-header>
+        <set-body>@{
+          var categories = (string)context.Variables[&quot;core-pii-categories-value&quot;];
+          var parameters = categories == &quot;all&quot;
+            ? new JObject(new JProperty(&quot;modelVersion&quot;, &quot;latest&quot;))
+            : new JObject(new JProperty(&quot;modelVersion&quot;, &quot;latest&quot;), new JProperty(&quot;piiCategories&quot;, new JArray(categories.Split(&apos;,&apos;))));
+          var document = new JObject(
+            new JProperty(&quot;id&quot;, &quot;1&quot;),
+            new JProperty(&quot;language&quot;, &quot;en&quot;),
+            new JProperty(&quot;text&quot;, context.Request.Body.As&lt;string&gt;(preserveContent: true)));
+          return new JObject(
+            new JProperty(&quot;kind&quot;, &quot;PiiEntityRecognition&quot;),
+            new JProperty(&quot;parameters&quot;, parameters),
+            new JProperty(&quot;analysisInput&quot;, new JObject(new JProperty(&quot;documents&quot;, new JArray(document))))).ToString();
+        }</set-body>
+      </send-request>
+      <choose>
+        <when condition="@(context.Variables[&quot;core-pii-result&quot;] == null || ((IResponse)context.Variables[&quot;core-pii-result&quot;]).StatusCode != 200)">
+          <return-response>
+            <set-status code="503" reason="Service Unavailable" />
+            <set-header name="Content-Type" exists-action="override">
+              <value>application/json</value>
+            </set-header>
+            <set-body>{"statusCode": 503, "message": "Personal data check is unavailable."}</set-body>
+          </return-response>
+        </when>
+      </choose>
+      <set-variable name="core-pii-response" value="@(((IResponse)context.Variables[&quot;core-pii-result&quot;]).Body.As&lt;JObject&gt;())" />
+      <choose>
+        <when condition="@(!((JObject)context.Variables[&quot;core-pii-response&quot;]).ContainsKey(&quot;results&quot;) || !((JObject)((JObject)context.Variables[&quot;core-pii-response&quot;])[&quot;results&quot;]).ContainsKey(&quot;documents&quot;) || ((JArray)((JObject)context.Variables[&quot;core-pii-response&quot;])[&quot;results&quot;][&quot;documents&quot;]).Count == 0)">
+          <return-response>
+            <set-status code="503" reason="Service Unavailable" />
+            <set-header name="Content-Type" exists-action="override">
+              <value>application/json</value>
+            </set-header>
+            <set-body>{"statusCode": 503, "message": "Personal data check could not process this request."}</set-body>
+          </return-response>
+        </when>
+      </choose>
+      <set-variable name="core-pii-document" value="@(((JObject)context.Variables[&quot;core-pii-response&quot;])[&quot;results&quot;][&quot;documents&quot;][0])" />
+      <set-variable name="core-pii-entity-count" value="@(((JArray)((JObject)context.Variables[&quot;core-pii-document&quot;])[&quot;entities&quot;]).Count)" />
+      <choose>
+        <when condition="@((int)context.Variables[&quot;core-pii-entity-count&quot;] &gt; 0 &amp;&amp; (string)context.Variables[&quot;core-pii-action-value&quot;] == &quot;block&quot;)">
+          <return-response>
+            <set-status code="403" reason="Forbidden" />
+            <set-header name="Content-Type" exists-action="override">
+              <value>application/json</value>
+            </set-header>
+            <set-body>{"statusCode": 403, "message": "Request contains personal data."}</set-body>
+          </return-response>
+        </when>
+        <when condition="@((int)context.Variables[&quot;core-pii-entity-count&quot;] &gt; 0 &amp;&amp; (string)context.Variables[&quot;core-pii-action-value&quot;] == &quot;redact&quot;)">
+          <set-body>@((string)((JObject)context.Variables[&quot;core-pii-document&quot;])[&quot;redactedText&quot;])</set-body>
+        </when>
+      </choose>
+    </when>
+  </choose>
+</fragment>

@@ -1,0 +1,34 @@
+<fragment>
+  <!--
+    core-content-safety: screen prompts, or completions, with Azure AI Content
+    Safety through the llm-content-safety policy.
+
+    Include it in an inbound section to check prompts, or in an outbound section
+    to check completions. Set any of these context variables before the include
+    to override the platform defaults held in named values:
+
+      core-content-safety-enabled        "true" or "false"   default {{core-content-safety-enabled}}
+      core-content-safety-backend        backend ID          default {{core-content-safety-backend-id}}
+      core-content-safety-shield-prompt  "true" or "false"   default {{core-content-safety-shield-prompt}}
+      core-content-safety-threshold      severity 0-7        default {{core-content-safety-default-threshold}}
+      core-content-safety-<category>-threshold  per-category override of the threshold above,
+                                         for hate, selfharm, sexual and violence
+
+    Severities use the FourSeverityLevels scale (0, 2, 4, 6). Content at or above
+    a threshold is blocked with 403. shield-prompt only applies to prompts.
+  -->
+  <choose>
+    <when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault(&quot;core-content-safety-enabled&quot;, &quot;{{core-content-safety-enabled}}&quot;)))">
+      <llm-content-safety
+        backend-id="@(Convert.ToString(context.Variables.GetValueOrDefault(&quot;core-content-safety-backend&quot;, &quot;{{core-content-safety-backend-id}}&quot;)))"
+        shield-prompt="@(Convert.ToBoolean(context.Variables.GetValueOrDefault(&quot;core-content-safety-shield-prompt&quot;, &quot;{{core-content-safety-shield-prompt}}&quot;)))">
+        <categories output-type="FourSeverityLevels">
+          <category name="Hate" threshold="@(Convert.ToInt32(context.Variables.GetValueOrDefault(&quot;core-content-safety-hate-threshold&quot;, context.Variables.GetValueOrDefault(&quot;core-content-safety-threshold&quot;, &quot;{{core-content-safety-default-threshold}}&quot;))))" />
+          <category name="SelfHarm" threshold="@(Convert.ToInt32(context.Variables.GetValueOrDefault(&quot;core-content-safety-selfharm-threshold&quot;, context.Variables.GetValueOrDefault(&quot;core-content-safety-threshold&quot;, &quot;{{core-content-safety-default-threshold}}&quot;))))" />
+          <category name="Sexual" threshold="@(Convert.ToInt32(context.Variables.GetValueOrDefault(&quot;core-content-safety-sexual-threshold&quot;, context.Variables.GetValueOrDefault(&quot;core-content-safety-threshold&quot;, &quot;{{core-content-safety-default-threshold}}&quot;))))" />
+          <category name="Violence" threshold="@(Convert.ToInt32(context.Variables.GetValueOrDefault(&quot;core-content-safety-violence-threshold&quot;, context.Variables.GetValueOrDefault(&quot;core-content-safety-threshold&quot;, &quot;{{core-content-safety-default-threshold}}&quot;))))" />
+        </categories>
+      </llm-content-safety>
+    </when>
+  </choose>
+</fragment>

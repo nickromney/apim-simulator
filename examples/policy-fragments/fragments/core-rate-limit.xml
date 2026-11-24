@@ -1,0 +1,26 @@
+<fragment>
+  <!--
+    core-rate-limit: call-count rate limiting for any API on a shared gateway.
+
+    Include it in an inbound section. Set any of these context variables before
+    the include to override the platform defaults held in named values:
+
+      core-rate-limit-enabled  "true" or "false"  default {{core-rate-limit-enabled}}
+      core-rate-limit-calls    calls per period   default {{core-rate-limit-default-calls}}
+      core-rate-limit-period   seconds, 1-300     default {{core-rate-limit-default-period}}
+      core-rate-limit-key      counter key        default <subscription id or caller IP>:<API id>
+
+    Over the limit the gateway answers 429 with Retry-After. Allowed calls carry
+    x-ratelimit-remaining.
+  -->
+  <choose>
+    <when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault(&quot;core-rate-limit-enabled&quot;, &quot;{{core-rate-limit-enabled}}&quot;)))">
+      <rate-limit-by-key
+        calls="@(Convert.ToInt32(context.Variables.GetValueOrDefault(&quot;core-rate-limit-calls&quot;, &quot;{{core-rate-limit-default-calls}}&quot;)))"
+        renewal-period="@(Convert.ToInt32(context.Variables.GetValueOrDefault(&quot;core-rate-limit-period&quot;, &quot;{{core-rate-limit-default-period}}&quot;)))"
+        counter-key="@(Convert.ToString(context.Variables.GetValueOrDefault(&quot;core-rate-limit-key&quot;, (context.Subscription?.Id ?? context.Request.IpAddress) + &quot;:&quot; + context.Api.Id)))"
+        retry-after-header-name="Retry-After"
+        remaining-calls-header-name="x-ratelimit-remaining" />
+    </when>
+  </choose>
+</fragment>

@@ -67,8 +67,9 @@ def test_deterministic_policy_fixtures_satisfy_expected_outcomes():
     spec.loader.exec_module(module)
     config, cases = module.fixtures("sim-parity-test")
     config["subscription"]["subscriptions"] = {
-        "fixture": {
-            "id": "fixture",
+        # The lab names the subscription after the prefix, as Azure does.
+        "sim-parity-test": {
+            "id": "sim-parity-test",
             "name": "fixture",
             "api_id": "sim-parity-test",
             "keys": {"primary": "fixture-key", "secondary": "fixture-secondary"},
@@ -84,4 +85,9 @@ def test_deterministic_policy_fixtures_satisfy_expected_outcomes():
                 content=case.get("body_text"),
             )
             assert response.status_code == case["expected_status"], case["name"]
-            assert response.text == case["expected_body"], case["name"]
+            if isinstance(case.get("expected_body"), dict):
+                assert response.json() == case["expected_body"], case["name"]
+            elif "expected_body" in case:
+                assert response.text == case["expected_body"], case["name"]
+            for name, value in case.get("expected_headers", {}).items():
+                assert response.headers.get(name, "") == value, (case["name"], name)

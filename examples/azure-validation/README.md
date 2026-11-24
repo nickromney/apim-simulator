@@ -2,7 +2,7 @@
 
 Run identical deterministic API policies and requests against the simulator and
 an existing Developer/Premium APIM. This lab creates one randomly named
-`sim-parity-*` API, an API-scoped subscription, named value, and policy fragment. It does not change existing
+`sim-parity-*` API, an API-scoped subscription, and `sim-parity-*` named values and policy fragments. It does not change existing
 APIs, global policies, backends, or products, and makes no billable model calls.
 
 ## Run
@@ -41,6 +41,38 @@ If an inherited resource-type policy blocks policy fragments, set
 records the exclusion in `.runtime/excluded.json`; subsequent verification uses
 the same reduced corpus. Set it to `0` to restore the full corpus. An excluded
 case is not evidence of parity, and this lab never changes policy assignments.
+
+## Core fragment cases
+
+The corpus also replays the shipped [core reusable fragments](../policy-fragments/README.md).
+The lab deploys copies named `<prefix>-core-*`, with their own `<prefix>-core-*`
+named values, so an existing `core-*` fragment in the target APIM is never
+read or changed.
+
+| Cases | What they show |
+| --- | --- |
+| `core-rate-limit-1` to `-3`, `core-rate-limit-exceeded` | Three calls allowed with `x-ratelimit-remaining` 2, 1, 0, then 429 |
+| `core-rate-limit-off` | A variable set before the include turns the limit off |
+| `core-token-budget-unspent`, `-seed`, `-exhausted` | The check allows a fresh budget, a seed call spends it with `cache-store-value`, then the check returns 403 with `x-token-budget-remaining: 0` |
+| `core-token-budget-off` | The check is skipped when turned off, even with the budget spent |
+| `core-usage-*` | The token-usage expression from `core-token-budget-record`, run on request bodies |
+| `core-subscription-coalesce`, `core-variable-*`, `core-convert-math`, `core-equals-ignore-case` | `??`, `?.`, `GetValueOrDefault`, `Convert`, `Math` and `StringComparison` as the fragments use them |
+
+Each `prepare` gives the run a new `X-Parity-Run` value, and the counters and
+budgets key on it, so a rerun starts from empty counters on both gateways.
+
+These cases do not cover:
+
+- `core-token-budget-record` in an outbound section. That needs a model
+  response, and this lab has no backend. Only its expressions are replayed.
+- The 429 body, which names the seconds until the limit renews. Only the
+  status is compared.
+- Timing. Azure stores `cache-store-value` asynchronously, so the
+  `-exhausted` case can fail if Azure has not stored the seed in time. Treat
+  that failure as a timing finding to investigate, not a policy mismatch.
+
+`PARITY_SKIP_FRAGMENTS=1` also excludes these fragment cases. The expression
+cases still run.
 
 ## Evidence and limits
 

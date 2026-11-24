@@ -6269,6 +6269,7 @@ _POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
     "azure-openai-token-limit": frozenset({"inbound"}),
     "llm-emit-token-metric": frozenset({"inbound"}),
     "azure-openai-emit-token-metric": frozenset({"inbound"}),
+    "llm-content-safety": frozenset({"inbound", "outbound"}),
     "emit-metric": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "validate-content": frozenset({"inbound", "outbound", "on-error"}),
     "validate-parameters": frozenset({"inbound"}),
@@ -6344,11 +6345,17 @@ def _parse_node(
 
 def _parse_extension(el, path):
     from app.policy_certificates import parse_certificate_policy
+    from app.policy_content_safety import parse_content_safety_policy
     from app.policy_messaging import parse_messaging_policy
     from app.policy_transforms import parse_transform_policy
 
     try:
-        node = parse_certificate_policy(el) or parse_messaging_policy(el) or parse_transform_policy(el)
+        node = (
+            parse_certificate_policy(el)
+            or parse_messaging_policy(el)
+            or parse_transform_policy(el)
+            or parse_content_safety_policy(el)
+        )
     except ValueError as exc:
         raise HTTPException(500, str(exc)) from exc
     if node is None:
@@ -6532,11 +6539,19 @@ def _reads_response_body(step: PolicyNode) -> bool:
     if isinstance(step, Choose):
         nested = [item for _cond, steps in step.branches for item in steps] + list(step.otherwise)
         return any(_reads_response_body(item) for item in nested)
+    from app.policy_content_safety import LlmContentSafety
     from app.policy_messaging import LogToEventHub, SendOneWayRequest, SendServiceBusMessage
     from app.policy_transforms import FindAndReplace
 
     return isinstance(
-        step, SetBody | ValidateContent | FindAndReplace | LogToEventHub | SendServiceBusMessage | SendOneWayRequest
+        step,
+        SetBody
+        | ValidateContent
+        | FindAndReplace
+        | LogToEventHub
+        | SendServiceBusMessage
+        | SendOneWayRequest
+        | LlmContentSafety,
     )
 
 

@@ -11,7 +11,7 @@
       "expression": "@(context.Request.Body.As<JObject>(preserveContent: true))",
       "request_body": "{\"message\":\"request\"}",
       "response_body": "{\"message\":\"response\"}",
-      "type": "dict",
+      "type": "_JObjectView",
       "value": {
         "message": "request"
       }
@@ -41,7 +41,7 @@
       "expression": "@(context.Response.Body.As<JObject>(preserveContent: true))",
       "request_body": "{\"message\":\"request\"}",
       "response_body": "{\"message\":\"response\"}",
-      "type": "dict",
+      "type": "_JObjectView",
       "value": {
         "message": "response"
       }

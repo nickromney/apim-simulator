@@ -162,7 +162,8 @@ placeholders remain authored in the inspection view.
 
 **Inputs and defaults.** Supported expressions are a focused C#-style subset:
 single `@(...)` expressions, multi-statement `@{...}` blocks with explicit
-returns, local declarations, assignment, `if`/`else`, ternaries, interpolation,
+returns, local declarations, assignment, `if`/`else`, ternaries, `??`, numeric
+casts, selected `Convert`/`Math`/`DateTime` members, interpolation,
 selected request/response/variable members, selected string/dictionary
 members, and `JObject` body conversion. Request and response body reads follow
 APIM's consuming default and `preserveContent` behavior for the supported types.

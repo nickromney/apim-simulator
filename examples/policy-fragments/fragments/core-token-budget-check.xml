@@ -1,0 +1,50 @@
+<fragment>
+  <!--
+    core-token-budget-check: refuse model calls once a caller has spent its token
+    budget for the current period. Pair it with core-token-budget-record, which
+    meters the tokens each response reports.
+
+    Include it in an inbound section. Set any of these context variables before
+    the include to override the platform defaults held in named values:
+
+      core-token-budget-enabled  "true" or "false"         default {{core-token-budget-enabled}}
+      core-token-budget-limit    tokens per period         default {{core-token-budget-default-limit}}
+      core-token-budget-period   "hour", "day" or "month"  default {{core-token-budget-default-period}}
+      core-token-budget-key      counter key               default subscription id, else caller IP
+
+    Spent tokens are kept with cache-store-value under one key per counter and
+    period. Over budget the gateway answers 403, as llm-token-limit does for an
+    exhausted token-quota.
+  -->
+  <choose>
+    <when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault(&quot;core-token-budget-enabled&quot;, &quot;{{core-token-budget-enabled}}&quot;)))">
+      <set-variable name="core-token-budget-limit-value" value="@(Convert.ToInt32(context.Variables.GetValueOrDefault(&quot;core-token-budget-limit&quot;, &quot;{{core-token-budget-default-limit}}&quot;)))" />
+      <set-variable name="core-token-budget-period-value" value="@(Convert.ToString(context.Variables.GetValueOrDefault(&quot;core-token-budget-period&quot;, &quot;{{core-token-budget-default-period}}&quot;)).ToLower())" />
+      <set-variable name="core-token-budget-cache-key" value="@{
+        var period = (string)context.Variables[&quot;core-token-budget-period-value&quot;];
+        var bucket = period == &quot;hour&quot; ? &quot;yyyy-MM-ddTHH&quot; : period == &quot;month&quot; ? &quot;yyyy-MM&quot; : &quot;yyyy-MM-dd&quot;;
+        var key = Convert.ToString(context.Variables.GetValueOrDefault(&quot;core-token-budget-key&quot;, context.Subscription?.Id ?? context.Request.IpAddress));
+        return &quot;core-token-budget:&quot; + key + &quot;:&quot; + DateTime.UtcNow.ToString(bucket);
+      }" />
+      <set-variable name="core-token-budget-ttl" value="@{
+        var period = (string)context.Variables[&quot;core-token-budget-period-value&quot;];
+        return period == &quot;hour&quot; ? 3600 : period == &quot;month&quot; ? 2678400 : 86400;
+      }" />
+      <cache-lookup-value key="@((string)context.Variables[&quot;core-token-budget-cache-key&quot;])" variable-name="core-token-budget-used" default-value="0" />
+      <choose>
+        <when condition="@(Convert.ToInt32(context.Variables[&quot;core-token-budget-used&quot;]) >= (int)context.Variables[&quot;core-token-budget-limit-value&quot;])">
+          <return-response>
+            <set-status code="403" reason="Forbidden" />
+            <set-header name="x-token-budget-remaining" exists-action="override">
+              <value>0</value>
+            </set-header>
+            <set-header name="Content-Type" exists-action="override">
+              <value>application/json</value>
+            </set-header>
+            <set-body>{"statusCode": 403, "message": "Token budget exhausted for this period."}</set-body>
+          </return-response>
+        </when>
+      </choose>
+    </when>
+  </choose>
+</fragment>

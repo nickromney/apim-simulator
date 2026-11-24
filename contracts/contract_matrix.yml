@@ -333,6 +333,20 @@ contracts:
     fixture_or_golden: inline-xml
     assertion_kind: policy-golden
 
+  - id: POLICY-CORE-FRAGMENTS
+    status: supported
+    surface: policy
+    module: app/apim_expr.py
+    doc_refs:
+      - examples/policy-fragments/README.md
+      - docs/CAPABILITY-MATRIX.md#policies
+    owner_tests:
+      - tests/test_core_policy_fragments.py::test_rate_limit_fragment_takes_per_api_settings_and_opt_out
+      - tests/test_core_policy_fragments.py::test_token_budget_meters_reported_usage_then_refuses
+      - tests/test_core_policy_fragments.py::test_token_budget_is_switched_off_by_named_value
+    fixture_or_golden: examples/policy-fragments/apim.json
+    assertion_kind: http-json
+
   - id: POLICY-EMIT-METRIC
     status: adapted
     surface: policy
@@ -425,6 +439,20 @@ contracts:
       - tests/test_policy_llm.py::test_llm_token_limit_quota_returns_403
     fixture_or_golden: inline-xml
     assertion_kind: policy-golden
+
+  - id: POLICY-LLM-CONTENT-SAFETY
+    status: adapted
+    surface: policy
+    module: app/policy_content_safety.py
+    doc_refs:
+      - docs/CAPABILITY-MATRIX.md#policies
+      - examples/policy-fragments/README.md
+    owner_tests:
+      - tests/test_policy_content_safety.py::test_blocklist_match_blocks_and_backend_credentials_are_sent
+      - tests/test_policy_content_safety.py::test_below_threshold_passes_and_service_errors_enter_on_error
+      - tests/test_core_policy_fragments.py::test_content_safety_fragment_blocks_harmful_prompts_attacks_and_completions
+    fixture_or_golden: inline-xml
+    assertion_kind: http-json
 
   - id: POLICY-LLM-EMIT-TOKEN-METRIC
     status: adapted
