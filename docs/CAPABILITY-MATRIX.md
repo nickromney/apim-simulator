@@ -38,6 +38,7 @@ rows retain the older labels so the matrix remains easy to scan.
 | Backend request headers | Yes | N/A | The backend gets its own `Host` and an `X-Forwarded-For` with the client address appended. The subscription key is forwarded, as in APIM. Simulator identity headers (`x-apim-user-*`, `x-ms-client-principal*`, `x-user-*`, `x-apim-products`) are sent only with `inject_simulator_identity_headers: true` |
 | Simulator response headers | Adapted | N/A | `x-apim-simulator` and `x-correlation-id` are sent only with `emit_simulator_response_headers` / `propagate_simulator_correlation_id`; APIM sends neither |
 | Custom domains / hostnames | Partial | `azurerm_api_management.hostname_configuration` / AzAPI `properties.hostnameConfigurations` | Imported as service hostname metadata; TLS termination remains external |
+| Self-hosted gateway | Partial | `azurerm_api_management_gateway` | Management gateway mode (`APIM_MANAGEMENT_GATEWAY=true`): one instance serves no APIs and routes every request, including `/apim/management`, to a serving instance that does the gateway work. Unlike Azure, the serving instance owns the configuration and nothing is pulled from a configuration endpoint; gateway resources and API-to-gateway assignment are not modelled. See [management gateway mode](MANAGEMENT-GATEWAY.md) |
 
 ## Runtime Scenarios
 
@@ -47,6 +48,7 @@ rows retain the older labels so the matrix remains easy to scan.
 | Edge HTTP compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.edge.yml`](../compose.edge.yml) on `edge.apim.127.0.0.1.sslip.io:8088` |
 | Edge TLS compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.edge.yml`](../compose.edge.yml) + [`compose.tls.yml`](../compose.tls.yml) on `edge.apim.127.0.0.1.sslip.io:9443` |
 | Private internal compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.private.yml`](../compose.private.yml); smoke uses internal probe container |
+| Management gateway compose path | Yes | N/A | [`compose.yml`](../compose.yml) + [`compose.public.yml`](../compose.public.yml) + [`compose.management-gateway.yml`](../compose.management-gateway.yml): management gateway on `localhost:8000`, serving gateway on `localhost:8001` |
 
 ## APIs and Operations
 
@@ -276,7 +278,6 @@ These features are explicitly out of scope for the simulator:
 - Developer Portal CMS, theming, and content management (`azurerm_api_management_portal_*`); the adapted consumer workflows live at `/apim/portal`
 - Email templates (`azurerm_api_management_email_template`)
 - Notifications (`azurerm_api_management_notification_*`)
-- Self-hosted gateway (`azurerm_api_management_gateway`)
 - Global/workspace policies distinction
 - External cache backends for `cache-*` policies
 - `quota-by-key` bandwidth enforcement
