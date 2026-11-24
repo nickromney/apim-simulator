@@ -1,0 +1,64 @@
+# Management-gateway topology: two simulator instances.
+#
+# apim-simulator is the management gateway. It serves no APIs itself and routes
+# every request to apim-serving, the self-hosted gateway that holds the
+# configuration and does the gateway work. Use with compose.yml and
+# compose.public.yml; `make up-management-gateway` starts it.
+x-python-build-args: &python-build-args
+  PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev@sha256:ea5fd1cae2463b48c7627577584e582ce3d6d99ba3789723051df9a707f658b0}
+  PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13@sha256:1fe1883f0c28d90b7364e6f069437801c9e8f150c886f02f74bfcefc9ea14591}
+  APP_UID: ${APP_UID:-65532}
+  APP_GID: ${APP_GID:-65532}
+
+x-python-service-hardening: &python-service-hardening
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  apim-serving:
+    <<: *python-service-hardening
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args: *python-build-args
+    image: apim-simulator:latest
+    expose:
+      - "8000"
+    ports:
+      - "${APIM_BIND_ADDRESS:-127.0.0.1}:${APIM_SERVING_GATEWAY_PORT:-8001}:8000"
+    environment:
+      APIM_CONFIG_PATH: /tmp/apim-config.json
+      APIM_CONFIG_SOURCE_PATH: ${APIM_CONFIG_SOURCE_PATH:-/app/examples/basic.json}
+      APIM_CONFIG_TEMPLATE_SUBSTITUTE: "true"
+      APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST: ${APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST:-http://localhost:3000}
+      APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE: ${APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE:-http://localhost:3007}
+      APIM_ALLOWED_ORIGIN_VITE: ${APIM_ALLOWED_ORIGIN_VITE:-http://localhost:5173}
+      APIM_ALLOWED_ORIGIN_GATEWAY: ${APIM_ALLOWED_ORIGIN_GATEWAY:-http://localhost:8000}
+      OIDC_ISSUER_EXTERNAL: ${OIDC_ISSUER_EXTERNAL:-http://localhost:8180/realms/subnet-calculator}
+      OTEL_SERVICE_NAME: apim-serving
+    depends_on:
+      mock-backend:
+        condition: service_started
+    networks:
+      - apim
+
+  apim-simulator:
+    environment:
+      APIM_MANAGEMENT_GATEWAY: "true"
+      APIM_MANAGEMENT_GATEWAY_UPSTREAM: http://apim-serving:8000
+      APIM_MANAGEMENT_GATEWAY_NAME: ${APIM_MANAGEMENT_GATEWAY_NAME:-self-hosted}
+      # The router loads no configuration of its own.
+      APIM_CONFIG_SOURCE_PATH: ""
+      OTEL_SERVICE_NAME: apim-management-gateway
+    depends_on:
+      apim-serving:
+        condition: service_healthy
+
+networks:
+  apim:
