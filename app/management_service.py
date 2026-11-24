@@ -792,7 +792,7 @@ class ManagementService:
         self.require_api_authoring_mode(cfg)
         self.validate_policy_xml(cfg, body.policies_xml)
         existing = cfg.apis.get(api_id)
-        cfg.apis[api_id] = ApiConfig(
+        api_config = ApiConfig(
             name=body.name or api_id,
             path=body.path,
             upstream_base_url=body.upstream_base_url,
@@ -817,8 +817,14 @@ class ManagementService:
             schemas=existing.schemas if existing is not None else {},
             revisions=existing.revisions if existing is not None else {},
             releases=existing.releases if existing is not None else {},
+            gateways=(
+                body.gateways
+                if "gateways" in getattr(body, "model_fields_set", set())
+                else (existing.gateways if existing is not None else None)
+            ),
             workspace=_owner_from_body(body, existing),
         )
+        cfg.apis[api_id] = api_config
         if existing is None:
             _ensure_initial_api_revision(cfg.apis[api_id])
         return self.persist_or_apply_config(cfg)

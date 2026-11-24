@@ -61,6 +61,10 @@ def workspaces_enabled(cfg: GatewayConfig) -> bool:
 
 def route_served_on_gateway(cfg: GatewayConfig, route: RouteConfig, gateway_id: str) -> bool:
     """Whether the gateway a request arrived on serves this route's API."""
+    api = cfg.apis.get(route.api_id or "")
+    if api is not None and api.gateways is not None:
+        # An explicit assignment wins over workspace placement.
+        return gateway_id in api.gateways
     workspace_id = route_workspace(cfg, route)
     if workspace_id is None:
         return gateway_id == MANAGED_GATEWAY_ID
@@ -244,6 +248,16 @@ def _ownership_errors(cfg: GatewayConfig) -> list[str]:
     return errors
 
 
+def _gateway_assignment_errors(cfg: GatewayConfig) -> list[str]:
+    known = {MANAGED_GATEWAY_ID, *cfg.gateways, *cfg.workspace_gateways}
+    return [
+        f"API {api_id} names unknown gateway {gateway_id}"
+        for api_id, api in cfg.apis.items()
+        for gateway_id in api.gateways or []
+        if gateway_id not in known
+    ]
+
+
 def _host_name_errors(cfg: GatewayConfig) -> list[str]:
     seen: dict[str, str] = {}
     errors: list[str] = []
@@ -278,9 +292,10 @@ def _reference_errors(cfg: GatewayConfig) -> list[str]:
 
 def validate_workspace_isolation(cfg: GatewayConfig) -> None:
     """Reject ownership and cross-workspace references Azure would refuse."""
-    if not workspaces_enabled(cfg) and not _any_owner_field(cfg):
+    assignment_errors = _gateway_assignment_errors(cfg)
+    if not workspaces_enabled(cfg) and not _any_owner_field(cfg) and not assignment_errors:
         return
-    errors = [*_ownership_errors(cfg), *_host_name_errors(cfg), *_reference_errors(cfg)]
+    errors = [*assignment_errors, *_ownership_errors(cfg), *_host_name_errors(cfg), *_reference_errors(cfg)]
     if errors:
         unique = list(dict.fromkeys(errors))
         shown = "; ".join(unique[:_MAX_REPORTED])

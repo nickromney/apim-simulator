@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from app.certificate_security import TLSCertificateConfig
 from app.control_plane import ControlPlaneConfig, PortalIdentityConfig
@@ -925,6 +925,27 @@ class RouteConfig(BaseModel):
 MANAGED_GATEWAY_ID = "managed"
 
 
+class GatewayLocationConfig(BaseModel):
+    name: str
+
+
+class GatewayResourceConfig(BaseModel):
+    """A managed or self-hosted gateway resource.
+
+    ``access_token`` is accepted from authored configuration but is never
+    exposed by the configuration snapshot.  Azure issues this credential from
+    the control plane; the simulator models the same boundary as a configured
+    per-gateway secret with an optional expiry.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    location: GatewayLocationConfig | None = None
+    description: str | None = None
+    access_token: SecretStr | None = Field(default=None, repr=False)
+    access_token_expires_at: str | None = None
+
+
 class WorkspaceGatewayConfig(BaseModel):
     """A dedicated workspace gateway, told apart from the managed gateway by Host.
 
@@ -1023,6 +1044,7 @@ class GatewayConfig(BaseModel):
     backends: dict[str, BackendConfig] = Field(default_factory=dict)
     apis: dict[str, ApiConfig] = Field(default_factory=dict)
     routes: list[RouteConfig] = Field(default_factory=list)
+    gateways: dict[str, GatewayResourceConfig] = Field(default_factory=dict, exclude_if=lambda value: not value)
     workspaces: dict[str, WorkspaceConfig] = Field(default_factory=dict, exclude_if=lambda value: not value, repr=False)
     workspace_gateways: dict[str, WorkspaceGatewayConfig] = Field(
         default_factory=dict, exclude_if=lambda value: not value, repr=False
@@ -1259,6 +1281,9 @@ class ApiConfig(BaseModel):
     revisions: dict[str, ApiRevisionConfig] = Field(default_factory=dict)
     releases: dict[str, ApiReleaseConfig] = Field(default_factory=dict)
     graphql: GraphQLApiConfig | None = None
+    # None means unassigned: a service-level API is on the managed gateway and a
+    # workspace API follows its workspace's gateways.
+    gateways: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
     workspace: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
 
 

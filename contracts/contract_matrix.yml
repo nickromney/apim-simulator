@@ -627,3 +627,19 @@ contracts:
       - tests/test_workspaces.py::test_management_api_manages_workspaces_end_to_end
     fixture_or_golden: null
     assertion_kind: http-json
+
+  - id: GW-SELF-HOSTED
+    status: adapted
+    surface: gateway
+    module: app/self_hosted_gateway.py
+    doc_refs:
+      - docs/SELF-HOSTED-GATEWAY.md
+      - docs/CAPABILITY-MATRIX.md#gateway--service-level
+      - https://learn.microsoft.com/en-us/azure/api-management/self-hosted-gateway-overview
+    owner_tests:
+      - tests/test_self_hosted_gateway.py::test_configuration_snapshot_auth_and_etag
+      - tests/test_self_hosted_gateway.py::test_api_assignments_and_deployment_gateway_identity
+      - tests/test_self_hosted_gateway.py::test_self_hosted_sync_keeps_last_known_good_on_fetch_failure
+      - tests/test_self_hosted_gateway.py::test_self_hosted_management_writes_are_refused
+    fixture_or_golden: inline-json
+    assertion_kind: http-json

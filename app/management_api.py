@@ -156,6 +156,7 @@ class ApiUpsert(BaseModel):
     subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None
     translate_required_query_parameters: Literal["template", "query"] = "template"
+    gateways: list[str] = Field(default_factory=lambda: ["managed"])
     workspace: str | None = None
 
 

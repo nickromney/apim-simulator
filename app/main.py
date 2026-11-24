@@ -74,6 +74,9 @@ class GatewayMetrics:
 
 def _serialize_gateway_config(cfg: GatewayConfig) -> str:
     payload = cfg.model_dump(mode="json")
+    for gateway_id, gateway in cfg.gateways.items():
+        if gateway.access_token is not None:
+            payload["gateways"][gateway_id]["access_token"] = gateway.access_token.get_secret_value()
     if payload.get("apis"):
         payload["routes"] = []
     if cfg.secret_storage.enabled:
@@ -385,6 +388,8 @@ def _build_gateway_router(*, require_management_plane: Callable[[], ManagementSe
     @router.post("/apim/reload")
     async def reload_config(request: Request) -> dict[str, Any]:
         """Reload configuration from file. Requires the admin token when one is set."""
+        if getattr(request.app.state, "self_hosted_gateway", None) is not None:
+            raise HTTPException(status_code=405, detail="Self-hosted gateway configuration is read-only")
         cfg: GatewayConfig = request.app.state.gateway_config
         if cfg.tenant_access.enabled or cfg.control_plane.enabled:
             require_tenant_access(request, permission="operate")
@@ -536,6 +541,24 @@ def _initialize_http_clients(app, http_client):
     return owns_client
 
 
+async def _start_self_hosted_sync(app: FastAPI, settings: Any, manager: ManagementService) -> asyncio.Task:
+    from app.self_hosted_gateway import SelfHostedSyncState, poll_config, sync_once
+
+    app.state.self_hosted_sync = SelfHostedSyncState()
+    await sync_once(app=app, settings=settings, manager=manager)
+    return asyncio.create_task(poll_config(app=app, settings=settings, manager=manager))
+
+
+async def _cancel_task(task: asyncio.Task | None) -> None:
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 def _build_lifespan(
     *,
     gateway_config: GatewayConfig,
@@ -543,6 +566,7 @@ def _build_lifespan(
     http_client: httpx.AsyncClient | None,
     require_management_plane: Callable[[], ManagementService],
     resolve_manager: Callable[[], ManagementService | None],
+    self_hosted_settings: Any = None,
 ):
     """Startup and shutdown: the HTTP client, the runtime stores, the watcher."""
 
@@ -554,6 +578,11 @@ def _build_lifespan(
         manager = require_management_plane()
         manager.apply_runtime_config(gateway_config)
         _reset_runtime_stores(app)
+        self_hosted_task = (
+            await _start_self_hosted_sync(app, self_hosted_settings, manager)
+            if self_hosted_settings is not None
+            else None
+        )
         from app.security_monitoring import SecurityAuditSink
 
         app.state.security_audit_sink = SecurityAuditSink(gateway_config.security_observability)
@@ -576,12 +605,8 @@ def _build_lifespan(
         )
         yield
 
-        if watcher_task is not None:
-            watcher_task.cancel()
-            try:
-                await watcher_task
-            except asyncio.CancelledError:
-                pass
+        await _cancel_task(watcher_task)
+        await _cancel_task(self_hosted_task)
         tasks = list(app.state.policy_background_tasks)
         if tasks:
             _, pending = await asyncio.wait(tasks, timeout=5)
@@ -648,7 +673,13 @@ def _require_manager(manager: ManagementService | None) -> ManagementService:
     return manager
 
 
-def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncClient | None = None) -> FastAPI:
+def create_app(
+    *,
+    config: GatewayConfig | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    gateway_id: str | None = None,
+    self_hosted_settings: Any = None,
+) -> FastAPI:
     """Compose the gateway: config, telemetry, middleware, then routers in order.
 
     Router order is load-bearing. The catch-all proxy matches every path, so it
@@ -675,8 +706,12 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
             http_client=http_client,
             require_management_plane=_require_management_plane,
             resolve_manager=_resolve_manager,
+            self_hosted_settings=self_hosted_settings,
         ),
     )
+    app.state.gateway_id = gateway_id
+    app.state.self_hosted_gateway = self_hosted_settings
+    app.state.gateway_heartbeats = {}
     app.add_exception_handler(GatewayError, gateway_error_handler)
     management_plane = ManagementService(
         app=app,
@@ -696,6 +731,20 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     app.add_middleware(SecurityMonitoringMiddleware)
     app.add_middleware(NetworkSecurityMiddleware, config_provider=lambda: app.state.gateway_config)
 
+    @app.middleware("http")
+    async def reject_self_hosted_writes(request: Request, call_next):
+        if self_hosted_settings is not None and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            if request.url.path.startswith("/apim/management/") or request.url.path in {
+                "/apim/reload",
+                "/apim/admin/subscriptions",
+            }:
+                return Response(
+                    content='{"statusCode":405,"message":"Self-hosted gateway configuration is read-only"}',
+                    status_code=405,
+                    media_type="application/json",
+                )
+        return await call_next(request)
+
     app.include_router(_build_gateway_router(require_management_plane=_require_management_plane))
     app.include_router(build_management_router(require_management_plane=_require_management_plane))
     app.include_router(build_debug_router(require_management_plane=_require_management_plane))
@@ -714,6 +763,9 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
     app.include_router(build_security_recovery_router(require_management_plane=_require_management_plane))
     app.include_router(build_security_governance_router(require_management_plane=_require_management_plane))
     app.include_router(build_security_monitoring_router())
+    from app.self_hosted_gateway import build_self_hosted_router
+
+    app.include_router(build_self_hosted_router())
     app.include_router(_build_catch_all_router())
 
     instrument_fastapi_app(app, telemetry)
@@ -723,10 +775,17 @@ def create_app(*, config: GatewayConfig | None = None, http_client: httpx.AsyncC
 def _create_process_app() -> FastAPI:
     """The app uvicorn serves: a management-gateway router when the flag is on, else the gateway."""
     from app.management_gateway import ManagementGatewaySettings, create_management_gateway_app
+    from app.self_hosted_gateway import SelfHostedGatewaySettings
 
     settings = ManagementGatewaySettings.from_env()
     if settings is not None:
         return create_management_gateway_app(settings)
+    self_hosted_settings = SelfHostedGatewaySettings.from_env()
+    if self_hosted_settings is not None:
+        return create_app(
+            gateway_id=self_hosted_settings.gateway_id,
+            self_hosted_settings=self_hosted_settings,
+        )
     return create_app()
 
 

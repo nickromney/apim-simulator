@@ -495,6 +495,7 @@ compose-config-ci:
 	@$(MAKE) --no-print-directory compose-config-private
 	@$(MAKE) --no-print-directory compose-config-ui
 	@$(MAKE) --no-print-directory compose-config-management-gateway
+	@$(MAKE) --no-print-directory compose-config-self-hosted-gateway
 	@$(MAKE) --no-print-directory -C examples/bff compose-config compose-config-series
 	@$(MAKE) --no-print-directory -C examples/architecture-patterns compose-config
 	@$(MAKE) --no-print-directory -C examples/architecture-patterns-extra compose-config
@@ -759,6 +760,9 @@ compose-config-hello-oidc:
 compose-config-management-gateway:
 	$(COMPOSE_MANAGEMENT_GATEWAY) config
 
+compose-config-self-hosted-gateway:
+	@$(MAKE) --no-print-directory -C examples/self-hosted-gateway compose-config
+
 compose-config-todo:
 	$(COMPOSE_TODO) config
 
@@ -776,6 +780,7 @@ examples:
 	@printf "  %-18s %-34s %s\n" "Gateway patterns" "make -C examples/architecture-patterns help" "Routing, offloading, aggregation, gatekeeper"
 	@printf "  %-18s %-34s %s\n" "Workload patterns" "make -C examples/architecture-patterns-extra help" "Domain adapter, deployment stamps, bulkheads"
 	@printf "  %-18s %-34s %s\n" "Regional gateways" "make -C examples/regional-gateways help" "Deployment.Region routing, retry and regional failover"
+	@printf "  %-18s %-34s %s\n" "Self-hosted gateway" "make -C examples/self-hosted-gateway help" "Configuration pull, API assignment and last-known-good state"
 	@printf "  %-18s %-34s %s\n" "Hello API" "make up-hello" "Smallest backend behind APIM"
 	@printf "  %-18s %-34s %s\n" "MCP" "make up-mcp" "MCP server behind APIM"
 	@printf "  %-18s %-34s %s\n" "OIDC" "make up-oidc" "JWT and subscription flows with Keycloak"

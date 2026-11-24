@@ -33,7 +33,7 @@ teach the wrong thing, or the feature belongs to another project.
 | 14 | Semantic caching | Covered by sibling | AI Foundry simulator behind `make up-ai-foundry` ([ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md)) |
 | 15 | Credential mapping: OAuth in, key, certificate or token out | Covered | `validate-jwt` with Keycloak, then `set-header`, managed identity or certificates to the backend |
 | 15 | Credential manager token renewal (`get-authorization-context`) | Gap | OAuth credential management is a candidate in [apim-coverage](apim-coverage/README.md) |
-| 16 | Self-hosted gateway: pulls configuration, keeps the data path local, per-API gateway assignment | Adapted, mismatched | [Management gateway mode](MANAGEMENT-GATEWAY.md) proxies the data path to the serving instance, which is the opposite of what the video stresses. Workspace gateways do model per-API gateway assignment |
+| 16 | Self-hosted gateway: pulls configuration, keeps the data path local, per-API gateway assignment | Adapted | [Self-hosted gateway mode](SELF-HOSTED-GATEWAY.md) and `examples/self-hosted-gateway`: token-authenticated configuration pull with ETags, local data path, API-to-gateway assignment, last-known-good configuration. Added after this review |
 | 17 | Public or private inbound; App Gateway and WAF in front | Covered | `make up-private`; edge HTTP/TLS stacks; WAF and request limits in the security lab |
 | 18 | Workspaces with their own gateway; federated model | Covered | [WORKSPACES.md](WORKSPACES.md) |
 | 19 | Developer portal, customise then publish | Covered | `/apim/portal` with draft/preview/publish customisation |
@@ -41,7 +41,7 @@ teach the wrong thing, or the feature belongs to another project.
 | 20 | API Center inventory and linting | Covered | Local API Center catalogue ([CAPABILITY-MATRIX.md](CAPABILITY-MATRIX.md)) |
 | 21 | Application Insights, Event Hubs, prompt/response capture | Adapted | OTEL/LGTM stacks, loggers and diagnostics, `log-to-eventhub`, local monitoring |
 
-## What changed in this pass
+## What changed after this review
 
 - The `retry` policy, including retry around `forward-request` with backend
   switching ([RETRY-POLICY.md](RETRY-POLICY.md), contract `POLICY-RETRY`).
@@ -49,13 +49,14 @@ teach the wrong thing, or the feature belongs to another project.
   two regional gateways, a global URL with failover, `context.Deployment.Region`
   routing and `retry` failover between regional backends. It was verified
   through published ports on slot 7 with `make verify`.
+- `xml-to-json`/`json-to-xml`, diagnostic logging and email notifications,
+  from the [Masterclass review](APIM-MASTERCLASS-COVERAGE.md).
+- A [self-hosted gateway mode](SELF-HOSTED-GATEWAY.md) that pulls its
+  configuration and serves locally.
 
 ## Remaining gaps worth doing
 
-1. A self-hosted gateway that pulls its configuration from the managed
-   instance and serves locally, with APIs assigned to it. This is the largest
-   difference from what the video teaches.
-2. `json-to-xml` and `xml-to-json`, for SOAP and legacy XML backends.
-3. `limit-concurrency` and `wait` (already listed as next in
+1. `limit-concurrency` and `wait` (already listed as next in
    [apim-coverage](apim-coverage/README.md)).
-4. Credential manager (`get-authorization-context`) against the local Keycloak.
+2. Credential manager (`get-authorization-context`) against the local Keycloak.
+3. WebSocket and gRPC APIs, which need real transports.
