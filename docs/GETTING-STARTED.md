@@ -6,12 +6,15 @@ Use the default `make up` fixture for this journey. Other examples have differen
 
 ## 1. Start the local stack
 
+First check your machine. `make doctor` prints `FAIL` with a fix for anything that would stop `make up`, and ends with `Ready for make up` when nothing does.
+
 ```bash
+make doctor
 make up
 curl -i http://localhost:8000/apim/health
 ```
 
-**Checkpoint:** the health request returns `200`. Allow the containers a few seconds to start and retry if the first call cannot connect. If it still fails, check the build output and Docker status before continuing.
+**Checkpoint:** the health request returns `200`. Allow the containers a few seconds to start and retry if the first call cannot connect. If it still fails, run `make doctor` and check the build output before continuing.
 
 There are two browser interfaces and one gateway:
 
