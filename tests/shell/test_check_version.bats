@@ -60,6 +60,12 @@ for dockerfile in (
         fixture.write_text(json.dumps({"sha": "079e3fd059c3d073151a6ac3b39eb129d66b517d"}), encoding="utf-8")
 PY
 
+  # The checkout selector the workflows pin (e.g. v6.0.2), read from ci.yml so an
+  # action bump does not need a test change.
+  export CHECKOUT_SELECTOR
+  CHECKOUT_SELECTOR="$(sed -n 's|.*uses: actions/checkout@[0-9a-f]\{40\}[[:space:]]*#[[:space:]]*\(v[^[:space:]]*\).*|\1|p' "$REPO_ROOT/.github/workflows/ci.yml" | head -n 1)"
+  [ -n "$CHECKOUT_SELECTOR" ]
+
   export EXPECTED_UV_VERSION
   EXPECTED_UV_VERSION="$(sed -n 's|^FROM ghcr.io/astral-sh/uv:\([^@ ]*\).*|\1|p' "$REPO_ROOT/Dockerfile")"
 
@@ -82,7 +88,7 @@ PY
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Release version declarations are synchronized at $EXPECTED_VERSION"* ]]
-  [[ "$output" == *"actions/checkout v6.0.2 resolves to the pinned SHA"* ]]
+  [[ "$output" == *"actions/checkout $CHECKOUT_SELECTOR resolves to the pinned SHA"* ]]
   [[ "$output" == *"grafana/otel-lgtm:0.24.0 matches the pinned digest"* ]]
   [[ "$output" == *"All uv-backed Dockerfiles use ghcr.io/astral-sh/uv:$EXPECTED_UV_VERSION"* ]]
   [[ "$output" == *"All .npmrc files set min-release-age=7"* ]]
@@ -91,7 +97,7 @@ PY
 }
 
 @test "check-version fails when an action selector resolves to a different sha" {
-  printf '{"sha":"%040d"}\n' 1 >"$GITHUB_FIXTURES/repos/actions/checkout/commits/v6.0.2"
+  printf '{"sha":"%040d"}\n' 1 >"$GITHUB_FIXTURES/repos/actions/checkout/commits/$CHECKOUT_SELECTOR"
 
   run env \
     CHECK_VERSION_GITHUB_API_BASE="file://$GITHUB_FIXTURES" \
@@ -99,6 +105,6 @@ PY
     "$SCRIPT" --execute
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"actions/checkout v6.0.2 resolves to"* ]]
+  [[ "$output" == *"actions/checkout $CHECKOUT_SELECTOR resolves to"* ]]
   [[ "$output" == *"version check(s) failed."* ]]
 }
