@@ -14,16 +14,21 @@ pytestmark = pytest.mark.repo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-PINNED_RELEASE_ACTION_REFS = {
-    "actions/checkout": "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
-    "actions/setup-python": "a309ff8b426b58ec0e2a45f0f869d46889d02405",
-    "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
-    "actions/attest-build-provenance": "a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32",
-    "docker/setup-buildx-action": "4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd",
-    "docker/login-action": "4907a6ddec9925e35a0a9e82d7399ccc52663121",
-    "docker/metadata-action": "030e881283bb7a6894de51c315a6bfe6a94e05cf",
-    "docker/build-push-action": "bcafcacb16a39f128d818304e6c9c0c18556b85f",
-}
+# Each action must be pinned to a full commit SHA, and only these actions may
+# be used. Which SHA is up to Dependabot: the tests do not repeat it, so an
+# action bump does not need a test change.
+RELEASE_ACTIONS = frozenset(
+    {
+        "actions/checkout",
+        "actions/setup-python",
+        "actions/upload-artifact",
+        "actions/attest-build-provenance",
+        "docker/setup-buildx-action",
+        "docker/login-action",
+        "docker/metadata-action",
+        "docker/build-push-action",
+    }
+)
 
 
 def _load_yaml(relative_path: str) -> dict:
@@ -146,7 +151,7 @@ def test_release_workflow_publishes_attested_zip_and_ghcr_image() -> None:
 
     dhi_login = _workflow_step_by_name(image_job, "Log in to Docker Hardened Images")
     assert dhi_login["if"] == "steps.build-profile.outputs.image_base == 'dhi'"
-    assert dhi_login["uses"] == f"docker/login-action@{PINNED_RELEASE_ACTION_REFS['docker/login-action']}"
+    assert re.fullmatch(r"docker/login-action@[0-9a-f]{40}", dhi_login["uses"])
     assert dhi_login["with"]["registry"] == "dhi.io"
 
     verify_dhi = _workflow_step_by_name(image_job, "Verify Docker Hardened Images access")
@@ -183,6 +188,5 @@ def test_release_workflow_uses_pinned_action_shas() -> None:
             action, ref = uses.split("@", 1)
             seen_actions.add(action)
             assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{uses} is not commit-pinned"
-            assert ref == PINNED_RELEASE_ACTION_REFS[action]
 
-    assert seen_actions == set(PINNED_RELEASE_ACTION_REFS)
+    assert seen_actions == RELEASE_ACTIONS
