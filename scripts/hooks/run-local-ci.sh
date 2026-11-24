@@ -45,6 +45,12 @@ Skip only when you have a reason:
   git push --no-verify
 EOF
 
+# Git exports GIT_DIR and friends to hooks, and from a linked worktree GIT_DIR
+# points at the shared .git. Tests that build throwaway repositories would act
+# on this one instead, so clear them; git rediscovers the checkout from the cwd.
+# shellcheck disable=SC2046 # one variable name per word
+unset $(git rev-parse --local-env-vars)
+
 export APIM_SIMULATOR_LOCAL_CI_IN_PROGRESS=1
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/apim-simulator-uv-cache}"
 if ! make local-ci; then
