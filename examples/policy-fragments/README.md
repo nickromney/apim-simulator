@@ -99,6 +99,8 @@ Behaviour to plan for:
   replace that header with
   `<authentication-managed-identity resource="https://cognitiveservices.azure.com" />`
   inside `send-request`, and grant the identity the Cognitive Services User role.
+  For a working keyless pairing with the AI Foundry simulator, see
+  [Go keyless](../ai-gateway/README.md#go-keyless).
 - **Content Safety 403 body.** Microsoft documents the 403 status but not the
   body. The simulator's body is its own.
 - **Local Language endpoint.** The sibling

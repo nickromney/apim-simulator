@@ -1,0 +1,11 @@
+# Overlay on compose.yml + compose.public.yml + compose.ai-foundry.yml: the
+# gateway calls the sibling AI Foundry simulator with its managed identity (a
+# signed JWT) instead of an api-key. Run it with
+# `make -C examples/ai-gateway up-foundry-keyless`, which generates the key first.
+services:
+  apim-simulator:
+    environment:
+      APIM_CONFIG_SOURCE_PATH: ${AI_FOUNDRY_APIM_CONFIG_PATH:-/app/examples/ai-gateway/apim.foundry.keyless.json}
+      APIM_WORKLOAD_IDENTITY_PRIVATE_KEY_FILE: /run/workload-identity/private.pem
+    volumes:
+      - ./examples/ai-gateway/.runtime/workload-identity:/run/workload-identity:ro
