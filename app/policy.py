@@ -6447,6 +6447,10 @@ _POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
     "llm-emit-token-metric": frozenset({"inbound"}),
     "azure-openai-emit-token-metric": frozenset({"inbound"}),
     "llm-content-safety": frozenset({"inbound", "outbound"}),
+    "llm-semantic-cache-lookup": frozenset({"inbound"}),
+    "azure-openai-semantic-cache-lookup": frozenset({"inbound"}),
+    "llm-semantic-cache-store": frozenset({"outbound"}),
+    "azure-openai-semantic-cache-store": frozenset({"outbound"}),
     "emit-metric": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "validate-content": frozenset({"inbound", "outbound", "on-error"}),
     "validate-parameters": frozenset({"inbound"}),
@@ -6535,6 +6539,7 @@ def _parse_extension(el, path):
     from app.policy_certificates import parse_certificate_policy
     from app.policy_content_safety import parse_content_safety_policy
     from app.policy_messaging import parse_messaging_policy
+    from app.policy_semantic_cache import parse_semantic_cache_policy
     from app.policy_transforms import parse_transform_policy
     from app.policy_xml_json import parse_xml_json_policy
 
@@ -6546,6 +6551,7 @@ def _parse_extension(el, path):
             or parse_xml_json_policy(el)
             or parse_trace_policy(el)
             or parse_content_safety_policy(el)
+            or parse_semantic_cache_policy(el)
         )
     except ValueError as exc:
         raise HTTPException(500, str(exc)) from exc
@@ -6736,6 +6742,7 @@ def _reads_response_body(step: PolicyNode) -> bool:
         return any(_reads_response_body(item) for item in step.steps)
     from app.policy_content_safety import LlmContentSafety
     from app.policy_messaging import LogToEventHub, SendOneWayRequest, SendServiceBusMessage
+    from app.policy_semantic_cache import LlmSemanticCacheStore
     from app.policy_transforms import FindAndReplace
     from app.policy_xml_json import JsonToXml, XmlToJson
 
@@ -6749,7 +6756,8 @@ def _reads_response_body(step: PolicyNode) -> bool:
         | LogToEventHub
         | SendServiceBusMessage
         | SendOneWayRequest
-        | LlmContentSafety,
+        | LlmContentSafety
+        | LlmSemanticCacheStore,
     )
 
 

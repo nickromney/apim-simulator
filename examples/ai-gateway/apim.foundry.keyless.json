@@ -60,6 +60,10 @@
     "aifoundry-simulator": {
       "url": "http://aifoundry-simulator:8000",
       "description": "Sibling AI Foundry simulator (model deployments, semantic cache, content safety) reached over the shared 'aifoundry' Docker network"
+    },
+    "foundry-embeddings": {
+      "url": "http://aifoundry-simulator:8000/openai/deployments/text-embedding-demo/embeddings",
+      "description": "Embeddings deployment the semantic cache policies call with the gateway's managed identity (embeddings-backend-auth=system-assigned)"
     }
   },
   "apis": {
@@ -102,6 +106,22 @@
           "name": "Shield Prompt",
           "method": "POST",
           "url_template": "/text:shieldPrompt"
+        }
+      }
+    },
+    "semantic-cache-api": {
+      "name": "Azure OpenAI with gateway semantic caching",
+      "path": "cached/openai",
+      "upstream_base_url": "http://aifoundry-simulator:8000",
+      "upstream_path_prefix": "/openai",
+      "backend": "aifoundry-simulator",
+      "products": ["ai-workloads"],
+      "policies_xml": "<policies><inbound><authentication-managed-identity resource=\"https://cognitiveservices.azure.com\" /><set-header name=\"api-key\" exists-action=\"delete\" /><llm-semantic-cache-lookup score-threshold=\"0.2\" embeddings-backend-id=\"foundry-embeddings\" embeddings-backend-auth=\"system-assigned\" ignore-system-messages=\"true\" max-message-count=\"10\"><vary-by>@(context.Subscription.Id)</vary-by></llm-semantic-cache-lookup><llm-token-limit counter-key=\"@(context.Subscription.Id)\" tokens-per-minute=\"5000\" estimate-prompt-tokens=\"false\" remaining-tokens-header-name=\"x-apim-remaining-tokens\" /></inbound><backend><forward-request /></backend><outbound><llm-semantic-cache-store duration=\"120\" /></outbound><on-error /></policies>",
+      "operations": {
+        "chat-completions": {
+          "name": "Chat Completions (deployment)",
+          "method": "POST",
+          "url_template": "/deployments/{deploymentId}/chat/completions"
         }
       }
     }

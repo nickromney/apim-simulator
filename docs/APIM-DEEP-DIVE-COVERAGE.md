@@ -30,7 +30,7 @@ teach the wrong thing, or the feature belongs to another project.
 | 13 | Copilot authoring | Out of scope | Editor feature |
 | 14 | Token limits and PTU-to-pay-as-you-go spillover | Covered | `llm-token-limit`, `llm-emit-token-metric`, priority backend pools ([AI-GATEWAY.md](AI-GATEWAY.md)) |
 | 14 | Model chaining (small model, then large) | Covered | `send-request` and `set-body` in policy |
-| 14 | Semantic caching | Covered by sibling | AI Foundry simulator behind `make up-ai-foundry` ([ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md)) |
+| 14 | Semantic caching | Adapted | `llm-semantic-cache-*` policies using the AI Foundry simulator's embeddings behind `make up-ai-foundry` ([AI-GATEWAY.md](AI-GATEWAY.md#llm-semantic-cache-lookup-and-llm-semantic-cache-store)) |
 | 15 | Credential mapping: OAuth in, key, certificate or token out | Covered | `validate-jwt` with Keycloak, then `set-header`, managed identity or certificates to the backend |
 | 15 | Credential manager token renewal (`get-authorization-context`) | Gap | OAuth credential management is a candidate in [apim-coverage](apim-coverage/README.md) |
 | 16 | Self-hosted gateway: pulls configuration, keeps the data path local, per-API gateway assignment | Adapted | [Self-hosted gateway mode](SELF-HOSTED-GATEWAY.md) and `examples/self-hosted-gateway`: token-authenticated configuration pull with ETags, local data path, API-to-gateway assignment, last-known-good configuration. Added after this review |

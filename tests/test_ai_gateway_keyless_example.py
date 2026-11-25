@@ -58,6 +58,8 @@ class FoundryStub:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request)
+        if request.url.path.endswith("/embeddings"):
+            return httpx.Response(200, json={"data": [{"embedding": [1.0, 0.0]}]})
         usage = {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10}
         return httpx.Response(200, json={"choices": [], "usage": usage})
 
@@ -105,6 +107,12 @@ def test_keyless_config_differs_from_the_key_based_one_only_in_auth() -> None:
     keyless = json.loads(KEYLESS_CONFIG.read_text(encoding="utf-8"))
     assert "workload_identity" not in keyed
     assert keyless.pop("workload_identity")
+    # The semantic cache's embeddings backend holds the key in the keyed
+    # example; keyless, the policy sends the managed identity instead.
+    embeddings = keyed["backends"]["foundry-embeddings"]
+    assert embeddings.pop("header_credentials") == {"api-key": "local-foundry-key-alpha"}
+    assert "header_credentials" not in keyless["backends"]["foundry-embeddings"]
+    embeddings["description"] = keyless["backends"]["foundry-embeddings"]["description"]
     old = '<set-header name="api-key" exists-action="override"><value>local-foundry-key-alpha</value></set-header>'
     new = MI_POLICY + '<set-header name="api-key" exists-action="delete" />'
     for api_id, api in keyed["apis"].items():
@@ -129,6 +137,23 @@ def test_chat_reaches_foundry_with_a_bearer_jwt_and_no_api_key(client: TestClien
     jwks = client.get(JWKS_PATH).json()
     kid = jwt.get_unverified_header(token)["kid"]
     jwk = next(key for key in jwks["keys"] if key["kid"] == kid)
+    claims = jwt.decode(token, jwt.PyJWK(jwk).key, algorithms=["RS256"], audience=RESOURCE, issuer=ISSUER)
+    assert claims["oid"] == "system-assigned"
+
+
+def test_semantic_cache_embeddings_call_uses_the_managed_identity(client: TestClient, foundry: FoundryStub) -> None:
+    path = "/cached/openai/deployments/gpt-nofilter/chat/completions?api-version=2024-10-21"
+    body = {"messages": [{"role": "user", "content": "What is the time off policy?"}]}
+    first = client.post(path, headers={"api-key": "ai-team-alpha-key"}, json=body)
+    second = client.post(path, headers={"api-key": "ai-team-alpha-key"}, json=body)
+
+    assert first.status_code == second.status_code == 200, first.text
+    assert second.headers["x-apim-semantic-cache"] == "hit"
+    embedding = next(call for call in foundry.calls if call.url.path.endswith("/embeddings"))
+    assert "api-key" not in embedding.headers
+    token = embedding.headers["authorization"].removeprefix("Bearer ")
+    jwks = client.get(JWKS_PATH).json()
+    jwk = next(key for key in jwks["keys"] if key["kid"] == jwt.get_unverified_header(token)["kid"])
     claims = jwt.decode(token, jwt.PyJWK(jwk).key, algorithms=["RS256"], audience=RESOURCE, issuer=ISSUER)
     assert claims["oid"] == "system-assigned"
 

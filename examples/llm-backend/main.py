@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import math
 import os
@@ -21,6 +22,36 @@ telemetry = configure_observability(service_name=SERVICE_NAME, service_version=S
 app = FastAPI(title="Mock LLM Backend", version=SERVICE_VERSION)
 
 LATENCY_MS = int(os.getenv("MOCK_LLM_LATENCY_MS", "0"))
+# Deployment capacity in tokens per minute, like a PTU deployment's provisioned
+# throughput. 0 means unlimited. Over capacity, the deployment answers 429
+# with Retry-After as Azure OpenAI does, so a gateway pool can spill to
+# pay-as-you-go. Simulated: real deployments meter throughput, not this
+# sliding sum of usage totals.
+TOKENS_PER_MINUTE = int(os.getenv("MOCK_LLM_TOKENS_PER_MINUTE", "0"))
+_token_window: collections.deque[tuple[float, int]] = collections.deque()
+
+
+def _capacity_retry_after(now: float) -> int | None:
+    """Seconds until the deployment has capacity again, or None if it has some now."""
+    if TOKENS_PER_MINUTE <= 0:
+        return None
+    while _token_window and _token_window[0][0] <= now - 60:
+        _token_window.popleft()
+    if sum(tokens for _at, tokens in _token_window) < TOKENS_PER_MINUTE:
+        return None
+    return max(1, math.ceil(_token_window[0][0] + 60 - now))
+
+
+def _capacity_exceeded(retry_after: int) -> JSONResponse:
+    # Azure OpenAI's 429 body shape; the message is shortened.
+    message = (
+        f"Requests have exceeded the token rate limit of this deployment. Please retry after {retry_after} seconds."
+    )
+    return JSONResponse(
+        status_code=429,
+        headers={"retry-after": str(retry_after)},
+        content={"error": {"code": "429", "message": message}},
+    )
 
 
 def _estimate_tokens(text: str) -> int:
@@ -153,8 +184,14 @@ async def _chat_completion(request: Request, *, model_hint: str | None = None) -
             content={"error": {"message": "'messages' is required", "type": "invalid_request_error"}},
         )
     model = model_hint or str(body.get("model") or "mock-model")
+    now = time.time()
+    retry_after = _capacity_retry_after(now)
+    if retry_after is not None:
+        return _capacity_exceeded(retry_after)
     max_tokens = body.get("max_tokens") if isinstance(body.get("max_tokens"), int) else None
     payload = _chat_response_payload(model=model, messages=body["messages"], max_tokens=max_tokens)
+    if TOKENS_PER_MINUTE > 0:
+        _token_window.append((now, payload["usage"]["total_tokens"]))
     set_current_span_attributes(
         **{
             "llm.model": model,
