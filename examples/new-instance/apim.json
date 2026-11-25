@@ -1,0 +1,219 @@
+{
+  "allowed_origins": [
+    "${APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST}",
+    "${APIM_ALLOWED_ORIGIN_OPERATOR_CONSOLE}",
+    "${APIM_ALLOWED_ORIGIN_VITE}",
+    "${APIM_ALLOWED_ORIGIN_GATEWAY}"
+  ],
+  "service": {
+    "name": "apim-new-instance",
+    "display_name": "New APIM instance"
+  },
+  "allow_anonymous": true,
+  "trace_enabled": true,
+  "trace_allow_unauthenticated": true,
+  "tenant_access": {
+    "enabled": true,
+    "primary_key": "local-dev-tenant-key",
+    "secondary_key": "local-dev-tenant-key-secondary"
+  },
+  "portal": {
+    "enabled": true
+  },
+  "policies_xml": "<policies><inbound /><backend><forward-request /></backend><outbound /><on-error /></policies>",
+  "users": {
+    "1": {
+      "id": "1",
+      "name": "Administrator",
+      "first_name": "Administrator",
+      "email": "admin@example.test",
+      "state": "active",
+      "note": "The administrator email given when the instance was created"
+    },
+    "demo-dev": {
+      "id": "demo-dev",
+      "name": "Demo Developer",
+      "first_name": "Demo",
+      "last_name": "Developer",
+      "email": "demo-dev@example.test",
+      "state": "active"
+    }
+  },
+  "groups": {
+    "administrators": {
+      "id": "administrators",
+      "name": "Administrators",
+      "description": "Administrators is a built-in group containing the admin email account provided at the time of service creation. Its membership is managed by the system.",
+      "users": [
+        "1"
+      ]
+    },
+    "developers": {
+      "id": "developers",
+      "name": "Developers",
+      "description": "Developers is a built-in group. Its membership is managed by the system. Signed-in users fall into this group.",
+      "users": [
+        "1",
+        "demo-dev"
+      ]
+    },
+    "guests": {
+      "id": "guests",
+      "name": "Guests",
+      "description": "Guests is a built-in group. Its membership is managed by the system. Unauthenticated users visiting the developer portal fall into this group.",
+      "users": []
+    }
+  },
+  "products": {
+    "starter": {
+      "name": "Starter",
+      "description": "Subscribers will be able to run 5 calls/minute up to a maximum of 100 calls/week.",
+      "state": "published",
+      "require_subscription": true,
+      "approval_required": false,
+      "subscriptions_limit": 1,
+      "groups": [
+        "administrators",
+        "developers",
+        "guests"
+      ],
+      "policies_xml": "<policies><inbound><rate-limit calls=\"5\" renewal-period=\"60\" /><quota calls=\"100\" renewal-period=\"604800\" /><base /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>"
+    },
+    "unlimited": {
+      "name": "Unlimited",
+      "description": "Subscribers have completely unlimited access to the API. Administrator approval is required.",
+      "state": "published",
+      "require_subscription": true,
+      "approval_required": true,
+      "subscriptions_limit": 1,
+      "groups": [
+        "administrators",
+        "developers",
+        "guests"
+      ]
+    }
+  },
+  "subscription": {
+    "subscriptions": {
+      "master": {
+        "id": "master",
+        "name": "Built-in all-access subscription",
+        "service_scoped": true,
+        "created_by": "1",
+        "keys": {
+          "primary": "new-instance-all-access-primary",
+          "secondary": "new-instance-all-access-secondary"
+        }
+      },
+      "admin-starter": {
+        "id": "admin-starter",
+        "name": "Starter",
+        "products": [
+          "starter"
+        ],
+        "created_by": "portal:1",
+        "keys": {
+          "primary": "new-instance-starter-primary",
+          "secondary": "new-instance-starter-secondary"
+        }
+      },
+      "admin-unlimited": {
+        "id": "admin-unlimited",
+        "name": "Unlimited",
+        "products": [
+          "unlimited"
+        ],
+        "created_by": "portal:1",
+        "keys": {
+          "primary": "new-instance-unlimited-primary",
+          "secondary": "new-instance-unlimited-secondary"
+        }
+      }
+    }
+  },
+  "apis": {
+    "echo-api": {
+      "name": "Echo API",
+      "path": "echo",
+      "upstream_base_url": "http://mock-backend:8080",
+      "upstream_path_prefix": "/api",
+      "products": [
+        "starter",
+        "unlimited"
+      ],
+      "operations": {
+        "create-resource": {
+          "name": "Create resource",
+          "method": "POST",
+          "url_template": "/resource",
+          "description": "A demonstration of a POST call based on the echo backend above. The request body is expected to contain JSON-formatted data (see example below). A policy is used to automatically transform any request sent in JSON directly to XML. In a real-world scenario this could be used to enable modern clients to speak to a legacy backend."
+        },
+        "modify-resource": {
+          "name": "Modify Resource",
+          "method": "PUT",
+          "url_template": "/resource",
+          "description": "A demonstration of a PUT call handled by the same \"echo\" backend as above. You can now specify a request body in addition to headers and it will be returned as well."
+        },
+        "remove-resource": {
+          "name": "Remove resource",
+          "method": "DELETE",
+          "url_template": "/resource",
+          "description": "A demonstration of a DELETE call which traditionally deletes the resource. It is based on the same \"echo\" backend as in all other operations so nothing is actually deleted."
+        },
+        "retrieve-header-only": {
+          "name": "Retrieve header only",
+          "method": "HEAD",
+          "url_template": "/resource",
+          "description": "The HEAD operation returns only headers. In this demonstration a policy is used to set additional headers when the response is returned and to enable JSONP."
+        },
+        "retrieve-resource": {
+          "name": "Retrieve resource",
+          "method": "GET",
+          "url_template": "/resource",
+          "description": "A demonstration of a GET call on a sample resource. It is handled by an \"echo\" backend which returns a response equal to the request (the supplied headers and body are being returned as received).",
+          "request": {
+            "query_parameters": [
+              {
+                "name": "param1",
+                "required": true,
+                "type": "string",
+                "description": "A sample parameter that is required and has a default value",
+                "default_value": "sample"
+              },
+              {
+                "name": "param2",
+                "required": false,
+                "type": "string",
+                "description": "Another sample parameter, set to not required"
+              }
+            ]
+          }
+        },
+        "retrieve-resource-cached": {
+          "name": "Retrieve resource (cached)",
+          "method": "GET",
+          "url_template": "/resource-cached",
+          "description": "A demonstration of a GET call with caching enabled on the same \"echo\" backend as above. Cache TTL is set to 1 hour. When you make the first request the headers you supplied will be cached. Subsequent calls will return the same headers as the first time even if you change them in your request.",
+          "request": {
+            "query_parameters": [
+              {
+                "name": "param1",
+                "required": true,
+                "type": "string",
+                "description": "A sample parameter that is required and has a default value",
+                "default_value": "sample"
+              },
+              {
+                "name": "param2",
+                "required": false,
+                "type": "string",
+                "description": "Another sample parameter, set to not required"
+              }
+            ]
+          },
+          "policies_xml": "<policies><inbound><base /><cache-lookup vary-by-developer=\"false\" vary-by-developer-groups=\"false\" downstream-caching-type=\"none\"><vary-by-query-parameter>param1</vary-by-query-parameter><vary-by-query-parameter>param2</vary-by-query-parameter></cache-lookup></inbound><backend><base /></backend><outbound><cache-store duration=\"3600\" /><base /></outbound><on-error><base /></on-error></policies>"
+        }
+      }
+    }
+  }
+}
