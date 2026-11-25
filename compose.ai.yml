@@ -73,6 +73,40 @@ services:
     networks:
       - apim
 
+  llm-backend-ptu:
+    <<: *python-service-hardening
+    build:
+      context: .
+      dockerfile: examples/llm-backend/Dockerfile
+      args:
+        PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev@sha256:ea5fd1cae2463b48c7627577584e582ce3d6d99ba3789723051df9a707f658b0}
+        PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13@sha256:1fe1883f0c28d90b7364e6f069437801c9e8f150c886f02f74bfcefc9ea14591}
+        APP_UID: ${APP_UID:-65532}
+        APP_GID: ${APP_GID:-65532}
+    image: apim-simulator-llm-backend:latest
+    expose:
+      - "8000"
+    environment:
+      OTEL_SERVICE_NAME: llm-backend-ptu
+      MOCK_LLM_LATENCY_MS: ${MOCK_LLM_LATENCY_MS:-0}
+      # Provisioned capacity; over it the deployment returns 429 + Retry-After.
+      MOCK_LLM_TOKENS_PER_MINUTE: ${MOCK_LLM_PTU_TOKENS_PER_MINUTE:-200}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+      start_interval: 1s
+    networks:
+      - apim
+
   apim-simulator:
     environment:
       APIM_CONFIG_PATH: /tmp/ai-apim-config.json
@@ -82,6 +116,8 @@ services:
       llm-backend:
         condition: service_healthy
       llm-backend-b:
+        condition: service_healthy
+      llm-backend-ptu:
         condition: service_healthy
 
 networks:

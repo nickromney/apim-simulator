@@ -64,8 +64,9 @@ Prefer new examples that exercise shipped capabilities rather than speculative p
 
 ### AI Foundry Simulator Integration
 
-`llm-semantic-cache-*` and `llm-content-safety` stay out of this repo (see
-[ADR 0003](adr/0003-gap-closure-round.md)): both proxy other Azure services.
+The embeddings and moderation behind `llm-semantic-cache-*` and
+`llm-content-safety` stay out of this repo (see
+[ADR 0003](adr/0003-gap-closure-round.md)): both policies call other Azure services.
 The AI Foundry simulator now exists as a sibling project,
 [aifoundry-simulator](https://github.com/nickromney/aifoundry-simulator) —
 sibling on GitHub, not necessarily adjacent on disk. The compose overlay
@@ -73,10 +74,10 @@ landed: `make up-ai-foundry` attaches the gateway to that simulator's
 `aifoundry` Docker network with
 [examples/ai-gateway/apim.foundry.json](../examples/ai-gateway/apim.foundry.json),
 and `make smoke-ai-foundry` asserts the integration end to end (see
-[AI-GATEWAY.md](AI-GATEWAY.md)). `llm-content-safety` is now a thin adapted
-client of that service's Content Safety API. The remaining work is
-`llm-semantic-cache-*` as the same kind of client, and Language PII detection
-in the Foundry simulator for the `core-pii` fragment. Do not implement embeddings or
+[AI-GATEWAY.md](AI-GATEWAY.md)). `llm-content-safety` is a thin adapted
+client of that service's Content Safety API, and `llm-semantic-cache-*` is a
+client of its embeddings deployment. The remaining work is Language PII
+detection in the Foundry simulator for the `core-pii` fragment. Do not implement embeddings or
 moderation logic here, and do not assume the two checkouts share a parent
 directory.
 
@@ -93,7 +94,6 @@ groups, schemas, version sets and notifications; ARM-shaped
 
 - External cache backends
 - Full APIM expression-engine compatibility
-- `llm-semantic-cache-lookup`/`-store` (simulates another Azure service; see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
 - Full developer portal visual editing, custom widgets, email, and notification features. Local branding, themes, pages, media, and draft/publish workflows are available at `/apim/portal`.
 - Full ARM or SDK wire compatibility
 

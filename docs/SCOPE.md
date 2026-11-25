@@ -59,7 +59,7 @@ subset, `adapted` when local behavior intentionally differs from APIM, and
   - `validate-parameters` (headers and query against operation metadata)
   - `validate-status-code` (adapted: `prevent` mutates the response to 502)
 - Curated Azure-Samples/APIM compatibility fixtures with documented supported, adapted, and unsupported cases
-- An AI gateway example: a mock OpenAI/Azure OpenAI-shaped LLM backend behind token-limit and token-metric policies ([AI-GATEWAY.md](AI-GATEWAY.md))
+- An AI gateway example: a mock OpenAI/Azure OpenAI-shaped LLM backend behind token-limit and token-metric policies, with PTU-first pay-as-you-go spillover; `llm-content-safety` and `llm-semantic-cache-*` as clients of the sibling AI Foundry simulator ([AI-GATEWAY.md](AI-GATEWAY.md))
 - A shared-gateway RBAC example: one gateway serving several simulated workload identities, segregated per API by role claims ([examples/shared-gateway](../examples/shared-gateway/README.md))
 - An opt-in LocalStack overlay running an AWS-shaped API Gateway beside the simulator for comparison
 - Compose-backed direct public, edge HTTP, edge TLS, private/internal, OIDC, MCP, hello starter, todo demo, and OTEL/[LGTM](https://github.com/grafana/docker-otel-lgtm) scenarios
@@ -67,7 +67,7 @@ subset, `adapted` when local behavior intentionally differs from APIM, and
 ## Currently Deferred
 
 - External cache backends for the `cache-*` policies
-- `llm-semantic-cache-lookup`/`-store` and `llm-content-safety` (see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
+- Embeddings and moderation for the `llm-semantic-cache-*` and `llm-content-safety` policies, which the sibling AI Foundry simulator serves (see [ADR 0001](adr/0001-goldilocks-ai-gateway-scope.md))
 - Full APIM policy expression compatibility
 - Reconstruction of complete revision snapshots from Terraform-imported metadata, arbitrary source-API revision cloning, and broader Azure release infrastructure
 - Broader control-plane parity beyond the current local CRUD and inspection surface

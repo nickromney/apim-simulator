@@ -20,14 +20,20 @@ make smoke-ai
 - The Azure OpenAI-shaped API load-balances across two mock deployments via
   the `llm-pool` backend; `x-apim-backend-id` shows the member that served
   each call
+- `POST /ptu/openai/deployments/{deployment}/chat/completions` — PTU first,
+  pay-as-you-go spillover: `llm-backend-ptu` has a small tokens-per-minute
+  capacity and answers 429 with `Retry-After`; the `llm-ptu-paygo` pool's
+  breaker then sends calls to `llm-backend-b` until `Retry-After` passes
 
 ## Variant: fronting the sibling AI Foundry simulator
 
 [apim.foundry.json](apim.foundry.json) points the same gateway policies at
 the sibling [aifoundry-simulator](https://github.com/nickromney/aifoundry-simulator)
 instead of the mock backend, adding semantic-cache and content-safety
-behaviour behind the gateway. Start that simulator first (`make up` in its
-checkout), then:
+behaviour behind the gateway. `/cached/openai` adds the gateway's own
+`llm-semantic-cache-lookup`/`-store` policies, which embed each prompt with
+Foundry's `text-embedding-demo` deployment. Start that simulator first
+(`make up` in its checkout), then:
 
 ```bash
 make up-ai-foundry

@@ -100,6 +100,29 @@ def smoke_pool_distribution() -> list[str]:
     return members
 
 
+PTU_CHAT_PATH = "/ptu/openai/deployments/gpt-demo/chat/completions?api-version=2024-10-21"
+
+
+def smoke_ptu_spillover() -> list[str]:
+    """PTU first; when it answers 429 the breaker opens and calls go to pay-as-you-go.
+
+    Every call must succeed: the 429 trips the PTU member's breaker for its
+    Retry-After and the gateway retries on the priority-2 member.
+    """
+    members: list[str] = []
+    for _ in range(12):
+        response = chat_request(PTU_CHAT_PATH, key=SECOND_SUBSCRIPTION_KEY, prompt="Use the PTU capacity first.")
+        require(response.status_code == 200, f"expected 200 during PTU spillover, got {response.status_code}")
+        members.append(response.headers.get("x-apim-backend-id", ""))
+    require("llm-backend-b" in members, f"expected spillover to pay-as-you-go, saw {members}")
+    first_paygo = members.index("llm-backend-b")
+    require(
+        all(member == "llm-backend-b" for member in members[first_paygo:]),
+        f"expected calls to stay on pay-as-you-go while the PTU breaker is open, saw {members}",
+    )
+    return members
+
+
 def smoke_token_limit_429() -> int:
     for attempt in range(1, 21):
         response = chat_request(CHAT_PATH, key=SUBSCRIPTION_KEY, prompt="Fill the token bucket quickly please.")
@@ -156,6 +179,7 @@ def main() -> int:
     smoke_auth()
     payload = smoke_completion()
     members = smoke_pool_distribution()
+    ptu_members = smoke_ptu_spillover()
     tripped_at = smoke_token_limit_429()
     smoke_counter_isolation()
     smoke_openai_compat_quota_headers()
@@ -165,6 +189,7 @@ def main() -> int:
     print("- missing/invalid subscription key: 401")
     print(f"- chat completion usage total_tokens: {payload['usage']['total_tokens']}")
     print(f"- backend pool round-robin across members: {members}")
+    print(f"- PTU then pay-as-you-go on 429: {ptu_members.count('llm-backend-ptu')} PTU calls, then llm-backend-b")
     print(f"- llm-token-limit tripped 429 after {tripped_at} follow-up requests")
     print("- second subscription kept its own token counter: 200")
     print("- token-quota headers present on OpenAI-compatible API")

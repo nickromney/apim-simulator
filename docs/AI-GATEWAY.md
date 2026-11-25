@@ -140,9 +140,97 @@ The `llm-content-safety` policy is a thin client of that Content Safety API:
 the gateway sends prompt or completion text to `text:analyze` and
 `text:shieldPrompt` and returns 403 when the backend's verdict crosses a
 threshold. The [core reusable fragments](../examples/policy-fragments/README.md)
-wrap it as `core-content-safety`. The `llm-semantic-cache-*` policies remain
-unimplemented (see the capability matrix); caching happens service-side in the
-Foundry simulator — tracked in [NEXT-FEATURES.md](NEXT-FEATURES.md).
+wrap it as `core-content-safety`. The `llm-semantic-cache-*` policies are the
+same kind of client, of the Foundry embeddings deployment (next section).
+
+## llm-semantic-cache-lookup and llm-semantic-cache-store
+
+Adapted implementation (aliases: `azure-openai-semantic-cache-lookup`,
+`azure-openai-semantic-cache-store`). The Foundry stack exposes it at
+`/cached/openai`, in front of `gpt-nofilter`, which has no service-side cache.
+A hit there can only come from the gateway:
+
+```bash
+ask() {
+  curl -si "http://localhost:8000/cached/openai/deployments/gpt-nofilter/chat/completions?api-version=2024-10-21" \
+    -H "api-key: ai-team-alpha-key" -H "content-type: application/json" \
+    -d "{\"messages\":[{\"role\":\"system\",\"content\":\"Be brief.\"},{\"role\":\"user\",\"content\":\"$1\"}]}" \
+    | grep -i '^x-apim-semantic-cache'
+}
+ask "What is the time off policy?"   # nothing: a miss, answered by the model
+ask "What is the time-off policy?"   # x-apim-semantic-cache: hit, and its -score
+```
+
+Add `-H "x-apim-trace: true"` to see the `llm-semantic-cache-lookup` step with
+its score, or the closest score on a miss.
+
+The lookup policy (inbound):
+
+- builds the prompt from the chat messages, leaving out `system` and
+  `developer` messages when `ignore-system-messages="true"`;
+- skips caching when the dialog has more than `max-message-count` messages;
+- sends the prompt to the `embeddings-backend-id` backend, whose URL is the
+  embeddings deployment endpoint, as in Azure;
+- returns the stored completion when the closest cached vector is within
+  `score-threshold`, a cosine distance from 0.0 to 1.0 where lower needs a
+  closer match;
+- keeps entries apart per API and per `<vary-by>` value. The example varies by
+  subscription, so one team never gets another team's cached answer.
+
+The store policy (outbound) saves the vector and a `200` response for
+`duration` seconds.
+
+`embeddings-backend-auth="system-assigned"` is required, as in Azure. When the
+backend has no credentials of its own, the gateway sends its managed identity
+token, which the keyless Foundry pairing verifies. The keyed example gives the
+backend an `api-key` instead.
+
+Adapted, not parity:
+
+- Vectors are kept in gateway memory, not in Azure Managed Redis (RediSearch).
+  A restart or configuration reload empties the cache, and instances don't
+  share it.
+- Streamed requests (`"stream": true`) skip the cache; replaying a stored
+  completion as SSE is not simulated.
+- Hits carry `x-apim-semantic-cache: hit` and `x-apim-semantic-cache-score`.
+  Those headers are local, added so you can see a hit without a trace.
+- The Foundry embeddings are lexical feature hashes, not a neural model, so
+  thresholds that suit Azure OpenAI embeddings are too loose here. The example
+  uses 0.2; at 0.4, "What is the parental leave policy?" would get the
+  time-off answer. See
+  [APIM-GENAI-COVERAGE.md](APIM-GENAI-COVERAGE.md#notes).
+
+## PTU first, pay-as-you-go spillover
+
+The standard pattern for provisioned throughput: send traffic to the PTU
+deployment, and when it returns `429` with `Retry-After`, open its circuit
+breaker and use pay-as-you-go until the breaker closes. `make up-ai` exposes
+it at `/ptu/openai`:
+
+- `llm-backend-ptu` is a mock deployment with a capacity of
+  `MOCK_LLM_PTU_TOKENS_PER_MINUTE` tokens per minute (default 200). Over it,
+  it answers `429` with `Retry-After` and Azure OpenAI's error body.
+- The `llm-ptu-paygo` pool puts it at priority 1 and `llm-backend-b` at
+  priority 2. The breaker trips on one `429` (`statusCodeRanges` 429–429) and
+  stays open for the `Retry-After` value (`acceptRetryAfter: true`).
+- `proxy_retry_statuses` includes `429`, so the request that trips the breaker
+  is retried on pay-as-you-go and the client still gets `200`.
+
+```bash
+for i in $(seq 8); do
+  curl -s -o /dev/null -w '%{http_code} ' -D - \
+    "http://localhost:8000/ptu/openai/deployments/gpt-demo/chat/completions?api-version=2024-10-21" \
+    -H "api-key: ai-team-beta-key" -H "content-type: application/json" \
+    -d '{"messages":[{"role":"user","content":"hello"}]}' | grep -i x-apim-backend-id
+done
+# x-apim-backend-id: llm-backend-ptu   (a few times, then)
+# x-apim-backend-id: llm-backend-b     (for the rest of the Retry-After window)
+```
+
+Azure needs a `retry` policy around `forward-request` to resend the tripping
+request. The simulator does that retry with `proxy_retry_statuses` and
+`proxy_max_attempts`; see [RETRY-POLICY.md](RETRY-POLICY.md) for the policy
+form.
 
 ## How Kong and NGINX solve the same problems
 
@@ -155,10 +243,10 @@ Foundry simulator — tracked in [NEXT-FEATURES.md](NEXT-FEATURES.md).
 | Semantic caching | `llm-semantic-cache-*` | `ai-semantic-cache` | Not built in |
 | Multi-deployment balancing | Backend pools + circuit breaker | Upstream targets/balancers | `upstream` blocks |
 
-The simulator implements the first three rows and multi-deployment balancing
-(all adapted) because they change how you *author APIM configs and policies*;
-prompt controls and semantic caching are held because they simulate other
-services rather than gateway behaviour (see ADR 0001 and ADR 0003).
+The simulator implements every row (all adapted). Prompt controls and
+semantic caching are clients of the sibling AI Foundry simulator, which
+serves the Content Safety and embeddings APIs those policies call; the
+gateway does no moderation or embedding itself (see ADR 0001 and ADR 0003).
 
 ## What this teaches
 

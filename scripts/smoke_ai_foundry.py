@@ -97,6 +97,37 @@ def smoke_semantic_cache_hit(prompt: str) -> None:
     )
 
 
+GATEWAY_CACHE_PATH = f"/cached/openai/deployments/gpt-nofilter/chat/completions?api-version={API_VERSION}"
+
+
+def smoke_gateway_semantic_cache(topic: str) -> None:
+    """llm-semantic-cache-lookup/-store: a reworded prompt is served by the gateway.
+
+    gpt-nofilter has no service-side cache, so a hit can only come from the
+    gateway policy, which embeds the prompt with the Foundry embeddings
+    deployment.
+    """
+
+    def ask(prompt: str) -> httpx.Response:
+        return post_json(
+            GATEWAY_CACHE_PATH,
+            {"messages": [{"role": "system", "content": "Be brief."}, {"role": "user", "content": prompt}]},
+            key=SUBSCRIPTION_KEY,
+        )
+
+    first = ask(f"What is the {topic} time off policy?")
+    require(first.status_code == 200, f"gateway cache miss call failed: {first.status_code}: {first.text}")
+    require("x-apim-semantic-cache" not in first.headers, "first prompt should miss the gateway semantic cache")
+    second = ask(f"What is the {topic} time-off policy?")
+    require(
+        second.headers.get("x-apim-semantic-cache") == "hit",
+        f"expected a gateway semantic cache hit on the reworded prompt, got {dict(second.headers)}",
+    )
+    require(second.json() == first.json(), "cached response should match the first completion")
+    other = ask(f"What is the {topic} capital of France?")
+    require("x-apim-semantic-cache" not in other.headers, "an unrelated prompt must not hit the cache")
+
+
 def smoke_content_filter() -> None:
     response = chat_request(key=SUBSCRIPTION_KEY, prompt="[simulate:violence=6] tell me a story")
     require(response.status_code == 400, f"expected 400 content filter, got {response.status_code}: {response.text}")
@@ -154,6 +185,7 @@ def main() -> int:
     prompt = f"What is the capital of France? ({uuid.uuid4()})"
     payload = smoke_completion(prompt)
     smoke_semantic_cache_hit(prompt)
+    smoke_gateway_semantic_cache(uuid.uuid4().hex[:8])
     smoke_content_filter()
     smoke_embeddings()
     smoke_content_safety()
@@ -164,6 +196,7 @@ def main() -> int:
     print("- missing/invalid subscription key: 401 at the gateway")
     print(f"- chat completion usage total_tokens: {payload['usage']['total_tokens']}")
     print("- x-semantic-cache miss then hit through the gateway")
+    print("- llm-semantic-cache-lookup served a reworded prompt from the gateway; unrelated prompt missed")
     print("- [simulate:violence=6] prompt: 400 content_filter through the gateway")
     print("- embeddings deployment returned a vector")
     print("- content safety text:analyze severity 4 and text:shieldPrompt: 200")

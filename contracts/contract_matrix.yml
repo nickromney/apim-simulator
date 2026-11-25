@@ -468,6 +468,21 @@ contracts:
     fixture_or_golden: inline-xml
     assertion_kind: http-json
 
+  - id: POLICY-LLM-SEMANTIC-CACHE
+    status: adapted
+    surface: policy
+    module: app/policy_semantic_cache.py
+    doc_refs:
+      - docs/CAPABILITY-MATRIX.md#policies
+      - docs/AI-GATEWAY.md
+    owner_tests:
+      - tests/test_policy_semantic_cache.py::test_reworded_prompt_hits_and_skips_the_model
+      - tests/test_policy_semantic_cache.py::test_max_message_count_and_streaming_skip_the_cache
+      - tests/test_policy_semantic_cache.py::test_vary_by_partitions_and_backend_key_replaces_managed_identity
+      - tests/test_policy_semantic_cache.py::test_azure_openai_aliases_parse_and_invalid_attributes_are_rejected
+    fixture_or_golden: inline-xml
+    assertion_kind: http-json
+
   - id: POLICY-LLM-EMIT-TOKEN-METRIC
     status: adapted
     surface: policy
