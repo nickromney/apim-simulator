@@ -3,8 +3,8 @@
 Status: Phase 1 merged (#98). Phase 2 implemented in aifoundry-simulator (branch
 `claude/entra-token-auth-bc0f21`, unmerged). Phase 3 done (2026-11-25): the keyless
 gateway variant, `make up-ai-foundry-keyless` and `make smoke-ai-foundry-keyless`. Phase 4
-partly done: the `examples/ai-gateway/README.md` and policy-fragments links are in;
-the capability matrix and Foundry term map are not.
+done (2026-11-25): capability matrix, example README, policy-fragments link, and the
+aifoundry-simulator term map.
 
 ## Goal
 
