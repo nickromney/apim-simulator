@@ -14,11 +14,11 @@ equivalent.
 | --- | --- | --- | --- |
 | 1 | Gateway, management plane, developer portal | Covered | Gateway on `:8000`, management API and operator console, `/apim/portal` |
 | 2–3 | Azure subscription, RBAC, creating the instance | Out of scope | `make up` replaces provisioning. Signed control-plane grants model per-API roles |
-| 3 | Echo API; "missing subscription key" until the requirement is lifted | Covered | `/api/echo` (anonymous) and `/demo/echo` (key required) in the default stack |
-| 4 | Publish the portal, CORS for "Try it", developer sign-up, Starter and Unlimited (approval) | Covered | Portal publish workflow, `cors` policy, portal identities, `approval_required` products |
+| 3 | Echo API; "missing subscription key" until the requirement is lifted | Covered | `/api/echo` (anonymous) and `/demo/echo` (key required) in the default stack; the Echo API at `/echo` in [the new-instance example](../examples/new-instance/README.md) |
+| 4 | Publish the portal, CORS for "Try it", developer sign-up, Starter and Unlimited (approval) | Covered | Portal publish workflow, `cors` policy, portal identities, `approval_required` products; Starter and Unlimited in [the new-instance example](../examples/new-instance/README.md) |
 | 5 | Visual editor: pages, layouts, menus, media, styles, publish | Adapted | Draft, preview and publish customisation with pages, navigation, logo and colours. No layouts, pop-ups or menus limited to signed-in users |
 | 6 | Email notifications and templates | Adapted | Added after this review: [EMAIL-NOTIFICATIONS.md](EMAIL-NOTIFICATIONS.md). Messages go to a local outbox |
-| 7 | Products: rate limit and quota at product scope, legal terms, subscription limits, group visibility, publish | Covered | Products with policies, `terms`, `subscriptions_limit`, group visibility |
+| 7 | Products: rate limit and quota at product scope, legal terms, subscription limits, group visibility, publish | Covered | Products with policies, `terms`, `subscriptions_limit`, group visibility; Administrators, Developers and Guests in [the new-instance example](../examples/new-instance/README.md) |
 | 8 | API from scratch: suffix, URL template parameters, tags | Covered | Operator console and management API authoring |
 | 9 | OpenAPI import, HTTP backend behind an HTTPS gateway | Covered | OpenAPI import (console, CLI, script); TLS stacks |
 | 10 | Import Azure OpenAI with token policies; Function App import | Adapted | `make up-ai` with `llm-token-limit`; Azure resource import itself needs Azure |
@@ -41,11 +41,10 @@ equivalent.
 - `xml-to-json` and `json-to-xml` policies.
 - Diagnostics shape local request telemetry, with the `trace` policy.
 - Local email notifications, templates and outbox.
+- [A starter configuration](../examples/new-instance/README.md) that matches a new
+  Azure instance, so the lab can be followed step by step.
+- The gateway accepts `HEAD`, for Echo's "Retrieve header only" operation.
 
 ## Remaining gaps
 
-1. A starter configuration that matches a new Azure instance, with the Echo API,
-   Starter (5 calls per 60 seconds, 100 per week) and Unlimited products, and
-   the Administrators, Developers and Guests groups, so the lab can be followed
-   step by step.
-2. Portal layouts, pop-ups and menus shown only to signed-in users.
+1. Portal layouts, pop-ups and menus shown only to signed-in users.

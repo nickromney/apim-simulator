@@ -453,7 +453,7 @@ def _build_catch_all_router() -> APIRouter:  # noqa: C901 - one branch per route
     """
     router = APIRouter()
 
-    @router.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+    @router.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
     async def gateway_proxy(full_path: str, request: Request) -> Response:
         preflight = await answer_preflight(request)
         if preflight is not None:

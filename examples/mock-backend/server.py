@@ -40,7 +40,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _payload(self, body: bytes) -> dict:
         return {
@@ -56,7 +57,7 @@ class Handler(BaseHTTPRequestHandler):
         if urlsplit(self.path).path.endswith("/fail"):
             self._write_json(503, {"status": "unavailable"})
             return
-        if self.command == "GET" and (self._metrics_get() or self._graphql_get() or self._petstore_get()):
+        if self.command in {"GET", "HEAD"} and (self._metrics_get() or self._graphql_get() or self._petstore_get()):
             return
         if self.path.endswith("/health") or self.path.endswith("/startup"):
             self._write_json(200, {"status": "ok", "path": self.path})
@@ -113,6 +114,9 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
+        self._handle()
+
+    def do_HEAD(self) -> None:
         self._handle()
 
     def do_POST(self) -> None:
