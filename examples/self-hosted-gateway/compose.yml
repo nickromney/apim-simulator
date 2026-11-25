@@ -1,0 +1,80 @@
+name: apim-simulator-self-hosted-gateway
+
+x-hardening: &hardening
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-image: &image
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev@sha256:ea5fd1cae2463b48c7627577584e582ce3d6d99ba3789723051df9a707f658b0}
+      PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13@sha256:1fe1883f0c28d90b7364e6f069437801c9e8f150c886f02f74bfcefc9ea14591}
+      APP_UID: ${APP_UID:-65532}
+      APP_GID: ${APP_GID:-65532}
+  image: apim-simulator:latest
+
+x-backend: &backend
+  <<: [*hardening, *image]
+  entrypoint:
+    - /app/.venv/bin/uvicorn
+    - --app-dir
+    - /app/examples/self-hosted-gateway
+    - backend:app
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8080"
+    - --no-access-log
+  expose: ["8080"]
+  healthcheck:
+    test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+    interval: 5s
+    timeout: 3s
+    retries: 15
+    start_period: 30s
+    start_interval: 1s
+  networks: [remote]
+
+services:
+  managed:
+    <<: [*hardening, *image]
+    environment:
+      APIM_CONFIG_PATH: /tmp/self-hosted-managed.json
+      APIM_CONFIG_SOURCE_PATH: /app/examples/self-hosted-gateway/apim.json
+      APIM_CONFIG_TEMPLATE_SUBSTITUTE: "true"
+    ports:
+      - "127.0.0.1:${APIM_MANAGED_PORT:-8000}:8000"
+    networks: [control]
+
+  self-hosted:
+    <<: [*hardening, *image]
+    environment:
+      APIM_SELF_HOSTED_GATEWAY: "true"
+      APIM_SELF_HOSTED_GATEWAY_ID: remote
+      APIM_SELF_HOSTED_GATEWAY_CONFIG_URL: http://managed:8000/apim/management/gateways/remote/configuration
+      APIM_SELF_HOSTED_GATEWAY_TOKEN: self-hosted-demo-token
+      APIM_SELF_HOSTED_GATEWAY_POLL_INTERVAL: ${APIM_SELF_HOSTED_GATEWAY_POLL_INTERVAL:-1}
+    ports:
+      - "127.0.0.1:${APIM_SELF_HOSTED_PORT:-8001}:8000"
+    depends_on:
+      managed:
+        condition: service_started
+      remote-backend:
+        condition: service_healthy
+    networks: [control, remote]
+
+  remote-backend:
+    <<: *backend
+
+networks:
+  control:
+  remote:
+    internal: true

@@ -650,6 +650,36 @@ def test_subscription_is_null_without_a_subscription() -> None:
     assert _evaluate("@(context.Subscription == null)") is True
 
 
+@pytest.mark.parametrize(
+    ("expression", "variables", "expected"),
+    [
+        ('@(context.Product?.Name ?? "none")', {}, "none"),
+        ("@(context.Product?.Name)", {"_expression_product": {"Id": "gold", "Name": "Gold Tier"}}, "Gold Tier"),
+        ('@(context.User?.Email ?? "anonymous")', {}, "anonymous"),
+        ("@(context.Workspace?.Id == null)", {}, True),
+        ("@(context.Variables.GetValueOrDefault(\"csv\")?.Split(',')[1])", {"csv": "a,b"}, "b"),
+        ('@(context.Variables.GetValueOrDefault("missing")?.ToUpper() ?? "none")', {}, "none"),
+        ('@(context.Variables.GetValueOrDefault("name")?.Length)', {"name": "abcd"}, 4),
+        ('@(context.Variables.GetValueOrDefault("missing")?.Length ?? -1)', {}, -1),
+        ("@(context.Deployment?.Region)", {}, "local"),
+    ],
+)
+def test_null_conditional_access_yields_null_for_a_null_receiver(
+    expression: str, variables: dict[str, object], expected: object
+) -> None:
+    """C# ?. returns null instead of throwing when the receiver is null.
+
+    https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/member-access-operators#null-conditional-operators--and-
+    """
+    assert _evaluate(expression, variables=variables) == expected
+
+
+def test_null_conditional_member_cannot_reach_private_attributes() -> None:
+    # The marker only matches public names, so ?._secret is refused before it runs.
+    with pytest.raises((ValueError, SyntaxError)):
+        _compile_expression("@(context.Product?._secret)", frozenset())
+
+
 def test_datetime_formats_with_csharp_custom_specifiers() -> None:
     from datetime import UTC, datetime
 

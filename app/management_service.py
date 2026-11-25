@@ -435,6 +435,7 @@ class ManagementService:
         sub = self.find_subscription_by_id(cfg, subscription_id)
         if sub is None:
             raise HTTPException(status_code=404, detail="Subscription not found")
+        previous = sub.model_copy(deep=True)
 
         if body.name is not None:
             sub.name = body.name
@@ -457,7 +458,12 @@ class ManagementService:
             sub.api_id = replacement.api_id
             sub.all_apis = replacement.all_apis
             sub.service_scoped = replacement.service_scoped
-        return self.persist_or_apply_config(cfg)
+        updated = self.persist_or_apply_config(cfg)
+        notification_runtime = getattr(self.app.state, "notification_runtime", None)
+        current = self.find_subscription_by_id(updated, subscription_id)
+        if notification_runtime is not None and current is not None:
+            notification_runtime.subscription_state_changed(updated, previous, current)
+        return updated
 
     def delete_subscription(self, cfg: GatewayConfig, subscription_id: str) -> GatewayConfig:
         entry = self.find_subscription_entry(cfg, subscription_id)
@@ -786,7 +792,7 @@ class ManagementService:
         self.require_api_authoring_mode(cfg)
         self.validate_policy_xml(cfg, body.policies_xml)
         existing = cfg.apis.get(api_id)
-        cfg.apis[api_id] = ApiConfig(
+        api_config = ApiConfig(
             name=body.name or api_id,
             path=body.path,
             upstream_base_url=body.upstream_base_url,
@@ -811,8 +817,14 @@ class ManagementService:
             schemas=existing.schemas if existing is not None else {},
             revisions=existing.revisions if existing is not None else {},
             releases=existing.releases if existing is not None else {},
+            gateways=(
+                body.gateways
+                if "gateways" in getattr(body, "model_fields_set", set())
+                else (existing.gateways if existing is not None else None)
+            ),
             workspace=_owner_from_body(body, existing),
         )
+        cfg.apis[api_id] = api_config
         if existing is None:
             _ensure_initial_api_revision(cfg.apis[api_id])
         return self.persist_or_apply_config(cfg)
@@ -1214,6 +1226,9 @@ class ManagementService:
             "security_observability",
             "portal",
             "local_messaging",
+            "notification_recipients",
+            "email_templates",
+            "email_settings",
         ):
             setattr(imported, field, getattr(current.model_copy(deep=True), field))
         imported.policy_fragments = current.policy_fragments

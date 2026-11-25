@@ -26,7 +26,8 @@ SDKs and conceptual material. Feature-level contracts remain authoritative in
 | Priority | Addition | Why it is useful locally | Verification needed |
 | --- | --- | --- | --- |
 | First batch | Postman collection export; `set-method` policy | Small client interoperability and request-transform gaps | Scoped authorization, secret-free portable export; actual backend method/body and expression behavior |
-| Next | XML `retry`, keyed `limit-concurrency`, parallel `wait` | Exercise resilience and fan-out inside authored policies | Failure/retry timing, termination, cancellation, shared limits and body replay |
+| Done | XML `retry` ([subset](../RETRY-POLICY.md)) | Exercise resilience inside authored policies | Retry timing, termination and backend switching around forward-request |
+| Next | Keyed `limit-concurrency`, parallel `wait` | Exercise fan-out and shared limits inside authored policies | Cancellation, shared limits and body replay |
 | Next | Shared Redis cache | Compare cache behavior across gateway replicas | Cross-replica hits, TTL, region/default selection, cache outages and credential handling |
 | Next | Local APIOps extract/diff/publish | Review configuration in Git and apply atomically | Secret references, round trips, dry-run, conflict detection and failed-publish preservation |
 | Next | REST-to-MCP tools and GraphQL request validation | Real protocol adaptation and query safety | Tool discovery/invocation/auth; schema, depth/size limits and operation authorization |

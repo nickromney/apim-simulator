@@ -1,0 +1,37 @@
+{
+  "allow_anonymous": true,
+  "subscription": {
+    "required": false
+  },
+  "tenant_access": {
+    "enabled": true,
+    "primary_key": "local-dev-tenant-key"
+  },
+  "gateways": {
+    "remote": {
+      "location": {
+        "name": "remote-network"
+      },
+      "description": "Self-hosted gateway in the remote network",
+      "access_token": "self-hosted-demo-token"
+    }
+  },
+  "apis": {
+    "remote": {
+      "name": "Remote-only API",
+      "path": "remote",
+      "upstream_base_url": "http://remote-backend:8080",
+      "gateways": [
+        "remote"
+      ],
+      "policies_xml": "<policies><inbound><set-header name=\"x-demo-policy\" exists-action=\"override\"><value>initial</value></set-header><base /></inbound><backend><base /></backend><outbound><base /></outbound></policies>",
+      "operations": {
+        "get": {
+          "name": "Get remote response",
+          "method": "GET",
+          "url_template": "/"
+        }
+      }
+    }
+  }
+}

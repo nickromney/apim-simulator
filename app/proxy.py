@@ -9,7 +9,7 @@ from fastapi import Request
 
 from app.config import MANAGED_GATEWAY_ID, ApiConfig, ApiVersioningScheme, GatewayConfig, RouteConfig, RouteMatch
 from app.security import AuthContext, build_client_principal
-from app.workspaces import route_served_on_gateway, workspaces_enabled
+from app.workspaces import route_served_on_gateway
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -142,7 +142,7 @@ def gateway_for_hosts(config: GatewayConfig, request_hosts: list[str]) -> str:
 
 
 def _route_on_gateway(config: GatewayConfig, route: RouteConfig, gateway_id: str) -> bool:
-    return not workspaces_enabled(config) or route_served_on_gateway(config, route, gateway_id)
+    return route_served_on_gateway(config, route, gateway_id)
 
 
 def _available_versions(config: GatewayConfig, *, path: str, version_set: str) -> set[str]:
@@ -444,7 +444,13 @@ def resolve_route(config: GatewayConfig, request: Request) -> ResolvedRoute | No
         # from a different forwarded or direct host.
         version_cache: dict[tuple[str, str], tuple[RouteMatch, ResolvedRoute] | None] = {}
         # The gateway is a property of the host group, like the version cache.
-        gateway_id = gateway_for_hosts(config, request_hosts) if config.workspace_gateways else MANAGED_GATEWAY_ID
+        app = request.scope.get("app")
+        forced_gateway_id = getattr(getattr(app, "state", None), "gateway_id", None)
+        gateway_id = (
+            forced_gateway_id
+            if forced_gateway_id is not None
+            else (gateway_for_hosts(config, request_hosts) if config.workspace_gateways else MANAGED_GATEWAY_ID)
+        )
         candidates: list[tuple[RouteMatch, int, ResolvedRoute]] = []
         for index, route in enumerate(config.routes):
             candidate = _resolve_route_candidate(

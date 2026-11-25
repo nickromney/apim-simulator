@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from app.certificate_security import TLSCertificateConfig
 from app.control_plane import ControlPlaneConfig, PortalIdentityConfig
@@ -225,6 +225,23 @@ class PortalConfig(BaseModel):
     identity: PortalIdentityConfig = Field(default_factory=PortalIdentityConfig)
 
 
+class NotificationRecipientConfig(BaseModel):
+    emails: list[str] = Field(default_factory=list)
+    users: list[str] = Field(default_factory=list)
+
+
+class EmailTemplateConfig(BaseModel):
+    subject: str
+    body: str
+
+
+class EmailSettingsConfig(BaseModel):
+    administrator_email: str | None = None
+    organization_name: str = "Local APIM Simulator"
+    originating_email: str = "no-reply@localhost"
+    developer_portal_url: str = "http://localhost:8000/apim/portal"
+
+
 class TenantAccessConfig(BaseModel):
     enabled: bool = False
     primary_key: str | None = None
@@ -422,6 +439,8 @@ class DiagnosticConfig(BaseModel):
     sampling_percentage: float | None = None
     verbosity: str | None = None
     operation_name_format: str | None = None
+    # Set for an API-scope diagnostic, which replaces the service-scope one for that API.
+    api_id: str | None = None
 
 
 class UserConfig(BaseModel):
@@ -906,6 +925,27 @@ class RouteConfig(BaseModel):
 MANAGED_GATEWAY_ID = "managed"
 
 
+class GatewayLocationConfig(BaseModel):
+    name: str
+
+
+class GatewayResourceConfig(BaseModel):
+    """A managed or self-hosted gateway resource.
+
+    ``access_token`` is accepted from authored configuration but is never
+    exposed by the configuration snapshot.  Azure issues this credential from
+    the control plane; the simulator models the same boundary as a configured
+    per-gateway secret with an optional expiry.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    location: GatewayLocationConfig | None = None
+    description: str | None = None
+    access_token: SecretStr | None = Field(default=None, repr=False)
+    access_token_expires_at: str | None = None
+
+
 class WorkspaceGatewayConfig(BaseModel):
     """A dedicated workspace gateway, told apart from the managed gateway by Host.
 
@@ -974,6 +1014,9 @@ class GatewayConfig(BaseModel):
     portal_content: PortalContentConfig = Field(default_factory=PortalContentConfig)
     api_center: ApiCenterState = Field(default_factory=ApiCenterState)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    notification_recipients: dict[str, NotificationRecipientConfig] = Field(default_factory=dict)
+    email_templates: dict[str, EmailTemplateConfig] = Field(default_factory=dict)
+    email_settings: EmailSettingsConfig = Field(default_factory=EmailSettingsConfig)
     security_governance: SecurityGovernanceConfig = Field(default_factory=SecurityGovernanceConfig)
     security_observability: SecurityObservabilityConfig = Field(default_factory=SecurityObservabilityConfig)
     security_ingress: SecurityIngressConfig = Field(default_factory=SecurityIngressConfig)
@@ -1001,6 +1044,7 @@ class GatewayConfig(BaseModel):
     backends: dict[str, BackendConfig] = Field(default_factory=dict)
     apis: dict[str, ApiConfig] = Field(default_factory=dict)
     routes: list[RouteConfig] = Field(default_factory=list)
+    gateways: dict[str, GatewayResourceConfig] = Field(default_factory=dict, exclude_if=lambda value: not value)
     workspaces: dict[str, WorkspaceConfig] = Field(default_factory=dict, exclude_if=lambda value: not value, repr=False)
     workspace_gateways: dict[str, WorkspaceGatewayConfig] = Field(
         default_factory=dict, exclude_if=lambda value: not value, repr=False
@@ -1237,6 +1281,9 @@ class ApiConfig(BaseModel):
     revisions: dict[str, ApiRevisionConfig] = Field(default_factory=dict)
     releases: dict[str, ApiReleaseConfig] = Field(default_factory=dict)
     graphql: GraphQLApiConfig | None = None
+    # None means unassigned: a service-level API is on the managed gateway and a
+    # workspace API follows its workspace's gateways.
+    gateways: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
     workspace: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
 
 

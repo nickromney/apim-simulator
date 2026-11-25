@@ -44,6 +44,8 @@ class MonitoringStore:
         self.activity_logs: deque[dict[str, Any]] = deque(maxlen=1000)
         self.resource_logs: deque[dict[str, Any]] = deque(maxlen=1000)
         self.alerts: deque[dict[str, Any]] = deque(maxlen=1000)
+        # Application Insights / Azure Monitor records shaped by APIM diagnostics.
+        self.telemetry: deque[dict[str, Any]] = deque(maxlen=2000)
         self.fired_rules: set[str] = set()
         self.total_requests = 0
         self.status_counts: Counter[str] = Counter()
@@ -86,7 +88,14 @@ class MonitoringStore:
             else:
                 self.fired_rules.discard(rule_id)
 
-    def record(self, request: Request, *, status_code: int, duration_seconds: float) -> None:
+    def record(
+        self,
+        request: Request,
+        *,
+        status_code: int,
+        duration_seconds: float,
+        response_headers: Any = None,
+    ) -> None:
         path = request.url.path
         event = {
             "timestamp": time.time(),
@@ -120,7 +129,44 @@ class MonitoringStore:
         # Stable local sampling; logging never reads or consumes request bodies.
         if diagnostic.gateway_logs and (self.total_requests * 37) % 100 < diagnostic.sampling_percentage:
             self.resource_logs.append(event)
+        self._record_diagnostic_telemetry(request, event, response_headers)
         self.evaluate(settings.alert_rules)
+
+    def _record_diagnostic_telemetry(self, request: Request, event: dict[str, Any], response_headers: Any) -> None:
+        from app.diagnostic_logging import RequestOutcome, build_telemetry, capture_stage, diagnostics_active
+
+        cfg = request.app.state.gateway_config
+        if not diagnostics_active(cfg):
+            return
+        variables = getattr(request.state, "apim_policy_variables", None) or {}
+        if response_headers is not None:
+            capture_stage(
+                request.state,
+                cfg,
+                "frontend_response",
+                headers=response_headers,
+                body=variables.get("_diagnostic_response_body"),
+            )
+        outcome = RequestOutcome(
+            method=event["method"],
+            url=str(request.url),
+            status_code=event["status_code"],
+            duration_ms=event["duration_ms"],
+            api_id=event["api_id"],
+            operation_id=getattr(request.state, "apim_operation_id", None),
+            client_ip=getattr(request.state, "apim_client_ip", None),
+            request_headers={key.lower(): value for key, value in request.headers.items()},
+        )
+        traces = variables.get("_diagnostic_traces")
+        self.telemetry.extend(
+            build_telemetry(
+                request.state,
+                cfg,
+                outcome,
+                counter=self.total_requests,
+                traces=traces if isinstance(traces, list) else [],
+            )
+        )
 
     def metrics(self) -> dict[str, Any]:
         return {
@@ -150,6 +196,23 @@ def build_monitoring_router(*, require_management_plane: Callable[[], Management
     async def resource_logs(request: Request) -> dict[str, Any]:
         require_tenant_access(request)
         return {"items": list(request.app.state.monitoring_store.resource_logs)}
+
+    @router.get("/apim/management/monitoring/telemetry")
+    async def telemetry(request: Request, api_id: str | None = None, destination: str | None = None) -> dict[str, Any]:
+        require_tenant_access(request)
+        items = [
+            item
+            for item in reversed(request.app.state.monitoring_store.telemetry)
+            if (api_id is None or item.get("api_id") == api_id)
+            and (destination is None or item.get("destination") == destination)
+        ]
+        return {"items": items}
+
+    @router.delete("/apim/management/monitoring/telemetry")
+    async def clear_telemetry(request: Request) -> dict[str, bool]:
+        require_tenant_access(request)
+        request.app.state.monitoring_store.telemetry.clear()
+        return {"cleared": True}
 
     @router.put("/apim/management/monitoring/diagnostic-settings")
     async def diagnostics(body: DiagnosticSettings, request: Request) -> dict[str, Any]:

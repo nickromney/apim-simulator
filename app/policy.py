@@ -6,9 +6,10 @@ import binascii
 import ipaddress
 import json
 import math
+import random
 import re
 import time
-from collections.abc import Callable, Iterator, Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -190,6 +191,7 @@ class PolicyRuntime:
     custom_metric_emitter: Any = None
     tls_client_pool: Any = None
     clock: Callable[[], float] | None = None
+    sleep: Callable[[float], Awaitable[None]] | None = None
 
 
 def issue_local_managed_identity_token(
@@ -911,6 +913,107 @@ class Choose(PolicyNode):
                 return await _apply_steps_async(steps, req, runtime)
         _record_step(runtime, "choose", {"branch": "otherwise"})
         return await _apply_steps_async(self.otherwise, req, runtime)
+
+
+_RETRY_MAX_COUNT = 50
+
+
+@dataclass(frozen=True)
+class Retry(PolicyNode):
+    """Run child policies once, then again while the condition holds.
+
+    https://learn.microsoft.com/en-us/azure/api-management/retry-policy
+    The children run before the condition is first evaluated. count (1-50),
+    interval, max-interval, delta and first-fast-retry may be expressions.
+    Wait times: interval alone is fixed; interval and delta are linear,
+    interval + (n - 1) * delta; adding max-interval makes them exponential,
+    interval + 2^(n - 1) * random(0.8 delta, 1.2 delta), capped at max-interval.
+
+    A retry that wraps forward-request cannot loop here, because the gateway
+    forwards after the backend section. It registers itself for the request
+    pipeline, which re-runs its children and forwards again; see
+    `request_pipeline._retry_forward_request`.
+    """
+
+    condition: Condition
+    count: str
+    interval: str
+    steps: list[PolicyNode]
+    max_interval: str | None = None
+    delta: str | None = None
+    first_fast_retry: str | None = None
+    wraps_forward: bool = False
+
+    def apply(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        raise RuntimeError("Retry must be executed through apply_async")
+
+    def retry_count(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> int:
+        raw = render_policy_value(self.count, req, runtime).strip()
+        try:
+            count = int(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=f"retry count must be an integer: {raw}") from exc
+        if not 1 <= count <= _RETRY_MAX_COUNT:
+            raise HTTPException(status_code=500, detail="retry count must be between 1 and 50")
+        return count
+
+    def delay_seconds(self, retry_number: int, req: PolicyRequest, runtime: PolicyRuntime | None) -> float:
+        """Seconds to wait before retry number `retry_number` (1-based)."""
+        if retry_number == 1 and _policy_bool(self.first_fast_retry, req, runtime, default=False):
+            return 0.0
+        interval = _retry_seconds(self.interval, "interval", req, runtime)
+        delta = _retry_seconds(self.delta, "delta", req, runtime) if self.delta else None
+        max_interval = _retry_seconds(self.max_interval, "max-interval", req, runtime) if self.max_interval else None
+        if delta is None:
+            return interval
+        if max_interval is None:
+            return interval + (retry_number - 1) * delta
+        jittered = random.uniform(delta * 0.8, delta * 1.2)  # noqa: S311 - retry jitter, not security
+        return min(max_interval, interval + (2 ** (retry_number - 1)) * jittered)
+
+    async def run_children(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> ResponseSpec | None:
+        return await _apply_steps_async(self.steps, req, runtime)
+
+    async def apply_async(self, req: PolicyRequest, runtime: PolicyRuntime | None = None) -> ResponseSpec | None:
+        if self.wraps_forward:
+            req.variables["_retry_forward"] = self
+            _record_step(runtime, "retry", {"attempt": 0, "wraps_forward": True})
+            return await self.run_children(req, runtime)
+        out = await self.run_children(req, runtime)
+        if out is not None:
+            return out
+        count = self.retry_count(req, runtime)
+        for retry_number in range(1, count + 1):
+            if not self.condition(req):
+                _record_step(runtime, "retry", {"stopped": "condition", "retries": retry_number - 1})
+                return None
+            delay = self.delay_seconds(retry_number, req, runtime)
+            _record_step(runtime, "retry", {"attempt": retry_number, "delay_seconds": delay})
+            await retry_sleep(runtime, delay)
+            out = await self.run_children(req, runtime)
+            if out is not None:
+                return out
+        _record_step(runtime, "retry", {"stopped": "count", "retries": count})
+        return None
+
+
+def _retry_seconds(value: str | None, name: str, req: PolicyRequest, runtime: PolicyRuntime | None) -> float:
+    raw = render_policy_value(value or "", req, runtime).strip()
+    try:
+        seconds = float(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"retry {name} must be a number of seconds: {raw}") from exc
+    if seconds < 0:
+        raise HTTPException(status_code=500, detail=f"retry {name} must not be negative")
+    return seconds
+
+
+async def retry_sleep(runtime: PolicyRuntime | None, seconds: float) -> None:
+    """Wait between retries; tests replace the sleeper on the runtime."""
+    if seconds <= 0:
+        return
+    sleeper = runtime.sleep if runtime is not None and runtime.sleep is not None else asyncio.sleep
+    await sleeper(seconds)
 
 
 def _json_error_response(status_code: int, message: str) -> ResponseSpec:
@@ -6072,6 +6175,70 @@ def _parse_choose(
     return Choose(branches=branches, otherwise=otherwise_steps)
 
 
+def _parse_retry_condition(raw: str | None) -> Condition:
+    raw_condition = (raw or "").strip()
+    if not raw_condition:
+        raise HTTPException(status_code=500, detail="retry requires condition")
+    if raw_condition.lower() in {"true", "false"}:
+        return BooleanConstant(value=raw_condition.lower() == "true")
+    if raw_condition.startswith("@"):
+        return ExpressionCondition(expression=raw_condition)
+    raise HTTPException(status_code=500, detail=f"Unsupported retry condition: {raw_condition}")
+
+
+def _retry_wraps_forward(steps: list[PolicyNode]) -> bool:
+    """Whether a retry contains forward-request, rejecting children the pipeline can't re-run."""
+    nested = list(_iter_policy_nodes(steps))
+    if not any(isinstance(node, ForwardRequest) for node in nested):
+        return False
+    # The pipeline re-runs these children after each forward. A response a
+    # child returns at that point has no path back to the caller yet.
+    if any(isinstance(node, ReturnResponse | MockResponse) for node in nested):
+        raise HTTPException(
+            status_code=500,
+            detail="return-response inside a retry that wraps forward-request is not supported",
+        )
+    if any(isinstance(node, Retry) and node.wraps_forward for node in nested):
+        raise HTTPException(status_code=500, detail="Only one retry may wrap forward-request")
+    return True
+
+
+def _parse_retry(
+    el: ElementTree.Element,
+    *,
+    policy_fragments: dict[str, str],
+    section_name: str,
+    seen_fragments: set[str],
+    path: str,
+    in_fragment: bool,
+) -> Retry:
+    """Parse `<retry>`; condition, count and interval are required."""
+    condition = _parse_retry_condition(el.attrib.get("condition"))
+    for required in ("count", "interval"):
+        if not (el.attrib.get(required) or "").strip():
+            raise HTTPException(status_code=500, detail=f"retry requires {required}")
+    steps = _parse_children(
+        list(el),
+        policy_fragments=policy_fragments,
+        section_name=section_name,
+        seen_fragments=set(seen_fragments),
+        allow_base=False,
+        path_prefix=path,
+        in_fragment=in_fragment,
+    )
+    wraps_forward = _retry_wraps_forward(steps)
+    return Retry(
+        condition=condition,
+        count=el.attrib["count"],
+        interval=el.attrib["interval"],
+        steps=steps,
+        max_interval=el.attrib.get("max-interval"),
+        delta=el.attrib.get("delta"),
+        first_fast_retry=el.attrib.get("first-fast-retry"),
+        wraps_forward=wraps_forward,
+    )
+
+
 def _fragment_elements(xml: str, *, section_name: str) -> list[ElementTree.Element]:
     try:
         root = ElementTree.fromstring(xml)
@@ -6250,10 +6417,14 @@ _CONSTANT_ELEMENTS: dict[str, Callable[[], PolicyNode]] = {
 # https://learn.microsoft.com/en-us/azure/api-management/validate-status-code-policy
 _POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
     "choose": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "retry": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "send-service-bus-message": frozenset({"inbound", "outbound", "on-error"}),
     "log-to-eventhub": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "send-one-way-request": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "find-and-replace": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "xml-to-json": frozenset({"inbound", "outbound", "on-error"}),
+    "trace": frozenset({"inbound", "backend", "outbound", "on-error"}),
+    "json-to-xml": frozenset({"inbound", "outbound", "on-error"}),
     "cross-domain": frozenset({"inbound"}),
     "include-fragment": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "set-header": frozenset({"inbound", "backend", "outbound", "on-error"}),
@@ -6319,8 +6490,8 @@ def _parse_node(
 ) -> PolicyNode:
     """One policy element to one node.
 
-    `choose` is the only element that can contain other elements, so it is the
-    only one that needs the fragment table and the recursion guard.
+    `choose` and `retry` are the only elements that contain other elements, so
+    they are the only ones that need the fragment table and the recursion guard.
     """
     tag = el.tag
     allowed_sections = _POLICY_ALLOWED_SECTIONS.get(tag)
@@ -6342,6 +6513,16 @@ def _parse_node(
             in_fragment=in_fragment,
         )
         return _annotate_policy_node(node, policy_id=el.attrib.get("id"), path=path)
+    if tag == "retry":
+        node = _parse_retry(
+            el,
+            policy_fragments=policy_fragments,
+            section_name=section_name,
+            seen_fragments=seen_fragments,
+            path=path or path_component,
+            in_fragment=in_fragment,
+        )
+        return _annotate_policy_node(node, policy_id=el.attrib.get("id"), path=path)
     parser = _ELEMENT_PARSERS.get(tag)
     if parser is None:
         return _parse_extension(el, path)
@@ -6350,16 +6531,20 @@ def _parse_node(
 
 
 def _parse_extension(el, path):
+    from app.diagnostic_logging import parse_trace_policy
     from app.policy_certificates import parse_certificate_policy
     from app.policy_content_safety import parse_content_safety_policy
     from app.policy_messaging import parse_messaging_policy
     from app.policy_transforms import parse_transform_policy
+    from app.policy_xml_json import parse_xml_json_policy
 
     try:
         node = (
             parse_certificate_policy(el)
             or parse_messaging_policy(el)
             or parse_transform_policy(el)
+            or parse_xml_json_policy(el)
+            or parse_trace_policy(el)
             or parse_content_safety_policy(el)
         )
     except ValueError as exc:
@@ -6376,6 +6561,8 @@ def _iter_policy_nodes(nodes: list[PolicyNode]) -> Iterator[PolicyNode]:
             for _condition, steps in node.branches:
                 yield from _iter_policy_nodes(steps)
             yield from _iter_policy_nodes(node.otherwise)
+        if isinstance(node, Retry):
+            yield from _iter_policy_nodes(node.steps)
 
 
 def _validate_section_structure(name: str, nodes: list[PolicyNode]) -> None:
@@ -6545,15 +6732,20 @@ def _reads_response_body(step: PolicyNode) -> bool:
     if isinstance(step, Choose):
         nested = [item for _cond, steps in step.branches for item in steps] + list(step.otherwise)
         return any(_reads_response_body(item) for item in nested)
+    if isinstance(step, Retry):
+        return any(_reads_response_body(item) for item in step.steps)
     from app.policy_content_safety import LlmContentSafety
     from app.policy_messaging import LogToEventHub, SendOneWayRequest, SendServiceBusMessage
     from app.policy_transforms import FindAndReplace
+    from app.policy_xml_json import JsonToXml, XmlToJson
 
     return isinstance(
         step,
         SetBody
         | ValidateContent
         | FindAndReplace
+        | XmlToJson
+        | JsonToXml
         | LogToEventHub
         | SendServiceBusMessage
         | SendOneWayRequest

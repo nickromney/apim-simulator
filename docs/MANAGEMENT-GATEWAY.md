@@ -1,5 +1,11 @@
 # Management Gateway Mode
 
+This page documents the legacy request-routing mode. For the Azure-shaped
+configuration-pull topology, use the [self-hosted gateway
+guide](SELF-HOSTED-GATEWAY.md). Management gateway mode forwards the data path
+and management writes to another simulator; self-hosted mode keeps the data
+path local and pulls only configuration.
+
 Run two simulator instances in the shape of an Azure APIM self-hosted gateway
 deployment. Callers and operators use one address, the management gateway. A
 second instance, the serving gateway, holds the configuration and does the

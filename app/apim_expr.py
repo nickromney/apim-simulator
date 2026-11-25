@@ -494,6 +494,8 @@ ALLOWED_FUNCTIONS = {
     "_try_get_value",
     "_parse_int",
     "_csharp_coalesce",
+    "_csharp_null_attr",
+    "_csharp_null_call",
     "_jtoken_value",
     "DateTime",
     "Math",
@@ -708,17 +710,26 @@ def _replace_generic_call(match: re.Match[str]) -> str:
     return method
 
 
+_NULL_CONDITIONAL_PREFIX = "NullConditional_"
+_NON_NULL_CONTEXT_MEMBER = r"\bcontext\.(Request|Response|Deployment|Api|Operation|Variables|LastError)\?\."
+
+
 def _translate_code_fragment(fragment: str) -> str:
     translated = re.sub(
         r"\((?:string|bool|int|long|double|decimal|float|IResponse|Jwt|JObject|JToken|JArray)\)", "", fragment
     )
     translated = re.sub(r"\.Value<(int|long|double|decimal|float|string|bool)>\(\)", r'.ValueAs("\1")', translated)
-    # Null-conditional access is approximated as plain access: a null receiver
-    # raises instead of propagating null.
     translated = translated.replace(
         "context.Subscription?.Id", "(context.Subscription.Id if context.Subscription else None)"
     )
-    translated = translated.replace("?.", ".").replace("?[", "[")
+    translated = translated.replace(".AsJwt()?.Subject", ".NullableJwtSubject()")
+    # These context members are never null locally, so ?. on them is plain
+    # access and the member renames below still apply.
+    translated = re.sub(_NON_NULL_CONTEXT_MEMBER, r"context.\1.", translated)
+    # Any other a?.b is null-safe: the AST transformer turns the marked member
+    # into a helper call that yields null for a null receiver. ?[ stays plain.
+    translated = re.sub(r"\?\.([A-Za-z]\w*)", rf".{_NULL_CONDITIONAL_PREFIX}\1", translated)
+    translated = translated.replace("?[", "[")
     translated = re.sub(r"\bnew\s+(?=JObject\b|JProperty\b|JArray\b)", "", translated)
     translated = re.sub(r"(?<![\w.)])(-?\d+)\.ToString\(\)", r"str(\1)", translated)
     translated = re.sub(
@@ -733,7 +744,6 @@ def _translate_code_fragment(fragment: str) -> str:
     translated = re.sub(r"\bfalse\b", "False", translated, flags=re.IGNORECASE)
     translated = re.sub(r"\bnull\b", "None", translated)
     translated = re.sub(r"\bout\s+([A-Za-z_]\w*)", r'"\1"', translated)
-    translated = translated.replace(".AsJwt()?.Subject", ".NullableJwtSubject()")
     translated = translated.replace("int.Parse(", "_parse_int(")
     translated = translated.replace("System.Net.WebUtility.", "WebUtility.")
     translated = translated.replace("&&", " and ").replace("||", " or ")
@@ -907,6 +917,46 @@ def _jtoken_value(value: Any, type_name: str) -> Any:
     return _csharp_tostring(value)
 
 
+def _csharp_null_attr(value: Any, member: str) -> Any:
+    """C# value?.Member: null for a null receiver."""
+    if value is None:
+        return None
+    if member in {"Length", "Count"}:
+        return _csharp_length(value)
+    return getattr(value, member)
+
+
+_NULL_CONDITIONAL_ALIASES = {
+    "StartsWith": "startswith",
+    "EndsWith": "endswith",
+    "ToUpper": "upper",
+    "ToLower": "lower",
+    "Trim": "strip",
+    "Split": "split",
+}
+
+
+def _csharp_null_call(value: Any, member: str, *args: Any) -> Any:
+    """C# value?.Method(args): null for a null receiver, else the translated call.
+
+    Unlike C#, the arguments are evaluated even when the receiver is null, and
+    only this member is null-safe: a?.b.c still fails on .c when a is null.
+    """
+    if value is None:
+        return None
+    helper = {
+        "Contains": _csharp_contains,
+        "Equals": _csharp_equals,
+        "ToString": _csharp_tostring,
+        "ContainsKey": _dict_contains_key,
+        "AsJwt": _as_jwt,
+        "ValueAs": _jtoken_value,
+    }.get(member)
+    if helper is not None:
+        return helper(value, *args)
+    return getattr(value, _NULL_CONDITIONAL_ALIASES.get(member, member))(*args)
+
+
 def _csharp_contains(value: Any, needle: Any) -> bool:
     return needle in value
 
@@ -995,6 +1045,16 @@ class _CSharpAstTransformer(ast.NodeTransformer):
 
     def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
         node = self.generic_visit(node)
+        if node.attr.startswith(_NULL_CONDITIONAL_PREFIX):
+            member = node.attr.removeprefix(_NULL_CONDITIONAL_PREFIX)
+            return ast.copy_location(
+                ast.Call(
+                    func=ast.Name(id="_csharp_null_attr", ctx=ast.Load()),
+                    args=[node.value, ast.Constant(member)],
+                    keywords=[],
+                ),
+                node,
+            )
         if node.attr not in {"Length", "Count"}:
             return node
         return ast.copy_location(
@@ -1003,6 +1063,18 @@ class _CSharpAstTransformer(ast.NodeTransformer):
         )
 
     def visit_Call(self, node: ast.Call) -> ast.AST:
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr.startswith(_NULL_CONDITIONAL_PREFIX):
+            # a?.Method(args): null when a is null, else the translated call.
+            member = func.attr.removeprefix(_NULL_CONDITIONAL_PREFIX)
+            return ast.copy_location(
+                ast.Call(
+                    func=ast.Name(id="_csharp_null_call", ctx=ast.Load()),
+                    args=[self.visit(func.value), ast.Constant(member), *[self.visit(arg) for arg in node.args]],
+                    keywords=[],
+                ),
+                node,
+            )
         node = self.generic_visit(node)
         if not isinstance(node.func, ast.Attribute):
             return node
@@ -1197,6 +1269,8 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
         "_try_get_value": try_get_value,
         "_parse_int": int,
         "_csharp_coalesce": _csharp_coalesce,
+        "_csharp_null_attr": _csharp_null_attr,
+        "_csharp_null_call": _csharp_null_call,
         "_jtoken_value": _jtoken_value,
         "DateTime": _DateTimeNamespace(),
         "Math": _MathNamespace(),

@@ -1,0 +1,119 @@
+name: apim-simulator-regional-gateways
+
+# Two regional gateways share one configuration, as Azure's control plane
+# replicates APIs, backends and policies to every regional gateway. They
+# differ only in APIM_REGION, which policies read as context.Deployment.Region.
+# The `global` nginx service stands in for the Traffic Manager name in front of
+# them: it prefers West Europe and fails over to East US when that gateway is down.
+
+x-hardening: &hardening
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-image: &image
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-dhi.io/python:3.13-debian13-dev@sha256:ea5fd1cae2463b48c7627577584e582ce3d6d99ba3789723051df9a707f658b0}
+      PYTHON_RUNTIME_IMAGE: ${PYTHON_RUNTIME_IMAGE:-dhi.io/python:3.13-debian13@sha256:1fe1883f0c28d90b7364e6f069437801c9e8f150c886f02f74bfcefc9ea14591}
+      APP_UID: ${APP_UID:-65532}
+      APP_GID: ${APP_GID:-65532}
+  image: apim-simulator:latest
+
+x-backend: &backend
+  <<: [*hardening, *image]
+  entrypoint:
+    - /app/.venv/bin/uvicorn
+    - --app-dir
+    - /app/examples/regional-gateways
+    - backend:app
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8080"
+    - --no-access-log
+  expose: ["8080"]
+  healthcheck:
+    test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+    interval: 5s
+    timeout: 3s
+    retries: 15
+    start_period: 30s
+    start_interval: 1s
+  networks: [private]
+
+x-gateway: &gateway
+  <<: [*hardening, *image]
+  environment: &gateway-environment
+    APIM_CONFIG_PATH: /tmp/regional-gateways-apim.json
+    APIM_CONFIG_SOURCE_PATH: /app/examples/regional-gateways/apim.json
+  depends_on:
+    orders-westeurope:
+      condition: service_healthy
+    orders-eastus:
+      condition: service_healthy
+  networks: [edge, private]
+
+services:
+  orders-westeurope:
+    <<: *backend
+    environment:
+      BACKEND_REGION: West Europe
+
+  orders-eastus:
+    <<: *backend
+    environment:
+      BACKEND_REGION: East US
+
+  gateway-westeurope:
+    <<: *gateway
+    environment:
+      <<: *gateway-environment
+      APIM_REGION: West Europe
+    ports:
+      - "127.0.0.1:${APIM_WESTEUROPE_PORT:-8001}:8000"
+
+  gateway-eastus:
+    <<: *gateway
+    environment:
+      <<: *gateway-environment
+      APIM_REGION: East US
+    ports:
+      - "127.0.0.1:${APIM_EASTUS_PORT:-8002}:8000"
+
+  global:
+    image: ${EDGE_PROXY_IMAGE:-dhi.io/nginx:1.29.5-debian13@sha256:9683af47feae3bab0031b489ed85f93f340a0f8b83a2edccc9f761dbfce1bffd}
+    init: true
+    read_only: true
+    user: "${NGINX_UID:-101}:${NGINX_GID:-101}"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,uid=${NGINX_UID:-101},gid=${NGINX_GID:-101},mode=1777
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,uid=${NGINX_UID:-101},gid=${NGINX_GID:-101},mode=0755
+      - /run/nginx:rw,noexec,nosuid,nodev,uid=${NGINX_UID:-101},gid=${NGINX_GID:-101},mode=0755
+      - /var/run:rw,noexec,nosuid,nodev,uid=${NGINX_UID:-101},gid=${NGINX_GID:-101},mode=0755
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ./examples/regional-gateways/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${APIM_GATEWAY_PORT:-8000}:8000"
+    depends_on:
+      gateway-westeurope:
+        condition: service_started
+      gateway-eastus:
+        condition: service_started
+    networks: [edge]
+
+networks:
+  edge:
+  private:
+    internal: true

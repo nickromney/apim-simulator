@@ -29,6 +29,7 @@ from app.config import (
     BackendPoolMemberConfig,
     BackendSessionAffinityConfig,
     DiagnosticConfig,
+    DiagnosticHttpMessageConfig,
     GatewayConfig,
     GroupConfig,
     KeyVaultNamedValueConfig,
@@ -47,6 +48,8 @@ from app.config import (
     UserConfig,
 )
 from app.control_plane import api_visible_in_collection
+from app.diagnostic_logging import api_diagnostic_key, validate_diagnostic
+from app.email_notification_management import build_email_notification_router
 from app.management_service import ManagementService
 from app.named_values import mask_secret_data
 from app.operation_authoring import build_operation_authoring_router
@@ -153,6 +156,7 @@ class ApiUpsert(BaseModel):
     subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None
     translate_required_query_parameters: Literal["template", "query"] = "template"
+    gateways: list[str] = Field(default_factory=lambda: ["managed"])
     workspace: str | None = None
 
 
@@ -427,6 +431,47 @@ def _get_diagnostic_or_404(cfg: GatewayConfig, diagnostic_id: str) -> Diagnostic
     if diagnostic is None:
         raise HTTPException(status_code=404, detail="Diagnostic not found")
     return diagnostic
+
+
+class DiagnosticUpsert(BaseModel):
+    """Writable diagnostic settings; the identifier and scope come from the URL."""
+
+    model_config = ConfigDict(extra="forbid")
+    logger_id: str | None = None
+    always_log_errors: bool | None = None
+    backend_request: DiagnosticHttpMessageConfig | None = None
+    backend_response: DiagnosticHttpMessageConfig | None = None
+    frontend_request: DiagnosticHttpMessageConfig | None = None
+    frontend_response: DiagnosticHttpMessageConfig | None = None
+    http_correlation_protocol: str | None = None
+    log_client_ip: bool | None = None
+    sampling_percentage: float | None = None
+    verbosity: str | None = None
+    operation_name_format: str | None = None
+
+
+def _write_diagnostic(
+    request: Request,
+    plane: Any,
+    key: str,
+    identifier: str,
+    api_id: str | None,
+    body: DiagnosticUpsert,
+) -> dict[str, Any]:
+    cfg = _config_for_management_write(request)
+    diagnostic = DiagnosticConfig(identifier=identifier, api_id=api_id, **body.model_dump(exclude_none=True))
+    validate_diagnostic(cfg, identifier, diagnostic)
+    cfg.diagnostics[key] = diagnostic
+    updated = plane.persist_or_apply_config(cfg)
+    return _masked(updated, project_diagnostic(updated, key, updated.diagnostics[key]))
+
+
+def _remove_diagnostic(request: Request, plane: Any, key: str) -> dict[str, Any]:
+    cfg = _config_for_management_write(request)
+    _get_diagnostic_or_404(cfg, key)
+    del cfg.diagnostics[key]
+    plane.persist_or_apply_config(cfg)
+    return {"deleted": True, "diagnostic_id": key}
 
 
 def _get_named_value_or_404(cfg: GatewayConfig, named_value_id: str) -> NamedValueConfig:
@@ -1286,6 +1331,9 @@ def _build_portal_router(*, require_management_plane: Callable[[], ManagementSer
         persisted = updated.subscription.subscriptions.get(subscription.id)
         if persisted is None:
             raise HTTPException(status_code=500, detail="Subscription persistence failed")
+        notification_runtime = getattr(request.app.state, "notification_runtime", None)
+        if notification_runtime is not None:
+            notification_runtime.subscription_created(updated, persisted)
         return project_portal_subscription(persisted)
 
     return router
@@ -1367,6 +1415,50 @@ def _build_infrastructure_router(*, require_management_plane: Callable[[], Manag
         cfg: GatewayConfig = request.app.state.gateway_config
         diagnostic = _get_diagnostic_or_404(cfg, diagnostic_id)
         return _masked(cfg, project_diagnostic(cfg, diagnostic_id, diagnostic))
+
+    @router.put("/apim/management/diagnostics/{diagnostic_id}")
+    async def upsert_diagnostic(diagnostic_id: str, request: Request, body: DiagnosticUpsert) -> dict[str, Any]:
+        require_tenant_access(request)
+        return _write_diagnostic(request, require_management_plane(), diagnostic_id, diagnostic_id, None, body)
+
+    @router.delete("/apim/management/diagnostics/{diagnostic_id}")
+    async def delete_diagnostic(diagnostic_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        return _remove_diagnostic(request, require_management_plane(), diagnostic_id)
+
+    @router.get("/apim/management/apis/{api_id}/diagnostics")
+    async def list_api_diagnostics(api_id: str, request: Request) -> list[dict[str, Any]]:
+        require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _get_api_or_404(cfg, api_id)
+        return [
+            _masked(cfg, project_diagnostic(cfg, key, diagnostic))
+            for key, diagnostic in cfg.diagnostics.items()
+            if diagnostic.api_id == api_id
+        ]
+
+    @router.get("/apim/management/apis/{api_id}/diagnostics/{diagnostic_id}")
+    async def get_api_diagnostic(api_id: str, diagnostic_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        _get_api_or_404(cfg, api_id)
+        key = api_diagnostic_key(api_id, diagnostic_id)
+        return _masked(cfg, project_diagnostic(cfg, key, _get_diagnostic_or_404(cfg, key)))
+
+    @router.put("/apim/management/apis/{api_id}/diagnostics/{diagnostic_id}")
+    async def upsert_api_diagnostic(
+        api_id: str, diagnostic_id: str, request: Request, body: DiagnosticUpsert
+    ) -> dict[str, Any]:
+        require_tenant_access(request)
+        _get_api_or_404(request.app.state.gateway_config, api_id)
+        key = api_diagnostic_key(api_id, diagnostic_id)
+        return _write_diagnostic(request, require_management_plane(), key, diagnostic_id, api_id, body)
+
+    @router.delete("/apim/management/apis/{api_id}/diagnostics/{diagnostic_id}")
+    async def delete_api_diagnostic(api_id: str, diagnostic_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        _get_api_or_404(request.app.state.gateway_config, api_id)
+        return _remove_diagnostic(request, require_management_plane(), api_diagnostic_key(api_id, diagnostic_id))
 
     @router.put("/apim/management/named-values/{named_value_id}")
     async def upsert_named_value(named_value_id: str, request: Request, body: NamedValueUpsert) -> dict[str, Any]:
@@ -1687,6 +1779,7 @@ def build_management_router(*, require_management_plane: Callable[[], Management
         _build_policy_router,
         _build_products_router,
         _build_subscriptions_router,
+        build_email_notification_router,
         _build_portal_router,
         _build_infrastructure_router,
         _build_versioning_router,

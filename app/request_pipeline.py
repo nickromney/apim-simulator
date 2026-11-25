@@ -33,6 +33,7 @@ from app.backend_pool import (
     select_pool_member,
 )
 from app.config import MANAGED_GATEWAY_ID, BackendConfig, GatewayConfig, RouteConfig, SubscriptionScope
+from app.diagnostic_logging import capture_stage
 from app.effective_policy import stacked_policy_scopes
 from app.gateway_errors import subscription_key_error
 from app.named_values import mask_secret_data
@@ -42,6 +43,8 @@ from app.policy import (
     PolicyRuntime,
     PolicyTraceCollector,
     ResponseSpec,
+    Retry,
+    _record_step,
     apply_backend_async,
     apply_inbound_async,
     apply_on_error_async,
@@ -49,6 +52,7 @@ from app.policy import (
     finalize_deferred_actions,
     outbound_reads_response_body,
     parse_policies_xml,
+    retry_sleep,
 )
 from app.policy_errors import build_last_error, exception_last_error, response_last_error
 from app.proxy import apply_claim_headers, build_upstream_headers, hop_by_hop_headers, resolve_route
@@ -490,6 +494,8 @@ def _policy_response(
     policy_req: PolicyRequest,
     policy_runtime: PolicyRuntime,
 ) -> Response:
+    # Diagnostic logging reads the body a policy answered with.
+    policy_req.variables["_diagnostic_response_body"] = body
     finalize_deferred_actions(
         PolicyRequest(
             method=policy_req.method,
@@ -1458,6 +1464,83 @@ async def _send_upstream_with_retries(
     )
 
 
+async def _retry_forward_request(
+    *,
+    first: _UpstreamAttempt,
+    client: httpx.AsyncClient,
+    cfg: GatewayConfig,
+    route: Any,
+    policy_req: PolicyRequest,
+    policy_runtime: Any,
+    request: Request,
+) -> _UpstreamAttempt:
+    """Repeat a `<retry>` that wraps forward-request.
+
+    https://learn.microsoft.com/en-us/azure/api-management/retry-policy
+    The backend section already ran the retry's children once and the gateway
+    forwarded. While the condition holds and retries remain, wait, re-run the
+    children (so set-variable and set-backend-service can pick another
+    backend), choose the backend again and forward again. The condition sees
+    the last response's status and headers; its body is not read here. A
+    transport failure ends the retry and takes the backend-unavailable path.
+    """
+    retry: Retry | None = policy_req.variables.pop("_retry_forward", None)
+    if retry is None:
+        return first
+    count = retry.retry_count(policy_req, policy_runtime)
+    result = first
+    saved_status, saved_headers = policy_req.response_status_code, policy_req.response_headers
+    try:
+        for retry_number in range(1, count + 1):
+            response = result.response
+            if response is None:
+                break
+            policy_req.response_status_code = response.status_code
+            policy_req.response_headers = dict(response.headers)
+            if not retry.condition(policy_req):
+                break
+            await response.aclose()
+            delay = retry.delay_seconds(retry_number, policy_req, policy_runtime)
+            _record_step(policy_runtime, "retry", {"attempt": retry_number, "delay_seconds": delay})
+            await retry_sleep(policy_runtime, delay)
+            policy_req.section = "backend"
+            await retry.run_children(policy_req, policy_runtime)
+            policy_req.variables.pop("_retry_forward", None)
+            policy_req.headers.pop("x-apim-backend-id", None)
+            choice = _choose_backend(
+                cfg=cfg,
+                route=route,
+                policy_req=policy_req,
+                backend_health=request.app.state.backend_health,
+                request=request,
+            )
+            upstream_url = _build_policy_upstream_url(route, policy_req, choice.upstream_base_url)
+            policy_req.variables["upstream_url"] = upstream_url
+            policy_req.variables["backend_id"] = choice.pool.backend_id or ""
+            following = await _send_upstream_with_retries(
+                tls_client_pool=request.app.state.tls_client_pool,
+                client=client,
+                cfg=cfg,
+                method=policy_req.method,
+                upstream_url=upstream_url,
+                policy_req=policy_req,
+                upstream_auth=choice.upstream_auth,
+                route=route,
+                pool=choice.pool,
+            )
+            result = _UpstreamAttempt(
+                response=following.response,
+                attempts=result.attempts + following.attempts,
+                elapsed_seconds=result.elapsed_seconds + following.elapsed_seconds,
+                error=following.error,
+                upstream_url=following.upstream_url,
+                pool=following.pool,
+            )
+    finally:
+        policy_req.response_status_code, policy_req.response_headers = saved_status, saved_headers
+    return result
+
+
 _ROUTE_AUTHZ_REASONS = {
     "Missing required scope": "missing_required_scope",
     "Missing required role": "missing_required_role",
@@ -1549,6 +1632,7 @@ def _uncached_response(
             },
         )
 
+    request.state.apim_policy_variables.setdefault("_diagnostic_response_body", None if streaming else content)
     if streaming:
         response = StreamingResponse(
             upstream_response.aiter_bytes(),
@@ -2289,6 +2373,8 @@ async def execute_gateway_request(request: Request) -> Response:
     request.state.apim_api_id = route.api_id
 
     body = await _read_body_within_limit(request, cfg)
+    capture_stage(request.state, cfg, "frontend_request", headers=list(request.headers.items()), body=body)
+    request.state.apim_operation_id = route.operation_id
     correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
     headers = _initial_upstream_headers(request, auth, cfg, correlation_id)
     # Debug credentials authorize gateway tracing, not the backend.
@@ -2313,6 +2399,7 @@ async def execute_gateway_request(request: Request) -> Response:
         subscription_groups=subscription_groups,
     )
 
+    request.state.apim_policy_variables = policy_req.variables
     trace = _TraceContext.read(request, cfg, route.api_id)
     trace_requested, trace_id, trace_collector = trace.requested, trace.trace_id, trace.collector
     client: httpx.AsyncClient = request.app.state.http_client
@@ -2458,6 +2545,16 @@ async def execute_gateway_request(request: Request) -> Response:
             session_cookie_name=choice.pool.session_cookie_name,
         ),
     )
+    attempt_result = await _retry_forward_request(
+        first=attempt_result,
+        client=client,
+        cfg=cfg,
+        route=route,
+        policy_req=policy_req,
+        policy_runtime=policy_runtime,
+        request=request,
+    )
+    capture_stage(request.state, cfg, "backend_request", headers=policy_req.headers, body=policy_req.body)
     upstream_response = attempt_result.response
     attempts_used = attempt_result.attempts
     last_exc = attempt_result.error
@@ -2496,6 +2593,13 @@ async def execute_gateway_request(request: Request) -> Response:
         cache_key=cache_key,
         policy_req=policy_req,
         policy_response_cache_active=policy_response_cache_active,
+    )
+    capture_stage(
+        request.state,
+        cfg,
+        "backend_response",
+        headers=upstream.headers,
+        body=upstream.content if upstream.buffered else None,
     )
     response_headers, media_type, content = upstream.headers, upstream.media_type, upstream.content
     upstream_status_code = upstream.status_code
