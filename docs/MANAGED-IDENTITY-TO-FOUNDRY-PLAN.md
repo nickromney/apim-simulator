@@ -1,6 +1,10 @@
 # Plan: keyless APIM → AI Foundry with managed identity
 
-Status: Phase 1 implemented on branch `feat/workload-identity-jwks` (2026-11-25); Phases 2–4 not started.
+Status: Phase 1 merged (#98). Phase 2 implemented in aifoundry-simulator (branch
+`claude/entra-token-auth-bc0f21`, unmerged). Phase 3 done (2026-11-25): the keyless
+gateway variant, `make up-ai-foundry-keyless` and `make smoke-ai-foundry-keyless`. Phase 4
+partly done: the `examples/ai-gateway/README.md` and policy-fragments links are in;
+the capability matrix and Foundry term map are not.
 
 ## Goal
 
@@ -137,6 +141,14 @@ test session:
 - JWKS rotation: unknown `kid` triggers exactly one refetch.
 
 ## Phase 3: wire the example end to end
+
+As built: a separate `apim.foundry.keyless.json` (the key-based
+`apim.foundry.json` and its smoke stay unchanged), selected by the overlay
+`examples/ai-gateway/compose.foundry-keyless.yml`. The policy also deletes the
+client's `api-key` header, because that header doubles as the APIM
+subscription key and would otherwise reach Foundry. A new
+`make smoke-ai-foundry-keyless` replaces extending the key-based smoke. The
+example ships no Bruno collection, so no Bruno requests were added.
 
 In apim-simulator `examples/ai-gateway/`:
 

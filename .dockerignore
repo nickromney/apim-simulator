@@ -19,6 +19,7 @@
 **/.run
 examples/edge/certs
 examples/apim-security/.runtime
+examples/ai-gateway/.runtime
 examples/azure-validation/.runtime
 **/.env
 **/.env.*

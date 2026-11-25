@@ -122,7 +122,7 @@ RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 
 .PHONY: examples
 
-.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-ai-foundry check-aifoundry-network up-shared up-aws up-management-gateway up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-ai logs-ai-foundry logs-shared logs-aws logs-management-gateway logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify verify-dry-run verify-test verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-ai smoke-ai-foundry smoke-shared smoke-aws smoke-management-gateway smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-ai compose-config-ai-foundry compose-config-shared compose-config-aws compose-config-management-gateway compose-config-todo compose-config-todo-otel
+.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-ai-foundry up-ai-foundry-keyless check-aifoundry-network up-shared up-aws up-management-gateway up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-ai logs-ai-foundry logs-shared logs-aws logs-management-gateway logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify verify-dry-run verify-test verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-ai smoke-ai-foundry smoke-ai-foundry-keyless smoke-shared smoke-aws smoke-management-gateway smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-ai compose-config-ai-foundry compose-config-shared compose-config-aws compose-config-management-gateway compose-config-todo compose-config-todo-otel
 
 help:
 	@echo "Local APIM Simulator"
@@ -155,6 +155,7 @@ help-stacks:
 	@printf $(HELP_FMT) "up" "Start the direct public simulator stack"
 	@printf $(HELP_FMT) "up-ai" "Start the AI gateway example with the mock LLM backend"
 	@printf $(HELP_FMT) "up-ai-foundry" "Start the gateway fronting the sibling AI Foundry simulator (start that first)"
+	@printf $(HELP_FMT) "up-ai-foundry-keyless" "Same, calling Foundry with managed identity (Foundry: make up-keyless)"
 	@printf $(HELP_FMT) "up-all" "Start root-managed stacks using isolated slots"
 	@printf $(HELP_FMT) "up-aws" "Start LocalStack AWS API Gateway comparison beside the simulator stack"
 	@printf $(HELP_FMT) "up-edge" "Start the edge HTTP MCP stack on $(APIM_EDGE_HOST):8088"
@@ -221,6 +222,7 @@ help-verify:
 	@printf $(HELP_FMT) "smoke-browser" "Run Scalar and console browser smokes in Docker slot 7"
 	@printf $(HELP_FMT) "smoke-ai" "Run the AI gateway token-limit smoke test"
 	@printf $(HELP_FMT) "smoke-ai-foundry" "Run the AI Foundry integration smoke test (cache, content safety, 429)"
+	@printf $(HELP_FMT) "smoke-ai-foundry-keyless" "Check the keyless pairing: chat, JWKS, Foundry rejects bad tokens"
 	@printf $(HELP_FMT) "smoke-aws" "Run the LocalStack AWS API Gateway comparison smoke test"
 	@printf $(HELP_FMT) "smoke-edge" "Run the edge MCP and forwarded-header smoke test"
 	@printf $(HELP_FMT) "smoke-hello" "Run the hello API smoke test (mode via SMOKE_HELLO_MODE)"
@@ -362,6 +364,9 @@ up-ai:
 up-ai-foundry: check-aifoundry-network
 	$(COMPOSE_AI_FOUNDRY) up --build -d
 
+up-ai-foundry-keyless:
+	$(MAKE) --no-print-directory -C examples/ai-gateway up-foundry-keyless
+
 check-aifoundry-network:
 	@docker network inspect aifoundry >/dev/null 2>&1 || { \
 	  echo "error: Docker network 'aifoundry' not found."; \
@@ -501,6 +506,7 @@ compose-config-ci:
 	@$(MAKE) --no-print-directory -C examples/architecture-patterns-extra compose-config
 	@$(MAKE) --no-print-directory -C examples/regional-gateways compose-config
 	@$(MAKE) --no-print-directory -C examples/new-instance compose-config
+	@$(MAKE) --no-print-directory -C examples/ai-gateway compose-config-foundry-keyless
 
 fmt:
 	uv run --extra dev ruff format .
@@ -673,6 +679,9 @@ smoke-ai:
 
 smoke-ai-foundry:
 	$(UV_RUN) python scripts/smoke_ai_foundry.py
+
+smoke-ai-foundry-keyless:
+	$(MAKE) --no-print-directory -C examples/ai-gateway smoke-foundry-keyless
 
 smoke-shared:
 	$(UV_RUN) python scripts/smoke_shared.py
