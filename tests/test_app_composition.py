@@ -23,6 +23,8 @@ EXPECTED_ROUTES = {
     ("GET", "/apim/management/apis/{api_id}/graphql"),
     ("GET", "/apim/management/apis/{api_id}/resolvers"),
     ("GET", "/crossdomain.xml"),
+    ("GET", "/.well-known/workload-identity/jwks.json"),
+    ("GET", "/.well-known/workload-identity/openid-configuration"),
     ("PUT", "/apim/management/apis/{api_id}/graphql"),
     ("PUT", "/apim/management/apis/{api_id}/resolvers/{resolver_id}"),
     ("PUT", "/apim/management/loggers/{logger_id}"),
