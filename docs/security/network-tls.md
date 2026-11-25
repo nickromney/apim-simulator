@@ -81,6 +81,25 @@ checks the signature and every claim, plus its accepted identity list. These
 are local issuer credentials; Microsoft Entra credentials are not needed for
 the lab's authentication outcome.
 
+Tokens also carry Entra-shaped `oid`, `appid` (both the identity) and `tid` (the
+placeholder `workload_identity.tenant_id`) claims, and a `kid` header that is the
+RFC 7638 thumbprint of the signing key. In signed mode with a signing key, the
+gateway publishes its verification keys so a backend can trust it by issuer
+instead of a shared secret:
+
+- `GET /.well-known/workload-identity/openid-configuration` returns `issuer`
+  and an absolute `jwks_uri`.
+- `GET /.well-known/workload-identity/jwks.json` returns the signing key's
+  public half. During a key rotation, set `public_key_file` to the previous
+  public key: it is published too, so tokens signed before the rotation still
+  verify until they expire.
+
+Both return 404 in demo mode or when no signing key is configured, and 500 when a
+configured key file cannot be read. Set `issuer` to the URL backends reach the
+gateway on (for example `http://apim-simulator:8000/.well-known/workload-identity`)
+when they validate `iss`. Only keys are published; there is no token endpoint
+for clients.
+
 The local vault uses the same signed identity when
 `APIM_LOCAL_VAULT_RESOURCE` is configured. Its TLS settings are
 `APIM_LOCAL_VAULT_CA_FILE`, `APIM_LOCAL_VAULT_CRL_FILE`,

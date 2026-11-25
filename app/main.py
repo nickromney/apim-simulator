@@ -52,6 +52,7 @@ from app.telemetry import (
     set_correlation_id,
 )
 from app.version_workflow import build_version_workflow_router
+from app.workload_identity import build_workload_identity_router
 
 logger = logging.getLogger("apim-simulator")
 
@@ -755,6 +756,7 @@ def create_app(
     app.include_router(build_portal_customization_router(require_management_plane=_require_management_plane))
     app.include_router(build_graphql_management_router(require_management_plane=_require_management_plane))
     app.include_router(build_cross_domain_router())
+    app.include_router(build_workload_identity_router())
     app.include_router(build_logger_authoring_router(require_management_plane=_require_management_plane))
     from app.security_governance import build_security_governance_router
     from app.security_monitoring import build_security_monitoring_router
