@@ -329,8 +329,8 @@ def test_reader_backend_metadata_redacts_inline_credentials_without_mutating_con
             assert secret not in single.text and secret not in collection.text
         assert single.json()["auth_type"] == "basic"
         assert single.json()["basic_username"] == "backend-user"
-        assert single.json()["header_credentials"] == {"x-api-key": "[redacted]"}
-        assert single.json()["basic_password"] == "[redacted]"
+        assert single.json()["header_credentials"] == {"x-api-key": "***"}
+        assert single.json()["basic_password"] == "***"
         assert cfg.backends["private"].basic_password == "basic-secret"
 
 

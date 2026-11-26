@@ -44,6 +44,7 @@ from app.effective_policy import (
     effective_policy_xml,
     policy_xml_documents_for_target,
 )
+from app.management_body import is_mask
 from app.named_values import validate_named_value_references
 from app.openapi_import import parse_api_import
 from app.policy import parse_policies_xml
@@ -140,6 +141,32 @@ def _owner_from_body(body: Any, existing: Any) -> str | None:
     if "workspace" in fields_set:
         return getattr(body, "workspace", None)
     return getattr(existing, "workspace", None) if existing is not None else None
+
+
+_BACKEND_SECRET_FIELDS = ("basic_password", "authorization_parameter")
+_BACKEND_SECRET_MAPS = ("header_credentials", "query_credentials")
+
+
+def _keep_masked_secrets(payload: dict[str, Any], stored: dict[str, Any]) -> None:
+    """Put the stored secret back wherever the body sent the mask a GET returned."""
+    for field in _BACKEND_SECRET_FIELDS:
+        if is_mask(payload.get(field)):
+            payload[field] = stored.get(field)
+    for field in _BACKEND_SECRET_MAPS:
+        sent, kept = payload.get(field) or {}, stored.get(field) or {}
+        payload[field] = {key: kept.get(key, value) if is_mask(value) else value for key, value in sent.items()}
+
+
+def _given_or_kept(body: Any, field: str, existing: Any) -> Any:
+    """The body's value for ``field`` if it names it, even as null; else the stored one.
+
+    A PUT that leaves a field out keeps it, so a client that manages a policy
+    or tag link through its own route does not lose it when it updates the
+    parent. A client that wants the field gone sends an explicit null.
+    """
+    if field in getattr(body, "model_fields_set", set()):
+        return getattr(body, field)
+    return getattr(existing, field, None) if existing is not None else None
 
 
 class ManagementService:
@@ -379,8 +406,7 @@ class ManagementService:
     def create_subscription(self, cfg: GatewayConfig, body: Any) -> GatewayConfig:
         if self.find_subscription_by_id(cfg, body.id) is not None:
             raise HTTPException(status_code=409, detail="Subscription already exists")
-        if getattr(body, "product_id", None) is not None and getattr(body, "products", None):
-            raise HTTPException(status_code=400, detail="product_id conflicts with products")
+        self._validate_product_id_conflict(body)
 
         primary = body.primary_key or f"sub-{body.id}-primary"
         secondary = body.secondary_key or f"sub-{body.id}-secondary"
@@ -402,9 +428,50 @@ class ManagementService:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return self.persist_or_apply_config(cfg)
 
+    def put_subscription(self, cfg: GatewayConfig, body: Any) -> GatewayConfig:
+        """Create the subscription named by ``body.id``, or replace its settings.
+
+        A replace keeps the subscription's keys unless the body sets them, and
+        keeps the record of who created it.
+        """
+        entry = self.find_subscription_entry(cfg, body.id)
+        if entry is None:
+            return self.create_subscription(cfg, body)
+        config_key, current = entry
+        self._validate_product_id_conflict(body)
+        previous = current.model_copy(deep=True)
+        try:
+            replacement = Subscription(
+                id=current.id,
+                name=body.name,
+                keys=SubscriptionKeyPair(
+                    primary=body.primary_key or current.keys.primary,
+                    secondary=body.secondary_key or current.keys.secondary,
+                ),
+                state=body.state,
+                products=body.products if body.product_id is None else [body.product_id],
+                scope=body.scope,
+                api_id=body.api_id,
+                all_apis=body.all_apis,
+                service_scoped=body.service_scoped,
+                created_by=current.created_by,
+                workspace=_owner_from_body(body, current),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        cfg.subscription.subscriptions[config_key] = replacement
+        updated = self.persist_or_apply_config(cfg)
+        notification_runtime = getattr(self.app.state, "notification_runtime", None)
+        if notification_runtime is not None:
+            notification_runtime.subscription_state_changed(updated, previous, replacement)
+        return updated
+
     @staticmethod
     def _validate_product_id_conflict(body: Any) -> None:
-        if getattr(body, "product_id", None) is not None and getattr(body, "products", None):
+        # A GET returns both, with product_id set when there is one product,
+        # so a body that repeats them consistently is not a conflict.
+        product_id, products = getattr(body, "product_id", None), getattr(body, "products", None)
+        if product_id is not None and products and products != [product_id]:
             raise HTTPException(status_code=400, detail="product_id conflicts with products")
 
     @staticmethod
@@ -501,7 +568,12 @@ class ManagementService:
         if not cfg.apis and cfg.routes:
             raise HTTPException(
                 status_code=400,
-                detail="API CRUD requires api-authored config; convert legacy route configs before mutating APIs.",
+                detail=(
+                    "This simulator routes requests with legacy routes, so APIs cannot be changed here. "
+                    "Started without APIM_CONFIG_PATH, it builds one /api route from environment variables. "
+                    "Start it with APIM_CONFIG_PATH set to a config file without routes, such as "
+                    "examples/new-instance/apim.json, then retry."
+                ),
             )
 
     def validate_policy_xml(self, cfg: GatewayConfig, xml: str | None) -> None:
@@ -664,6 +736,23 @@ class ManagementService:
         self.set_policy_xml(target, cleaned)
         return self.persist_or_apply_config(cfg)
 
+    def delete_policy(
+        self, cfg: GatewayConfig, scope_type: str, scope_name: str, *, if_match: str | None = None
+    ) -> GatewayConfig:
+        """Remove the policy at a scope, so the scope only inherits from its parent."""
+        target = self.policy_scope_target(cfg, scope_type, scope_name)
+        if (
+            scope_type.lower() == "api"
+            and if_match is not None
+            and if_match != "*"
+            and if_match != self.policy_etag(scope_name, target)
+        ):
+            raise HTTPException(status_code=412, detail="The policy changed. Plan the change again before applying.")
+        target.policies_xml = None
+        if hasattr(target, "policies_xml_documents"):
+            target.policies_xml_documents = []
+        return self.persist_or_apply_config(cfg)
+
     def import_api(
         self, cfg: GatewayConfig, api_id: str, body: Any, *, stage: bool = False
     ) -> tuple[GatewayConfig, Any]:
@@ -813,7 +902,7 @@ class ManagementService:
             is_online=existing.is_online if existing is not None else None,
             subscription_header_names=body.subscription_header_names,
             subscription_query_param_names=body.subscription_query_param_names,
-            policies_xml=body.policies_xml,
+            policies_xml=_given_or_kept(body, "policies_xml", existing),
             tags=existing.tags if existing is not None else [],
             operations=existing.operations if existing is not None else {},
             schemas=existing.schemas if existing is not None else {},
@@ -959,9 +1048,7 @@ class ManagementService:
             name=body.name or (existing.name if existing is not None else operation_id),
             method=body.method,
             url_template=body.url_template,
-            description=body.description
-            if body.description is not None
-            else (existing.description if existing else None),
+            description=_given_or_kept(body, "description", existing),
             upstream_base_url=body.upstream_base_url,
             upstream_path_prefix=body.upstream_path_prefix,
             backend=body.backend,
@@ -971,17 +1058,11 @@ class ManagementService:
             subscription_header_names=body.subscription_header_names,
             subscription_query_param_names=body.subscription_query_param_names,
             authz=body.authz,
-            policies_xml=body.policies_xml,
-            tags=body.tags if body.tags is not None else (existing.tags if existing is not None else []),
-            template_parameters=(
-                body.template_parameters
-                if body.template_parameters is not None
-                else (existing.template_parameters if existing is not None else [])
-            ),
-            request=body.request if body.request is not None else (existing.request if existing is not None else None),
-            responses=body.responses
-            if body.responses is not None
-            else (existing.responses if existing is not None else []),
+            policies_xml=_given_or_kept(body, "policies_xml", existing),
+            tags=_given_or_kept(body, "tags", existing) or [],
+            template_parameters=_given_or_kept(body, "template_parameters", existing) or [],
+            request=_given_or_kept(body, "request", existing),
+            responses=_given_or_kept(body, "responses", existing) or [],
         )
         return self.persist_or_apply_config(cfg)
 
@@ -1010,6 +1091,12 @@ class ManagementService:
         api = self._get_api_or_404(cfg, api_id)
         self._link_list_item(api.products, product_id)
         return self.persist_or_apply_config(cfg)
+
+    def get_product_api_link(self, cfg: GatewayConfig, product_id: str, api_id: str) -> None:
+        self._get_product_or_404(cfg, product_id)
+        api = self._get_api_or_404(cfg, api_id)
+        if product_id not in api.products:
+            raise HTTPException(status_code=404, detail="Product API link not found")
 
     def unlink_product_api(self, cfg: GatewayConfig, product_id: str, api_id: str) -> GatewayConfig:
         self.require_api_authoring_mode(cfg)
@@ -1044,8 +1131,16 @@ class ManagementService:
         return self.persist_or_apply_config(cfg)
 
     def upsert_backend(self, cfg: GatewayConfig, backend_id: str, body: Any) -> GatewayConfig:
+        existing = cfg.backends.get(backend_id)
         payload = body.model_dump(mode="json") if hasattr(body, "model_dump") else dict(body)
-        payload["workspace"] = _owner_from_body(body, cfg.backends.get(backend_id))
+        payload["workspace"] = _owner_from_body(body, existing)
+        if existing is not None:
+            stored = existing.model_dump(mode="json")
+            # Certificate files and verification flags come from config; the
+            # PUT body cannot set them, so it must not reset them either.
+            for field in stored.keys() - payload.keys():
+                payload[field] = stored[field]
+            _keep_masked_secrets(payload, stored)
         cfg.backends[backend_id] = BackendConfig(**payload)
         return self.persist_or_apply_config(cfg)
 
@@ -1059,6 +1154,9 @@ class ManagementService:
         from app.named_values import rename_named_value_references
 
         existing = cfg.named_values.get(named_value_id)
+        if existing is not None and existing.secret and is_mask(changes.get("value")):
+            # A GET masks secret values; sending the mask back keeps the secret.
+            del changes["value"]
         payload = {**(existing.model_dump(mode="json") if existing else {}), **changes}
         if changes.get("value_from_key_vault") is not None:
             payload["value"] = None
@@ -1141,10 +1239,14 @@ class ManagementService:
             raise HTTPException(status_code=400, detail=f"Workspace ID {MANAGED_GATEWAY_ID} is reserved")
         existing = cfg.workspaces.get(workspace_id)
         payload = existing.model_dump(mode="python") if existing is not None else {}
-        updates = body.model_dump(exclude_unset=True) if hasattr(body, "model_dump") else dict(body)
-        updates = {key: value for key, value in updates.items() if value is not None}
+        for key, value in body.model_dump(exclude_unset=True).items():
+            # An explicit null clears the field back to its default.
+            if value is None:
+                payload.pop(key, None)
+            else:
+                payload[key] = value
         try:
-            cfg.workspaces[workspace_id] = WorkspaceConfig.model_validate({**payload, **updates})
+            cfg.workspaces[workspace_id] = WorkspaceConfig.model_validate(payload)
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid workspace configuration: {exc}") from exc
         return self.persist_or_apply_config(cfg)

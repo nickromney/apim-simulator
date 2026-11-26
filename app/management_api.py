@@ -51,6 +51,7 @@ from app.config import (
 from app.control_plane import api_visible_in_collection
 from app.diagnostic_logging import api_diagnostic_key, validate_diagnostic
 from app.email_notification_management import build_email_notification_router
+from app.management_body import ManagementBody
 from app.management_service import ManagementService
 from app.named_values import mask_secret_data
 from app.operation_authoring import build_operation_authoring_router
@@ -114,9 +115,7 @@ def _decode_body(content: bytes) -> dict[str, str | None]:
         return {"text": None, "base64": base64.b64encode(content).decode("ascii")}
 
 
-class SubscriptionUpsert(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class SubscriptionUpsert(ManagementBody):
     id: str
     name: str
     state: SubscriptionState = SubscriptionState.Active
@@ -131,9 +130,31 @@ class SubscriptionUpsert(BaseModel):
     workspace: str | None = None
 
 
-class SubscriptionUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class SubscriptionPut(ManagementBody):
+    """PUT body for /subscriptions/{id}: the subscription, with its id taken from the URL."""
 
+    read_only = frozenset({"config_key", "created_by", "keys"})
+
+    name: str
+    state: SubscriptionState = SubscriptionState.Active
+    products: list[str] = Field(default_factory=list)
+    product_id: str | None = None
+    scope: SubscriptionScope | None = None
+    api_id: str | None = None
+    all_apis: bool = False
+    service_scoped: bool = False
+    primary_key: str | None = None
+    secondary_key: str | None = None
+    workspace: str | None = None
+
+
+class ProductApiLinkPut(ManagementBody):
+    """A link has no settings; the body may be empty or what its GET returned."""
+
+    read_only = frozenset({"api_id", "product_id", "products"})
+
+
+class SubscriptionUpdate(ManagementBody):
     name: str | None = None
     state: SubscriptionState | None = None
     products: list[str] | None = None
@@ -144,7 +165,24 @@ class SubscriptionUpdate(BaseModel):
     service_scoped: bool | None = None
 
 
-class ApiUpsert(BaseModel):
+class ApiUpsert(ManagementBody):
+    read_only = frozenset(
+        {
+            "graphql",
+            "is_current",
+            "is_online",
+            "operations",
+            "releases",
+            "revision",
+            "revision_description",
+            "revisions",
+            "schemas",
+            "source_api_id",
+            "tags",
+            "version_description",
+        }
+    )
+
     name: str | None = None
     path: str
     upstream_base_url: str
@@ -162,7 +200,9 @@ class ApiUpsert(BaseModel):
     workspace: str | None = None
 
 
-class OperationUpsert(BaseModel):
+class OperationUpsert(ManagementBody):
+    read_only = frozenset({"api_id"})
+
     name: str | None = None
     method: str = "GET"
     url_template: str
@@ -183,7 +223,7 @@ class OperationUpsert(BaseModel):
     responses: list[OperationResponseMetadataConfig] | None = None
 
 
-class ApiImportRequest(BaseModel):
+class ApiImportRequest(ManagementBody):
     name: str | None = None
     path: str | None = None
     content_format: str
@@ -202,7 +242,7 @@ class ApiImportRequest(BaseModel):
     workspace: str | None = None
 
 
-class ApiVersionSetUpsert(BaseModel):
+class ApiVersionSetUpsert(ManagementBody):
     display_name: str
     description: str | None = None
     versioning_scheme: str
@@ -210,7 +250,7 @@ class ApiVersionSetUpsert(BaseModel):
     version_query_name: str | None = None
 
 
-class ApiRevisionUpsert(BaseModel):
+class ApiRevisionUpsert(ManagementBody):
     description: str | None = None
     is_current: bool | None = None
     is_online: bool | None = None
@@ -218,14 +258,16 @@ class ApiRevisionUpsert(BaseModel):
     definition: dict[str, Any] | None = None
 
 
-class ApiReleaseUpsert(BaseModel):
+class ApiReleaseUpsert(ManagementBody):
     name: str | None = None
     api_id: str | None = None
     notes: str | None = None
     revision: str
 
 
-class ProductUpsert(BaseModel):
+class ProductUpsert(ManagementBody):
+    read_only = frozenset({"groups", "subscription_count", "tags"})
+
     name: str | None = None
     description: str | None = None
     state: ProductState = ProductState.NotPublished
@@ -242,14 +284,18 @@ class PortalSubscriptionRequest(BaseModel):
     accept_terms: bool = False
 
 
-class GroupUpsert(BaseModel):
+class GroupUpsert(ManagementBody):
+    read_only = frozenset({"products", "users"})
+
     name: str
     description: str | None = None
     external_id: str | None = None
     type: str = "custom"
 
 
-class UserUpsert(BaseModel):
+class UserUpsert(ManagementBody):
+    read_only = frozenset({"groups", "name"})
+
     email: str | None = None
     first_name: str | None = None
     last_name: str | None = None
@@ -258,11 +304,23 @@ class UserUpsert(BaseModel):
     confirmation: str | None = None
 
 
-class TagUpsert(BaseModel):
+class TagUpsert(ManagementBody):
     display_name: str | None = None
 
 
-class BackendUpsert(BaseModel):
+class BackendUpsert(ManagementBody):
+    read_only = frozenset(
+        {
+            "allow_simulated_certificate",
+            "ca_file",
+            "client_certificate_file",
+            "client_certificate_key_file",
+            "crl_file",
+            "verify_certificate_chain",
+            "verify_certificate_name",
+        }
+    )
+
     url: str = ""
     description: str | None = None
     type: str = "single"
@@ -281,7 +339,9 @@ class BackendUpsert(BaseModel):
     workspace: str | None = None
 
 
-class NamedValueUpsert(BaseModel):
+class NamedValueUpsert(ManagementBody):
+    read_only = frozenset({"resolved"})
+
     display_name: str | None = Field(default=None, min_length=1)
     value: str | None = None
     secret: bool = False
@@ -289,8 +349,8 @@ class NamedValueUpsert(BaseModel):
     workspace: str | None = None
 
 
-class WorkspaceUpsert(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class WorkspaceUpsert(ManagementBody):
+    read_only = frozenset({"resources"})
 
     display_name: str | None = None
     description: str | None = None
@@ -298,19 +358,25 @@ class WorkspaceUpsert(BaseModel):
     policy_fragments: list[str] | None = None
 
 
-class WorkspaceGatewayUpsert(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class WorkspaceGatewayUpsert(ManagementBody):
+    read_only = frozenset({"workspaces"})
 
     display_name: str | None = None
     description: str | None = None
     host_names: list[str] = Field(default_factory=list)
 
 
-class PolicyUpdate(BaseModel):
+class GlobalSchemaUpsert(ManagementBody, GlobalSchemaConfig):
+    pass
+
+
+class PolicyUpdate(ManagementBody):
+    read_only = frozenset({"scope_name", "scope_type"})
+
     xml: str
 
 
-class PolicyFragmentUpsert(BaseModel):
+class PolicyFragmentUpsert(ManagementBody):
     xml: str
 
 
@@ -435,7 +501,9 @@ def _get_diagnostic_or_404(cfg: GatewayConfig, diagnostic_id: str) -> Diagnostic
     return diagnostic
 
 
-class DiagnosticUpsert(BaseModel):
+class DiagnosticUpsert(ManagementBody):
+    read_only = frozenset({"api_id", "identifier", "logger_resource_id"})
+
     """Writable diagnostic settings; the identifier and scope come from the URL."""
 
     model_config = ConfigDict(extra="forbid")
@@ -934,6 +1002,13 @@ def _build_policy_router(*, require_management_plane: Callable[[], ManagementSer
             "xml": manager.policy_xml_for_target(target),
         }
 
+    @router.delete("/apim/management/policies/{scope_type}/{scope_name:path}")
+    async def management_delete_policy(scope_type: str, scope_name: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg = _config_for_management_write(request)
+        require_management_plane().delete_policy(cfg, scope_type, scope_name, if_match=request.headers.get("if-match"))
+        return {"deleted": True, "scope_type": scope_type, "scope_name": scope_name}
+
     @router.get("/apim/management/traces")
     async def management_traces(request: Request, limit: int = 50) -> dict[str, Any]:
         require_tenant_access(request)
@@ -1067,8 +1142,17 @@ def _build_products_router(*, require_management_plane: Callable[[], ManagementS
         updated = require_management_plane().delete_product(cfg, product_id)
         return {"deleted": True, "product_id": product_id, "remaining": len(updated.products)}
 
+    @router.get("/apim/management/products/{product_id}/apis/{api_id}")
+    async def get_product_api_link(product_id: str, api_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        require_management_plane().get_product_api_link(cfg, product_id, api_id)
+        return {"product_id": product_id, "api_id": api_id, "products": cfg.apis[api_id].products}
+
     @router.put("/apim/management/products/{product_id}/apis/{api_id}")
-    async def link_product_api(product_id: str, api_id: str, request: Request) -> dict[str, Any]:
+    async def link_product_api(
+        product_id: str, api_id: str, request: Request, body: ProductApiLinkPut | None = None
+    ) -> dict[str, Any]:
         require_tenant_access(request)
         cfg = _config_for_management_write(request)
         updated = require_management_plane().link_product_api(cfg, product_id, api_id)
@@ -1208,6 +1292,19 @@ def _build_subscriptions_router(*, require_management_plane: Callable[[], Manage
         manager = require_management_plane()
         updated = manager.create_subscription(cfg, body)
         entry = manager.find_subscription_entry(updated, body.id)
+        if entry is None:
+            raise HTTPException(status_code=500, detail="Subscription persistence failed")
+        config_key, subscription = entry
+        return _masked(updated, project_subscription(updated, config_key, subscription))
+
+    @router.put("/apim/management/subscriptions/{subscription_id}")
+    async def put_subscription(subscription_id: str, request: Request, body: SubscriptionPut) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg = _config_for_management_write(request)
+        manager = require_management_plane()
+        upsert = SubscriptionUpsert(id=subscription_id, **body.model_dump(exclude_unset=True))
+        updated = manager.put_subscription(cfg, upsert)
+        entry = manager.find_subscription_entry(updated, subscription_id)
         if entry is None:
             raise HTTPException(status_code=500, detail="Subscription persistence failed")
         config_key, subscription = entry
@@ -1489,7 +1586,7 @@ def _build_infrastructure_router(*, require_management_plane: Callable[[], Manag
         return _masked(cfg, project_global_schema(cfg, schema_id, schema))
 
     @router.put("/apim/management/schemas/{schema_id}")
-    async def upsert_global_schema(schema_id: str, request: Request, body: GlobalSchemaConfig) -> dict[str, Any]:
+    async def upsert_global_schema(schema_id: str, request: Request, body: GlobalSchemaUpsert) -> dict[str, Any]:
         require_tenant_access(request)
         cfg = _config_for_management_write(request)
         updated = require_management_plane().upsert_global_schema(cfg, schema_id, body)
