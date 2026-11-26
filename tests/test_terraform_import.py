@@ -1233,3 +1233,111 @@ def test_import_reports_apim_resource_types_it_does_not_handle() -> None:
     assert ("azurerm_api_management_redis_cache", "adapted") in reported
     assert ("azurerm_api_management_custom_domain", "unsupported") in reported
     assert not any(feature == "azurerm_storage_account" for feature, _ in reported)
+
+
+def _subscription_required_api(name: str, value: bool) -> dict:
+    return {
+        "address": f"azurerm_api_management_api.{name}",
+        "type": "azurerm_api_management_api",
+        "name": name,
+        "values": {
+            "name": name,
+            "path": name,
+            "service_url": http_url("upstream"),
+            "subscription_required": value,
+        },
+    }
+
+
+def _subscription_required_operation(api_name: str) -> dict:
+    return {
+        "address": f"azurerm_api_management_api_operation.{api_name}",
+        "type": "azurerm_api_management_api_operation",
+        "name": api_name,
+        "values": {"api_name": api_name, "operation_id": "get", "method": "GET", "url_template": "/"},
+    }
+
+
+def test_import_maps_azurerm_api_subscription_required_and_the_gateway_enforces_it() -> None:
+    """subscription_required = true needs a key for the API; false is open even though keys are required.
+
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    tf = _tf_json(
+        [
+            _subscription_required_api("locked", True),
+            _subscription_required_operation("locked"),
+            _subscription_required_api("public", False),
+            _subscription_required_operation("public"),
+            {
+                "address": "azurerm_api_management_subscription.locked",
+                "type": "azurerm_api_management_subscription",
+                "name": "locked",
+                "values": {
+                    "subscription_id": "locked-sub",
+                    "display_name": "Locked",
+                    "primary_key": "locked-primary",
+                    "secondary_key": "locked-secondary",
+                    "api_id": "/subscriptions/test/apis/locked",
+                },
+            },
+        ]
+    )
+    cfg = config_from_tofu_show_json(tf)
+    assert cfg.subscription.required is True
+    assert cfg.apis["locked"].subscription_required is True
+    assert cfg.apis["public"].subscription_required is False
+
+    app = create_app(
+        config=cfg,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
+    )
+    with TestClient(app) as client:
+        assert client.get("/locked/").status_code == 401
+        assert client.get("/locked/", headers={"Ocp-Apim-Subscription-Key": "locked-primary"}).status_code == 200
+        assert client.get("/public/").status_code == 200
+        assert client.get("/public/", headers={"Ocp-Apim-Subscription-Key": "not-a-key"}).status_code == 200
+
+
+def test_import_maps_azapi_mcp_api_subscription_required() -> None:
+    def mcp_api(name: str, value: bool) -> dict:
+        return {
+            "address": f"azapi_resource.{name}",
+            "type": "azapi_resource",
+            "name": name,
+            "values": {
+                "type": "Microsoft.ApiManagement/service/apis@2025-09-01-preview",
+                "name": name,
+                "body": {
+                    "properties": {
+                        "type": "mcp",
+                        "path": name,
+                        "serviceUrl": http_url("mcp-server:8080"),
+                        "subscriptionRequired": value,
+                        "mcpProperties": {"endpoints": {"message": {"name": "message", "uriTemplate": "/mcp"}}},
+                    }
+                },
+            },
+        }
+
+    cfg = config_from_tofu_show_json(_tf_json([mcp_api("open-mcp", False), mcp_api("keyed-mcp", True)]))
+    assert cfg.apis["open-mcp"].subscription_required is False
+    assert cfg.apis["keyed-mcp"].subscription_required is True
+    assert {route.api_id: route.subscription_required for route in cfg.routes} == {
+        "open-mcp": False,
+        "keyed-mcp": True,
+    }
+
+
+def test_import_leaves_subscription_required_unset_when_terraform_omits_it() -> None:
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_api.weather",
+                "type": "azurerm_api_management_api",
+                "name": "weather",
+                "values": {"name": "weather", "path": "weather", "service_url": http_url("upstream")},
+            }
+        ]
+    )
+    assert config_from_tofu_show_json(tf).apis["weather"].subscription_required is None

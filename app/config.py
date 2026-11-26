@@ -859,6 +859,8 @@ class RouteConfig(BaseModel):
     api_protocols: list[str] | None = Field(default=None, exclude=True, repr=False)
     subscription_header_names: list[str] | None = None
     subscription_query_param_names: list[str] | None = None
+    # The owning API's subscriptionRequired; None keeps the gateway-wide setting.
+    subscription_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
     authz: RouteAuthzConfig | None = None
     policies_xml: str | None = None
     policies_xml_documents: list[str] = Field(default_factory=list)
@@ -1243,6 +1245,7 @@ def _operation_route(
         api_version=op.api_version or api.api_version,
         subscription_header_names=op.subscription_header_names or api.subscription_header_names,
         subscription_query_param_names=op.subscription_query_param_names or api.subscription_query_param_names,
+        subscription_required=api.subscription_required,
         authz=op.authz,
         policies_xml_documents=policies,
     )
@@ -1288,6 +1291,11 @@ class ApiConfig(BaseModel):
     source_api_id: str | None = None
     is_current: bool | None = None
     is_online: bool | None = None
+    # APIM's subscriptionRequired. True demands a key valid for this API (API-,
+    # product-, all-APIs- or service-scoped); False serves calls with or without
+    # a key whatever its products require. None keeps the gateway-wide
+    # subscription.required setting for configs written before this field.
+    subscription_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
     subscription_header_names: list[str] | None = None
     subscription_query_param_names: list[str] | None = None
     policies_xml: str | None = None

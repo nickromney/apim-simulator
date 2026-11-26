@@ -1368,6 +1368,7 @@ def _import_api(res: TFResource, acc: _ImportAccumulator) -> None:
         source_api_id=source_api_id,
         is_current=revision_is_current,
         is_online=revision_is_online,
+        subscription_required=_coerce_bool(res.values.get("subscription_required")),
         subscription_header_names=subscription_header_names,
         subscription_query_param_names=subscription_query_param_names,
         revisions={revision: revision_metadata},
@@ -1725,6 +1726,7 @@ def _import_azapi_mcp_api(res: TFResource, acc: _ImportAccumulator) -> None:
         upstream_base_url=upstream,
         backend=backend_id if backend else None,
         protocols=_string_list(properties.get("protocols")) or ["http", "https"],
+        subscription_required=_coerce_bool(properties.get("subscriptionRequired")),
         operations=operations,
     )
     transport = str(mcp.get("transportType") or "streamable")

@@ -212,10 +212,22 @@ def _require_active_subscription(
         raise subscription_key_error(request, config, route, missing=False)
 
 
+def route_subscription_required(config: GatewayConfig, route: RouteConfig | None) -> bool:
+    """Whether the route's API requires a subscription.
+
+    An API's own subscriptionRequired wins; configs that never set it fall back
+    to the gateway-wide setting.
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    if route is not None and route.subscription_required is not None:
+        return route.subscription_required
+    return config.subscription.required
+
+
 def validate_subscription_key(
     request: Request, config: GatewayConfig, route: RouteConfig | None = None
 ) -> SubscriptionIdentity | None:
-    if not config.subscription.required:
+    if not route_subscription_required(config, route):
         return None
     if _subscription_bypassed(request, config):
         return None
@@ -306,7 +318,7 @@ def _anonymous_context(request: Request, config: GatewayConfig, route: RouteConf
     bearer token being required.
     """
     issuer, audience = _default_issuer_audience(config)
-    if route_has_open_product(config, route):
+    if _subscription_key_optional(config, route):
         subscription, products, scope, api_id = _lenient_subscription(request, config, route)
     else:
         subscription = get_subscription_identity_optional(request, config, route)
@@ -371,6 +383,15 @@ def route_has_open_product(config: GatewayConfig, route: RouteConfig | None) -> 
     return any((p := config.products.get(pid)) is not None and not p.require_subscription for pid in ids)
 
 
+def _subscription_key_optional(config: GatewayConfig, route: RouteConfig | None) -> bool:
+    """Whether a key this gateway can't accept is ignored rather than refused.
+
+    APIM does this for an API in an open product, and for an API that doesn't
+    require a subscription at all (any key, or none, is allowed).
+    """
+    return route_has_open_product(config, route) or (route is not None and route.subscription_required is False)
+
+
 def _lenient_subscription(
     request: Request, config: GatewayConfig, route: RouteConfig | None
 ) -> tuple[SubscriptionIdentity | None, list[str], SubscriptionScope | None, str | None]:
@@ -394,7 +415,7 @@ def authenticate_request(
     if config.allow_anonymous:
         return _anonymous_context(request, config, route)
 
-    if route_has_open_product(config, route):
+    if _subscription_key_optional(config, route):
         subscription, products, scope, api_id = _lenient_subscription(request, config, route)
     else:
         subscription, products, scope, api_id = _strict_subscription(request, config, route)
@@ -415,7 +436,7 @@ def _strict_subscription(
 ) -> tuple[SubscriptionIdentity | None, list[str], SubscriptionScope | None, str | None]:
     """Read a subscription key, rejecting a missing or invalid one when required."""
     subscription = validate_subscription_key(request, config, route)
-    if config.subscription.required:
+    if route_subscription_required(config, route):
         products = require_subscription_products(request, config, route)
     else:
         products = get_subscription_products_optional(request, config, route)
