@@ -54,21 +54,32 @@ fields, because existing clients rely on it (a product PUT of `{"state":
 "published"}` keeps its name and terms; an operation PUT keeps metadata from
 an OpenAPI import). The contract test records this as `KEEPS_OMITTED`.
 
-Still open, roughly in order of what they cost a provider:
+Also fixed on this branch:
 
-1. **Unknown fields are silently dropped.** Most `*Upsert` models lack
-   `extra="forbid"`. A client can record a value the server never stored.
-2. **Not every resource has a single URL with PUT, GET and DELETE:**
-   - subscriptions use POST and PATCH;
-   - product-to-API links have no GET;
-   - policies have no DELETE.
-3. **Secret masks differ.** Named values return `***` and backends return
-   `[redacted]`. The provider accepts both.
-4. **A simulator started from environment variables alone cannot be managed.**
-   It builds a legacy route config, and API CRUD refuses to mutate that. The
-   acceptance harness starts the simulator from a minimal config file instead.
+- **Unknown fields are rejected with 422.** Request bodies derive from
+  `ManagementBody` in `app/management_body.py`. It ignores the read-only
+  fields a GET returns (`id`, `resource_id` and each resource's computed
+  fields), so GET, edit, PUT still works, as with ARM.
+- **One secret mask.** Every GET returns `***` for a secret, and a PUT that
+  sends `***` back keeps the stored secret. Before, backends returned
+  `[redacted]`, and sending a mask back saved it as the secret.
+- **A backend PUT keeps its certificate settings.** Certificate files and
+  verification flags come from config, and a PUT used to reset them.
+- **Every resource has one URL with PUT, GET and DELETE:**
+  - `PUT /subscriptions/{id}` creates or replaces a subscription. Its keys
+    are kept unless the body sets them.
+  - `GET /products/{product_id}/apis/{api_id}` reads a link.
+  - `DELETE /policies/{scope_type}/{scope_name}` removes a policy, so the
+    scope only inherits. A scope with no policy reads as the empty document.
 
-The provider works around 3 and 4.
+Still open:
+
+- **A simulator started from environment variables alone cannot be
+  managed.** It routes `/api` with one legacy route, and route
+  materialization drops legacy routes once any API exists. Fixing it needs
+  wildcard operations (any method, any path), so the default route can
+  become an API, or catalogues that mix routes and APIs. The error now says
+  how to start the simulator from a config file instead.
 
 ## Option C: the prototype
 
@@ -98,8 +109,8 @@ Tests:
 
 Not done yet:
 
-- subscriptions, groups, users, version sets, diagnostics, loggers, schemas,
-  workspaces and product links;
+- subscriptions (keys are nested in the response), groups, users, version
+  sets, diagnostics, loggers, schemas, workspaces and product links;
 - data sources;
 - generated docs (`tfplugindocs`);
 - a release pipeline;

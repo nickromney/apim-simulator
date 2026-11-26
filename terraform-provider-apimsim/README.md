@@ -74,15 +74,14 @@ cannot see a secret changed outside Terraform, and an import leaves it empty.
 
 ## Known gaps
 
-These are simulator behaviours, not provider bugs. Each one has a test that
-fails once it is fixed, so the workaround can be removed.
+- **No subscription or product-API link resources yet.** The simulator
+  supports both as PUT, GET and DELETE on one URL. Subscription keys are
+  nested in the response, which the provider's flat model does not map yet.
+- **A simulator started without `APIM_CONFIG_PATH` refuses API changes.** It
+  routes `/api` with a legacy route built from environment variables. Start
+  it from a config file, as `make testacc` does.
 
-- **Destroying `apimsim_api_policy` resets the policy** to an empty document,
-  because the API has no DELETE for policies.
-- **No subscription resource yet.** Subscriptions are created with POST, not
-  PUT to an ID.
-
-The server-side list lives in `KNOWN_GAPS` in
+Behaviour the simulator keeps by design is listed in `KNOWN_GAPS` in
 [tests/test_management_round_trip.py](../tests/test_management_round_trip.py).
 
 ## Develop

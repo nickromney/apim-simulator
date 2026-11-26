@@ -25,6 +25,7 @@ from app.config import (
     WorkspaceConfig,
     WorkspaceGatewayConfig,
 )
+from app.management_body import SECRET_MASK
 from app.named_values import mask_secret_data, resolve_named_value
 
 
@@ -210,10 +211,10 @@ def _backend_public_url(value: str) -> str:
     try:
         parsed = urlsplit(value)
     except ValueError:
-        return "[redacted]"
+        return SECRET_MASK
     host = parsed.netloc.rsplit("@", 1)[-1]
-    netloc = "[redacted]@" + host if "@" in parsed.netloc else host
-    query = urlencode([(key, "[redacted]") for key, _ in parse_qsl(parsed.query, keep_blank_values=True)])
+    netloc = SECRET_MASK + "@" + host if "@" in parsed.netloc else host
+    query = urlencode([(key, SECRET_MASK) for key, _ in parse_qsl(parsed.query, keep_blank_values=True)])
     return urlunsplit((parsed.scheme, netloc, parsed.path, query, parsed.fragment))
 
 
@@ -221,9 +222,9 @@ def project_backend(config: GatewayConfig, backend_id: str, backend: BackendConf
     payload = backend.model_dump(mode="json")
     for field in ("basic_password", "authorization_parameter"):
         if payload.get(field) is not None:
-            payload[field] = "[redacted]"
+            payload[field] = SECRET_MASK
     for field in ("header_credentials", "query_credentials"):
-        payload[field] = dict.fromkeys(payload.get(field, {}), "[redacted]")
+        payload[field] = dict.fromkeys(payload.get(field, {}), SECRET_MASK)
     payload["url"] = _backend_public_url(backend.url)
     return {
         "id": backend_id,
@@ -262,12 +263,12 @@ def _masked_logger_payload(logger: LoggerConfig) -> dict[str, Any]:
     app_insights = payload.get("application_insights")
     if isinstance(app_insights, dict):
         if app_insights.get("connection_string"):
-            app_insights["connection_string"] = "***"
+            app_insights["connection_string"] = SECRET_MASK
         if app_insights.get("instrumentation_key"):
-            app_insights["instrumentation_key"] = "***"
+            app_insights["instrumentation_key"] = SECRET_MASK
     eventhub = payload.get("eventhub")
     if isinstance(eventhub, dict) and eventhub.get("connection_string"):
-        eventhub["connection_string"] = "***"
+        eventhub["connection_string"] = SECRET_MASK
     return payload
 
 

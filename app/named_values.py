@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import BackendConfig, GatewayConfig
+from app.management_body import SECRET_MASK
 
 NAMED_VALUE_PATTERN = re.compile(r"\{\{([^{}]+)\}\}")
 ENV_NAME_PATTERN = re.compile(r"[^A-Za-z0-9]+")
@@ -232,7 +233,7 @@ def secret_named_value_map(config: GatewayConfig) -> dict[str, str]:
 def mask_secret_text(value: str, config: GatewayConfig) -> str:
     out = value
     for secret in secret_named_value_map(config).values():
-        out = out.replace(secret, "***")
+        out = out.replace(secret, SECRET_MASK)
     return out
 
 
@@ -241,7 +242,7 @@ def mask_secret_data(value: Any, config: GatewayConfig) -> Any:
 
     def redact(text: str) -> str:
         for secret in secrets.values():
-            text = text.replace(secret, "***")
+            text = text.replace(secret, SECRET_MASK)
         return text
 
     def walk(item):

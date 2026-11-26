@@ -4,8 +4,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-
-	"github.com/nickromney/apim-simulator/terraform-provider-apimsim/internal/client"
 )
 
 // The resource catalogue. Each entry is a model (the fields and their roles,
@@ -62,11 +60,10 @@ var resources = []func() resource.Resource{
 	register[apiPolicyModel](spec{
 		name: "api_policy",
 		path: "policies/api/{api_id}",
-		doc:  "The policy document at API scope. Destroying it resets the API to an empty policy.",
+		doc:  "The policy document at API scope. Destroying it removes the policy, so the API only inherits.",
 		attributes: map[string]schema.Attribute{
 			"xml": required("Policy XML."),
 		},
-		reset: client.Object{"xml": "<policies><inbound /><backend /><outbound /><on-error /></policies>"},
 	}),
 	register[backendModel](spec{
 		name: "backend",

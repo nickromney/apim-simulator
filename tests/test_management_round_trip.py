@@ -57,6 +57,10 @@ class Resource:
     write_only: frozenset[str] = frozenset()
     # Resources that must exist first, as (path, body) PUTs.
     requires: tuple[tuple[str, dict[str, Any]], ...] = ()
+    # Fields a GET returns once the resource is deleted, for resources that
+    # always read as something (a scope with no policy reads as an empty
+    # document). None means the GET must be a 404.
+    reads_after_delete: dict[str, Any] | None = None
 
     @property
     def url(self) -> str:
@@ -64,6 +68,7 @@ class Resource:
 
 
 API = ("apis/a1", {"name": "A1", "path": "a1", "upstream_base_url": "http://backend.example"})
+PRODUCT = ("products/p1", {"name": "P1"})
 LOGGER = ("loggers/log1", {"logger_type": "custom", "description": "local"})
 
 RESOURCES: tuple[Resource, ...] = (
@@ -106,12 +111,19 @@ RESOURCES: tuple[Resource, ...] = (
         "policies/api/a1",
         {"xml": POLICY_XML},
         requires=(API,),
+        reads_after_delete={"xml": "<policies><inbound /><backend /><outbound /><on-error /></policies>"},
     ),
     Resource(
         "backend",
         "backends/b1",
         {"url": "http://backend.example", "description": "Primary", "type": "single", "auth_type": "none"},
         clearable="description",
+    ),
+    Resource(
+        "backend_with_secret",
+        "backends/b2",
+        {"url": "http://backend.example", "auth_type": "basic", "basic_username": "svc", "basic_password": "pw"},
+        write_only=frozenset({"basic_password"}),
     ),
     Resource(
         "named_value",
@@ -125,6 +137,13 @@ RESOURCES: tuple[Resource, ...] = (
         write_only=frozenset({"value"}),
     ),
     Resource("tag", "tags/t1", {"display_name": "T1"}),
+    Resource(
+        "subscription",
+        "subscriptions/s1",
+        {"name": "S1", "state": "active", "products": ["p1"]},
+        requires=(PRODUCT,),
+    ),
+    Resource("product_api_link", "products/p1/apis/a1", {}, requires=(PRODUCT, API)),
     Resource(
         "user",
         "users/u1",
@@ -177,35 +196,12 @@ RESOURCES: tuple[Resource, ...] = (
     ),
 )
 
-ACCEPTS_UNKNOWN = "request model has no extra='forbid', so unknown fields are silently dropped"
-
-# (check, resource name) -> reason. Remove an entry when the gap is fixed.
 KEEPS_OMITTED = "by design, a PUT keeps fields it leaves out; an explicit null clears them"
 
 KNOWN_GAPS: dict[tuple[str, str], str] = {
     ("replace", "product"): KEEPS_OMITTED,
     ("replace", "api_operation"): KEEPS_OMITTED,
     ("replace", "workspace"): KEEPS_OMITTED,
-    ("delete", "api_policy"): "policies have no DELETE route; reset means PUTting a default document",
-    **{
-        ("strict", name): ACCEPTS_UNKNOWN
-        for name in (
-            "product",
-            "api",
-            "api_operation",
-            "api_policy",
-            "backend",
-            "named_value",
-            "secret_named_value",
-            "tag",
-            "user",
-            "group",
-            "api_version_set",
-            "policy_fragment",
-            "global_schema",
-            "logger",
-        )
-    },
 }
 
 
@@ -272,6 +268,30 @@ def test_repeating_put_changes_nothing(client: TestClient, resource: Resource) -
     assert _read(client, resource) == first
 
 
+@pytest.mark.parametrize("resource", _params("get_put"))
+def test_put_of_what_get_returned_changes_nothing(client: TestClient, resource: Resource) -> None:
+    """GET, edit, PUT: read-only fields and masked secrets sent back are harmless."""
+    _create(client, resource)
+    first = _read(client, resource)
+
+    response = _put(client, resource.url, first)
+
+    assert response.status_code == 200, response.text
+    assert _read(client, resource) == first
+
+
+def test_put_of_a_masked_secret_keeps_the_secret(client: TestClient) -> None:
+    """The masked GET body cannot reveal a lost secret, so check the stored config."""
+    for resource in RESOURCES:
+        if resource.write_only:
+            _create(client, resource)
+            _put(client, resource.url, _read(client, resource))
+
+    config = client.app.state.gateway_config
+    assert config.backends["b2"].basic_password == "pw"
+    assert config.named_values["nv2"].value == "hidden"
+
+
 @pytest.mark.parametrize("resource", _params("replace", tuple(r for r in RESOURCES if r.clearable)))
 def test_put_without_a_field_clears_it(client: TestClient, resource: Resource) -> None:
     assert resource.clearable is not None
@@ -310,12 +330,14 @@ def test_delete_removes_the_resource(client: TestClient, resource: Resource) -> 
     deleted = client.delete(resource.url, headers=TENANT_HEADERS)
 
     assert deleted.status_code in {200, 204}, deleted.text
-    assert client.get(resource.url, headers=TENANT_HEADERS).status_code == 404
+    after = client.get(resource.url, headers=TENANT_HEADERS)
+    if resource.reads_after_delete is None:
+        assert after.status_code == 404
+    else:
+        assert after.status_code == 200, after.text
+        assert _drift(resource.reads_after_delete, after.json()) == {}
 
 
-@pytest.mark.xfail(
-    strict=True, reason="product-API links have PUT and DELETE but no GET, so a client cannot read them back"
-)
 def test_product_api_link_is_readable(client: TestClient) -> None:
     _put(client, f"{MANAGEMENT}/products/p1", {"name": "P1"})
     _put(client, f"{MANAGEMENT}/{API[0]}", API[1])
@@ -324,7 +346,6 @@ def test_product_api_link_is_readable(client: TestClient) -> None:
     assert client.get(f"{MANAGEMENT}/products/p1/apis/a1", headers=TENANT_HEADERS).status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="subscriptions are created by POST with the id in the body, not PUT by id")
 def test_subscription_is_created_by_put_to_its_id(client: TestClient) -> None:
     _put(client, f"{MANAGEMENT}/products/p1", {"name": "P1"})
 
@@ -366,7 +387,6 @@ def test_updating_an_api_keeps_its_operations(client: TestClient) -> None:
     assert client.get(f"{MANAGEMENT}/apis/a1/operations/o1", headers=TENANT_HEADERS).status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="backends mask secrets as '[redacted]'; named values use '***'")
 def test_every_resource_masks_secrets_the_same_way(client: TestClient) -> None:
     body = {"url": "http://backend.example", "auth_type": "basic", "basic_username": "u", "basic_password": "pw"}
     _put(client, f"{MANAGEMENT}/backends/b1", body)

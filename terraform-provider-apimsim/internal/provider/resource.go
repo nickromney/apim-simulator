@@ -26,9 +26,6 @@ type spec struct {
 	path       string // URL template under /apim/management/
 	doc        string
 	attributes map[string]schema.Attribute
-	// reset, when set, replaces DELETE: the resource is PUT back to this body.
-	// Policies use it, since the API can reset a policy but not delete it.
-	reset client.Object
 }
 
 // managedResource is the one CRUD implementation every resource shares: the
@@ -122,13 +119,7 @@ func (r *managedResource[T]) Delete(ctx context.Context, req resource.DeleteRequ
 	if !ok {
 		return
 	}
-	var err error
-	if r.spec.reset != nil {
-		_, err = r.client.Put(ctx, address, r.spec.reset)
-	} else {
-		err = r.client.Delete(ctx, address)
-	}
-	if err != nil && !errors.Is(err, client.ErrNotFound) {
+	if err := r.client.Delete(ctx, address); err != nil && !errors.Is(err, client.ErrNotFound) {
 		resp.Diagnostics.AddError("Cannot delete "+address, err.Error())
 	}
 }

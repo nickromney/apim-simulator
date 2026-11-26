@@ -80,7 +80,7 @@ func TestApplyKeepsMaskedSecretsAndNullsUnreturnedComputedValues(t *testing.T) {
 	}
 	response := client.Object{
 		"name":     "n",
-		"password": "[redacted]",
+		"password": "***",
 		"limit":    json.Number("7"),
 		"tags":     []any{"a", "b"},
 	}

@@ -22,16 +22,13 @@ var ErrNotFound = errors.New("not found")
 // Numbers decode as json.Number so integers survive the round trip exactly.
 type Object = map[string]any
 
-// masks are the placeholders the simulator returns in place of a secret.
-// Two spellings exist today; tests/test_management_round_trip.py tracks the
-// gap, and this list shrinks to one when it is closed.
-var masks = map[string]bool{"***": true, "[redacted]": true}
+// Mask is what the simulator returns in place of a secret.
+const Mask = "***"
 
 // IsMasked reports whether a value the server returned stands in for a secret
 // it will not reveal. A client must keep its own copy of such a value.
 func IsMasked(value any) bool {
-	s, ok := value.(string)
-	return ok && masks[s]
+	return value == Mask
 }
 
 // APIError is a non-2xx, non-404 response.

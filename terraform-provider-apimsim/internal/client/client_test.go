@@ -68,7 +68,7 @@ func TestErrorsAreClassified(t *testing.T) {
 }
 
 func TestIsMasked(t *testing.T) {
-	for value, want := range map[any]bool{"***": true, "[redacted]": true, "secret": false, nil: false, 3: false} {
+	for value, want := range map[any]bool{"***": true, "[redacted]": false, "secret": false, nil: false, 3: false} {
 		if IsMasked(value) != want {
 			t.Errorf("IsMasked(%#v) = %v", value, !want)
 		}
