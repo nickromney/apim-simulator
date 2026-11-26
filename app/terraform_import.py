@@ -25,6 +25,7 @@ from app.config import (
     DiagnosticHttpMessageConfig,
     DiagnosticMaskingRuleConfig,
     GatewayConfig,
+    GlobalSchemaConfig,
     GroupConfig,
     KeyVaultNamedValueConfig,
     LoggerApplicationInsightsConfig,
@@ -49,6 +50,7 @@ from app.config import (
     UserConfig,
     validate_policy_config,
 )
+from app.diagnostic_logging import api_diagnostic_key
 from app.openapi_import import parse_api_import
 from app.urls import http_url
 
@@ -543,6 +545,7 @@ AZAPI_APIM_CHILD_EQUIVALENTS = {
     "Microsoft.ApiManagement/service/subscriptions": "azurerm_api_management_subscription",
     "Microsoft.ApiManagement/service/backends": "azurerm_api_management_backend",
     "Microsoft.ApiManagement/service/namedValues": "azurerm_api_management_named_value",
+    "Microsoft.ApiManagement/service/schemas": "azurerm_api_management_global_schema",
     "Microsoft.ApiManagement/service/loggers": "azurerm_api_management_logger",
     "Microsoft.ApiManagement/service/diagnostics": "azurerm_api_management_diagnostic",
     "Microsoft.ApiManagement/service/apiVersionSets": "azurerm_api_management_api_version_set",
@@ -802,6 +805,7 @@ class _ImportAccumulator:
     products: dict[str, ProductConfig] = field(default_factory=dict)
     subscriptions: dict[str, Subscription] = field(default_factory=dict)
     named_values: dict[str, NamedValueConfig] = field(default_factory=dict)
+    global_schemas: dict[str, GlobalSchemaConfig] = field(default_factory=dict)
     loggers: dict[str, LoggerConfig] = field(default_factory=dict)
     diagnostic_resources: dict[str, DiagnosticConfig] = field(default_factory=dict)
     users: dict[str, UserConfig] = field(default_factory=dict)
@@ -839,11 +843,14 @@ def _import_product(res: TFResource, acc: _ImportAccumulator) -> None:
             )
         )
         approval_required = False
+    limit = res.values.get("subscriptions_limit")
     acc.products[product_id] = ProductConfig(
         name=display_name,
+        description=str(res.values["description"]) if res.values.get("description") else None,
         state=state,
         require_subscription=require_subscription,
         approval_required=approval_required,
+        subscriptions_limit=int(limit) if require_subscription and isinstance(limit, int) and limit >= 1 else None,
     )
 
 
@@ -998,6 +1005,28 @@ def _import_named_value(res: TFResource, acc: _ImportAccumulator) -> None:
     )
 
 
+def _import_global_schema(res: TFResource, acc: _ImportAccumulator) -> None:
+    """azurerm_api_management_global_schema: a service-level schema for validate-content schema-id."""
+    schema_id = str(res.values.get("schema_id") or res.name).strip()
+    value = res.values.get("value")
+    if not schema_id or not isinstance(value, str) or not value.strip():
+        acc.diagnostics.append(
+            ImportDiagnostic(
+                status="unsupported",
+                scope=f"global-schema:{schema_id or res.name}",
+                feature="value",
+                detail="Global schema has no inline value to import.",
+            )
+        )
+        return
+    schema_type = str(res.values.get("type") or "json").strip().lower()
+    acc.global_schemas[schema_id] = GlobalSchemaConfig(
+        type="xml" if schema_type == "xml" else "json",
+        value=value,
+        description=str(res.values["description"]) if res.values.get("description") else None,
+    )
+
+
 def _import_logger(res: TFResource, acc: _ImportAccumulator) -> None:
     logger_id = str(res.values.get("name") or res.name).strip()
     if not logger_id:
@@ -1081,10 +1110,26 @@ def _import_diagnostic(res: TFResource, acc: _ImportAccumulator) -> None:
     diagnostic_id = str(res.values.get("identifier") or res.name).strip()
     if not diagnostic_id:
         return
+    _record_diagnostic(res, acc, diagnostic_id, key=diagnostic_id, api_id=None)
+
+
+def _link_api_diagnostic(res: TFResource, acc: _ImportAccumulator) -> None:
+    """azurerm_api_management_api_diagnostic: the same settings, scoped to one API."""
+    diagnostic_id = str(res.values.get("identifier") or res.name).strip()
+    api_name = str(res.values.get("api_name") or "")
+    if not diagnostic_id or api_name not in acc.apis:
+        return
+    _record_diagnostic(res, acc, diagnostic_id, key=api_diagnostic_key(api_name, diagnostic_id), api_id=api_name)
+
+
+def _record_diagnostic(
+    res: TFResource, acc: _ImportAccumulator, diagnostic_id: str, *, key: str, api_id: str | None
+) -> None:
     logger_reference = str(res.values.get("api_management_logger_id") or "").strip()
     logger_id = _resource_name_from_id(logger_reference, acc.id_to_name) if logger_reference else None
-    acc.diagnostic_resources[diagnostic_id] = DiagnosticConfig(
+    acc.diagnostic_resources[key] = DiagnosticConfig(
         identifier=diagnostic_id,
+        api_id=api_id,
         logger_id=logger_id,
         always_log_errors=_coerce_bool(res.values.get("always_log_errors")),
         backend_request=_diagnostic_http_message(res.values.get("backend_request")),
@@ -1104,7 +1149,7 @@ def _import_diagnostic(res: TFResource, acc: _ImportAccumulator) -> None:
     acc.diagnostics.append(
         ImportDiagnostic(
             status="supported",
-            scope=f"diagnostic:{diagnostic_id}",
+            scope=f"diagnostic:{key}",
             feature="diagnostic",
             detail="Imported API Management diagnostic for read-only local inspection.",
         )
@@ -1112,7 +1157,7 @@ def _import_diagnostic(res: TFResource, acc: _ImportAccumulator) -> None:
     acc.diagnostics.append(
         ImportDiagnostic(
             status="adapted",
-            scope=f"diagnostic:{diagnostic_id}",
+            scope=f"diagnostic:{key}",
             feature="runtime_settings",
             detail=(
                 "Diagnostic sampling, header/body capture, and logger routing are descriptive only; "
@@ -1156,7 +1201,9 @@ def _import_backend(res: TFResource, acc: _ImportAccumulator) -> None:
     session_affinity = _backend_session_affinity(res.values)
     breaker = _backend_circuit_breaker(res.values)
     backend_type = str(res.values.get("type") or ("pool" if pool_members else "single"))
-    acc.backends[res.name] = BackendConfig(
+    # Policies and pool members name a backend by its APIM name, not the Terraform label.
+    backend_id = str(res.values.get("name") or res.name)
+    acc.backends[backend_id] = BackendConfig(
         url=str(res.values.get("url") or ("" if pool_members else http_url("upstream"))),
         description=str(res.values.get("description")) if res.values.get("description") else None,
         type=backend_type,
@@ -1170,7 +1217,22 @@ def _import_backend(res: TFResource, acc: _ImportAccumulator) -> None:
         client_certificate_thumbprints=[
             str(item) for item in (credentials.get("certificate") or []) if str(item).strip()
         ],
+        **_backend_tls_settings(res.values),
     )
+
+
+def _backend_tls_settings(values: dict[str, Any]) -> dict[str, bool]:
+    """The backend tls block: whether to verify the upstream certificate chain and name."""
+    tls = _first_block(values.get("tls")) or {}
+    settings: dict[str, bool] = {}
+    for source, target in (
+        ("validate_certificate_chain", "verify_certificate_chain"),
+        ("validate_certificate_name", "verify_certificate_name"),
+    ):
+        flag = _coerce_bool(tls.get(source))
+        if flag is not None:
+            settings[target] = flag
+    return settings
 
 
 def _apply_api_import_document(res: TFResource, acc: _ImportAccumulator, candidate: ApiConfig, api_name: str) -> None:
@@ -1583,6 +1645,7 @@ _FIRST_PASS: dict[str, Callable[[TFResource, _ImportAccumulator], None]] = {
     "azurerm_api_management_tag": _import_tag,
     "azurerm_api_management_subscription": _import_subscription,
     "azurerm_api_management_named_value": _import_named_value,
+    "azurerm_api_management_global_schema": _import_global_schema,
     "azurerm_api_management_logger": _import_logger,
     "azurerm_api_management_diagnostic": _import_diagnostic,
     "azurerm_api_management_api_version_set": _import_api_version_set,
@@ -1603,6 +1666,7 @@ _SECOND_PASS: dict[str, Callable[[TFResource, _ImportAccumulator], None]] = {
     "azurerm_api_management_api_release": _link_api_release,
     "azurerm_api_management_subscription": _link_subscription,
     "azurerm_api_management_api_policy": _link_api_policy,
+    "azurerm_api_management_api_diagnostic": _link_api_diagnostic,
     "azurerm_api_management_api_operation_policy": _link_api_operation_policy,
 }
 
@@ -1620,6 +1684,63 @@ def _index_resource_names(resources: list[TFResource], acc: _ImportAccumulator) 
         acc.id_to_name[res.name] = res.name
 
 
+# Streamable HTTP MCP: POST sends messages, GET opens the server stream, DELETE ends a session.
+_MCP_ENDPOINT_METHODS = ("POST", "GET", "DELETE")
+
+
+def _azapi_properties(res: TFResource) -> dict[str, Any]:
+    properties = azapi_body(res.values).get("properties")
+    return properties if isinstance(properties, dict) else {}
+
+
+def _is_azapi_mcp_api(res: TFResource) -> bool:
+    return (
+        arm_resource_type(res) == "Microsoft.ApiManagement/service/apis"
+        and str(_azapi_properties(res).get("type") or "").lower() == "mcp"
+    )
+
+
+def _import_azapi_mcp_api(res: TFResource, acc: _ImportAccumulator) -> None:
+    """Import an AzAPI `type: mcp` API that passes through to an existing MCP server."""
+    if not _is_azapi_mcp_api(res):
+        return
+    properties = _azapi_properties(res)
+    api_name = str(res.values.get("name") or res.name)
+    backend_id = str(properties.get("backendId") or "") or None
+    backend = acc.backends.get(backend_id) if backend_id else None
+    upstream = str(properties.get("serviceUrl") or (backend.url if backend else "") or http_url("upstream"))
+    mcp = properties.get("mcpProperties") if isinstance(properties.get("mcpProperties"), dict) else {}
+    endpoints = mcp.get("endpoints") if isinstance(mcp.get("endpoints"), dict) else {}
+    operations: dict[str, OperationConfig] = {}
+    for key, endpoint in endpoints.items():
+        template = str(endpoint.get("uriTemplate") or "/mcp") if isinstance(endpoint, dict) else "/mcp"
+        name = str(endpoint.get("name") or key) if isinstance(endpoint, dict) else str(key)
+        for method in _MCP_ENDPOINT_METHODS:
+            operations[f"{name}-{method.lower()}"] = OperationConfig(
+                name=f"{name}-{method.lower()}", method=method, url_template=template
+            )
+    acc.apis[api_name] = ApiConfig(
+        name=api_name,
+        path=str(properties.get("path") or ""),
+        upstream_base_url=upstream,
+        backend=backend_id if backend else None,
+        protocols=_string_list(properties.get("protocols")) or ["http", "https"],
+        operations=operations,
+    )
+    transport = str(mcp.get("transportType") or "streamable")
+    acc.diagnostics.append(
+        ImportDiagnostic(
+            status="adapted",
+            scope=f"api:{api_name}",
+            feature="mcp",
+            detail=(
+                f"MCP pass-through API ({transport}) imported as a streaming HTTP API: requests and server "
+                "streams are proxied to the MCP server; APIM's MCP tool discovery is not emulated."
+            ),
+        )
+    )
+
+
 def _import_azapi_resource(res: TFResource, acc: _ImportAccumulator) -> None:
     """Handle the AzAPI spelling of a resource the AzureRM provider also has."""
     arm_type = arm_resource_type(res)
@@ -1629,6 +1750,8 @@ def _import_azapi_resource(res: TFResource, acc: _ImportAccumulator) -> None:
         acc.diagnostics.extend(service_diagnostics)
         if mode is not None:
             acc.client_certificate_mode = mode
+    elif arm_type == "Microsoft.ApiManagement/service/apis" and _is_azapi_mcp_api(res):
+        return  # Imported after backends exist; see _import_azapi_mcp_api.
     elif arm_type in AZAPI_APIM_CHILD_EQUIVALENTS:
         acc.diagnostics.append(
             ImportDiagnostic(
@@ -1641,6 +1764,31 @@ def _import_azapi_resource(res: TFResource, acc: _ImportAccumulator) -> None:
                 ),
             )
         )
+
+
+_ADAPTED_RESOURCE_TYPES = {
+    "azurerm_api_management_redis_cache": (
+        "External Redis caches are not connected locally; cache and semantic-cache policies use the "
+        "simulator's in-process store."
+    ),
+}
+
+
+def _report_unimported_resource(res: TFResource, acc: _ImportAccumulator) -> None:
+    """Name every APIM resource type the importer does not handle, instead of dropping it silently."""
+    if not res.type.startswith("azurerm_api_management") or res.type.endswith("_policy"):
+        return
+    if res.type in _FIRST_PASS or res.type in _SECOND_PASS:
+        return
+    adapted = _ADAPTED_RESOURCE_TYPES.get(res.type)
+    acc.diagnostics.append(
+        ImportDiagnostic(
+            status="adapted" if adapted else "unsupported",
+            scope=res.address or res.type,
+            feature=res.type,
+            detail=adapted or "This resource type is not imported into the simulator.",
+        )
+    )
 
 
 def _import_gateway_policy(res: TFResource, acc: _ImportAccumulator) -> None:
@@ -1704,6 +1852,7 @@ def _assemble_config(acc: _ImportAccumulator) -> GatewayConfig:
         service=acc.service,
         products=acc.products,
         named_values=acc.named_values,
+        global_schemas=acc.global_schemas,
         loggers=acc.loggers,
         diagnostics=acc.diagnostic_resources,
         users=acc.users,
@@ -1732,10 +1881,10 @@ def import_from_tofu_show_json(
 ) -> ImportResult:
     """Build a tenant document from `tofu show -json` output.
 
-    Three passes, in this order and for this reason: standalone resources first,
-    then the associations and policies that reference them, then the tenant-wide
-    policy. A resource type is handled by one entry in one of the dispatch
-    tables above, never by another branch here.
+    Passes, in this order and for this reason: standalone resources first; then
+    AzAPI MCP APIs, which resolve a backend ID; then the associations and
+    policies that reference APIs; then the tenant-wide policy. Other resource
+    types are handled by one entry in one of the dispatch tables above.
     """
     resources = list(_iter_resources(tf))
     acc = _ImportAccumulator(fetcher=fetcher)
@@ -1749,12 +1898,16 @@ def import_from_tofu_show_json(
         _import_azapi_resource(res, acc)
 
     for res in resources:
+        _import_azapi_mcp_api(res, acc)
+
+    for res in resources:
         handler = _SECOND_PASS.get(res.type)
         if handler is not None:
             handler(res, acc)
 
     for res in resources:
         _import_gateway_policy(res, acc)
+        _report_unimported_resource(res, acc)
 
     _report_dangling_logger_references(acc)
     return ImportResult(

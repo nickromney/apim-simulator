@@ -873,3 +873,54 @@ def test_json_schema_violation_reports_where_the_rejected_value_starts() -> None
     assert _json_line_position('{"items": [1, "x"]}', ("items", 1)) == (1, 15)
     assert _json_line_position('{"Name": 1}', ("name",), case_insensitive=True) == (1, 10)
     assert _validation_message(SchemaViolation("bad", ("age",)), (3, 10)) == "bad Line: 3, Position: 10"
+
+
+def test_validate_content_schema_id_resolves_a_service_level_global_schema() -> None:
+    """schema-id names a schema added to the APIM instance, not an API schema.
+
+    https://learn.microsoft.com/en-us/azure/api-management/validate-content-policy
+    """
+    from app.config import GlobalSchemaConfig
+
+    calculation = {
+        "type": "object",
+        "required": ["scenario"],
+        "properties": {"scenario": {"type": "string", "maxLength": 20}},
+        "definitions": {"Tag": {"type": "string", "pattern": "^[a-z]+$"}},
+    }
+    config = _schema_operation_config()
+    config.global_schemas["calculation"] = GlobalSchemaConfig(type="json", value=json.dumps(calculation))
+    # An API schema with the same ID must not shadow the service-level one.
+    config.apis["demo-api"].schemas["calculation"] = ApiSchemaConfig(
+        content_type="application/json", value=json.dumps({"type": "array"})
+    )
+
+    def run(body: bytes, schema_attrs: str = 'schema-id="calculation"'):
+        doc = _doc(
+            inbound='<validate-content unspecified-content-type-action="prevent" max-size="2048" '
+            'size-exceeded-action="prevent" errors-variable-name="errors">'
+            f'<content type="application/json" validate-as="json" action="prevent" {schema_attrs} '
+            'allow-additional-properties="false" /></validate-content>'
+        )
+        req = _request(body=body, headers={"content-type": "application/json"}, variables=_operation_variables())
+        return apply_inbound([doc], req, PolicyRuntime(gateway_config=config))
+
+    assert run(b'{"scenario":"ok"}') is None
+    assert run(b'{"scenario":"ok","extra":1}').status_code == 400
+    assert run(b'{"other":"x"}').status_code == 400
+    with_ref = 'schema-id="calculation" schema-ref="#/definitions/Tag"'
+    assert run(b'"lower"', with_ref) is None
+    assert run(b'"UPPER"', with_ref).status_code == 400
+
+
+def test_validate_content_still_falls_back_to_api_schemas_for_unknown_global_ids() -> None:
+    config = _schema_operation_config(
+        schemas={"Shared": ApiSchemaConfig(content_type="application/json", value=json.dumps({"type": "object"}))}
+    )
+    doc = _doc(
+        inbound='<validate-content unspecified-content-type-action="prevent" max-size="100" '
+        'size-exceeded-action="prevent"><content type="application/json" validate-as="json" action="prevent" '
+        'schema-id="Shared" /></validate-content>'
+    )
+    req = _request(body=b"[1]", headers={"content-type": "application/json"}, variables=_operation_variables())
+    assert apply_inbound([doc], req, PolicyRuntime(gateway_config=config)).status_code == 400

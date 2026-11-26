@@ -997,3 +997,239 @@ def test_compat_report_classifies_policy_parity_v2_cache_modes() -> None:
     assert "cache-lookup-value.caching-type" in unsupported_features
     assert "quota-by-key.bandwidth" in unsupported_features
     assert {"rate-limit-by-key", "cache-store", "cache-store-value", "cache-remove-value"}.issubset(supported_features)
+
+
+def test_compat_report_derives_policy_support_from_the_gateway_parsers() -> None:
+    from app.compat_report import _analyze_policy_xml
+
+    xml = """<policies>
+      <inbound>
+        <cors terminate-unmatched-request="true"><allowed-origins><origin>https://a.example</origin></allowed-origins>
+          <allowed-methods><method>GET</method></allowed-methods><expose-headers><header>X-A</header></expose-headers></cors>
+        <validate-azure-ad-token tenant-id="t"><client-application-ids><application-id>c</application-id></client-application-ids></validate-azure-ad-token>
+        <validate-content unspecified-content-type-action="prevent" max-size="10" size-exceeded-action="prevent">
+          <content type="application/json" validate-as="json" action="prevent" /></validate-content>
+        <llm-token-limit counter-key="k" tokens-per-minute="10" />
+        <llm-emit-token-metric><dimension name="API ID" /></llm-emit-token-metric>
+        <invented-policy />
+      </inbound>
+      <backend><retry condition="@(context.Response != null && context.Response.StatusCode == 429)" count="1" interval="1"><forward-request /></retry></backend>
+    </policies>"""
+    diagnostics = _analyze_policy_xml(xml, "api:x")
+    unsupported = {item.feature for item in diagnostics if item.status == "unsupported"}
+    assert unsupported == {"invented-policy"}
+
+
+def test_import_maps_global_schemas_for_validate_content() -> None:
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_global_schema.calc",
+                "type": "azurerm_api_management_global_schema",
+                "name": "calc",
+                "values": {
+                    "schema_id": "token-cost-calculation-validation",
+                    "type": "json",
+                    "value": '{"type":"object"}',
+                    "description": "Calculation request",
+                },
+            },
+            {
+                "address": "azurerm_api_management_global_schema.empty",
+                "type": "azurerm_api_management_global_schema",
+                "name": "empty",
+                "values": {"schema_id": "no-value", "type": "xml", "value": None},
+            },
+        ]
+    )
+    result = import_from_tofu_show_json(tf)
+    schema = result.config.global_schemas["token-cost-calculation-validation"]
+    assert (schema.type, schema.value, schema.description) == ("json", '{"type":"object"}', "Calculation request")
+    assert "no-value" not in result.config.global_schemas
+    assert any(item.scope == "global-schema:no-value" for item in result.diagnostics)
+
+
+def test_import_maps_an_azapi_mcp_pass_through_api_and_its_policy() -> None:
+    policy = (
+        '<policies><inbound><base /><set-backend-service backend-id="pce-mcp-aca" /></inbound>'
+        '<backend><forward-request buffer-response="false" /></backend><outbound><base /></outbound></policies>'
+    )
+    tf = _tf_json(
+        [
+            {
+                "address": "azapi_resource.mcp_ingress",
+                "type": "azapi_resource",
+                "name": "mcp_ingress",
+                "values": {
+                    "type": "Microsoft.ApiManagement/service/apis@2025-09-01-preview",
+                    "name": "pce-mcp-ingress",
+                    "body": {
+                        "properties": {
+                            "type": "mcp",
+                            "path": "",
+                            "displayName": "PCE MCP Ingress",
+                            "protocols": ["https"],
+                            "backendId": "pce-mcp-aca",
+                            "subscriptionRequired": False,
+                            "mcpProperties": {
+                                "transportType": "streamable",
+                                "endpoints": {"message": {"name": "message", "uriTemplate": "/mcp"}},
+                            },
+                        }
+                    },
+                },
+            },
+            {
+                "address": "azurerm_api_management_backend.mcp",
+                "type": "azurerm_api_management_backend",
+                "name": "mcp",
+                "values": {"name": "pce-mcp-aca", "protocol": "http", "url": http_url("mcp-server:8080")},
+            },
+            {
+                "address": "azurerm_api_management_api_policy.mcp",
+                "type": "azurerm_api_management_api_policy",
+                "name": "mcp",
+                "values": {"api_name": "pce-mcp-ingress", "xml_content": policy},
+            },
+        ]
+    )
+    result = import_from_tofu_show_json(tf)
+    api = result.config.apis["pce-mcp-ingress"]
+    assert (api.path, api.backend, api.upstream_base_url) == ("", "pce-mcp-aca", http_url("mcp-server:8080"))
+    assert {(op.method, op.url_template) for op in api.operations.values()} == {
+        ("POST", "/mcp"),
+        ("GET", "/mcp"),
+        ("DELETE", "/mcp"),
+    }
+    assert api.policies_xml == policy
+    assert any(item.feature == "mcp" and item.status == "adapted" for item in result.diagnostics)
+    assert not any(item.feature == "azapi_import" for item in result.diagnostics)
+
+
+def test_import_keys_backends_by_apim_name_not_terraform_label() -> None:
+    policy = '<policies><inbound><set-backend-service backend-id="pce-api-aca" /></inbound></policies>'
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_backend.internal_api",
+                "type": "azurerm_api_management_backend",
+                "name": "internal_api",
+                "values": {"name": "pce-api-aca", "protocol": "http", "url": http_url("api:8080")},
+            },
+            {
+                "address": "azurerm_api_management_api.internal_api",
+                "type": "azurerm_api_management_api",
+                "name": "internal_api",
+                "values": {"name": "pce-internal-api", "path": "internal-api", "service_url": http_url("api:8080")},
+            },
+            {
+                "address": "azurerm_api_management_api_policy.internal_api",
+                "type": "azurerm_api_management_api_policy",
+                "name": "internal_api",
+                "values": {"api_name": "pce-internal-api", "xml_content": policy},
+            },
+        ]
+    )
+    cfg = import_from_tofu_show_json(tf).config
+    assert set(cfg.backends) == {"pce-api-aca"}
+    assert cfg.apis["pce-internal-api"].policies_xml == policy
+
+
+def test_import_maps_backend_tls_and_product_subscription_limits() -> None:
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_backend.bff",
+                "type": "azurerm_api_management_backend",
+                "name": "bff",
+                "values": {
+                    "name": "pce-token-cost-bff",
+                    "protocol": "http",
+                    "url": "https://bff.internal.example.test",
+                    "tls": [{"validate_certificate_chain": False, "validate_certificate_name": True}],
+                },
+            },
+            {
+                "address": "azurerm_api_management_product.internal",
+                "type": "azurerm_api_management_product",
+                "name": "internal",
+                "values": {
+                    "product_id": "pce-token-cost-internal",
+                    "display_name": "Internal",
+                    "description": "One BFF subscription",
+                    "subscription_required": True,
+                    "approval_required": True,
+                    "subscriptions_limit": 1,
+                },
+            },
+        ]
+    )
+    cfg = import_from_tofu_show_json(tf).config
+    backend = cfg.backends["pce-token-cost-bff"]
+    assert (backend.verify_certificate_chain, backend.verify_certificate_name) == (False, True)
+    product = cfg.products["pce-token-cost-internal"]
+    assert (product.subscriptions_limit, product.description) == (1, "One BFF subscription")
+
+
+def test_import_maps_api_scoped_diagnostics() -> None:
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_api.reader",
+                "type": "azurerm_api_management_api",
+                "name": "reader",
+                "values": {"name": "pce-conversations-reader", "path": "conversations", "service_url": http_url("api")},
+            },
+            {
+                "address": "azurerm_api_management_api_diagnostic.reader",
+                "type": "azurerm_api_management_api_diagnostic",
+                "name": "reader",
+                "values": {
+                    "identifier": "applicationinsights",
+                    "api_name": "pce-conversations-reader",
+                    "sampling_percentage": 0,
+                    "always_log_errors": False,
+                    "log_client_ip": False,
+                    "verbosity": "error",
+                    "frontend_request": [{"body_bytes": 0, "headers_to_log": []}],
+                },
+            },
+        ]
+    )
+    cfg = import_from_tofu_show_json(tf).config
+    diagnostic = cfg.diagnostics["pce-conversations-reader:applicationinsights"]
+    assert (diagnostic.api_id, diagnostic.verbosity, diagnostic.sampling_percentage) == (
+        "pce-conversations-reader",
+        "error",
+        0.0,
+    )
+    assert diagnostic.log_client_ip is False
+
+
+def test_import_reports_apim_resource_types_it_does_not_handle() -> None:
+    tf = _tf_json(
+        [
+            {
+                "address": "azurerm_api_management_redis_cache.semantic",
+                "type": "azurerm_api_management_redis_cache",
+                "name": "semantic",
+                "values": {"name": "apim-semantic-cache"},
+            },
+            {
+                "address": "azurerm_api_management_custom_domain.this",
+                "type": "azurerm_api_management_custom_domain",
+                "name": "this",
+                "values": {},
+            },
+            {
+                "address": "azurerm_storage_account.unrelated",
+                "type": "azurerm_storage_account",
+                "name": "unrelated",
+                "values": {},
+            },
+        ]
+    )
+    reported = {(item.feature, item.status) for item in import_from_tofu_show_json(tf).diagnostics}
+    assert ("azurerm_api_management_redis_cache", "adapted") in reported
+    assert ("azurerm_api_management_custom_domain", "unsupported") in reported
+    assert not any(feature == "azurerm_storage_account" for feature, _ in reported)

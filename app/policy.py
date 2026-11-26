@@ -38,6 +38,7 @@ from app.named_values import (
     validate_named_value_references,
 )
 from app.policy_errors import element_name
+from app.policy_rawxml import parse_policy_xml
 from app.throttling_config import TokenBucket, token_bucket
 from app.workspaces import backend_visible_to_api
 
@@ -3050,6 +3051,21 @@ def _resolve_schema_node(
     return _schema_node_from_document(document, api_schema, wanted=wanted)
 
 
+def _global_schema_resolution(schema: Any, *, schema_id: str, schema_ref: str | None) -> _SchemaResolution:
+    """A service-level schema is one whole document; schema-ref may point inside it."""
+    document = _json_schema_document(schema)
+    if document is None:
+        return _SchemaResolution(
+            None,
+            schema_id,
+            error_details=f"Schema {schema_id} does not exist or it could not be resolved.",
+            error_type="Schema",
+        )
+    if schema_ref:
+        return _resolve_schema_node(schema, schema_id=schema_id, schema_ref=schema_ref, definition_name=None)
+    return _SchemaResolution(document, schema_id)
+
+
 def _operation_representation(req: PolicyRequest, runtime: PolicyRuntime | None, content_type: str) -> Any | None:
     operation = _operation_request_metadata(req, runtime)
     if operation is None:
@@ -3076,9 +3092,27 @@ def _content_schema(
 ) -> _SchemaResolution | None:
     if runtime is None or runtime.gateway_config is None:
         return None
+    # schema-id names a schema added to the service (APIM's /schemas); API
+    # schemas with the same ID remain a local fallback.
+    global_schema = runtime.gateway_config.global_schemas.get(schema_id) if schema_id else None
+    if global_schema is not None:
+        return _global_schema_resolution(global_schema, schema_id=str(schema_id), schema_ref=schema_ref)
     api = runtime.gateway_config.apis.get(str(req.variables.get("api_id") or ""))
     if api is None:
         return None
+    return _api_content_schema(req, runtime, api, content_type=content_type, schema_id=schema_id, schema_ref=schema_ref)
+
+
+def _api_content_schema(
+    req: PolicyRequest,
+    runtime: PolicyRuntime,
+    api: Any,
+    *,
+    content_type: str,
+    schema_id: str | None,
+    schema_ref: str | None,
+) -> _SchemaResolution:
+    """Resolve the schema from the API definition: named schema, then the operation's representation."""
     representation = _operation_representation(req, runtime, content_type)
     selected_id = schema_id or getattr(representation, "schema_id", None)
     type_name = getattr(representation, "type_name", None)
@@ -4543,6 +4577,9 @@ class ValidateJwt(PolicyNode):
         require_expiration = _policy_bool(self.require_expiration_time, req, runtime, default=True)
         return require_signed, clock_skew, require_expiration
 
+    def _openid_config_urls(self, req: PolicyRequest, runtime: PolicyRuntime) -> list[str]:
+        return [render_policy_value(url, req, runtime) for url in self.openid_config_urls]
+
     async def _candidate_signing_keys(
         self,
         kid: str | None,
@@ -4554,7 +4591,7 @@ class ValidateJwt(PolicyNode):
             keys = matching or self.issuer_signing_keys
             return [(item.key, None) for item in keys]
 
-        urls = [render_policy_value(url, req, runtime) for url in self.openid_config_urls]
+        urls = self._openid_config_urls(req, runtime)
         if not urls:
             raise HTTPException(status_code=500, detail="validate-jwt requires at least one openid-config url")
         candidates: list[tuple[Any, dict[str, Any] | None]] = []
@@ -4675,6 +4712,55 @@ class ValidateJwt(PolicyNode):
         self._check_issuer(claims, req, runtime)
         self._check_audience(claims, req, runtime)
         self._check_required_claims(claims, req, runtime)
+
+
+ENTRA_AUTHORITY = "https://login.microsoftonline.com"
+
+
+@dataclass(frozen=True)
+class ValidateAzureAdToken(ValidateJwt):
+    """validate-azure-ad-token: validate-jwt with Microsoft Entra discovery for one tenant.
+
+    Keys come from {entra_authority}/{tenant-id}/v2.0. With the default Entra
+    authority, v1 (sts.windows.net) and v2 issuers for the tenant are accepted;
+    with a local authority the discovered issuer is the only one accepted.
+    """
+
+    tenant_id: str = ""
+    client_application_ids: list[str] = field(default_factory=list)
+
+    def _authority(self, runtime: PolicyRuntime | None) -> str:
+        configured = runtime.gateway_config.entra_authority if runtime and runtime.gateway_config else ""
+        return (configured or ENTRA_AUTHORITY).rstrip("/")
+
+    def _tenant(self, req: PolicyRequest, runtime: PolicyRuntime | None) -> str:
+        tenant = render_policy_value(self.tenant_id, req, runtime).strip()
+        if not tenant:
+            raise HTTPException(status_code=500, detail="validate-azure-ad-token requires tenant-id")
+        return tenant
+
+    def _openid_config_urls(self, req: PolicyRequest, runtime: PolicyRuntime) -> list[str]:
+        return [f"{self._authority(runtime)}/{self._tenant(req, runtime)}/v2.0/.well-known/openid-configuration"]
+
+    def _check_issuer(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
+        expected = {str(claims.get("_metadata_issuer") or "")} - {""}
+        if self._authority(runtime) == ENTRA_AUTHORITY:
+            tenant = self._tenant(req, runtime)
+            expected |= {f"https://sts.windows.net/{tenant}/", f"{ENTRA_AUTHORITY}/{tenant}/v2.0"}
+        if str(claims.get("iss") or "") not in expected:
+            raise _JwtValidationError("TokenIssuerNotAllowed", "Invalid issuer")
+
+    def _validate_claims(self, claims: dict[str, Any], req: PolicyRequest, runtime: PolicyRuntime | None) -> None:
+        super()._validate_claims(claims, req, runtime)
+        if not self.client_application_ids:
+            return
+        allowed = {render_policy_value(item, req, runtime) for item in self.client_application_ids}
+        # v2 tokens name the calling application in azp, v1 tokens in appid.
+        caller = str(claims.get("azp") or claims.get("appid") or "")
+        if caller not in allowed:
+            raise _JwtValidationError(
+                "TokenClaimValueNotAllowed", f"Client application {caller or '(none)'} is not allowed. Access denied."
+            )
 
 
 @dataclass(frozen=True)
@@ -5952,23 +6038,18 @@ def _parse_issuer_signing_keys(el: ElementTree.Element) -> list[IssuerSigningKey
     return keys
 
 
-def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
-    source_attributes = ("header-name", "query-parameter-name", "token-value")
-    source_count = sum(el.attrib.get(name) is not None for name in source_attributes)
-    if source_count != 1:
-        raise HTTPException(status_code=500, detail="validate-jwt requires exactly one token source")
-
+def _parse_required_claims(el: ElementTree.Element, policy_name: str) -> list[RequiredClaim]:
     required_claims: list[RequiredClaim] = []
     required_claims_el = el.find("required-claims")
     if required_claims_el is not None:
         for claim_el in required_claims_el.findall("claim"):
             name = (claim_el.attrib.get("name") or "").strip()
             if not name:
-                raise HTTPException(status_code=500, detail="validate-jwt claim missing name")
+                raise HTTPException(status_code=500, detail=f"{policy_name} claim missing name")
             values = [_text_or_empty(value_el) for value_el in claim_el.findall("value") if _text_or_empty(value_el)]
             match = str(claim_el.attrib.get("match") or "all")
             if match not in {"all", "any"}:
-                raise HTTPException(status_code=500, detail="validate-jwt claim match must be all or any")
+                raise HTTPException(status_code=500, detail=f"{policy_name} claim match must be all or any")
             required_claims.append(
                 RequiredClaim(
                     name=name,
@@ -5977,6 +6058,16 @@ def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
                     separator=str(claim_el.attrib.get("separator")) if claim_el.attrib.get("separator") else None,
                 )
             )
+    return required_claims
+
+
+def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
+    source_attributes = ("header-name", "query-parameter-name", "token-value")
+    source_count = sum(el.attrib.get(name) is not None for name in source_attributes)
+    if source_count != 1:
+        raise HTTPException(status_code=500, detail="validate-jwt requires exactly one token source")
+
+    required_claims = _parse_required_claims(el, "validate-jwt")
 
     audiences_el = el.find("audiences")
     audiences = [_text_or_empty(item) for item in el.findall("./audiences/audience") if _text_or_empty(item)]
@@ -6009,6 +6100,42 @@ def _parse_validate_jwt(el: ElementTree.Element) -> ValidateJwt:
         audiences=audiences,
         issuer_signing_keys=_parse_issuer_signing_keys(signing_keys_el) if signing_keys_el is not None else [],
         required_claims=required_claims,
+    )
+
+
+def _application_ids(el: ElementTree.Element, container: str) -> list[str]:
+    return [_text_or_empty(item) for item in el.findall(f"./{container}/application-id") if _text_or_empty(item)]
+
+
+def _parse_validate_azure_ad_token(el: ElementTree.Element) -> ValidateAzureAdToken:
+    """Microsoft documents the element at
+    https://learn.microsoft.com/en-us/azure/api-management/validate-azure-ad-token-policy
+    """
+    tenant_id = (el.attrib.get("tenant-id") or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=500, detail="validate-azure-ad-token requires tenant-id")
+    explicit_sources = [name for name in ("header-name", "query-parameter-name", "token-value") if el.attrib.get(name)]
+    if len(explicit_sources) > 1:
+        raise HTTPException(status_code=500, detail="validate-azure-ad-token allows only one token source")
+    if el.find("decryption-keys") is not None:
+        raise HTTPException(status_code=500, detail="validate-azure-ad-token decryption-keys are unsupported")
+    header_name = el.attrib.get("header-name") or (None if explicit_sources else "Authorization")
+    audiences = [_text_or_empty(item) for item in el.findall("./audiences/audience") if _text_or_empty(item)]
+    # A backend application ID is the token audience, as a bare GUID or an api:// URI.
+    for application_id in _application_ids(el, "backend-application-ids"):
+        audiences.extend([application_id, f"api://{application_id}"])
+    return ValidateAzureAdToken(
+        header_name=header_name,
+        query_parameter_name=el.attrib.get("query-parameter-name"),
+        token_value=el.attrib.get("token-value"),
+        failed_validation_httpcode=el.attrib.get("failed-validation-httpcode") or "401",
+        failed_validation_error_message=el.attrib.get("failed-validation-error-message"),
+        require_scheme="Bearer" if (header_name or "").lower() == "authorization" else None,
+        output_token_variable_name=el.attrib.get("output-token-variable-name"),
+        audiences=audiences,
+        required_claims=_parse_required_claims(el, "validate-azure-ad-token"),
+        tenant_id=tenant_id,
+        client_application_ids=_application_ids(el, "client-application-ids"),
     )
 
 
@@ -6241,10 +6368,10 @@ def _parse_retry(
 
 def _fragment_elements(xml: str, *, section_name: str) -> list[ElementTree.Element]:
     try:
-        root = ElementTree.fromstring(xml)
+        root = parse_policy_xml(xml)
     except ElementTree.ParseError:
         try:
-            root = ElementTree.fromstring(f"<fragment>{xml}</fragment>")
+            root = parse_policy_xml(f"<fragment>{xml}</fragment>")
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=500, detail="Invalid policy fragment XML") from exc
 
@@ -6282,7 +6409,7 @@ def expand_policy_fragments_xml(xml: str, fragments: dict[str, str], config: Gat
     Microsoft documents that this view displays included fragment content:
     https://learn.microsoft.com/en-us/azure/api-management/policy-fragments
     """
-    root = ElementTree.fromstring(xml)
+    root = parse_policy_xml(xml)
     _expand_inspection_fragments(root, fragments, config)
     return ElementTree.tostring(root, encoding="unicode")
 
@@ -6403,6 +6530,7 @@ _ELEMENT_PARSERS: dict[str, Callable[[ElementTree.Element], PolicyNode]] = {
     "return-response": _parse_return_response,
     "mock-response": _parse_mock_response,
     "validate-jwt": _parse_validate_jwt,
+    "validate-azure-ad-token": _parse_validate_azure_ad_token,
     "set-backend-service": _parse_set_backend_service,
     "forward-request": _parse_forward_request,
     "send-request": _parse_send_request,
@@ -6463,6 +6591,7 @@ _POLICY_ALLOWED_SECTIONS: dict[str, frozenset[str]] = {
     "return-response": frozenset({"inbound", "backend", "outbound", "on-error"}),
     "mock-response": frozenset({"inbound", "outbound", "on-error"}),
     "validate-jwt": frozenset({"inbound"}),
+    "validate-azure-ad-token": frozenset({"inbound"}),
     "set-backend-service": frozenset({"inbound", "backend"}),
     "forward-request": frozenset({"backend"}),
     "send-request": frozenset({"inbound", "backend", "outbound", "on-error"}),
@@ -6534,7 +6663,7 @@ def _parse_node(
     return _annotate_policy_node(parser(el), policy_id=el.attrib.get("id"), path=path)
 
 
-def _parse_extension(el, path):
+def _extension_parsers() -> tuple[Any, ...]:
     from app.diagnostic_logging import parse_trace_policy
     from app.policy_certificates import parse_certificate_policy
     from app.policy_content_safety import parse_content_safety_policy
@@ -6543,16 +6672,44 @@ def _parse_extension(el, path):
     from app.policy_transforms import parse_transform_policy
     from app.policy_xml_json import parse_xml_json_policy
 
+    return (
+        parse_certificate_policy,
+        parse_messaging_policy,
+        parse_transform_policy,
+        parse_xml_json_policy,
+        parse_trace_policy,
+        parse_content_safety_policy,
+        parse_semantic_cache_policy,
+    )
+
+
+def is_policy_element_implemented(tag: str) -> bool:
+    """Whether the gateway has a parser for this top-level policy element.
+
+    Extension parsers return None for elements they do not own, so probing one
+    with an empty element tells ownership apart: a parser that owns the tag
+    builds a node or rejects the missing attributes.
+    """
+    if tag in _ELEMENT_PARSERS or tag in _CONSTANT_ELEMENTS or tag in {"choose", "retry"}:
+        return True
+    from xml.etree.ElementTree import Element  # noqa: S405 - builds a probe element, parses no input
+
+    for parser in _extension_parsers():
+        try:
+            if parser(Element(tag)) is not None:
+                return True
+        except (ValueError, HTTPException, KeyError, TypeError, AttributeError):
+            return True
+    return False
+
+
+def _parse_extension(el, path):
     try:
-        node = (
-            parse_certificate_policy(el)
-            or parse_messaging_policy(el)
-            or parse_transform_policy(el)
-            or parse_xml_json_policy(el)
-            or parse_trace_policy(el)
-            or parse_content_safety_policy(el)
-            or parse_semantic_cache_policy(el)
-        )
+        node = None
+        for parser in _extension_parsers():
+            node = parser(el)
+            if node is not None:
+                break
     except ValueError as exc:
         raise HTTPException(500, str(exc)) from exc
     if node is None:
@@ -6586,10 +6743,10 @@ def _resolve_policy_fragment_named_values(policy_fragments: dict[str, str], conf
     for fragment_id, fragment_xml in policy_fragments.items():
         validate_named_value_references(fragment_xml, config)
         try:
-            root = ElementTree.fromstring(fragment_xml)
+            root = parse_policy_xml(fragment_xml)
         except ElementTree.ParseError:
             try:
-                root = ElementTree.fromstring(f"<fragment>{fragment_xml}</fragment>")
+                root = parse_policy_xml(f"<fragment>{fragment_xml}</fragment>")
             except ElementTree.ParseError:
                 resolved[fragment_id] = fragment_xml
                 continue
@@ -6608,7 +6765,7 @@ def parse_policies_xml(
         validate_named_value_references(xml, gateway_config)
         policy_fragments = _resolve_policy_fragment_named_values(policy_fragments or {}, gateway_config)
     try:
-        root = ElementTree.fromstring(xml)
+        root = parse_policy_xml(xml)
     except ElementTree.ParseError as exc:
         raise HTTPException(status_code=500, detail="Invalid policies XML") from exc
     if root.tag != "policies":

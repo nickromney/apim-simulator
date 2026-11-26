@@ -6,6 +6,8 @@ from typing import Any
 
 from defusedxml import ElementTree
 
+from app.policy_rawxml import parse_policy_xml
+
 MAX_FRAGMENT_BYTES = 512 * 1024
 FORBIDDEN = {"policies", "inbound", "backend", "outbound", "on-error", "base", "include-fragment"}
 
@@ -14,7 +16,7 @@ def validate_fragment_xml(xml: str) -> None:
     if len(xml.encode("utf-8")) > MAX_FRAGMENT_BYTES:
         raise ValueError("Policy fragment exceeds 512 KB")
     try:
-        root = ElementTree.fromstring("<fragment>" + xml + "</fragment>")
+        root = parse_policy_xml("<fragment>" + xml + "</fragment>")
     except ElementTree.ParseError as exc:
         raise ValueError("Invalid policy fragment XML") from exc
     for element in root.iter():
@@ -24,7 +26,7 @@ def validate_fragment_xml(xml: str) -> None:
 
 def validate_fragment_references(xml: str, fragments: dict[str, str], cfg: Any = None) -> None:
     try:
-        root = ElementTree.fromstring(xml)
+        root = parse_policy_xml(xml)
     except ElementTree.ParseError as exc:
         raise ValueError("Invalid policies XML") from exc
     for element in root.iter("include-fragment"):

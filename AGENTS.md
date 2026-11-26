@@ -16,6 +16,7 @@ Use this file for durable, concise guidance for coding agents in this repository
 - Trace serialization must preserve request and callout bodies; enabling tracing must not change policy results.
 - When patching `app/policy.py`, include its containing policy/helper context; repeated `PolicyRequest` constructors have different variable-sharing semantics.
 - Keep example XML in Microsoft's documented element order; the local parser can accept orders Azure rejects.
+- Parse policy and fragment XML with `app.policy_rawxml.parse_policy_xml`, not `ElementTree.fromstring`: Terraform `xml_content` arrives as `rawxml` with unescaped `&&`, `<` and quotes inside expressions.
 - Keep the `uv` and `deps` stages of every uv-based example Dockerfile identical to the root `Dockerfile`, so all Python images share one venv layer; `tests/test_container_hardening.py` enforces it. Copy runtime files without `--chown` and compile bytecode serially with hash invalidation.
 - Pin every external image as `tag@sha256:<digest>`, one digest per tag across the repo, and only adopt releases at least 7 days old; `tests/test_version_pins.py` enforces the pins.
 - Verify Docker smoke through published localhost ports; in-container checks can miss inaccessible host ports.
