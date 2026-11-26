@@ -56,7 +56,13 @@ from app.policy import (
 )
 from app.policy_errors import build_last_error, exception_last_error, response_last_error
 from app.proxy import apply_claim_headers, build_upstream_headers, hop_by_hop_headers, resolve_route
-from app.security import AuthContext, authenticate_request, subscription_bypassed, validate_client_certificate
+from app.security import (
+    AuthContext,
+    authenticate_request,
+    route_subscription_required,
+    subscription_bypassed,
+    validate_client_certificate,
+)
 from app.workspaces import route_workspace, subscription_workspace, workspaces_enabled
 
 APIM_ROUTE_NAME_ATTR = "apim.route.name"
@@ -220,12 +226,38 @@ def _reject_key_scoped_elsewhere(
     Keys with no APIM scope (identity-only compatibility keys) carry no scope
     to check.
     """
-    if not should_reject or auth.subscription is None or not cfg.subscription.required:
+    if not should_reject or auth.subscription is None or not route_subscription_required(cfg, route):
         return
     if auth.subscription_scope is None and not auth.subscription_products:
         return
     if not _subscription_scope_applies(route, auth, allowed_products, cfg):
         raise subscription_key_error(request, cfg, route, missing=False)
+
+
+def _open_api_product_context(
+    cfg: GatewayConfig, route: RouteConfig, auth: AuthContext, allowed_products: list[str]
+) -> str:
+    """Product context for an API that doesn't require a subscription.
+
+    APIM admits any key, or none, and never denies a key scoped elsewhere. A
+    key for one of the API's products applies that product; with no usable key
+    an open product applies, and otherwise no product context does (second and
+    fourth rows of the summary table):
+    https://learn.microsoft.com/en-us/azure/api-management/api-management-subscriptions
+    """
+    if not allowed_products or auth.subscription_scope in {
+        SubscriptionScope.Api,
+        SubscriptionScope.AllApis,
+        SubscriptionScope.Service,
+    }:
+        return ""
+    if auth.subscription is not None:
+        granted = set(auth.subscription_products)
+        matched = next((p for p in allowed_products if p in granted), "")
+        if matched:
+            return matched
+    open_products = [p for p in allowed_products if (cfg.products.get(p) and not cfg.products[p].require_subscription)]
+    return open_products[0] if open_products else ""
 
 
 def enforce_product_grant(
@@ -237,6 +269,8 @@ def enforce_product_grant(
     request: Request | None = None,
 ) -> str:
     allowed_products = allowed_products_for_route(route)
+    if route.subscription_required is False:
+        return _open_api_product_context(cfg, route, auth, allowed_products)
     if not allowed_products:
         _reject_key_scoped_elsewhere(
             cfg,
@@ -244,8 +278,12 @@ def enforce_product_grant(
             auth,
             allowed_products,
             request,
-            should_reject=cfg.subscription.required and not subscription_is_bypassed,
+            should_reject=route_subscription_required(cfg, route) and not subscription_is_bypassed,
         )
+        if route.subscription_required and not subscription_is_bypassed and auth.subscription is None:
+            # The API itself requires a subscription and no product can grant
+            # one, so only an API-, all-APIs- or service-scoped key admits it.
+            raise subscription_key_error(request, cfg, route, missing=True)
         _enforce_non_product_scope(route, auth, allowed_products, cfg, request)
         return ""
 
