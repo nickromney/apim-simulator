@@ -732,6 +732,10 @@ make compat
 
 Key Vault-backed named values are local-first. Provide local overrides with env vars in the form `APIM_NAMED_VALUE_<NAME>`.
 
+Policies from `xml_content` may keep raw, unescaped expressions such as `@(a != null && b)`, because the azurerm provider sends them to Azure in `rawxml` format; the simulator accepts them the same way. The report lists any `azurerm_api_management_*` resource type it does not import, so nothing is dropped silently.
+
+To validate tokens from a `validate-azure-ad-token` policy against a local OIDC provider instead of Microsoft Entra, set `entra_authority` in the gateway config (for example `"http://keycloak:8080/realms"`); keys are then discovered at `{entra_authority}/{tenant-id}/v2.0/.well-known/openid-configuration`.
+
 ## Development
 
 Run `make` for a short navigation menu. Use `make help-stacks`,

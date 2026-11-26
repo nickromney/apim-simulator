@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import logging
 import os
 import tempfile
@@ -22,6 +23,7 @@ from app.config import (
     ApiVersionSetConfig,
     BackendConfig,
     GatewayConfig,
+    GlobalSchemaConfig,
     GroupConfig,
     NamedValueConfig,
     OperationConfig,
@@ -1073,6 +1075,21 @@ class ManagementService:
         cfg.named_values[named_value_id] = NamedValueConfig(**payload)
         if old_name != new_name:
             cfg = rename_named_value_references(cfg, old_name, new_name)
+        return self.persist_or_apply_config(cfg)
+
+    def upsert_global_schema(self, cfg: GatewayConfig, schema_id: str, body: GlobalSchemaConfig) -> GatewayConfig:
+        if body.type == "json":
+            try:
+                json.loads(body.value)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail=f"Global schema {schema_id} is not valid JSON") from exc
+        cfg.global_schemas[schema_id] = GlobalSchemaConfig(**body.model_dump(mode="json"))
+        return self.persist_or_apply_config(cfg)
+
+    def delete_global_schema(self, cfg: GatewayConfig, schema_id: str) -> GatewayConfig:
+        if schema_id not in cfg.global_schemas:
+            raise HTTPException(status_code=404, detail="Global schema not found")
+        del cfg.global_schemas[schema_id]
         return self.persist_or_apply_config(cfg)
 
     def delete_named_value(self, cfg: GatewayConfig, named_value_id: str) -> GatewayConfig:

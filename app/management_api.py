@@ -31,6 +31,7 @@ from app.config import (
     DiagnosticConfig,
     DiagnosticHttpMessageConfig,
     GatewayConfig,
+    GlobalSchemaConfig,
     GroupConfig,
     KeyVaultNamedValueConfig,
     LoggerConfig,
@@ -79,6 +80,7 @@ from app.resource_projection import (
     project_api_version_set,
     project_backend,
     project_diagnostic,
+    project_global_schema,
     project_group,
     project_group_user_link,
     project_logger,
@@ -1467,6 +1469,38 @@ def _build_infrastructure_router(*, require_management_plane: Callable[[], Manag
         updated = require_management_plane().upsert_named_value(cfg, named_value_id, body)
         named_value = _get_named_value_or_404(updated, named_value_id)
         return _masked(updated, project_named_value(updated, named_value_id, named_value))
+
+    @router.get("/apim/management/schemas")
+    async def list_global_schemas(request: Request) -> list[dict[str, Any]]:
+        require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        return [
+            _masked(cfg, project_global_schema(cfg, schema_id, schema))
+            for schema_id, schema in cfg.global_schemas.items()
+        ]
+
+    @router.get("/apim/management/schemas/{schema_id}")
+    async def get_global_schema(schema_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg: GatewayConfig = request.app.state.gateway_config
+        schema = cfg.global_schemas.get(schema_id)
+        if schema is None:
+            raise HTTPException(status_code=404, detail="Global schema not found")
+        return _masked(cfg, project_global_schema(cfg, schema_id, schema))
+
+    @router.put("/apim/management/schemas/{schema_id}")
+    async def upsert_global_schema(schema_id: str, request: Request, body: GlobalSchemaConfig) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg = _config_for_management_write(request)
+        updated = require_management_plane().upsert_global_schema(cfg, schema_id, body)
+        return _masked(updated, project_global_schema(updated, schema_id, updated.global_schemas[schema_id]))
+
+    @router.delete("/apim/management/schemas/{schema_id}")
+    async def delete_global_schema(schema_id: str, request: Request) -> dict[str, Any]:
+        require_tenant_access(request)
+        cfg = _config_for_management_write(request)
+        updated = require_management_plane().delete_global_schema(cfg, schema_id)
+        return {"deleted": True, "schema_id": schema_id, "remaining": len(updated.global_schemas)}
 
     @router.delete("/apim/management/named-values/{named_value_id}")
     async def delete_named_value(named_value_id: str, request: Request) -> dict[str, Any]:

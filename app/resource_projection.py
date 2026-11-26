@@ -12,6 +12,7 @@ from app.config import (
     BackendConfig,
     DiagnosticConfig,
     GatewayConfig,
+    GlobalSchemaConfig,
     GroupConfig,
     LoggerConfig,
     NamedValueConfig,
@@ -78,6 +79,14 @@ def project_api_schema(config: GatewayConfig, api_id: str, schema_id: str, schem
     return {
         "id": schema_id,
         "resource_id": nested_resource_id(config, "apis", api_id, "schemas", schema_id),
+        **schema.model_dump(mode="json"),
+    }
+
+
+def project_global_schema(config: GatewayConfig, schema_id: str, schema: GlobalSchemaConfig) -> dict[str, Any]:
+    return {
+        "id": schema_id,
+        "resource_id": nested_resource_id(config, "schemas", schema_id),
         **schema.model_dump(mode="json"),
     }
 

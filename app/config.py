@@ -357,6 +357,18 @@ class ApiSchemaConfig(BaseModel):
     components: dict[str, Any] = Field(default_factory=dict)
 
 
+class GlobalSchemaConfig(BaseModel):
+    """A service-level schema (APIM's /schemas collection).
+
+    validate-content and validate-headers name these with schema-id; the whole
+    document is the schema, and schema-ref may select a node inside it.
+    """
+
+    type: Literal["json", "xml"] = "json"
+    value: str
+    description: str | None = None
+
+
 class ApiRevisionConfig(BaseModel):
     revision: str
     description: str | None = None
@@ -998,6 +1010,10 @@ class GatewayConfig(BaseModel):
     workload_identity: WorkloadIdentityConfig = Field(default_factory=WorkloadIdentityConfig)
     oidc: OIDCConfig | None = None
     oidc_providers: dict[str, OIDCConfig] = Field(default_factory=dict)
+    # validate-azure-ad-token discovers keys at {entra_authority}/{tenant-id}/v2.0.
+    # Point it at a local OIDC provider to validate locally issued tokens.
+    entra_authority: str = "https://login.microsoftonline.com"
+    global_schemas: dict[str, GlobalSchemaConfig] = Field(default_factory=dict)
     products: dict[str, ProductConfig] = Field(default_factory=dict)
     named_values: dict[str, NamedValueConfig] = Field(default_factory=dict)
     loggers: dict[str, LoggerConfig] = Field(default_factory=dict)

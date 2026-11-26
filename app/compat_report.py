@@ -5,6 +5,8 @@ from typing import Any
 
 from defusedxml import ElementTree
 
+from app.policy import is_policy_element_implemented
+from app.policy_rawxml import parse_policy_xml
 from app.terraform_import import (
     ImportDiagnostic,
     arm_resource_type,
@@ -69,6 +71,23 @@ SUPPORTED_POLICY_TAGS = {
     "set-method",
     "authentication-certificate",
     "authentication-managed-identity",
+    # Child elements of implemented policies. Top-level policy elements come
+    # from the gateway's own parsers through is_policy_element_implemented.
+    "allowed-origins",
+    "origin",
+    "allowed-methods",
+    "method",
+    "allowed-headers",
+    "expose-headers",
+    "header",
+    "content",
+    "categories",
+    "category",
+    "dimension",
+    "vary-by",
+    "client-application-ids",
+    "backend-application-ids",
+    "application-id",
 }
 
 ADAPTED_POLICY_TAGS = {
@@ -146,7 +165,7 @@ def _analyze_policy_tag(tag: str, scope: str, diagnostics: list[ImportDiagnostic
             ImportDiagnostic(status="unsupported", scope=scope, feature=tag, detail=UNSUPPORTED_POLICY_TAGS[tag])
         )
         return
-    if tag in SUPPORTED_POLICY_TAGS:
+    if tag in SUPPORTED_POLICY_TAGS or is_policy_element_implemented(tag):
         diagnostics.append(ImportDiagnostic(status="supported", scope=scope, feature=tag, detail="Supported."))
         return
     diagnostics.append(
@@ -199,7 +218,7 @@ def _analyze_policy_attributes(element: ElementTree.Element, scope: str, diagnos
 
 def _analyze_policy_xml(xml: str, scope: str) -> list[ImportDiagnostic]:
     try:
-        root = ElementTree.fromstring(xml)
+        root = parse_policy_xml(xml)
     except ElementTree.ParseError as exc:
         return [ImportDiagnostic(status="unsupported", scope=scope, feature="policy-xml", detail=str(exc))]
 

@@ -13,6 +13,7 @@ from xml.etree import ElementTree as XmlTree
 from defusedxml import ElementTree
 
 from app.config import DEFAULT_GLOBAL_POLICY_XML, GatewayConfig, ProductConfig, RouteConfig
+from app.policy_rawxml import parse_policy_xml
 from app.workspaces import route_workspace
 
 EMPTY_POLICY_XML = "<policies><inbound /><backend /><outbound /><on-error /></policies>"
@@ -22,7 +23,7 @@ POLICY_SECTION_NAMES = ("inbound", "backend", "outbound", "on-error")
 def _parsed_policy_root(xml: str) -> Any:
     """Parse one policy document, retaining errors for the authoring boundary."""
     try:
-        parsed = ElementTree.fromstring(xml)
+        parsed = parse_policy_xml(xml)
     except ElementTree.ParseError as exc:
         raise ValueError("Invalid policies XML") from exc
     if parsed.tag != "policies":

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import CodeType
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote_plus
+from urllib.parse import parse_qs, quote, quote_plus, unquote, urlsplit
 
 import jwt
 
@@ -49,6 +49,14 @@ class ExpressionMap(dict[str, Any]):
 
     def ContainsKey(self, key: str) -> bool:
         return self._find_key(key) is not None
+
+    @property
+    def Keys(self) -> list[str]:
+        return list(self.keys())
+
+    @property
+    def Values(self) -> list[Any]:
+        return list(self.values())
 
     def _find_key(self, key: str) -> str | None:
         lowered = str(key).lower()
@@ -198,10 +206,40 @@ class _RegexGroup:
         self.Value = value
 
 
+def _python_regex(pattern: str, options: int = 0) -> re.Pattern[str]:
+    """Compile a .NET pattern: (?<name>...) groups become Python's (?P<name>...)."""
+    return re.compile(re.sub(r"\(\?<([A-Za-z_]\w*)>", r"(?P<\1>", pattern), options)
+
+
+class _RegexOptionsNamespace:
+    IgnoreCase = re.IGNORECASE
+    Multiline = re.MULTILINE
+    Singleline = re.DOTALL
+    CultureInvariant = 0
+    Compiled = 0
+
+
+class _UriNamespace:
+    @staticmethod
+    def EscapeDataString(value: str) -> str:
+        # .NET escapes everything outside the RFC 3986 unreserved set.
+        return quote(str(value), safe="-_.~")
+
+    @staticmethod
+    def UnescapeDataString(value: str) -> str:
+        return unquote(str(value))
+
+
 class _RegexNamespace:
     @staticmethod
+    def IsMatch(value: str, pattern: str, options: int = 0) -> bool:
+        if value is None:
+            raise ValueError("Regex.IsMatch input cannot be null.")
+        return _python_regex(pattern, options).search(value) is not None
+
+    @staticmethod
     def Replace(value: str, pattern: str, replacement: str) -> str:
-        compiled = re.compile(re.sub(r"\(\?<([A-Za-z_]\w*)>", r"(?P<\1>", pattern))
+        compiled = _python_regex(pattern)
 
         def replace_match(match):
             def substitute(token):
@@ -229,7 +267,7 @@ class _RegexNamespace:
 
     @staticmethod
     def Match(value: str, pattern: str) -> Any:
-        compiled = re.compile(re.sub(r"\(\?<([A-Za-z_]\w*)>", r"(?P<\1>", pattern))
+        compiled = _python_regex(pattern)
         match = compiled.search(value)
         groups = {name: _RegexGroup((match.group(name) if match else "") or "") for name in compiled.groupindex}
         return type("RegexMatch", (), {"Groups": groups})()
@@ -346,6 +384,41 @@ class _EncodingNamespace:
 
 
 @dataclass(frozen=True)
+class _ExpressionUrl:
+    """IUrl: the URL as the caller sent it, before any rewrite-uri."""
+
+    Scheme: str
+    Host: str
+    Port: int
+    Path: str
+    QueryString: str
+    Query: ExpressionMap
+
+    @classmethod
+    def parse(cls, url: str, *, fallback_path: str, fallback_host: str) -> _ExpressionUrl:
+        parts = urlsplit(url) if url else None
+        scheme = (parts.scheme if parts else "") or "https"
+        query_string = parts.query if parts else ""
+        try:
+            explicit_port = parts.port if parts else None
+        except ValueError:
+            explicit_port = None
+        return cls(
+            Scheme=scheme,
+            Host=fallback_host or ((parts.hostname or "") if parts else ""),
+            Port=explicit_port or (80 if scheme == "http" else 443),
+            Path=(parts.path if parts else "") or fallback_path,
+            QueryString=f"?{query_string}" if query_string else "",
+            Query=ExpressionMap(parse_qs(query_string, keep_blank_values=True)),
+        )
+
+    def __str__(self) -> str:
+        default_port = 80 if self.Scheme == "http" else 443
+        port = "" if self.Port == default_port else f":{self.Port}"
+        return f"{self.Scheme}://{self.Host}{port}{self.Path}{self.QueryString}"
+
+
+@dataclass(frozen=True)
 class _ExpressionRequest:
     method: str
     path: str
@@ -355,6 +428,7 @@ class _ExpressionRequest:
     original_host: str
     ip_address: str
     body: CalloutBody | None = None
+    original_url: _ExpressionUrl | None = None
 
     def headers_get(self, key: str, default: Any = "") -> Any:
         return self.headers.GetValueOrDefault(key, default)
@@ -476,6 +550,9 @@ ALLOWED_AST_NODES = (
     ast.Mod,
     ast.USub,
     ast.UAdd,
+    ast.Lambda,
+    ast.arguments,
+    ast.arg,
 )
 
 ALLOWED_FUNCTIONS = {
@@ -509,6 +586,13 @@ ALLOWED_FUNCTIONS = {
     "JObject",
     "JProperty",
     "JArray",
+    "Uri",
+    "RegexOptions",
+    "_csharp_substring",
+    "_linq_any",
+    "_linq_all",
+    "_try_parse_int32",
+    "_try_parse_int64",
 }
 
 
@@ -528,15 +612,19 @@ def _normalize_request(req: PolicyRequest) -> _ExpressionRequest:
     matched_parameters = req.variables.get("_matched_parameters")
     if not isinstance(matched_parameters, dict):
         matched_parameters = {}
+    path = str(req.variables.get("_request_path") or req.path)
     return _ExpressionRequest(
         method=req.method,
-        path=str(req.variables.get("_request_path") or req.path),
+        path=path,
         headers=ExpressionMap(_as_value_lists(request_headers)),
         query=ExpressionMap(_as_value_lists(request_query)),
         matched_parameters=ExpressionMap(matched_parameters),
         original_host=host,
         ip_address=str(req.variables.get("client_ip") or ""),
         body=CalloutBody(req.body, lambda: setattr(req, "body", b"")) if req.body else None,
+        original_url=_ExpressionUrl.parse(
+            str(req.variables.get("original_request_url") or ""), fallback_path=path, fallback_host=host
+        ),
     )
 
 
@@ -744,8 +832,16 @@ def _translate_code_fragment(fragment: str) -> str:
     translated = re.sub(r"\bfalse\b", "False", translated, flags=re.IGNORECASE)
     translated = re.sub(r"\bnull\b", "None", translated)
     translated = re.sub(r"\bout\s+([A-Za-z_]\w*)", r'"\1"', translated)
+    translated = re.sub(r"\b(?:System\.)?(?:Int64|long)\.TryParse\(", "_try_parse_int64(", translated)
+    translated = re.sub(r"\b(?:System\.)?(?:Int32|int)\.TryParse\(", "_try_parse_int32(", translated)
     translated = translated.replace("int.Parse(", "_parse_int(")
     translated = translated.replace("System.Net.WebUtility.", "WebUtility.")
+    translated = translated.replace("System.Text.RegularExpressions.", "")
+    translated = re.sub(r"\bSystem\.Uri\.", "Uri.", translated)
+    # C# lambdas: (x) => body and x => body. A Python lambda body also extends
+    # to the end of its argument, matching C#'s lowest-precedence =>.
+    translated = re.sub(r"\(\s*([A-Za-z_]\w*)\s*\)\s*=>", r"lambda \1:", translated)
+    translated = re.sub(r"\b([A-Za-z_]\w*)\s*=>", r"lambda \1:", translated)
     translated = translated.replace("&&", " and ").replace("||", " or ")
     translated = translated.replace("!=", " != ")
     translated = re.sub(r"(?<![=!<>])!(?!=)", " not ", translated)
@@ -759,6 +855,7 @@ def _translate_code_fragment(fragment: str) -> str:
         ("context.Request.MatchedParameters.GetValueOrDefault", "context.request.matched_parameters_get"),
         ("context.Request.MatchedParameters", "context.request.matched_parameters"),
         ("context.Request.OriginalUrl.Host", "context.request.original_host"),
+        ("context.Request.OriginalUrl", "context.request.original_url"),
         ("context.Request.IpAddress", "context.request.ip_address"),
         ("context.Request.Url.Path", "context.request.path"),
         ("context.Request.Method", "context.request.method"),
@@ -844,6 +941,10 @@ def _translate_ternary(expression: str) -> str:
     ?: has the lowest precedence and ?? binds tighter, so the top-level
     conditional splits first and its parts are searched for null coalescing.
     """
+    lambda_head = re.match(r"\s*lambda\s+[A-Za-z_]\w*\s*:", expression)
+    if lambda_head:
+        # The lambda's own colon is not a conditional operator; translate its body.
+        return f"{lambda_head.group(0)} {_translate_ternary(expression[lambda_head.end() :])}"
     expression = _translate_nested_groups(expression)
     parts = _find_ternary_parts(expression)
     if parts is not None:
@@ -1024,6 +1125,36 @@ def _dict_contains_key(value: Any, key: Any) -> bool:
     return key in value
 
 
+def _csharp_substring(value: str, start: int, length: int | None = None) -> str:
+    end = len(value) if length is None else start + length
+    if start < 0 or start > len(value) or end < start or end > len(value):
+        raise ValueError("Substring index and length must refer to a location within the string.")
+    return value[start:end]
+
+
+def _linq_any(values: Any, predicate: Any = None) -> bool:
+    return any(True for _ in values) if predicate is None else any(predicate(item) for item in values)
+
+
+def _linq_all(values: Any, predicate: Any) -> bool:
+    return all(predicate(item) for item in values)
+
+
+_INT32_RANGE = (-(2**31), 2**31 - 1)
+_INT64_RANGE = (-(2**63), 2**63 - 1)
+
+
+def _csharp_try_parse(value: Any, bounds: tuple[int, int]) -> tuple[bool, int]:
+    """NumberStyles.Integer: optional surrounding whitespace and a leading sign, ASCII digits only."""
+    text = "" if value is None else str(value)
+    if not re.fullmatch(r"\s*[+-]?[0-9]+\s*", text):
+        return False, 0
+    number = int(text)
+    if not bounds[0] <= number <= bounds[1]:
+        return False, 0
+    return True, number
+
+
 class _CSharpAstTransformer(ast.NodeTransformer):
     _methods = {
         "Contains": "_csharp_contains",
@@ -1034,6 +1165,9 @@ class _CSharpAstTransformer(ast.NodeTransformer):
         "NullableJwtSubject": "_nullable_jwt_subject",
         "TryGetValue": "_try_get_value",
         "ValueAs": "_jtoken_value",
+        "Substring": "_csharp_substring",
+        "Any": "_linq_any",
+        "All": "_linq_all",
     }
     _aliases = {
         "StartsWith": "startswith",
@@ -1105,9 +1239,33 @@ class _CSharpAstTransformer(ast.NodeTransformer):
         )
 
 
+def _lambda_parameter_names(tree: ast.AST) -> set[str]:
+    """Translated C# lambdas take exactly one plain parameter; anything else is refused."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Lambda):
+            continue
+        arguments = node.args
+        if (
+            len(arguments.args) != 1
+            or arguments.posonlyargs
+            or arguments.kwonlyargs
+            or arguments.vararg
+            or arguments.kwarg
+            or arguments.defaults
+        ):
+            raise ValueError("Unsupported lambda: use a single parameter, as in x => x.Length > 0")
+        name = arguments.args[0].arg
+        if name.startswith("_"):
+            raise ValueError("Lambda parameters cannot start with an underscore")
+        names.add(name)
+    return names
+
+
 def _validate_ast(expression: str, allowed_names: set[str] | None = None) -> ast.Expression:
     tree = _CSharpAstTransformer().visit(ast.parse(expression, mode="eval"))
     ast.fix_missing_locations(tree)
+    allowed_names = (allowed_names or set()) | _lambda_parameter_names(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ALLOWED_AST_NODES):
             raise ValueError(f"Unsupported expression syntax: {type(node).__name__}")
@@ -1247,10 +1405,26 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
     code = _compile_expression(stripped, frozenset(locals_ or {}))
     scope = locals_ if locals_ is not None else {}
 
+    def set_out(target: str, value: Any) -> None:
+        # The statement's locals and this evaluation's names both see an out
+        # value, so `TryParse(s, out n) && n > 0` reads it in the same expression.
+        if target.startswith("_"):
+            raise ValueError("out variables cannot start with an underscore")
+        scope[target] = value
+        environment[target] = value
+
     def try_get_value(mapping: ExpressionMap, key: str, target: str) -> bool:
         exists = mapping.ContainsKey(key)
-        scope[target] = mapping[key] if exists else None
+        set_out(target, mapping[key] if exists else None)
         return exists
+
+    def try_parse(bounds: tuple[int, int]) -> Any:
+        def parse(value: Any, target: str) -> bool:
+            parsed, number = _csharp_try_parse(value, bounds)
+            set_out(target, number)
+            return parsed
+
+        return parse
 
     environment = {
         "context": context,
@@ -1277,6 +1451,13 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
         "StringComparison": _StringComparisonNamespace(),
         "WebUtility": _WebUtility(),
         "Regex": _RegexNamespace(),
+        "RegexOptions": _RegexOptionsNamespace(),
+        "Uri": _UriNamespace(),
+        "_csharp_substring": _csharp_substring,
+        "_linq_any": _linq_any,
+        "_linq_all": _linq_all,
+        "_try_parse_int32": try_parse(_INT32_RANGE),
+        "_try_parse_int64": try_parse(_INT64_RANGE),
         "Convert": _ConvertNamespace(),
         "Encoding": _EncodingNamespace(),
         "request": context.request,
@@ -1286,7 +1467,10 @@ def _evaluate_expression(expression: str, context: ExpressionContext, locals_: d
         "JArray": _json_array,
         **(locals_ or {}),
     }
-    return eval(code, {"__builtins__": {}}, environment)
+    # Names live in globals so translated lambda bodies, which are nested
+    # scopes, resolve the same helpers and locals as the outer expression.
+    environment["__builtins__"] = {}
+    return eval(code, environment)
 
 
 def _execute_simple(

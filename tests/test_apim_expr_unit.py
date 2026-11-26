@@ -698,3 +698,106 @@ def test_multi_line_declarations_and_json_construction() -> None:
         return payload.ToString() + ":" + ((JArray)payload["items"]).Count;
     }"""
     assert _evaluate(expression, variables={"list": "a,b"}) == '{"items": ["a", "b"]}:2'
+
+
+# Patterns from real Terraform-managed APIM policies that previously failed to evaluate.
+
+_UUID = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+
+
+@pytest.mark.parametrize("prefix", ["", "System.Text.RegularExpressions."])
+def test_regex_is_match_accepts_short_and_fully_qualified_names(prefix: str) -> None:
+    expression = f'@({prefix}Regex.IsMatch(context.Request.Headers.GetValueOrDefault("x-key", ""), "{_UUID}"))'
+    assert _evaluate(expression, headers={"x-key": "11111111-2222-3333-4444-555555555555"}) is True
+    assert _evaluate(expression, headers={"x-key": "not-a-uuid"}) is False
+
+
+def test_regex_is_match_negation_and_verbatim_inline_options() -> None:
+    assert _evaluate(f'@(!Regex.IsMatch("abc", "{_UUID}"))') is True
+    assert _evaluate('@(Regex.IsMatch("Bearer abcdefghij", @"(?i)(password|bearer\\s+[a-z0-9._-]{8,})"))') is True
+
+
+def test_regex_is_match_honours_regex_options_ignore_case() -> None:
+    assert _evaluate('@(Regex.IsMatch("ABC", "^abc$", RegexOptions.IgnoreCase))') is True
+    assert _evaluate('@(Regex.IsMatch("ABC", "^abc$"))') is False
+
+
+@pytest.mark.parametrize("prefix", ["", "System."])
+def test_uri_escape_data_string_percent_encodes_reserved_characters(prefix: str) -> None:
+    assert _evaluate(f'@({prefix}Uri.EscapeDataString("/conversations/a b?c=d&e"))') == (
+        "%2Fconversations%2Fa%20b%3Fc%3Dd%26e"
+    )
+    assert _evaluate('@(Uri.UnescapeDataString("%2Fa%20b"))') == "/a b"
+
+
+def test_original_url_exposes_incoming_path_query_and_scheme() -> None:
+    variables = {"original_request_url": "https://gw.example.test:8443/conversations-ui/static/app.js?v=2"}
+    assert (
+        _evaluate('@(context.Request.OriginalUrl.Path.Substring("/conversations-ui".Length))', variables=variables)
+        == "/static/app.js"
+    )
+    assert _evaluate("@(context.Request.OriginalUrl.Scheme)", variables=variables) == "https"
+    assert _evaluate("@(context.Request.OriginalUrl.Port)", variables=variables) == 8443
+    assert _evaluate('@(context.Request.OriginalUrl.Query.GetValueOrDefault("v", ""))', variables=variables) == "2"
+    assert (
+        _evaluate("@(context.Request.OriginalUrl.ToString())", variables=variables) == variables["original_request_url"]
+    )
+
+
+def test_original_url_falls_back_to_the_request_path_without_a_recorded_url() -> None:
+    assert _evaluate("@(context.Request.OriginalUrl.Path)") == "/api/items"
+
+
+def test_substring_with_start_and_length() -> None:
+    assert _evaluate('@("abcdef".Substring(2))') == "cdef"
+    assert _evaluate('@("abcdef".Substring(1, 3))') == "bcd"
+
+
+def test_query_keys_any_with_lambda_predicate() -> None:
+    expression = '@(context.Request.Url.Query.Keys.Any(key => key != "cursor" && key != "page_size"))'
+    assert _evaluate(expression, query={"cursor": "1", "page_size": "5"}) is False
+    assert _evaluate(expression, query={"cursor": "1", "q": "x"}) is True
+    assert _evaluate(expression, query={}) is False
+
+
+def test_linq_all_and_parenthesised_lambda_parameter() -> None:
+    assert _evaluate('@(context.Request.Url.Query.Keys.All((k) => k.StartsWith("x")))', query={"xa": "1"}) is True
+    assert _evaluate("@(context.Request.Url.Query.Keys.Any())", query={"a": "1"}) is True
+
+
+def test_lambda_body_may_hold_a_conditional_operator() -> None:
+    expression = '@(context.Request.Url.Query.Keys.Any(k => k == "a" ? true : false))'
+    assert _evaluate(expression, query={"a": "1"}) is True
+
+
+def test_lambda_parameters_cannot_shadow_private_names() -> None:
+    with pytest.raises(ValueError):
+        _evaluate("@(context.Request.Url.Query.Keys.Any(_x => true))")
+
+
+@pytest.mark.parametrize(
+    ("raw", "parsed", "value"),
+    [("20971521", True, 20971521), (" 42 ", True, 42), ("-7", True, -7), ("1e3", False, 0), ("", False, 0)],
+)
+def test_int64_try_parse_sets_out_variable(raw: str, parsed: bool, value: int) -> None:
+    body = '@{ long size; var ok = Int64.TryParse(context.Request.Headers.GetValueOrDefault("Content-Length", ""), out size); return ok + ":" + size; }'
+    assert _evaluate(body, headers={"Content-Length": raw}) == f"{parsed}:{value}"
+
+
+def test_int32_try_parse_rejects_values_outside_int_range() -> None:
+    assert _evaluate('@{ int n; return int.TryParse("2147483648", out n) ? "yes" : "no"; }') == "no"
+    assert _evaluate('@{ long n; return long.TryParse("2147483648", out n) ? "yes" : "no"; }') == "yes"
+
+
+def test_report_size_guard_from_reader_policy() -> None:
+    body = (
+        '@{ long size; return Int64.TryParse(context.Request.Headers.GetValueOrDefault("Content-Length", "0"), '
+        "out size) && size > 20971520; }"
+    )
+    assert _evaluate(body, headers={"Content-Length": "20971521"}) is True
+    assert _evaluate(body, headers={"Content-Length": "10"}) is False
+
+
+def test_out_variables_cannot_target_private_names() -> None:
+    with pytest.raises(ValueError, match="underscore"):
+        _evaluate('@{ long __builtins__; return Int64.TryParse("1", out __builtins__); }')
