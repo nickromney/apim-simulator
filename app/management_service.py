@@ -142,6 +142,18 @@ def _owner_from_body(body: Any, existing: Any) -> str | None:
     return getattr(existing, "workspace", None) if existing is not None else None
 
 
+def _given_or_kept(body: Any, field: str, existing: Any) -> Any:
+    """The body's value for ``field`` if it names it, even as null; else the stored one.
+
+    A PUT that leaves a field out keeps it, so a client that manages a policy
+    or tag link through its own route does not lose it when it updates the
+    parent. A client that wants the field gone sends an explicit null.
+    """
+    if field in getattr(body, "model_fields_set", set()):
+        return getattr(body, field)
+    return getattr(existing, field, None) if existing is not None else None
+
+
 class ManagementService:
     def __init__(
         self,
@@ -813,7 +825,7 @@ class ManagementService:
             is_online=existing.is_online if existing is not None else None,
             subscription_header_names=body.subscription_header_names,
             subscription_query_param_names=body.subscription_query_param_names,
-            policies_xml=body.policies_xml,
+            policies_xml=_given_or_kept(body, "policies_xml", existing),
             tags=existing.tags if existing is not None else [],
             operations=existing.operations if existing is not None else {},
             schemas=existing.schemas if existing is not None else {},
@@ -959,9 +971,7 @@ class ManagementService:
             name=body.name or (existing.name if existing is not None else operation_id),
             method=body.method,
             url_template=body.url_template,
-            description=body.description
-            if body.description is not None
-            else (existing.description if existing else None),
+            description=_given_or_kept(body, "description", existing),
             upstream_base_url=body.upstream_base_url,
             upstream_path_prefix=body.upstream_path_prefix,
             backend=body.backend,
@@ -971,17 +981,11 @@ class ManagementService:
             subscription_header_names=body.subscription_header_names,
             subscription_query_param_names=body.subscription_query_param_names,
             authz=body.authz,
-            policies_xml=body.policies_xml,
-            tags=body.tags if body.tags is not None else (existing.tags if existing is not None else []),
-            template_parameters=(
-                body.template_parameters
-                if body.template_parameters is not None
-                else (existing.template_parameters if existing is not None else [])
-            ),
-            request=body.request if body.request is not None else (existing.request if existing is not None else None),
-            responses=body.responses
-            if body.responses is not None
-            else (existing.responses if existing is not None else []),
+            policies_xml=_given_or_kept(body, "policies_xml", existing),
+            tags=_given_or_kept(body, "tags", existing) or [],
+            template_parameters=_given_or_kept(body, "template_parameters", existing) or [],
+            request=_given_or_kept(body, "request", existing),
+            responses=_given_or_kept(body, "responses", existing) or [],
         )
         return self.persist_or_apply_config(cfg)
 
@@ -1141,10 +1145,14 @@ class ManagementService:
             raise HTTPException(status_code=400, detail=f"Workspace ID {MANAGED_GATEWAY_ID} is reserved")
         existing = cfg.workspaces.get(workspace_id)
         payload = existing.model_dump(mode="python") if existing is not None else {}
-        updates = body.model_dump(exclude_unset=True) if hasattr(body, "model_dump") else dict(body)
-        updates = {key: value for key, value in updates.items() if value is not None}
+        for key, value in body.model_dump(exclude_unset=True).items():
+            # An explicit null clears the field back to its default.
+            if value is None:
+                payload.pop(key, None)
+            else:
+                payload[key] = value
         try:
-            cfg.workspaces[workspace_id] = WorkspaceConfig.model_validate({**payload, **updates})
+            cfg.workspaces[workspace_id] = WorkspaceConfig.model_validate(payload)
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid workspace configuration: {exc}") from exc
         return self.persist_or_apply_config(cfg)
