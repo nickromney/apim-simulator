@@ -26,6 +26,9 @@ type spec struct {
 	path       string // URL template under /apim/management/
 	doc        string
 	attributes map[string]schema.Attribute
+	// decode, if set, reshapes a response before it is folded into the
+	// model, for servers that nest what the model keeps flat.
+	decode func(client.Object) client.Object
 }
 
 // managedResource is the one CRUD implementation every resource shares: the
@@ -170,6 +173,9 @@ func (r *managedResource[T]) load(ctx context.Context, from stateReader, diags *
 
 // save folds what the server stored into the model and writes it to state.
 func (r *managedResource[T]) save(ctx context.Context, model *T, stored client.Object, state *tfsdk.State, diags *diag.Diagnostics) {
+	if r.spec.decode != nil {
+		stored = r.spec.decode(stored)
+	}
 	if err := r.codec.apply(model, stored); err != nil {
 		diags.AddError("Unexpected response from the simulator", err.Error())
 		return

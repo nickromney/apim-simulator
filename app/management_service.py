@@ -169,6 +169,11 @@ def _given_or_kept(body: Any, field: str, existing: Any) -> Any:
     return getattr(existing, field, None) if existing is not None else None
 
 
+def _given_key(value: str | None) -> str | None:
+    """A subscription key from a request body; the secret mask means "keep the stored key"."""
+    return None if is_mask(value) else value
+
+
 class ManagementService:
     def __init__(
         self,
@@ -408,8 +413,8 @@ class ManagementService:
             raise HTTPException(status_code=409, detail="Subscription already exists")
         self._validate_product_id_conflict(body)
 
-        primary = body.primary_key or f"sub-{body.id}-primary"
-        secondary = body.secondary_key or f"sub-{body.id}-secondary"
+        primary = _given_key(body.primary_key) or f"sub-{body.id}-primary"
+        secondary = _given_key(body.secondary_key) or f"sub-{body.id}-secondary"
         try:
             cfg.subscription.subscriptions[body.id] = Subscription(
                 id=body.id,
@@ -445,8 +450,8 @@ class ManagementService:
                 id=current.id,
                 name=body.name,
                 keys=SubscriptionKeyPair(
-                    primary=body.primary_key or current.keys.primary,
-                    secondary=body.secondary_key or current.keys.secondary,
+                    primary=_given_key(body.primary_key) or current.keys.primary,
+                    secondary=_given_key(body.secondary_key) or current.keys.secondary,
                 ),
                 state=body.state,
                 products=body.products if body.product_id is None else [body.product_id],
@@ -891,7 +896,9 @@ class ManagementService:
             protocols=body.protocols,
             translate_required_query_parameters=body.translate_required_query_parameters,
             backend=body.backend,
-            products=body.products,
+            # Kept when omitted, so links made through /products/{id}/apis/{id}
+            # survive an update to the API.
+            products=_given_or_kept(body, "products", existing) or [],
             api_version_set=body.api_version_set,
             api_version=body.api_version,
             revision=existing.revision if existing is not None else None,

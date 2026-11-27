@@ -11,7 +11,7 @@ cost. The working prototype is in
 | --- | --- | --- | --- |
 | A. Generic REST provider | A community REST provider pointed at `/apim/management/*` | Not built | You want a one-hour diagnostic, not something to keep |
 | B. ARM facade for `azapi` | Azure-shaped routes, so the real `azapi` provider deploys to the simulator | Spiked, blocked at TLS | The same HCL must run unchanged against Azure and locally |
-| C. Native `apimsim` provider | Go provider on terraform-plugin-framework | Prototype working: 8 resources, acceptance tests pass | You want declarative config of the simulator itself, with drift detection |
+| C. Native `apimsim` provider | Go provider on terraform-plugin-framework | Prototype working: 10 resources, acceptance tests pass | You want declarative config of the simulator itself, with drift detection |
 
 Recommendation: continue with C, and treat the server gaps below as the real
 work. C is already working end to end. B is possible, but each resource type
@@ -72,6 +72,16 @@ Also fixed on this branch:
   - `DELETE /policies/{scope_type}/{scope_name}` removes a policy, so the
     scope only inherits. A scope with no policy reads as the empty document.
 
+Added with the product link and subscription resources (2026-11-27):
+
+- **An API PUT keeps its product links.** `products` follows the same rule as
+  `policies_xml`: kept when the body leaves it out, cleared by an explicit
+  `null`. The provider leaves an unconfigured `products` out of the PUT, so a
+  link made by `apimsim_product_api` survives an update to its API.
+- **A subscription PUT that sends `***` as a key keeps the stored key.** It
+  used to save `***` as the key. Subscription GETs return keys in plain text,
+  so this only guards clients that mask them themselves.
+
 Still open:
 
 - **A simulator started from environment variables alone cannot be
@@ -103,18 +113,20 @@ Tests:
   schema matches its model.
 - `make testacc` starts a simulator and runs the acceptance tests with a real
   `terraform` binary. It covers create, a follow-up plan that must be empty,
-  clearing a field, import of all eight resources, and regressions for the
-  two fixed gaps.
+  clearing a field, import of all ten resources, regressions for the two
+  fixed gaps, and a product link that survives an update to its API.
 - Both Terraform and OpenTofu planned the example through `dev_overrides`.
 
 Not done yet:
 
-- subscriptions (keys are nested in the response), groups, users, version
-  sets, diagnostics, loggers, schemas, workspaces and product links;
+- groups, users, version sets, diagnostics, loggers, schemas and
+  workspaces;
 - data sources;
 - generated docs (`tfplugindocs`);
-- a release pipeline;
-- `make testacc` wired into `make local-ci`.
+- a release pipeline.
+
+`make local-ci` runs the provider's unit and acceptance tests through
+`make test-terraform-provider`.
 
 Each new resource is about 30 lines once its server behaviour passes the
 contract test.

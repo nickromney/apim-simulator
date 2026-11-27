@@ -128,6 +128,77 @@ resource "apimsim_api_operation" "gap" {
 	})
 }
 
+// TestAccProductAPIAndSubscription: a link made by apimsim_product_api must
+// survive an update to its API (which leaves products out), and a
+// subscription's generated keys must read back without drift.
+func TestAccProductAPIAndSubscription(t *testing.T) {
+	suffix := acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)
+	config := func(apiName, state string) string {
+		return fmt.Sprintf(`
+resource "apimsim_product" "gold" {
+  product_id = "gold-%[1]s"
+  name       = "Gold"
+}
+
+resource "apimsim_api" "orders" {
+  api_id            = "orders-%[1]s"
+  name              = %[2]q
+  path              = "orders-%[1]s"
+  upstream_base_url = "http://backend.example"
+}
+
+resource "apimsim_product_api" "gold_orders" {
+  product_id = apimsim_product.gold.product_id
+  api_id     = apimsim_api.orders.api_id
+}
+
+resource "apimsim_subscription" "generated" {
+  subscription_id = "generated-%[1]s"
+  name            = "Generated keys"
+  state           = %[3]q
+  products        = [apimsim_product.gold.product_id]
+}
+
+resource "apimsim_subscription" "chosen" {
+  subscription_id = "chosen-%[1]s"
+  name            = "Chosen keys"
+  api_id          = apimsim_api.orders.api_id
+  primary_key     = "primary-%[1]s"
+  secondary_key   = "secondary-%[1]s"
+}
+`, suffix, apiName, state)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: factories,
+		Steps: []resource.TestStep{
+			{
+				Config: config("Orders", "active"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("apimsim_product_api.gold_orders", "id", "gold-"+suffix+"/orders-"+suffix),
+					resource.TestCheckResourceAttr("apimsim_subscription.generated", "primary_key", "sub-generated-"+suffix+"-primary"),
+					resource.TestCheckResourceAttr("apimsim_subscription.generated", "created_by", "management"),
+					resource.TestCheckResourceAttr("apimsim_subscription.chosen", "primary_key", "primary-"+suffix),
+				),
+			},
+			{
+				// The rename's PUT leaves products out, so the server must
+				// keep the link; had it dropped it, the plan would recreate it.
+				Config: config("Orders renamed", "suspended"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("apimsim_api.orders", "products.#", "1"),
+					resource.TestCheckResourceAttr("apimsim_api.orders", "products.0", "gold-"+suffix),
+					resource.TestCheckResourceAttr("apimsim_subscription.generated", "state", "suspended"),
+					resource.TestCheckResourceAttr("apimsim_subscription.generated", "primary_key", "sub-generated-"+suffix+"-primary"),
+				),
+			},
+			importStep("apimsim_product_api.gold_orders"),
+			importStep("apimsim_subscription.generated"),
+			importStep("apimsim_subscription.chosen"),
+		},
+	})
+}
+
 func importStep(address string, writeOnly ...string) resource.TestStep {
 	return resource.TestStep{
 		ResourceName:            address,

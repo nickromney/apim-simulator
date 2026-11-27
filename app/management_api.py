@@ -189,7 +189,8 @@ class ApiUpsert(ManagementBody):
     upstream_path_prefix: str = ""
     protocols: list[str] = Field(default_factory=lambda: ["http", "https"])
     backend: str | None = None
-    products: list[str] = Field(default_factory=list)
+    # Omitted keeps the API's product links; an explicit null clears them.
+    products: list[str] | None = Field(default_factory=list)
     api_version_set: str | None = None
     api_version: str | None = None
     subscription_header_names: list[str] | None = None
