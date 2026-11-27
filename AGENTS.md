@@ -12,6 +12,7 @@ Use this file for durable, concise guidance for coding agents in this repository
 - Run Python tests and lint with `uv run --extra dev`; do not invoke `.venv/bin/python` directly.
 - Authorize management API IDs from the decoded ASGI path or matched route parameters. URL parsing can reinterpret characters in an ID.
 - Keep new example lifecycle commands in `examples/<name>/Makefile`; the root lists entrypoints and delegates repo-wide validation.
+- Add a root compose stack as a row in the root Makefile's `STACKS` table; it generates `up-`, `logs-` and `compose-config-<name>` and their help lines.
 - When forwarding a transformed body or assembling a callout/resolver request, let HTTPX recalculate Content-Length; do not copy the incoming length.
 - Trace serialization must preserve request and callout bodies; enabling tracing must not change policy results.
 - When patching `app/policy.py`, include its containing policy/helper context; repeated `PolicyRequest` constructors have different variable-sharing semantics.

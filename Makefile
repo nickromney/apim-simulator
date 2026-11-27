@@ -89,26 +89,86 @@ export APIM_ALLOWED_ORIGIN_BROWSER_LOCALHOST APIM_ALLOWED_ORIGIN_OPERATOR_CONSOL
 export EDGE_HTTP_BASE_URL EDGE_TLS_BASE_URL
 export SMOKE_HELLO_BASE_URL SMOKE_HELLO_KEYCLOAK_BASE_URL SMOKE_OIDC_BASE_URL SMOKE_OIDC_KEYCLOAK_BASE_URL SMOKE_MCP_URL SMOKE_EDGE_BASE_URL SMOKE_AI_BASE_URL SMOKE_AI_FOUNDRY_BASE_URL SMOKE_SHARED_BASE_URL SMOKE_SHARED_KEYCLOAK_BASE_URL SMOKE_AWS_BASE_URL SMOKE_MANAGEMENT_GATEWAY_BASE_URL SMOKE_SERVING_GATEWAY_BASE_URL
 
-COMPOSE_GATEWAY := $(call compose_stack,core) -f compose.yml -f compose.public.yml
-COMPOSE_CORE := $(COMPOSE_GATEWAY) -f compose.ui.yml
-COMPOSE_CORE_OTEL := $(call compose_stack,core-otel) -f compose.yml -f compose.public.yml -f compose.otel.yml
-COMPOSE_OIDC := $(call compose_stack,oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml
-COMPOSE_MCP := $(call compose_stack,mcp) -f compose.yml -f compose.public.yml -f compose.mcp.yml
-COMPOSE_EDGE := $(call compose_stack,edge) -f compose.yml -f compose.edge.yml -f compose.mcp.yml
-COMPOSE_TLS := $(call compose_stack,tls) -f compose.yml -f compose.edge.yml -f compose.tls.yml -f compose.mcp.yml
-COMPOSE_PRIVATE := $(call compose_stack,private) -f compose.yml -f compose.private.yml -f compose.mcp.yml
-COMPOSE_UI := $(COMPOSE_CORE)
-COMPOSE_HELLO := $(call compose_stack,hello) -f compose.yml -f compose.public.yml -f compose.hello.yml
-COMPOSE_HELLO_OTEL := $(call compose_stack,hello-otel) -f compose.yml -f compose.public.yml -f compose.hello.yml -f compose.otel.yml -f compose.hello.otel.yml
-COMPOSE_HELLO_OIDC := $(call compose_stack,hello-oidc) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.hello.yml
-COMPOSE_AI := $(call compose_stack,ai) -f compose.yml -f compose.public.yml -f compose.ai.yml
-COMPOSE_AI_FOUNDRY := $(call compose_stack,ai-foundry) -f compose.yml -f compose.public.yml -f compose.ai-foundry.yml
-COMPOSE_SHARED := $(call compose_stack,shared) -f compose.yml -f compose.public.yml -f compose.oidc.yml -f compose.shared.yml
-COMPOSE_AWS := $(call compose_stack,aws) -f compose.yml -f compose.public.yml -f compose.aws.yml
-COMPOSE_MANAGEMENT_GATEWAY := $(call compose_stack,management-gateway) -f compose.yml -f compose.public.yml -f compose.management-gateway.yml
-COMPOSE_TODO := $(call compose_stack,todo) -f compose.todo.yml
-COMPOSE_TODO_OTEL := $(call compose_stack,todo-otel) -f compose.todo.yml -f compose.todo.otel.yml
-COMPOSE_ALL := $(call compose_stack,all) -f compose.yml -f compose.public.yml -f compose.edge.yml -f compose.tls.yml -f compose.private.yml -f compose.ui.yml -f compose.oidc.yml -f compose.mcp.yml
+# Root compose stacks, one row each. Every stack gets up-<name>,
+# logs-<name> and compose-config-<name>; the core stack's are plain up, logs
+# and compose-config. A row sets:
+#   <name>.files    compose files, in order
+#   <name>.project  compose project name, if not <name>
+#   <name>.needs    prerequisites of up-<name>
+#   <name>.env      environment for up-<name>
+#   <name>.logs     services logs-<name> follows (all when unset)
+#   <name>.about    help text for up-<name>
+# STACKS is also the order `make down` stops them in.
+STACKS := core otel oidc mcp edge tls private hello hello-otel hello-oidc ai ai-foundry shared aws management-gateway todo todo-otel
+
+core.files := compose.yml compose.public.yml compose.ui.yml
+core.logs := apim-simulator mock-backend
+core.about = Start the direct public simulator stack
+otel.files := compose.yml compose.public.yml compose.otel.yml
+otel.project := core-otel
+otel.needs := ensure-certs
+otel.logs := apim-simulator mock-backend lgtm lgtm-proxy
+otel.about = Start the direct public simulator stack with LGTM at $(GRAFANA_BASE_URL)
+oidc.files := compose.yml compose.public.yml compose.oidc.yml
+oidc.logs := apim-simulator mock-backend keycloak
+oidc.about = Start the simulator with the Keycloak overlay
+mcp.files := compose.yml compose.public.yml compose.mcp.yml
+mcp.logs := apim-simulator mcp-server
+mcp.about = Start the simulator with the MCP example overlay
+edge.files := compose.yml compose.edge.yml compose.mcp.yml
+edge.needs := ensure-certs
+edge.about = Start the edge HTTP MCP stack on $(APIM_EDGE_HOST):8088
+tls.files := compose.yml compose.edge.yml compose.tls.yml compose.mcp.yml
+tls.needs := ensure-certs
+tls.about = Start the edge TLS MCP stack on $(APIM_EDGE_HOST):9443
+private.files := compose.yml compose.private.yml compose.mcp.yml
+private.logs := apim-simulator mcp-server smoke-runner
+private.about = Start the private MCP stack without publishing the gateway host port
+hello.files := compose.yml compose.public.yml compose.hello.yml
+hello.logs := apim-simulator hello-api
+hello.about = Start the anonymous hello API example behind APIM
+hello-otel.files := compose.yml compose.public.yml compose.hello.yml compose.otel.yml compose.hello.otel.yml
+hello-otel.needs := ensure-certs
+hello-otel.logs := apim-simulator hello-api lgtm lgtm-proxy
+hello-otel.about = Start the hello API example with LGTM
+hello-oidc.files := compose.yml compose.public.yml compose.oidc.yml compose.hello.yml
+hello-oidc.env := HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.oidc.jwt-only.json
+hello-oidc.logs := apim-simulator hello-api keycloak
+hello-oidc.about = Start the JWT-only hello API example with Keycloak
+ai.files := compose.yml compose.public.yml compose.ai.yml
+ai.logs := apim-simulator llm-backend
+ai.about = Start the AI gateway example with the mock LLM backend
+ai-foundry.files := compose.yml compose.public.yml compose.ai-foundry.yml
+ai-foundry.needs := check-aifoundry-network
+ai-foundry.logs := apim-simulator
+ai-foundry.about = Start the gateway fronting the sibling AI Foundry simulator (start that first)
+shared.files := compose.yml compose.public.yml compose.oidc.yml compose.shared.yml
+shared.logs := apim-simulator keycloak
+shared.about = Start the shared gateway RBAC example with Keycloak workload identities
+aws.files := compose.yml compose.public.yml compose.aws.yml
+aws.logs := localstack mock-backend
+aws.about = Start LocalStack AWS API Gateway comparison beside the simulator stack
+management-gateway.files := compose.yml compose.public.yml compose.management-gateway.yml
+management-gateway.logs := apim-simulator apim-serving mock-backend
+management-gateway.about = Start a management gateway routing to a self-hosted serving gateway
+todo.files := compose.todo.yml
+todo.logs := todo-frontend apim-simulator todo-api
+todo.about = Start the Astro + APIM + FastAPI todo demo stack
+todo-otel.files := compose.todo.yml compose.todo.otel.yml
+todo-otel.needs := ensure-certs
+todo-otel.logs := todo-frontend apim-simulator todo-api lgtm lgtm-proxy
+todo-otel.about = Start the todo demo stack with LGTM at $(GRAFANA_BASE_URL)
+
+# $(call compose_for,<stack>): the docker compose command for a stack.
+compose_for = $(call compose_stack,$(or $($(1).project),$(1))) $(addprefix -f ,$($(1).files))
+# $(call stack_target,<verb>,<stack>): up-mcp, logs-mcp; plain up for core.
+stack_target = $(if $(filter core,$(2)),$(1),$(1)-$(2))
+STACK_TARGETS := $(foreach verb,up logs compose-config,$(foreach s,$(STACKS),$(call stack_target,$(verb),$(s))))
+define newline
+
+
+endef
+
 DEV_CERTS := examples/edge/certs/$(APIM_EDGE_HOST).crt examples/edge/certs/$(APIM_EDGE_HOST).key
 HELP_FMT := "  %-34s %s\n"
 UV_RUN := uv run --project $(CURDIR)
@@ -122,7 +182,7 @@ RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 
 .PHONY: examples
 
-.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-ai-foundry up-ai-foundry-keyless check-aifoundry-network up-shared up-aws up-management-gateway up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-ai logs-ai-foundry logs-shared logs-aws logs-management-gateway logs-todo logs-todo-otel test test-python test-shell test-terraform-provider compat compat-report import-tofu verify verify-dry-run verify-test verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-ai smoke-ai-foundry smoke-ai-foundry-keyless smoke-shared smoke-aws smoke-management-gateway smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-ai compose-config-ai-foundry compose-config-shared compose-config-aws compose-config-management-gateway compose-config-todo compose-config-todo-otel
+.PHONY: help ensure-certs hooks install-hooks local-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run test test-python test-shell test-terraform-provider compat compat-report import-tofu verify verify-dry-run verify-test verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-mcp smoke-edge smoke-tls smoke-private smoke-ai-foundry-keyless smoke-management-gateway smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har complexity complexity-report lint-shellcheck mutation mutation-baseline mutation-clean mutation-gate mutation-results mutation-show
 
 help:
 	@echo "Local APIM Simulator"
@@ -152,46 +212,18 @@ help-stacks:
 	@printf $(HELP_FMT) "down" "Stop all compose services defined by this repo"
 	@printf $(HELP_FMT) "down-all" "Stop every stack launched by up-all"
 	@printf $(HELP_FMT) "examples" "Choose a demo and see how to run it"
-	@printf $(HELP_FMT) "up" "Start the direct public simulator stack"
-	@printf $(HELP_FMT) "up-ai" "Start the AI gateway example with the mock LLM backend"
-	@printf $(HELP_FMT) "up-ai-foundry" "Start the gateway fronting the sibling AI Foundry simulator (start that first)"
+	@$(foreach s,$(STACKS),printf $(HELP_FMT) "$(call stack_target,up,$(s))" "$($(s).about)";)
 	@printf $(HELP_FMT) "up-ai-foundry-keyless" "Same, calling Foundry with managed identity (Foundry: make up-keyless)"
 	@printf $(HELP_FMT) "up-all" "Start root-managed stacks using isolated slots"
-	@printf $(HELP_FMT) "up-aws" "Start LocalStack AWS API Gateway comparison beside the simulator stack"
-	@printf $(HELP_FMT) "up-edge" "Start the edge HTTP MCP stack on $(APIM_EDGE_HOST):8088"
-	@printf $(HELP_FMT) "up-hello" "Start the anonymous hello API example behind APIM"
-	@printf $(HELP_FMT) "up-hello-oidc" "Start the JWT-only hello API example with Keycloak"
-	@printf $(HELP_FMT) "up-hello-oidc-subscription" "Start the subscription-plus-JWT hello API example with Keycloak"
-	@printf $(HELP_FMT) "up-hello-otel" "Start the hello API example with LGTM"
-	@printf $(HELP_FMT) "up-hello-subscription" "Start the subscription-protected hello API example behind APIM"
-	@printf $(HELP_FMT) "up-management-gateway" "Start a management gateway routing to a self-hosted serving gateway"
-	@printf $(HELP_FMT) "up-mcp" "Start the simulator with the MCP example overlay"
-	@printf $(HELP_FMT) "up-oidc" "Start the simulator with the Keycloak overlay"
-	@printf $(HELP_FMT) "up-otel" "Start the direct public simulator stack with LGTM at $(GRAFANA_BASE_URL)"
-	@printf $(HELP_FMT) "up-private" "Start the private MCP stack without publishing the gateway host port"
-	@printf $(HELP_FMT) "up-shared" "Start the shared gateway RBAC example with Keycloak workload identities"
-	@printf $(HELP_FMT) "up-tls" "Start the edge TLS MCP stack on $(APIM_EDGE_HOST):9443"
-	@printf $(HELP_FMT) "up-todo" "Start the Astro + APIM + FastAPI todo demo stack"
-	@printf $(HELP_FMT) "up-todo-otel" "Start the todo demo stack with LGTM at $(GRAFANA_BASE_URL)"
 	@printf $(HELP_FMT) "up-gateway" "Start only the gateway and mock backend"
+	@printf $(HELP_FMT) "up-hello-oidc-subscription" "Start the subscription-plus-JWT hello API example with Keycloak"
+	@printf $(HELP_FMT) "up-hello-subscription" "Start the subscription-protected hello API example behind APIM"
 	@printf $(HELP_FMT) "up-ui" "Start the operator console on localhost:3007"
 	@printf "\nStack Isolation:\n"
 	@printf $(HELP_FMT) "PORT_OFFSET=100 make up-ui" "Shift published ports by a fixed offset without changing defaults"
 	@printf $(HELP_FMT) "STACK_SLOT=1 make up-otel" "Shift published ports by a slot and isolate compose project names"
 	@printf "\nLogs:\n"
-	@printf $(HELP_FMT) "logs" "Tail core stack logs"
-	@printf $(HELP_FMT) "logs-ai" "Tail AI gateway example stack logs"
-	@printf $(HELP_FMT) "logs-aws" "Tail LocalStack AWS API Gateway comparison stack logs"
-	@printf $(HELP_FMT) "logs-hello" "Tail hello API example stack logs"
-	@printf $(HELP_FMT) "logs-hello-oidc" "Tail hello API example logs with Keycloak"
-	@printf $(HELP_FMT) "logs-hello-otel" "Tail hello API example logs with LGTM"
-	@printf $(HELP_FMT) "logs-management-gateway" "Tail management gateway and serving gateway logs"
-	@printf $(HELP_FMT) "logs-mcp" "Tail MCP stack logs"
-	@printf $(HELP_FMT) "logs-oidc" "Tail OIDC stack logs"
-	@printf $(HELP_FMT) "logs-otel" "Tail core stack logs with LGTM"
-	@printf $(HELP_FMT) "logs-shared" "Tail shared gateway RBAC example stack logs"
-	@printf $(HELP_FMT) "logs-todo" "Tail todo demo stack logs"
-	@printf $(HELP_FMT) "logs-todo-otel" "Tail todo demo stack logs with LGTM"
+	@$(foreach s,$(STACKS),printf $(HELP_FMT) "$(call stack_target,logs,$(s))" "Tail logs for make $(call stack_target,up,$(s))";)
 
 help-dev:
 	@printf "\nCode Quality and Tooling:\n"
@@ -257,18 +289,7 @@ help-release:
 
 help-config:
 	@printf "\nCompose Config:\n"
-	@printf $(HELP_FMT) "compose-config" "Render docker compose config for the direct public stack"
-	@printf $(HELP_FMT) "compose-config-edge" "Render docker compose config for the edge HTTP stack"
-	@printf $(HELP_FMT) "compose-config-hello" "Render docker compose config for the hello API example"
-	@printf $(HELP_FMT) "compose-config-hello-oidc" "Render docker compose config for the hello API example with Keycloak"
-	@printf $(HELP_FMT) "compose-config-hello-otel" "Render docker compose config for the hello API example with LGTM"
-	@printf $(HELP_FMT) "compose-config-mcp" "Render docker compose config for the MCP stack"
-	@printf $(HELP_FMT) "compose-config-oidc" "Render docker compose config for the OIDC stack"
-	@printf $(HELP_FMT) "compose-config-otel" "Render docker compose config for the direct public LGTM stack"
-	@printf $(HELP_FMT) "compose-config-private" "Render docker compose config for the private MCP stack"
-	@printf $(HELP_FMT) "compose-config-tls" "Render docker compose config for the edge TLS stack"
-	@printf $(HELP_FMT) "compose-config-todo" "Render docker compose config for the todo demo stack"
-	@printf $(HELP_FMT) "compose-config-todo-otel" "Render docker compose config for the todo demo LGTM stack"
+	@$(foreach s,$(STACKS),printf $(HELP_FMT) "$(call stack_target,compose-config,$(s))" "Render docker compose config for make $(call stack_target,up,$(s))";)
 	@printf $(HELP_FMT) "compose-config-ui" "Render docker compose config for the console stack"
 
 .PHONY: doctor
@@ -318,52 +339,35 @@ ensure-certs: check-mkcert-prerequisites
 $(DEV_CERTS): check-mkcert-prerequisites
 	./scripts/gen_dev_certs.sh --execute
 
-up:
-	$(COMPOSE_CORE) up --build -d
+.PHONY: $(STACK_TARGETS)
+
+define stack_rules
+$(call stack_target,up,$(1)): $($(1).needs)
+	$(if $($(1).env),$($(1).env) )$$(call compose_for,$(1)) up --build -d
+
+$(call stack_target,logs,$(1)):
+	$$(call compose_for,$(1)) logs -f $($(1).logs)
+
+$(call stack_target,compose-config,$(1)):
+	$$(call compose_for,$(1)) config
+endef
+$(foreach s,$(STACKS),$(eval $(call stack_rules,$(s))))
+
+# Variants of a stack: the same compose files with another gateway config, or a subset.
+.PHONY: up-gateway up-ui compose-config-ui up-hello-subscription up-hello-oidc-subscription up-ai-foundry-keyless check-aifoundry-network up-all down down-all
 
 up-gateway:
-	$(COMPOSE_GATEWAY) up --build -d
-
-up-otel: ensure-certs
-	$(COMPOSE_CORE_OTEL) up --build -d
-
-up-oidc:
-	$(COMPOSE_OIDC) up --build -d
-
-up-mcp:
-	$(COMPOSE_MCP) up --build -d
-
-up-edge: ensure-certs
-	$(COMPOSE_EDGE) up --build -d
-
-up-tls: ensure-certs
-	$(COMPOSE_TLS) up --build -d
-
-up-private:
-	$(COMPOSE_PRIVATE) up --build -d
+	$(call compose_stack,core) -f compose.yml -f compose.public.yml up --build -d
 
 up-ui: up
 
-up-hello:
-	$(COMPOSE_HELLO) up --build -d
+compose-config-ui: compose-config
 
 up-hello-subscription:
-	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.subscription.json $(COMPOSE_HELLO) up --build -d
-
-up-hello-otel: ensure-certs
-	$(COMPOSE_HELLO_OTEL) up --build -d
-
-up-hello-oidc:
-	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.oidc.jwt-only.json $(COMPOSE_HELLO_OIDC) up --build -d
+	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.subscription.json $(call compose_for,hello) up --build -d
 
 up-hello-oidc-subscription:
-	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.oidc.subscription.json $(COMPOSE_HELLO_OIDC) up --build -d
-
-up-ai:
-	$(COMPOSE_AI) up --build -d
-
-up-ai-foundry: check-aifoundry-network
-	$(COMPOSE_AI_FOUNDRY) up --build -d
+	HELLO_APIM_CONFIG_PATH=/app/examples/hello-api/apim.oidc.subscription.json $(call compose_for,hello-oidc) up --build -d
 
 up-ai-foundry-keyless:
 	$(MAKE) --no-print-directory -C examples/ai-gateway up-foundry-keyless
@@ -376,21 +380,6 @@ check-aifoundry-network:
 	  exit 1; \
 	}
 
-up-shared:
-	$(COMPOSE_SHARED) up --build -d
-
-up-aws:
-	$(COMPOSE_AWS) up --build -d
-
-up-management-gateway:
-	$(COMPOSE_MANAGEMENT_GATEWAY) up --build -d
-
-up-todo:
-	$(COMPOSE_TODO) up --build -d
-
-up-todo-otel: ensure-certs
-	$(COMPOSE_TODO_OTEL) up --build -d
-
 up-all:
 	@set -e; \
 	slot="$(UP_ALL_SLOT_BASE)"; \
@@ -401,24 +390,8 @@ up-all:
 	done
 
 down:
-	$(COMPOSE_CORE) down --remove-orphans
-	$(COMPOSE_CORE_OTEL) down --remove-orphans
-	$(COMPOSE_OIDC) down --remove-orphans
-	$(COMPOSE_MCP) down --remove-orphans
-	$(COMPOSE_EDGE) down --remove-orphans
-	$(COMPOSE_TLS) down --remove-orphans
-	$(COMPOSE_PRIVATE) down --remove-orphans
-	$(COMPOSE_HELLO) down --remove-orphans
-	$(COMPOSE_HELLO_OTEL) down --remove-orphans
-	$(COMPOSE_HELLO_OIDC) down --remove-orphans
-	$(COMPOSE_AI) down --remove-orphans
-	$(COMPOSE_AI_FOUNDRY) down --remove-orphans
+	$(foreach s,$(STACKS),$(call compose_for,$(s)) down --remove-orphans$(newline))
 	$(MAKE) --no-print-directory -C examples/bff down
-	$(COMPOSE_SHARED) down --remove-orphans
-	$(COMPOSE_AWS) down --remove-orphans
-	$(COMPOSE_MANAGEMENT_GATEWAY) down --remove-orphans
-	$(COMPOSE_TODO) down --remove-orphans
-	$(COMPOSE_TODO_OTEL) down --remove-orphans
 
 down-all:
 	@set -e; \
@@ -428,51 +401,6 @@ down-all:
 	  ./scripts/run-stacked-make.sh --execute "$$slot" down; \
 	  slot=$$((slot + 1)); \
 	done
-
-logs:
-	$(COMPOSE_CORE) logs -f apim-simulator mock-backend
-
-logs-otel:
-	$(COMPOSE_CORE_OTEL) logs -f apim-simulator mock-backend lgtm lgtm-proxy
-
-logs-oidc:
-	$(COMPOSE_OIDC) logs -f apim-simulator mock-backend keycloak
-
-logs-management-gateway:
-	$(COMPOSE_MANAGEMENT_GATEWAY) logs -f apim-simulator apim-serving mock-backend
-
-logs-mcp:
-	$(COMPOSE_MCP) logs -f apim-simulator mcp-server
-
-logs-private:
-	$(COMPOSE_PRIVATE) logs -f apim-simulator mcp-server smoke-runner
-
-logs-hello:
-	$(COMPOSE_HELLO) logs -f apim-simulator hello-api
-
-logs-hello-otel:
-	$(COMPOSE_HELLO_OTEL) logs -f apim-simulator hello-api lgtm lgtm-proxy
-
-logs-ai:
-	$(COMPOSE_AI) logs -f apim-simulator llm-backend
-
-logs-ai-foundry:
-	$(COMPOSE_AI_FOUNDRY) logs -f apim-simulator
-
-logs-shared:
-	$(COMPOSE_SHARED) logs -f apim-simulator keycloak
-
-logs-aws:
-	$(COMPOSE_AWS) logs -f localstack mock-backend
-
-logs-hello-oidc:
-	$(COMPOSE_HELLO_OIDC) logs -f apim-simulator hello-api keycloak
-
-logs-todo:
-	$(COMPOSE_TODO) logs -f todo-frontend apim-simulator todo-api
-
-logs-todo-otel:
-	$(COMPOSE_TODO_OTEL) logs -f todo-frontend apim-simulator todo-api lgtm lgtm-proxy
 
 hooks: install-hooks
 
@@ -661,8 +589,11 @@ verify-todo-otel:
 VERIFY_SKILL := skills/verify-apim-simulator
 include $(VERIFY_SKILL)/verify.mk
 
-smoke-oidc:
-	$(UV_RUN) python scripts/smoke_oidc.py
+# Smoke tests that are one script each: smoke-<name> runs scripts/smoke_<name>.py.
+SMOKE_SCRIPTS := oidc hello ai ai-foundry shared aws todo
+.PHONY: $(addprefix smoke-,$(SMOKE_SCRIPTS))
+$(addprefix smoke-,$(SMOKE_SCRIPTS)): smoke-%:
+	$(UV_RUN) python scripts/smoke_$(subst -,_,$*).py
 
 smoke-mcp:
 	SMOKE_MCP_URL="$(SMOKE_MCP_URL)" $(UV_RUN) --extra mcp python scripts/smoke_mcp.py
@@ -678,31 +609,13 @@ check-private-port-clear:
 
 smoke-private:
 	$(MAKE) check-private-port-clear
-	$(COMPOSE_PRIVATE) run --rm --entrypoint python3 smoke-runner scripts/run_smoke_private.py
-
-smoke-hello:
-	$(UV_RUN) python scripts/smoke_hello.py
-
-smoke-ai:
-	$(UV_RUN) python scripts/smoke_ai.py
-
-smoke-ai-foundry:
-	$(UV_RUN) python scripts/smoke_ai_foundry.py
+	$(call compose_for,private) run --rm --entrypoint python3 smoke-runner scripts/run_smoke_private.py
 
 smoke-ai-foundry-keyless:
 	$(MAKE) --no-print-directory -C examples/ai-gateway smoke-foundry-keyless
 
-smoke-shared:
-	$(UV_RUN) python scripts/smoke_shared.py
-
-smoke-aws:
-	$(UV_RUN) python scripts/smoke_aws.py
-
 smoke-management-gateway:
 	SMOKE_MANAGEMENT_GATEWAY_BASE_URL="$(SMOKE_MANAGEMENT_GATEWAY_BASE_URL)" SMOKE_SERVING_GATEWAY_BASE_URL="$(SMOKE_SERVING_GATEWAY_BASE_URL)" $(UV_RUN) python scripts/smoke_management_gateway.py
-
-smoke-todo:
-	$(UV_RUN) python scripts/smoke_todo.py
 
 smoke-tutorials-live:
 	APIM_BASE="$(APIM_BASE_URL)" GRAFANA_BASE="$(GRAFANA_BASE_URL)" OPERATOR_CONSOLE_BASE="$(OPERATOR_CONSOLE_URL)" ./scripts/run_tutorial_smoke.sh --execute
@@ -731,62 +644,9 @@ test-todo-postman:
 export-todo-har:
 	TODO_HAR_APIM_BASE_URL="$(TODO_APIM_BASE_URL)" TODO_HAR_FRONTEND_BASE_URL="$(TODO_FRONTEND_BASE_URL)" $(UV_RUN) python scripts/export_todo_har.py
 
-compose-config:
-	$(COMPOSE_CORE) config
-
-compose-config-otel:
-	$(COMPOSE_CORE_OTEL) config
-
-compose-config-oidc:
-	$(COMPOSE_OIDC) config
-
-compose-config-mcp:
-	$(COMPOSE_MCP) config
-
-compose-config-edge:
-	$(COMPOSE_EDGE) config
-
-compose-config-tls:
-	$(COMPOSE_TLS) config
-
-compose-config-private:
-	$(COMPOSE_PRIVATE) config
-
-compose-config-ui:
-	$(COMPOSE_UI) config
-
-compose-config-hello:
-	$(COMPOSE_HELLO) config
-
-compose-config-hello-otel:
-	$(COMPOSE_HELLO_OTEL) config
-
-compose-config-ai:
-	$(COMPOSE_AI) config
-
-compose-config-ai-foundry:
-	$(COMPOSE_AI_FOUNDRY) config
-
-compose-config-shared:
-	$(COMPOSE_SHARED) config
-
-compose-config-aws:
-	$(COMPOSE_AWS) config
-
-compose-config-hello-oidc:
-	$(COMPOSE_HELLO_OIDC) config
-
-compose-config-management-gateway:
-	$(COMPOSE_MANAGEMENT_GATEWAY) config
-
+.PHONY: compose-config-self-hosted-gateway
 compose-config-self-hosted-gateway:
 	@$(MAKE) --no-print-directory -C examples/self-hosted-gateway compose-config
-
-compose-config-todo:
-	$(COMPOSE_TODO) config
-
-compose-config-todo-otel:
-	$(COMPOSE_TODO_OTEL) config
 
 examples:
 	@echo "Choose a demo (commands run from the repository root):"
@@ -818,7 +678,6 @@ security-lab-verify:
 security-lab-down:
 	$(MAKE) -C examples/apim-security down
 
-.PHONY: up-gateway
 
 .PHONY: smoke-authoring smoke-browser
 smoke-authoring:
