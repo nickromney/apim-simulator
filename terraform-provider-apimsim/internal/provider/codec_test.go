@@ -191,3 +191,19 @@ func TestEveryResourceSchemaMatchesItsModel(t *testing.T) {
 		})
 	}
 }
+
+func TestFlattenSubscriptionKeysLiftsNestedKeysWithoutTouchingTheResponse(t *testing.T) {
+	response := client.Object{"name": "S1", "keys": map[string]any{"primary": "p", "secondary": "s"}}
+
+	flat := flattenSubscriptionKeys(response)
+
+	if flat["primary_key"] != "p" || flat["secondary_key"] != "s" || flat["name"] != "S1" {
+		t.Fatalf("flattened = %v", flat)
+	}
+	if _, changed := response["primary_key"]; changed {
+		t.Fatal("flattenSubscriptionKeys modified its input")
+	}
+	if got := flattenSubscriptionKeys(client.Object{"name": "S1"}); got["primary_key"] != nil {
+		t.Fatalf("a response without keys gained %v", got["primary_key"])
+	}
+}

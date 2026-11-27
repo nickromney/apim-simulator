@@ -46,6 +46,33 @@ func optionalList(doc string) schema.ListAttribute {
 	return schema.ListAttribute{Optional: true, ElementType: types.StringType, Description: doc}
 }
 
+// adoptedList is a list another resource may also write, such as an API's
+// products, which apimsim_product_api links. Left out of configuration it is
+// unknown in any plan that updates the resource, so the PUT leaves it out and
+// the server keeps what it holds. Carrying the state value forward instead
+// would send stale links back. Set it to [] to clear it.
+func adoptedList(doc string) schema.ListAttribute {
+	return schema.ListAttribute{
+		Optional:    true,
+		Computed:    true,
+		ElementType: types.StringType,
+		Description: doc,
+	}
+}
+
+// generatedSecret is a secret the server makes up when configuration leaves
+// it out, such as a subscription key. It is read back in plain text, so a
+// change made outside Terraform shows up in state.
+func generatedSecret(doc string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Optional:      true,
+		Computed:      true,
+		Sensitive:     true,
+		Description:   doc,
+		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+	}
+}
+
 func defaultedList(doc string, values ...string) schema.ListAttribute {
 	elements := make([]attr.Value, len(values))
 	for i, v := range values {
@@ -57,6 +84,14 @@ func defaultedList(doc string, values ...string) schema.ListAttribute {
 		ElementType: types.StringType,
 		Default:     listdefault.StaticValue(types.ListValueMust(types.StringType, elements)),
 		Description: doc,
+	}
+}
+
+func computedString(doc string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Computed:      true,
+		Description:   doc,
+		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 	}
 }
 

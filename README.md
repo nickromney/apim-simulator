@@ -97,8 +97,9 @@ This runs `lefthook install`. You can also run it directly if you prefer.
 
 Pre-commit checks run fast staged-file validation for Python, shell, and YAML
 files. Pre-push runs the repo local CI gate: secret scan, lint, the Python and
-BATS shell test suites, the compatibility harness, frontend checks and compose
-validation. It needs `gitleaks` and `bats` installed:
+BATS shell test suites, the compatibility harness, frontend checks, the
+Terraform provider's unit and acceptance tests, and compose validation. It
+needs `gitleaks`, `bats`, `go` and `terraform` installed:
 
 ```bash
 make local-ci

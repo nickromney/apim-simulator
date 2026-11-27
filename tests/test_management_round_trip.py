@@ -196,6 +196,8 @@ RESOURCES: tuple[Resource, ...] = (
     ),
 )
 
+RESOURCES_BY_NAME = {resource.name: resource for resource in RESOURCES}
+
 KEEPS_OMITTED = "by design, a PUT keeps fields it leaves out; an explicit null clears them"
 
 KNOWN_GAPS: dict[tuple[str, str], str] = {
@@ -352,6 +354,38 @@ def test_subscription_is_created_by_put_to_its_id(client: TestClient) -> None:
     response = _put(client, f"{MANAGEMENT}/subscriptions/s1", {"name": "S1", "products": ["p1"]})
 
     assert response.status_code == 200
+
+
+def test_updating_an_api_keeps_its_product_links(client: TestClient) -> None:
+    """A link made through /products/{id}/apis/{id} survives a PUT of the API that omits products."""
+    _put(client, f"{MANAGEMENT}/{PRODUCT[0]}", PRODUCT[1])
+    _put(client, f"{MANAGEMENT}/{API[0]}", API[1])
+    _put(client, f"{MANAGEMENT}/products/p1/apis/a1", {})
+
+    _put(client, f"{MANAGEMENT}/{API[0]}", {**API[1], "name": "A1 renamed"})
+
+    assert _read(client, RESOURCES_BY_NAME["api"])["products"] == ["p1"]
+    _put(client, f"{MANAGEMENT}/{API[0]}", {**API[1], "products": None})
+    assert _read(client, RESOURCES_BY_NAME["api"])["products"] == []
+
+
+def test_put_of_a_masked_subscription_key_keeps_the_key(client: TestClient) -> None:
+    _put(client, f"{MANAGEMENT}/{PRODUCT[0]}", PRODUCT[1])
+    body = {"name": "S1", "products": ["p1"], "primary_key": "pk-1", "secondary_key": "sk-1"}
+    _put(client, f"{MANAGEMENT}/subscriptions/s1", body)
+
+    response = _put(client, f"{MANAGEMENT}/subscriptions/s1", {**body, "primary_key": MASK, "secondary_key": MASK})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["keys"] == {"primary": "pk-1", "secondary": "sk-1"}
+
+
+def test_subscription_created_with_a_masked_key_gets_a_generated_one(client: TestClient) -> None:
+    _put(client, f"{MANAGEMENT}/{PRODUCT[0]}", PRODUCT[1])
+
+    response = _put(client, f"{MANAGEMENT}/subscriptions/s1", {"name": "S1", "products": ["p1"], "primary_key": MASK})
+
+    assert response.json()["keys"]["primary"] != MASK
 
 
 def test_updating_an_api_keeps_its_policy(client: TestClient) -> None:

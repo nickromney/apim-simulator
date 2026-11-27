@@ -122,7 +122,7 @@ RELEASE_TAG_SCRIPT ?= scripts/release_tag.sh
 
 .PHONY: examples
 
-.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-ai-foundry up-ai-foundry-keyless check-aifoundry-network up-shared up-aws up-management-gateway up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-ai logs-ai-foundry logs-shared logs-aws logs-management-gateway logs-todo logs-todo-otel test test-python test-shell compat compat-report import-tofu verify verify-dry-run verify-test verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-ai smoke-ai-foundry smoke-ai-foundry-keyless smoke-shared smoke-aws smoke-management-gateway smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-ai compose-config-ai-foundry compose-config-shared compose-config-aws compose-config-management-gateway compose-config-todo compose-config-todo-otel
+.PHONY: help prereqs check-docker-prerequisites check-mkcert-prerequisites ensure-certs hooks install-hooks local-ci compose-config-ci fmt lint lint-check lint-yaml lint-markdown lint-bash32 lint-shell frontend-check check-version runtime-artifact release release-dry-run release-preview release-tag release-tag-dry-run up up-all up-otel up-oidc up-mcp up-edge up-tls up-private up-ui up-hello up-hello-subscription up-hello-otel up-hello-oidc up-hello-oidc-subscription up-ai up-ai-foundry up-ai-foundry-keyless check-aifoundry-network up-shared up-aws up-management-gateway up-todo up-todo-otel down down-all logs logs-otel logs-oidc logs-mcp logs-private logs-hello logs-hello-otel logs-hello-oidc logs-ai logs-ai-foundry logs-shared logs-aws logs-management-gateway logs-todo logs-todo-otel test test-python test-shell test-terraform-provider compat compat-report import-tofu verify verify-dry-run verify-test verify-azure verify-otel verify-hello-otel verify-todo-otel check-host-ports check-private-port-clear smoke-oidc smoke-mcp smoke-edge smoke-tls smoke-private smoke-hello smoke-ai smoke-ai-foundry smoke-ai-foundry-keyless smoke-shared smoke-aws smoke-management-gateway smoke-todo smoke-tutorials-live test-todo-e2e test-todo-bruno test-todo-postman export-todo-har compose-config compose-config-otel compose-config-oidc compose-config-mcp compose-config-edge compose-config-tls compose-config-private compose-config-ui compose-config-hello compose-config-hello-otel compose-config-hello-oidc compose-config-ai compose-config-ai-foundry compose-config-shared compose-config-aws compose-config-management-gateway compose-config-todo compose-config-todo-otel
 
 help:
 	@echo "Local APIM Simulator"
@@ -215,6 +215,7 @@ help-dev:
 	@printf $(HELP_FMT) "test" "Run Python and shell tests"
 	@printf $(HELP_FMT) "test-python" "Run the Python test suite"
 	@printf $(HELP_FMT) "test-shell" "Run the shell script test suite with BATS"
+	@printf $(HELP_FMT) "test-terraform-provider" "Run the Terraform provider unit and acceptance tests"
 
 help-verify:
 	@printf "\nVerification and Smoke:\n"
@@ -487,6 +488,7 @@ local-ci:
 	@$(MAKE) --no-print-directory compat
 	@TOFU_SHOW=tests/fixtures/tofu_show/sample.json $(MAKE) --no-print-directory compat-report
 	@$(MAKE) --no-print-directory frontend-check
+	@$(MAKE) --no-print-directory test-terraform-provider
 	@$(MAKE) --no-print-directory compose-config-ci
 
 compose-config-ci:
@@ -625,6 +627,13 @@ test-python:
 test-shell:
 	@command -v bats >/dev/null 2>&1 || { echo "bats is required for shell tests"; exit 1; }
 	bats tests/shell
+
+# Unit tests, then acceptance tests against a throwaway simulator with a real
+# terraform binary. See terraform-provider-apimsim/README.md.
+test-terraform-provider:
+	@command -v go >/dev/null 2>&1 || { echo "go is required for the Terraform provider tests"; exit 1; }
+	@command -v terraform >/dev/null 2>&1 || { echo "terraform is required for the Terraform provider acceptance tests"; exit 1; }
+	$(MAKE) --no-print-directory -C terraform-provider-apimsim check testacc
 
 compat:
 	$(UV_RUN) python scripts/check_sample_compat.py

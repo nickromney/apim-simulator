@@ -1,7 +1,8 @@
 # Terraform provider for the APIM simulator (prototype)
 
 Manage a running simulator's products, APIs, operations, policies, backends,
-named values, tags and policy fragments with Terraform or OpenTofu. Plans show
+named values, tags, policy fragments, product–API links and subscriptions
+with Terraform or OpenTofu. Plans show
 drift when someone changes the simulator through the console or the management
 API, and `terraform destroy` removes what the configuration created.
 
@@ -63,6 +64,8 @@ OpenTofu reads the same file: replace `terraform` with `tofu`.
 | `apimsim_named_value` | `{named_value_id}` |
 | `apimsim_tag` | `{tag_id}` |
 | `apimsim_policy_fragment` | `{fragment_id}` |
+| `apimsim_product_api` | `{product_id}/{api_id}` |
+| `apimsim_subscription` | `{subscription_id}` |
 
 ```bash
 terraform import apimsim_api_operation.get_item echo/get-item
@@ -72,11 +75,16 @@ Secrets (`apimsim_backend.basic_password`, `apimsim_named_value.value` when
 `secret = true`) come back masked. Terraform keeps the configured value, so it
 cannot see a secret changed outside Terraform, and an import leaves it empty.
 
+Subscription keys are different: the simulator returns them, so
+`primary_key` and `secondary_key` are sensitive values it generates when you
+leave them out, and a key rotated outside Terraform shows up in state.
+
+Link an API to a product with either `products` on `apimsim_api` or
+`apimsim_product_api`, not both. Left out, `products` keeps whatever links the
+simulator holds; set it to `[]` to remove them all.
+
 ## Known gaps
 
-- **No subscription or product-API link resources yet.** The simulator
-  supports both as PUT, GET and DELETE on one URL. Subscription keys are
-  nested in the response, which the provider's flat model does not map yet.
 - **A simulator started without `APIM_CONFIG_PATH` refuses API changes.** It
   routes `/api` with a legacy route built from environment variables. Start
   it from a config file, as `make testacc` does.
@@ -119,4 +127,6 @@ The `spec` gives the URL template (`tags/{tag_id}`), the docs and the schema of
 the body attributes. The `id` attribute and the path-parameter attributes are
 added for you, and `TestEveryResourceSchemaMatchesItsModel` fails if the schema
 and the model disagree. Give every attribute the server defaults the same
-default in the schema, so removing it from configuration resets it.
+default in the schema, so removing it from configuration resets it. Where the
+server nests what the model keeps flat, give the spec a `decode` function,
+as `apimsim_subscription` does for its keys.

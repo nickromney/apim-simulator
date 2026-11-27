@@ -1,9 +1,13 @@
 package provider
 
 import (
+	"maps"
+
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/nickromney/apim-simulator/terraform-provider-apimsim/internal/client"
 )
 
 // The resource catalogue. Each entry is a model (the fields and their roles,
@@ -37,7 +41,7 @@ var resources = []func() resource.Resource{
 			"upstream_path_prefix":      defaulted("Prefix added to the upstream path.", ""),
 			"protocols":                 defaultedList("Accepted protocols.", "http", "https"),
 			"backend":                   optional("ID of an `apimsim_backend` to forward to instead of `upstream_base_url`."),
-			"products":                  defaultedList("IDs of the products that include this API."),
+			"products":                  adoptedList("IDs of the products that include this API. Leave it out when `apimsim_product_api` manages the links; set it to `[]` to remove every link."),
 			"api_version_set":           optional("ID of the version set this API belongs to."),
 			"api_version":               optional("Version name within the version set."),
 			"subscription_header_names": optionalList("Headers that carry the subscription key."),
@@ -64,6 +68,30 @@ var resources = []func() resource.Resource{
 		attributes: map[string]schema.Attribute{
 			"xml": required("Policy XML."),
 		},
+	}),
+	register[productAPIModel](spec{
+		name:       "product_api",
+		path:       "products/{product_id}/apis/{api_id}",
+		doc:        "Adds an API to a product. Use it instead of `products` on `apimsim_api`, not alongside it.",
+		attributes: map[string]schema.Attribute{},
+	}),
+	register[subscriptionModel](spec{
+		name: "subscription",
+		path: "subscriptions/{subscription_id}",
+		doc:  "A subscription: a pair of keys that grants access to its products, one API, or every API.",
+		attributes: map[string]schema.Attribute{
+			"name":           required("Display name."),
+			"state":          defaulted("`active`, `suspended`, `cancelled`, `submitted`, `rejected` or `expired`.", "active"),
+			"products":       defaultedList("IDs of the products the subscription grants. Set one scope: `products`, `api_id` or `all_apis`."),
+			"api_id":         optional("ID of the one API the subscription grants."),
+			"all_apis":       flag("Whether the subscription grants every API.", false),
+			"service_scoped": flag("Whether this is the built-in all-access subscription.", false),
+			"primary_key":    generatedSecret("Primary key. Generated when left out."),
+			"secondary_key":  generatedSecret("Secondary key. Generated when left out."),
+			"created_by":     computedString("Who created the subscription."),
+			"resource_id":    resourceID,
+		},
+		decode: flattenSubscriptionKeys,
 	}),
 	register[backendModel](spec{
 		name: "backend",
@@ -155,6 +183,40 @@ type apiPolicyModel struct {
 	ID    types.String `tfsdk:"id"`
 	APIID types.String `tfsdk:"api_id" apim:"path"`
 	XML   types.String `tfsdk:"xml"`
+}
+
+type productAPIModel struct {
+	ID        types.String `tfsdk:"id"`
+	ProductID types.String `tfsdk:"product_id" apim:"path"`
+	APIID     types.String `tfsdk:"api_id" apim:"path"`
+}
+
+type subscriptionModel struct {
+	ID             types.String `tfsdk:"id"`
+	SubscriptionID types.String `tfsdk:"subscription_id" apim:"path"`
+	Name           types.String `tfsdk:"name"`
+	State          types.String `tfsdk:"state"`
+	Products       types.List   `tfsdk:"products"`
+	APIID          types.String `tfsdk:"api_id"`
+	AllAPIs        types.Bool   `tfsdk:"all_apis"`
+	ServiceScoped  types.Bool   `tfsdk:"service_scoped"`
+	PrimaryKey     types.String `tfsdk:"primary_key"`
+	SecondaryKey   types.String `tfsdk:"secondary_key"`
+	CreatedBy      types.String `tfsdk:"created_by" apim:"read_only"`
+	ResourceID     types.String `tfsdk:"resource_id" apim:"read_only"`
+}
+
+// flattenSubscriptionKeys lifts {"keys": {"primary", "secondary"}} into the
+// primary_key and secondary_key fields a PUT accepts.
+func flattenSubscriptionKeys(response client.Object) client.Object {
+	keys, ok := response["keys"].(map[string]any)
+	if !ok {
+		return response
+	}
+	flat := maps.Clone(response)
+	flat["primary_key"] = keys["primary"]
+	flat["secondary_key"] = keys["secondary"]
+	return flat
 }
 
 type backendModel struct {
